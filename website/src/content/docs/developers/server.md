@@ -49,7 +49,7 @@ javdex-server bind --config /etc/javdex/server.json
 javdex-server recover --config /etc/javdex/server.json
 ```
 
-新统一入口使用管理器 `pair`：尚未认主时首次授权，其后每次增加一台设备并保留现有授权；`pair-recover` 只用于全部设备遗失后的整体恢复。原始 `bind` / `recover` 仍为首次／全量恢复令牌接口；`recover` 完成领取会撤销所有旧设备，不用来普通新增电脑。秘密只在桌面主进程安全存储中保存。`JAVDEX_BOOTSTRAP_TOKEN` 仅用于首次引导。网页账号使用 `web.passwordHash` 或 `JAVDEX_WEB_PASSWORD`；Cookie 不授权管理接口。
+统一 HTTPS 入口仅提供管理器 `token` 命令：尚未认主时首次授权，其后新增一台可信设备并保留现有设备。命令输出一次性令牌，桌面将地址与令牌提交 `/connect/v1/claim`，成功后保存独立设备秘密。已移除 `bind`、`recover`、`pair` 和 `pair-recover` CLI；遗失设备由新授权电脑在可信设备列表逐台撤销。首次自动保存证书，合法公开证书按系统信任及主机名校验后自动更新，自签名证书指纹变化需在发送凭据前取得用户确认。网页 Cookie 不授权管理或更新接口。
 
 交接/恢复领取遇到扫描、维护任务或未完成的文件操作时返回 `MAINTENANCE_BUSY`。请求不排队、不占用交接资格，也不消耗一次性令牌；操作者应完成或取消任务后重试（令牌过期需重新签发）。原 writer 在交接成功前保持有效，新维护任务不会因一次失败的交接而被禁止。成功领取仍是原子操作，同一成功 claim 的重试不增加写入代次。`writer.status.maintenanceBusy` 表示当前有维护任务，不表示有人排队。
 

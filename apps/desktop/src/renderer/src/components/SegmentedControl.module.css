@@ -60,6 +60,40 @@
   border-left-color: color-mix(in srgb, var(--accent) 55%, var(--border));
 }
 
+.root[data-variant='subtle'] .option {
+  font-size: var(--settings-fs-secondary, 12px);
+}
+
+.root[data-variant='subtle'] .option + .option {
+  border-left-color: transparent;
+}
+
+.root[data-variant='subtle'] .option[aria-pressed='true'] {
+  border-radius: var(--radius-sm);
+  background: var(--surface-selected);
+  color: var(--text-primary);
+  box-shadow: inset 0 0 0 1px var(--border-accent);
+}
+
+.root[data-variant='subtle'] .option:not(:disabled):hover {
+  background: var(--surface-control-hover);
+  color: var(--text-primary);
+}
+
+.root[data-variant='subtle'] .option[aria-pressed='true']:not(:disabled):hover {
+  background: var(--surface-selected);
+}
+
+.root[data-variant='subtle'] .option:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: -3px;
+}
+
+.root[data-variant='subtle'] .option:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .option {
     transition: none;

@@ -9,11 +9,13 @@ import { renderedText } from '../../test/renderedText'
 
 Object.defineProperty(globalThis, 'React', { configurable: true, value: React })
 
-test('device list cannot revoke this computer and retains names when refresh fails', async () => {
+test('client list pins the current client, preserves separate grants, and retains names when refresh fails', async () => {
   const previousWindow = globalThis.window
   let fail = false
   const result: ServerUpdateSnapshot = { protocolVersion: 1, paired: false, serverId: null, catalogId: null, currentVersion: null, platform: null, targetVersion: null, job: null,
-    devices: [{ id: 'current', name: '工作电脑', createdAt: '2026-10-15T00:00:00Z', current: true }, { id: 'other', name: '客厅电脑', createdAt: '2026-10-15T01:00:00Z', current: false }] }
+    devices: [{ id: 'other', name: '客厅电脑', createdAt: '2026-10-15T01:00:00Z', current: false },
+      { id: 'current', name: '工作电脑', createdAt: '2026-10-15T00:00:00Z', current: true },
+      { id: 'another-grant', name: '客厅电脑', createdAt: '2026-10-15T02:00:00Z', current: false }] }
   Object.defineProperty(globalThis, 'window', { configurable: true, value: { api: { serverUpdate: { control: async () => {
     if (fail) throw new Error('连接中断，请重试')
     return result
@@ -29,8 +31,16 @@ test('device list cannot revoke this computer and retains names when refresh fai
       session: { ...EMPTY_DESKTOP_SESSION, mode: 'remote', state: 'available', serverId: 's', catalogId: 'c' }, capabilities: {} as never, catalogReadsEnabled: true,
       reconnect: async () => {}, claimWriter: async () => { throw new Error('unused') }
     }}><Panel /></DesktopSessionContext.Provider>) })
-    assert.equal(tree!.root.findAllByType(Button).filter(button => renderedText(button) === '撤销').length, 1)
-    assert.match(renderedText(tree!.root), /工作电脑 · 此电脑/)
+    assert.equal(tree!.root.findAllByType(Button).filter(button => renderedText(button) === '撤销授权').length, 2)
+    const rows = tree!.root.findByProps({ 'aria-label': '可信客户端列表' }).findAllByType('li')
+    assert.equal(rows.length, 3)
+    assert.match(renderedText(rows[0]), /工作电脑当前客户端/)
+    assert.equal(rows[0].findAllByType(Button).length, 0)
+    assert.deepEqual(rows.map(row => row.findByType('time').props.dateTime), [
+      '2026-10-15T00:00:00Z', '2026-10-15T01:00:00Z', '2026-10-15T02:00:00Z'
+    ])
+    assert.match(renderedText(tree!.root), /可信客户端3 个/)
+    assert.doesNotMatch(renderedText(tree!.root), /设备|配对|pair/)
     fail = true
     await act(async () => { tree!.root.findAllByType(Button).find(button => renderedText(button) === '刷新')!.props.onClick() })
     const { default: Feedback } = await import('./SettingsFeedback')

@@ -20,7 +20,8 @@ function isUnavailablePathError(error: unknown): boolean {
 
 /** Main-process helper. Captures lexical identity even when a root is offline. */
 export function resolveMediaLibraryRootIdentity(
-  inputPath: string
+  inputPath: string,
+  options: { throwOnAccessDenied?: boolean } = {}
 ): ResolvedMediaLibraryRootPath {
   if (typeof inputPath !== 'string') throw new Error('根目录路径必须是字符串。')
   const trimmed = inputPath.trim()
@@ -43,6 +44,7 @@ export function resolveMediaLibraryRootIdentity(
       inode: stat.ino.toString()
     }
   } catch (error) {
+    if (options.throwOnAccessDenied && ['EACCES', 'EPERM'].includes(String((error as NodeJS.ErrnoException)?.code))) throw error
     if (!isUnavailablePathError(error)) throw error
     return {
       path: resolvedPath,

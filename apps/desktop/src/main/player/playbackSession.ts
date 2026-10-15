@@ -32,6 +32,7 @@ interface Dependencies {
   windowSize(): { width: number; height: number }
   focusControls?(): void
   navigate?(direction: 'back' | 'forward'): void
+  escape?(): void
   readVolume?(): Promise<number>
   volumeChanged?(value: number): void
   progress?: {
@@ -309,6 +310,10 @@ export function createPlaybackSession(deps: Dependencies) {
       for (const action of raw.actions ?? []) {
         if (snapshot !== state) break
         if (action.kind === 'history-back' || action.kind === 'history-forward') deps.navigate?.(action.kind === 'history-back' ? 'back' : 'forward')
+        else if (action.kind === 'escape') {
+          if (state.presentation === 'docked') deps.navigate?.('back')
+          else deps.escape?.()
+        }
         else if (action.kind === 'toggle-pause') {
           if (state.phase === 'ended' && !state.seeking) { control(state.sessionId, { kind: 'restart' }); pauseIntent = false }
           else { pauseIntent = !pauseIntent; control(state.sessionId, { kind: 'pause', paused: pauseIntent }) }

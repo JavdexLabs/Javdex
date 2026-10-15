@@ -5,7 +5,7 @@ import { promisify } from 'node:util'
 import type { DefaultPlayerDetectionResult } from '@shared/desktop/settings'
 
 // Ask Windows for the current user's file association. Never execute its command string.
-// File association does not prove support for HTTP playback; the user still saves the choice.
+// File association does not prove HTTP playback support or change the playback preference.
 export const WINDOWS_PLAYER_QUERY = `
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)

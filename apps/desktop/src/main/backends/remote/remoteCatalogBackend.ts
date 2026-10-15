@@ -5,6 +5,7 @@ import type { CatalogOperationInput, CatalogWireInput } from '../../application/
 import type { CatalogOperationResults } from '../../application/catalogOperationResults'
 import { randomUUID } from 'node:crypto'
 import { ManageHttpClient } from '@http/manageClient'
+import type { VerifyServerCertificate } from '@http/pinnedFetch'
 import { createPlaybackBridge } from '@http/playbackBridge'
 import { trustedDevicesSchema } from '@shared/serverUpdateTypes'
 import { digestToken, generateSecret } from '@library/catalog/catalogSecrets'
@@ -33,6 +34,7 @@ export interface RemoteCatalogBackendOptions {
   generation?: number
   timeoutMs?: number
   certificateSha256?: string
+  verifyCertificate?: VerifyServerCertificate
   /** Server-bound device identity survives an authorized catalog restore. */
   deviceIdentity?: { serverId: string; secret: string }
   workStore?: { putVerification(operationId: string, catalogId: string): void }
@@ -49,9 +51,11 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
     baseUrl: options.baseUrl,
     appVersion: options.appVersion,
     timeoutMs: options.timeoutMs,
-    certificateSha256: options.certificateSha256
+    certificateSha256: options.certificateSha256,
+    allowSelfSignedCertificate: !options.certificateSha256,
+    verifyCertificate: options.verifyCertificate
   })
-  const playback = options.certificateSha256 ? createPlaybackBridge(client.origin, client.fetch) : null
+  const playback = new URL(client.origin).protocol === 'https:' ? createPlaybackBridge(client.origin, client.fetch) : null
   let generation = options.generation ?? 1
   const identity: CatalogIdentity = { mode: 'remote', catalogId: '' }
   let handshake: HandshakeResult | null = null

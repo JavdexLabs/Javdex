@@ -1,5 +1,5 @@
 import { isStructuredError, structuredError, toStructuredError, type StructuredError } from '@shared/protocol/errors'
-import { createPinnedFetch } from './pinnedFetch'
+import { createPinnedFetch, type VerifyServerCertificate } from './pinnedFetch'
 
 const APP_VERSION_HEADER = 'X-Javdex-App-Version'
 
@@ -8,6 +8,9 @@ export interface ManageHttpClientOptions {
   appVersion: string
   timeoutMs?: number
   certificateSha256?: string
+  /** Desktop manual connections accept self-signed certificates at their configured origin. */
+  allowSelfSignedCertificate?: boolean
+  verifyCertificate?: VerifyServerCertificate
 }
 
 export interface ManageHttpCallOptions {
@@ -31,8 +34,28 @@ function throwIfStructured(status: number, body: unknown): void {
 
 function networkError(error: unknown): StructuredError {
   if (isStructuredError(error)) return error
-  if (error instanceof Error && error.name === 'AbortError') {
-    return structuredError('CONNECTION_UNAVAILABLE', '管理请求已取消或超时')
+  const seen = new Set<Error>()
+  let cause = error
+  while (cause instanceof Error && !seen.has(cause)) {
+    seen.add(cause)
+    if (cause.name === 'AbortError' || cause.name === 'TimeoutError') {
+      return structuredError('CONNECTION_UNAVAILABLE', '管理请求已取消或超时')
+    }
+    const code = (cause as NodeJS.ErrnoException).code
+    if (code === 'DEPTH_ZERO_SELF_SIGNED_CERT' || code === 'SELF_SIGNED_CERT_IN_CHAIN' ||
+        code === 'UNABLE_TO_VERIFY_LEAF_SIGNATURE' || code === 'UNABLE_TO_GET_ISSUER_CERT_LOCALLY') {
+      return structuredError('CONNECTION_UNAVAILABLE', '服务器的 HTTPS 证书未受信任，请先使用服务端一次性配对信息完成配对。')
+    }
+    if (code === 'ERR_TLS_CERT_ALTNAME_INVALID') {
+      return structuredError('CONNECTION_UNAVAILABLE', 'HTTPS 证书与服务器地址不匹配，请核对地址或使用一次性配对信息完成配对。')
+    }
+    if (code === 'CERT_HAS_EXPIRED' || code === 'CERT_NOT_YET_VALID') {
+      return structuredError('CONNECTION_UNAVAILABLE', '服务器的 HTTPS 证书不在有效期内，请核对证书和本机时间。')
+    }
+    if (code === 'JAVDEX_CERTIFICATE_MISMATCH') {
+      return structuredError('CONNECTION_UNAVAILABLE', '服务器自签名证书已变化，确认信任新证书后才能继续连接。')
+    }
+    cause = cause.cause
   }
   return structuredError('CONNECTION_UNAVAILABLE', '无法连接远程资料库')
 }
@@ -50,7 +73,10 @@ export class ManageHttpClient {
     this.origin = new URL(this.baseUrl).origin
     this.appVersion = options.appVersion
     this.timeoutMs = options.timeoutMs ?? 15_000
-    const transport = createPinnedFetch(this.origin, options.certificateSha256)
+    const transport = createPinnedFetch(this.origin, options.certificateSha256, {
+      allowSelfSignedCertificate: options.allowSelfSignedCertificate,
+      verifyCertificate: options.verifyCertificate
+    })
     this.fetch = transport.fetch
     this.close = transport.close
   }

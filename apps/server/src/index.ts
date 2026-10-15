@@ -18,18 +18,8 @@ async function main(): Promise<void> {
     staticRoot: defaultStaticRoot()
   })
   const bootstrapToken = bootstrapTokenFromEnv(process.env)
-  if (command === 'pair') {
+  if (command === 'token') {
     process.stdout.write(`${JSON.stringify(issueDeployToken(config, 'pair'))}\n`)
-    return
-  }
-  if (command === 'bind') {
-    const issued = issueDeployToken(config, 'initialBind', { bootstrapToken })
-    process.stdout.write(`${JSON.stringify(issued)}\n`)
-    return
-  }
-  if (command === 'recover') {
-    const issued = issueDeployToken(config, 'deployRecover')
-    process.stdout.write(`${JSON.stringify(issued)}\n`)
     return
   }
   const server = await startJavdexServer(config, { bootstrapToken, updateJobId: process.env.JAVDEX_UPDATE_JOB?.trim() || undefined })

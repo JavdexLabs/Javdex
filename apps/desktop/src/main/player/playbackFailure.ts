@@ -11,6 +11,7 @@ const messages = {
   root: '影片文件或媒体库根目录不可用，请检查来源目录及访问权限后重试',
   missing: '影片文件不存在，请重新连接存储设备或检查资源位置',
   file: '影片文件暂时无法访问，请检查文件及访问权限后重试',
+  permission: '服务进程无权读取影片文件或媒体目录，请检查服务端 UID、GID、附加组及 NAS ACL',
   unsupported: '此资源请使用外部打开，内置播放目前仅支持影片文件',
   grant: '服务端未返回可用的原文件播放授权，请检查连接后重试',
   runtime: '内置播放运行库无法初始化，请检查运行库或显式使用外部播放器',
@@ -38,6 +39,8 @@ export function playbackFailure(error: unknown, fallback: PlaybackFailureCode = 
   if (isStructuredError(error)) {
     if (error.code === 'AUTH_REQUIRED' || error.code === 'WRITER_REVOKED') return new PlaybackFailure('authorization')
     if (error.code === 'VERSION_MISMATCH') return new PlaybackFailure('version')
+    if (error.code === 'FILE_MISSING') return new PlaybackFailure('missing')
+    if (error.code === 'FILE_ACCESS_DENIED') return new PlaybackFailure('permission')
     if (['IDENTITY_CONFLICT', 'INSTANCE_MISMATCH', 'CATALOG_MISMATCH', 'VERSION_CONFLICT', 'FILE_CHANGED'].includes(error.code)) return new PlaybackFailure('identity')
     if (error.code === 'ROOT_OFFLINE' || error.code === 'READ_ONLY_MOUNT') return new PlaybackFailure('root')
     if (['CONNECTION_UNAVAILABLE', 'CATALOG_FROZEN', 'RECOVERY_REQUIRED'].includes(error.code)) return new PlaybackFailure('connection')

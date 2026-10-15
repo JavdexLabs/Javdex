@@ -7,6 +7,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { createRequire } from 'node:module'
 import { setTimeout as delay } from 'node:timers/promises'
+import { smokeConnection } from './server-smoke-connection.ts'
 
 // Uses only a uniquely named test container/volume. Never touches the user's local server.
 const name = `javdex-backup-smoke-${randomUUID()}`
@@ -18,7 +19,8 @@ fs.chmodSync(configDir, 0o755)
 const image = process.env.JAVDEX_BACKUP_SMOKE_IMAGE ?? 'javdex-server:backup-verification'
 const version = JSON.parse(fs.readFileSync('out/server/package.json', 'utf8')).version
 // A stalled local transport must fail the smoke instead of waiting indefinitely.
-const fetch = (input, init = {}) => globalThis.fetch(input, { ...init, signal: init.signal ?? AbortSignal.timeout(15_000) })
+let connection
+const fetch = (input, init) => connection.fetch(input, init)
 const digest = data => createHash('sha256').update(data).digest('hex')
 // Keep the harness alive during startup fetches whose sockets/timers may be unreferenced.
 const keepAlive = setInterval(() => {}, 1000)
@@ -31,12 +33,12 @@ docker('info', '--format', '{{.ServerVersion}}')
 const probe = createServer(); await new Promise(resolve => probe.listen(0, '127.0.0.1', resolve))
 const port = probe.address().port; await new Promise(resolve => probe.close(resolve))
 fs.writeFileSync(path.join(configDir, 'server.json'), JSON.stringify({
-  port, accessHosts: ['127.0.0.1'], dataDir: '/data', imagesDir: '/data/media_assets',
+  port: 8096, accessHosts: ['127.0.0.1'], dataDir: '/data', imagesDir: '/data/media_assets',
   mediaMounts: { library: '/media' }, web: { username: 'viewer' }
 }), { mode: 0o644 })
 let base
 let identity
-const secret = randomBytes(32).toString('base64url')
+const secret = randomBytes(32).toString('hex')
 async function post(operation, input, authorization = secret, mutation = false) {
   const response = await fetch(`${base}/manage/v1/${operation}`, {
     method: 'POST', headers: { Origin: base, 'Content-Type': 'application/json',
@@ -68,16 +70,18 @@ async function wait(id, phase) {
   assert.fail(`timeout: ${phase}`)
 }
 try {
-  docker('run', '-d', '--name', name, '-p', `127.0.0.1:${port}:${port}`, '-v', `${volume}:/data`,
+  docker('run', '-d', '--name', name, '-p', `127.0.0.1:${port}:8096`, '-v', `${volume}:/data`,
     '-v', `${configDir}:/config:ro`, '-e', 'JAVDEX_WEB_PASSWORD=backup-smoke-test-only',
+    '-e', `JAVDEX_PUBLIC_URL=https://127.0.0.1:${port}`,
     image, 'start', '--config', '/config/server.json')
-  base = `http://127.0.0.1:${port}`
+  base = `https://127.0.0.1:${port}`
+  connection = smokeConnection(base)
   await healthy()
   identity = (await post('handshake.get', {}, null)).identity
-  const token = JSON.parse(docker('exec', name, 'node', 'index.js', 'bind', '--config', '/config/server.json'))
-  const claimed = await post('writer.claim', { kind: 'initialBind', oneTimeToken: token.oneTimeToken,
-    candidate: { claimId: randomUUID(), secretDigest: digest(secret) } }, null)
-  identity = { ...identity, writerEpoch: claimed.writerEpoch ?? claimed.identity?.writerEpoch ?? 1 }
+  const bundle = docker('exec', name, 'node', '/opt/javdex-manager/index.js', 'token', '--config', '/config/server.json').trim()
+  await connection.claim(bundle, version, secret)
+  const hello = await post('handshake.get', {}, null)
+  identity = { ...hello.identity, writerEpoch: hello.writerEpoch }
   await post('playlists.create', { name: '备份清单' }, secret, true)
   const playlistIdentity = item => ({ id: item.id, name: item.name, system_kind: item.system_kind ?? null })
   const originalPlaylists = (await post('playlists.listPage', { limit: 60 })).items.map(playlistIdentity)
@@ -220,6 +224,7 @@ try {
   console.log(`PASS: Docker backup restored into an isolated ${process.platform} local catalog with images and resource mapping.`)
 } finally {
   clearInterval(keepAlive)
+  await connection?.close()
   spawnSync('docker', ['rm', '-f', '-v', name], { stdio: 'ignore' })
   spawnSync('docker', ['volume', 'rm', volume], { stdio: 'ignore' })
   // Deliberately retain the small host config directory for failure diagnostics.

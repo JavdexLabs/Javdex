@@ -1,6 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import { createAuthorizedMediaLibraryRootFileInspector, MediaLibraryRootFileMissingError } from '@library/scan/mediaLibraryRootFileGuard'
+import { createAuthorizedMediaLibraryRootFileInspector, MediaLibraryRootFileMissingError, MediaLibraryRootFileAccessError } from '@library/scan/mediaLibraryRootFileGuard'
 import { resourceLocatorRevision } from '@library/catalog/catalogPlay'
 import type { PlaybackTarget } from '@shared/desktop/playback'
 import type { CatalogBackend } from '../application/catalogBackend'
@@ -38,7 +38,8 @@ export function createPlaybackSourceResolver(backend: CatalogBackend) {
       try {
         const checked = createAuthorizedMediaLibraryRootFileInspector()(resource.library_id, resource.root_id, resource.locator)
         locator = checked.fileRealPath; stat = checked.stat
-      } catch (error) { throw new PlaybackFailure(error instanceof MediaLibraryRootFileMissingError ? 'missing' : 'root') }
+      } catch (error) { throw new PlaybackFailure(error instanceof MediaLibraryRootFileMissingError ? 'missing'
+        : error instanceof MediaLibraryRootFileAccessError ? 'file' : 'root') }
     } else {
       // An explicit manual import already authorized this catalog locator. Never accept a renderer path.
       try {

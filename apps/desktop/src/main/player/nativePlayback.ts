@@ -35,7 +35,7 @@ export interface NativePlaybackState {
   'frame-drop-count'?: number
   'track-list'?: string
   'chapter-list'?: string
-  actions?: Array<{ kind: 'toggle-pause' | 'toggle-mute' | 'expand' | 'dock' | 'fullscreen' | 'stop' | 'seek' | 'seek-relative' | 'volume' | 'volume-relative' | 'focus-forward' | 'focus-backward' | 'history-back' | 'history-forward'; value?: number }>
+  actions?: Array<{ kind: 'toggle-pause' | 'toggle-mute' | 'expand' | 'dock' | 'fullscreen' | 'stop' | 'seek' | 'seek-relative' | 'volume' | 'volume-relative' | 'focus-forward' | 'focus-backward' | 'history-back' | 'history-forward' | 'escape'; value?: number }>
 }
 export interface NativePlayback {
   create(): void

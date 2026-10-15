@@ -19,24 +19,24 @@ function fixture() {
   const pop = (delta = -1) => { index += delta; history.pop(stack[index]) }
   return { playback, history, state, pop, commands, goes, options, marker: () => readOverlayHistoryMarker(stack[index]), length: () => stack.length }
 }
-test('acknowledged docking consumes all layers before navigation without replaying transport commands', () => {
+test('acknowledged docking consumes the viewing entry before navigation without replaying transport commands', () => {
   const f = fixture()
   f.playback.observe(f.state()); f.playback.observe(f.state('fullscreen')); f.playback.setOptions(true)
   f.playback.closeForNavigation()
   let navigated = false
   f.history.afterTraversal(() => { navigated = true })
   assert.equal(navigated, false)
-  assert.deepEqual(f.goes, [-3])
+  assert.deepEqual(f.goes, [-1])
   assert.deepEqual(f.commands, [])
-  f.pop(-3)
+  f.pop()
   assert.equal(navigated, true)
   assert.equal(f.marker(), null)
   f.playback.observe(f.state('docked'))
   assert.deepEqual(f.commands, [])
-  assert.deepEqual(f.goes, [-3])
+  assert.deepEqual(f.goes, [-1])
 })
 
-test('navigation waits for both queued traversals when the docking event arrives first', () => {
+test('navigation waits for one viewing traversal when the docking event arrives first', () => {
   const f = fixture()
   f.playback.observe(f.state()); f.playback.setOptions(true)
   f.playback.observe(f.state('docked'))
@@ -45,32 +45,37 @@ test('navigation waits for both queued traversals when the docking event arrives
   f.history.afterTraversal(() => { navigated = true })
   assert.deepEqual(f.goes, [-1])
   f.pop()
-  assert.equal(navigated, false)
-  assert.deepEqual(f.goes, [-1, -1])
-  f.pop()
   assert.equal(navigated, true)
+  assert.deepEqual(f.goes, [-1])
   assert.deepEqual(f.commands, [])
 })
 
-test('back closes options, exits fullscreen, then docks; never stops or rebuilds the session', () => {
-  const f = fixture()
-  f.playback.observe(f.state())
-  f.playback.setOptions(true); f.pop()
-  assert.deepEqual(f.options, [true, false]); assert.deepEqual(f.commands, [])
-  f.playback.observe(f.state('fullscreen')); f.pop()
-  assert.deepEqual(f.commands.at(-1), { id: 'one', value: { kind: 'presentation', value: 'expanded' } })
-  f.playback.observe(f.state('expanded')); f.pop()
-  assert.deepEqual(f.commands.at(-1), { id: 'one', value: { kind: 'presentation', value: 'docked' } })
-  f.playback.observe(f.state('docked'))
-  assert.equal(f.marker(), null); assert.deepEqual(f.goes, [])
+test('one system back docks expanded or fullscreen playback, including open settings, without stopping the session', () => {
+  for (const presentation of ['expanded', 'fullscreen'] as const) for (const openSettings of [false, true]) {
+    const f = fixture()
+    f.playback.observe(f.state())
+    f.playback.observe(f.state(presentation))
+    if (openSettings) f.playback.setOptions(true)
+    assert.equal(f.length(), 2, 'all player presentation modes share one viewing entry')
+    f.pop()
+    assert.deepEqual(f.commands, [{ id: 'one', value: { kind: 'presentation', value: 'docked' } }])
+    if (openSettings) assert.deepEqual(f.options, [true, false])
+    f.playback.observe(f.state('docked'))
+    assert.equal(f.marker(), null)
+    assert.deepEqual(f.goes, [], 'system back already consumed the viewing entry')
+  }
 })
-test('fullscreen settings consume their own back step before leaving fullscreen', () => {
+test('explicitly closing settings and exiting fullscreen retain the single viewing entry', () => {
   const f = fixture()
   f.playback.observe(f.state()); f.playback.observe(f.state('fullscreen'))
-  f.playback.setOptions(true); f.pop()
+  f.playback.setOptions(true); f.playback.setOptions(false)
   assert.deepEqual(f.options, [true, false]); assert.deepEqual(f.commands, [])
+  f.playback.observe(f.state('expanded'))
+  assert.equal(f.marker()?.kind, 'playback-expanded')
+  assert.equal(f.length(), 2)
+  assert.deepEqual(f.goes, [])
   f.pop()
-  assert.deepEqual(f.commands.at(-1), { id: 'one', value: { kind: 'presentation', value: 'expanded' } })
+  assert.deepEqual(f.commands, [{ id: 'one', value: { kind: 'presentation', value: 'docked' } }])
 })
 test('normal updates and mount snapshot never write history; a late old tick cannot reopen a consumed layer', () => {
   const f = fixture()
@@ -88,7 +93,7 @@ test('explicit fullscreen docking or stop consumes all owned layers without anot
     const f = fixture()
     f.playback.observe(f.state()); f.playback.observe(f.state('fullscreen'))
     f.playback.observe(next ? f.state(next) : null)
-    assert.deepEqual(f.goes, [-2]); f.pop(-2)
+    assert.deepEqual(f.goes, [-1]); f.pop()
     assert.equal(f.marker(), null)
     assert.deepEqual(f.commands, [])
   }
@@ -97,7 +102,7 @@ test('switching resources reuses the viewing layer but a history close targets o
   const f = fixture()
   f.playback.observe(f.state()); f.playback.setOptions(true)
   f.playback.observe(f.state('expanded', 'opening', 'two'))
-  assert.deepEqual(f.options, [true, false]); f.pop()
+  assert.deepEqual(f.options, [true, false])
   f.pop()
   assert.deepEqual(f.commands, [{ id: 'two', value: { kind: 'presentation', value: 'docked' } }])
 })

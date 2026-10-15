@@ -14,7 +14,6 @@ export interface DeploymentIdentity {
   dataDir: string
   imagesDir: string
   busy: boolean
-  estimatedBytes: number
   port: number
 }
 export interface DeploymentSnapshot {
@@ -24,13 +23,12 @@ export interface DeploymentSnapshot {
   configHash: string
 }
 export interface UpdateDeployment {
-  inspect(options?: { measure?: boolean }): Promise<DeploymentSnapshot>
+  inspect(): Promise<DeploymentSnapshot>
   prepare(manifest: ServerUpdateManifest, archive?: string): Promise<void>
   stop(): Promise<void>
-  backup(jobDir: string, original: DeploymentSnapshot): Promise<void>
   install(manifest: DeploymentRelease, jobId: string, original: DeploymentSnapshot): Promise<void>
   verify(manifest: DeploymentRelease, original: DeploymentSnapshot): Promise<void>
   activate(jobId: string, manifest: DeploymentRelease, original: DeploymentSnapshot): Promise<void>
-  restore(jobDir: string, original: DeploymentSnapshot): Promise<void>
+  resume(original: DeploymentSnapshot): Promise<void>
   cleanup(original: DeploymentSnapshot): Promise<void>
 }

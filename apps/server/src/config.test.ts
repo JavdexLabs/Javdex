@@ -17,6 +17,11 @@ function writeJson(file: string, value: unknown): void {
 }
 
 describe('server config', () => {
+  it('rejects the removed authorization commands before opening a catalog', async () => {
+    for (const command of ['bind', 'recover', 'pair', 'pair-recover']) {
+      await assert.rejects(loadServerConfig({}, ['node', 'index', command]), /未知参数/)
+    }
+  })
   it('rejects the removed offline migration command before opening a catalog', async () => {
     await assert.rejects(
       loadServerConfig({}, ['node', 'index', 'migrate-auth']),
@@ -79,6 +84,7 @@ describe('server config', () => {
       ['node', 'index', 'start', '--config', configPath]
     )
     assert.equal(loaded.command, 'start')
+    assert.equal((await loadServerConfig({ JAVDEX_WEB_PASSWORD: 'correct horse battery' }, ['node', 'index', 'token', '--config', configPath])).command, 'token')
     assert.match(loaded.config.web.passwordHash, /^[a-f0-9]{32}:[a-f0-9]{128}$/)
     assert.equal(loaded.config.mediaMounts.library, path.resolve(media))
     const known = await hashPassword('correct horse battery')

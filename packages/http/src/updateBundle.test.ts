@@ -105,11 +105,12 @@ test('large offline file uploads bounded inner chunks and rejects stalled progre
       assert.ok(chunk.length <= 8 * 1024 ** 2)
       assert.deepEqual(chunk, bytes.subarray(offset, offset + chunk.length))
       return { ...status, job: { ...status.job!, receivedBytes: offset + chunk.length, phase: offset + chunk.length === bytes.length ? 'prepared' : 'preparing' } }
-    } }, fd)
+    } }, fd, '0.9.0')
     assert.deepEqual(offsets, [0, 8 * 1024 ** 2])
     assert.equal(result.job?.phase, 'prepared')
-    await assert.rejects(uploadServerUpdateBundle({ import: async () => status, upload: async () => status }, fd), /进度/)
+    await assert.rejects(uploadServerUpdateBundle({ import: async () => status, upload: async () => status }, fd, '0.9.0'), /进度/)
+    await assert.rejects(uploadServerUpdateBundle({ import: async () => { assert.fail('Wrong-version bundle must not create a server job') }, upload: async () => status }, fd, '0.9.0-beta.4'), /客户端/)
     fs.appendFileSync(file, 'extra')
-    await assert.rejects(uploadServerUpdateBundle({ import: async () => { assert.fail('Wrong-size bundle must not create a server job') }, upload: async () => status }, fd), /大小/)
+    await assert.rejects(uploadServerUpdateBundle({ import: async () => { assert.fail('Wrong-size bundle must not create a server job') }, upload: async () => status }, fd, '0.9.0'), /大小/)
   } finally { fs.closeSync(fd); fs.rmSync(directory, { recursive: true, force: true }) }
 })

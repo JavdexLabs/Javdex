@@ -218,7 +218,7 @@ static void *getProcAddress(void *, const char *name) {
         queueAction("seek-relative", event.keyCode == 123 ? -seconds : seconds);
     }
     else if ([key isEqualToString:@"f"]) queueAction("fullscreen");
-    else if (event.keyCode == 53) queueAction("history-back");
+    else if (event.keyCode == 53) queueAction("escape");
     else [super keyDown:event];
 }
 - (BOOL)performKeyEquivalent:(NSEvent *)event { return historyKey(self, event) || [super performKeyEquivalent:event]; }

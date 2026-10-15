@@ -185,7 +185,7 @@ void key(XKeyEvent &event, bool repeat) {
         else queue(shift ? "focus-backward" : "focus-forward");
         return;
     }
-    if (code == XK_Escape) { if (!repeat) queue("history-back"); return; }
+    if (code == XK_Escape) { if (!repeat) queue("escape"); return; }
     if (event.window == toolbar) {
         if (controls.focus == Control::Seek || controls.focus == Control::Volume) {
             const bool negative = code == XK_Left || code == XK_Down, positive = code == XK_Right || code == XK_Up;

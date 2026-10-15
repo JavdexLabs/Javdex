@@ -150,10 +150,10 @@ AI 服务三页签之间保留已挂载的用途草稿；下载跳转用 `model`
 
 - 打开由显式图片动作或 main 已提交的播放展示变化触发；订阅、普通时钟更新和 React cleanup 不导航。
 - 系统 pop 只关闭已弹出的层，不再后退。主动关闭一次消费所属层及子层；旧异步遍历未完成前，新 token 排队，不能被迟到的旧事件关闭。事件 marker 必须与实时游标一致，fallback 已结算后到达的旧事件不能确认新的遍历。超时检查不发起第二次后退。
-- 返回先关闭选项、退出全屏或收起展开播放，底栏继续同一会话且不拦截业务页面返回。离开业务路由只释放旧观看层，不额外后退，也不由前进标记复活已结束的层。
+- 系统后退、鼠标返回键及历史导航快捷键在播放界面统一等同“收起到底栏”，一次收起展开或全屏播放并关闭播放设置，保留同一会话和当前业务页面；播放设置和全屏共用一个观看历史项。Esc 保持原有逐层行为：先关闭播放设置，再退出全屏，最后收起展开播放。底栏不拦截业务页面返回。离开业务路由只释放旧观看层，不额外后退，也不由前进标记复活已结束的层。
 - `NavigationGuardProvider` 忽略同一 pathname/search 的临时观看历史；真正离开时顺序组合草稿保护。主动关闭的遍历尚未完成时，业务跳转等待其结算，避免返回两次。待处理的业务目标与已确认草稿独立于 Router 的临时 blocker 状态保存；只继续当前有效 blocker，重放必须保留 PUSH／REPLACE／POP 的原始语义、目标 state 和历史游标，不能把 POP 降级为 PUSH。取消、卸载和新的业务目标使旧等待失效。
 
-主进程 `windowNavigation.ts` 将 Windows/Linux Alt+Left/Right、macOS ⌘[/⌘]、系统 app-command 和 Electron 的 legacy swipe 统一导向真实浏览器历史；macOS Option+Left/Right 保留系统文本按词编辑行为。原生播放器只提交受限 back/forward 动作，策略仍由 renderer 的历史与离开保护所有者决定。macOS 原生键位识别兼容中文输入源的【/】字符。[Electron legacy swipe](https://raw.githubusercontent.com/electron/electron/v43.4.1/docs/api/browser-window.md) 不是现代双指手势的支持承诺；后者及物理鼠标返回键仍需实机验收。
+主进程 `windowNavigation.ts` 将 Windows/Linux Alt+Left/Right、macOS ⌘[/⌘]、系统 app-command 和 Electron 的 legacy swipe 统一导向真实浏览器历史；macOS Option+Left/Right 保留系统文本按词编辑行为。原生播放器分别提交受限 back/forward 与 Escape 动作，前者进入浏览器历史，后者透传至页面键盘处理以保留逐层关闭；策略仍由 renderer 的历史、交互层与离开保护所有者决定。macOS 原生键位识别兼容中文输入源的【/】字符。[Electron legacy swipe](https://raw.githubusercontent.com/electron/electron/v43.4.1/docs/api/browser-window.md) 不是现代双指手势的支持承诺；后者及物理鼠标返回键仍需实机验收。
 
 ### 清单、分类与关联影片连续浏览
 

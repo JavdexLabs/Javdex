@@ -7,7 +7,8 @@ test('playback failures distinguish controlled causes without forwarding third-p
   const cases = [
     ['AUTH_REQUIRED', 'authorization'], ['WRITER_REVOKED', 'authorization'],
     ['ROOT_OFFLINE', 'root'], ['FILE_CHANGED', 'identity'],
-    ['VERSION_MISMATCH', 'version'], ['CONNECTION_UNAVAILABLE', 'connection']
+    ['VERSION_MISMATCH', 'version'], ['CONNECTION_UNAVAILABLE', 'connection'],
+    ['FILE_MISSING', 'missing'], ['FILE_ACCESS_DENIED', 'permission']
   ] as const
   for (const [code, expected] of cases) {
     const failure = playbackFailure(structuredError(code, 'https://server.invalid/play?token=secret /private/movie.mp4'))

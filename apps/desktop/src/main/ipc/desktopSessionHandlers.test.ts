@@ -2,7 +2,8 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { createServer } from 'node:http'
+import { createServer } from 'node:https'
+import { testTls } from '../../../../../scripts/test-tls'
 import { afterEach, describe, it } from 'node:test'
 import { IPC } from '@shared/ipc-channels'
 import type { AppIpcContract } from '@shared/appIpcContract'
@@ -71,7 +72,7 @@ describe('desktop session IPC', () => {
     let ready = 'ready'
     let writerEpoch = 1
     let appVersion = '0.8.0-beta.1'
-    const server = createServer((request, response) => {
+    const server = createServer(testTls(), (request, response) => {
       assert.equal(request.url, '/manage/v1/handshake.get')
       assert.equal(request.headers.authorization, undefined)
       response.setHeader('Content-Type', 'application/json')
@@ -84,7 +85,7 @@ describe('desktop session IPC', () => {
     try {
       const address = server.address()
       assert.ok(address && typeof address !== 'string')
-      const url = `http://127.0.0.1:${address.port}`
+      const url = `https://127.0.0.1:${address.port}`
       const reachable = await probeRemoteConnection(url, '0.8.0-beta.1')
       assert.equal(reachable.status, 'reachable')
       assert.equal(reachable.catalogId, 'catalog-1')
@@ -94,7 +95,10 @@ describe('desktop session IPC', () => {
       assert.equal((await probeRemoteConnection(url, '0.8.0-beta.1')).status, 'notBound')
       appVersion = '0.8.0-beta.2'
       assert.equal((await probeRemoteConnection(url, '0.8.0-beta.1')).status, 'versionMismatch')
-      await assert.rejects(() => probeRemoteConnection('javascript:alert(1)', '0.8.0-beta.1'))
+      for (const invalid of ['http://127.0.0.1:8096', 'https://example.test/manage', 'https://example.test/?token=x', 'javascript:alert(1)']) {
+        await assert.rejects(() => probeRemoteConnection(invalid, '0.8.0-beta.1'),
+          (error: unknown) => isStructuredError(error) && error.code === 'INVALID_INPUT' && error.message.includes('HTTPS'))
+      }
     } finally {
       await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()))
     }
@@ -130,7 +134,7 @@ describe('desktop session IPC', () => {
     )
   })
 
-  it('rejects remote mode without a safe HTTP URL and does not leak a writer secret', async () => {
+  it('rejects remote mode without a safe HTTPS root URL and does not leak a writer secret', async () => {
     tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-session-ipc-'))
     const settings = createThisComputerSettingsStore(thisComputerSettingsPath(tempRoot))
     const backend = createUnconfiguredRemoteBackend()
@@ -167,13 +171,13 @@ describe('desktop session IPC', () => {
 
     const updated = (await handlers.get(IPC.THIS_COMPUTER_UPDATE)!({} as IpcMainInvokeEvent, {
       mode: 'remote',
-      remoteBaseUrl: 'http://127.0.0.1:8096'
+      remoteBaseUrl: 'https://127.0.0.1:8096'
     })) as { restartRequired: boolean; settings: { mode: string } }
     assert.equal(updated.restartRequired, true)
     assert.equal(updated.settings.mode, 'remote')
     const stored = JSON.parse(fs.readFileSync(thisComputerSettingsPath(tempRoot), 'utf8')) as {
       remoteBaseUrl: string
     }
-    assert.equal(stored.remoteBaseUrl, 'http://127.0.0.1:8096')
+    assert.equal(stored.remoteBaseUrl, 'https://127.0.0.1:8096')
   })
 })

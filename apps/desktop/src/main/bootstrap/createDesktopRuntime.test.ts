@@ -1,7 +1,8 @@
 import { readVideoAggregateVersion } from '@library/catalog/catalogAggregateVersion'
 import { afterEach, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { createServer as createHttpServer, type Server } from 'node:http'
+import { createServer as createHttpServer, type Server } from 'node:https'
+import { testTls } from '../../../../../scripts/test-tls'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -9,7 +10,7 @@ import { closeDatabase, getDb, initDatabaseAtPath } from '@library/db/database'
 import { isStructuredError } from '@shared/protocol/errors'
 import { clearAgentRunDatabase } from '../agent-platform/agentRunStore'
 import {
-  createDesktopRuntime,
+  createDesktopRuntime as createRuntime,
   localCatalogDatabasePath,
   workStorePath
 } from './createDesktopRuntime'
@@ -17,6 +18,13 @@ import { createThisComputerSettingsStore, thisComputerSettingsPath } from '../de
 import { copyAgentWorkTables } from '../desktop/agentWorkCopy'
 import { openDesktopWorkStore } from '../desktop/workStore'
 import { createWriterCredentialStore, type WriterSecretCipher } from '../desktop/writerCredentialStore'
+
+function createDesktopRuntime(...args: Parameters<typeof createRuntime>) {
+  return createRuntime(args[0], args[1], {
+    detectDefaultPlayer: async () => ({ status: 'unavailable', message: 'No system association in this test' }),
+    ...args[2], verifyCertificate: async () => {}
+  })
+}
 
 function memoryCipher(): WriterSecretCipher {
   return {
@@ -59,7 +67,7 @@ afterEach(async () => {
 })
 
 function listenHandshake(appVersion: string, writerEpoch = 1): Promise<string> {
-  handshakeServer = createHttpServer((_request, response) => {
+  handshakeServer = createHttpServer(testTls(), (_request, response) => {
     response.setHeader('Content-Type', 'application/json')
     response.end(
       JSON.stringify({
@@ -89,12 +97,37 @@ function listenHandshake(appVersion: string, writerEpoch = 1): Promise<string> {
         reject(new Error('port'))
         return
       }
-      resolve(`http://127.0.0.1:${address.port}`)
+      resolve(`https://127.0.0.1:${address.port}`)
     })
   })
 }
 
 describe('createDesktopRuntime', () => {
+  it('initializes the external program from the system association while retaining built-in playback', async () => {
+    const runtime = await createDesktopRuntime(tempDir(), '0.9.0-beta.4', {
+      detectDefaultPlayer: async () => ({ status: 'found', path: 'C:\\Video Player\\player.exe', extension: '.mp4' })
+    })
+    try {
+      const settings = await runtime.settings.read()
+      assert.equal(settings.playerPath, 'C:\\Video Player\\player.exe')
+      assert.equal(settings.playerPreference, 'builtin')
+      assert.equal(settings.resumePlayback, true)
+    } finally { await runtime.dispose() }
+  })
+
+  it('keeps settings accessible without opening an old HTTP deployment on startup', async () => {
+    const root = tempDir()
+    const settings = createThisComputerSettingsStore(thisComputerSettingsPath(root))
+    await settings.write({ mode: 'remote', remoteBaseUrl: 'http://127.0.0.1:8096' })
+    const runtime = await createDesktopRuntime(root, '0.9.0-beta.4')
+    try {
+      assert.equal(runtime.openedCatalog, false)
+      assert.equal(runtime.backend.session().state, 'disconnected')
+      assert.match(runtime.backend.session().message ?? '', /HTTPS.*重新配对/)
+      assert.equal((await runtime.settings.read()).remoteBaseUrl, 'http://127.0.0.1:8096', 'preserve the previous address for editing')
+    } finally { await runtime.dispose() }
+  })
+
   it('starts local mode, copies agent work, and marks workStore ready', async () => {
     const root = tempDir()
     fs.mkdirSync(path.join(root, 'data'), { recursive: true })
@@ -191,7 +224,7 @@ describe('createDesktopRuntime', () => {
   it('starts unconfigured remote without opening library.db', async () => {
     const root = tempDir()
     const settings = createThisComputerSettingsStore(thisComputerSettingsPath(root))
-    await settings.write({ mode: 'remote', remoteBaseUrl: 'http://127.0.0.1:1' })
+    await settings.write({ mode: 'remote', remoteBaseUrl: 'https://127.0.0.1:1' })
     const runtime = await createDesktopRuntime(root, '0.7.0')
     try {
       assert.equal(runtime.mode, 'remote')
@@ -210,7 +243,7 @@ describe('createDesktopRuntime', () => {
   it('starts remote in modePrepRequired when workStore copy is unfinished', async () => {
     const root = tempDir()
     const settings = createThisComputerSettingsStore(thisComputerSettingsPath(root))
-    await settings.write({ mode: 'remote', remoteBaseUrl: 'http://127.0.0.1:1' })
+    await settings.write({ mode: 'remote', remoteBaseUrl: 'https://127.0.0.1:1' })
     const store = openDesktopWorkStore(workStorePath(root))
     store.beginCopy()
     store.close()
@@ -230,7 +263,7 @@ describe('createDesktopRuntime', () => {
     fs.mkdirSync(path.join(root, 'data'), { recursive: true })
     fs.writeFileSync(localCatalogDatabasePath(root), '')
     const settings = createThisComputerSettingsStore(thisComputerSettingsPath(root))
-    await settings.write({ mode: 'remote', remoteBaseUrl: 'http://127.0.0.1:1' })
+    await settings.write({ mode: 'remote', remoteBaseUrl: 'https://127.0.0.1:1' })
     const runtime = await createDesktopRuntime(root, '0.7.0')
     try {
       assert.equal(runtime.backend.session().state, 'modePrepRequired')
@@ -297,7 +330,7 @@ describe('createDesktopRuntime', () => {
     assert.throws(() => getDb(), /Database not initialised/)
 
     const settings = createThisComputerSettingsStore(thisComputerSettingsPath(root))
-    await settings.write({ mode: 'remote', remoteBaseUrl: 'http://127.0.0.1:1' })
+    await settings.write({ mode: 'remote', remoteBaseUrl: 'https://127.0.0.1:1' })
     const remote = await createDesktopRuntime(root, '0.7.0')
     try {
       assert.equal(remote.mode, 'remote')
@@ -315,7 +348,7 @@ describe('createDesktopRuntime', () => {
     await local.dispose()
 
     const settings = createThisComputerSettingsStore(thisComputerSettingsPath(root))
-    await settings.write({ mode: 'remote', remoteBaseUrl: 'http://127.0.0.1:1' })
+    await settings.write({ mode: 'remote', remoteBaseUrl: 'https://127.0.0.1:1' })
     const remote = await createDesktopRuntime(root, '0.7.0')
     assert.equal(remote.openedCatalog, false)
     assert.throws(() => getDb(), /Database not initialised/)
@@ -348,7 +381,7 @@ describe('createDesktopRuntime', () => {
     closeDatabase()
 
     const settings = createThisComputerSettingsStore(thisComputerSettingsPath(root))
-    await settings.write({ mode: 'remote', remoteBaseUrl: 'http://127.0.0.1:1' })
+    await settings.write({ mode: 'remote', remoteBaseUrl: 'https://127.0.0.1:1' })
     const blocked = await createDesktopRuntime(root, '0.7.0')
     try {
       assert.equal(blocked.backend.session().state, 'modePrepRequired')
@@ -378,7 +411,7 @@ describe('createDesktopRuntime', () => {
   it('rebuilds a remote runtime without reopening library.db', async () => {
     const root = tempDir()
     const settings = createThisComputerSettingsStore(thisComputerSettingsPath(root))
-    await settings.write({ mode: 'remote', remoteBaseUrl: 'http://127.0.0.1:1' })
+    await settings.write({ mode: 'remote', remoteBaseUrl: 'https://127.0.0.1:1' })
     const first = await createDesktopRuntime(root, '0.7.0')
     assert.equal(first.openedCatalog, false)
     await first.dispose()

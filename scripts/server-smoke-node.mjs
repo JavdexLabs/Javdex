@@ -142,7 +142,7 @@ try {
   assert.equal(typeof hello.identity.serverId, 'string')
   assert.equal(hello.capabilities.encryptedAssets, false)
 
-  const bind = spawnSync(process.execPath, [path.join(appDir, 'index.js'), 'bind', '--config', configPath], {
+  const bind = spawnSync(process.execPath, [path.join(appDir, 'index.js'), 'token', '--config', configPath], {
     cwd: appDir,
     encoding: 'utf8'
   })

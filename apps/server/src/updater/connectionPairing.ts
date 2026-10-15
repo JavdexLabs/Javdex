@@ -22,15 +22,15 @@ export class ConnectionPairing {
     return { code, expiresAt: new Date(expiresAt).toISOString(), serverId: issued.serverId, catalogId: issued.catalogId }
   }
   async claim<T>(input: unknown, consume: (issued: z.infer<typeof issuedSchema>, candidate: { claimId: string; secretDigest: string; name?: string }) => Promise<T>): Promise<T> {
-    if (this.busy) throw new Error('配对正在处理，请稍后重试')
+    if (this.busy) throw new Error('授权正在处理，请稍后重试')
     this.busy = true
     try {
       const { code, ...candidate } = connectionClaimSchema.parse(input)
       const grant = stateSchema.parse(readJsonIfExists(this.file))
-      if (this.digest(code) !== grant.digest) throw new Error('配对信息无效')
+      if (this.digest(code) !== grant.digest) throw new Error('令牌无效')
       if (grant.candidate) {
-        if (grant.candidate.claimId !== candidate.claimId || grant.candidate.secretDigest !== candidate.secretDigest) throw new Error('配对信息已被另一台客户端使用')
-      } else if (this.now() >= grant.expiresAt) throw new Error('配对信息已过期，请重新生成')
+        if (grant.candidate.claimId !== candidate.claimId || grant.candidate.secretDigest !== candidate.secretDigest) throw new Error('令牌已被另一台客户端使用')
+      } else if (this.now() >= grant.expiresAt) throw new Error('令牌已过期，请重新生成')
       // Persist the candidate BEFORE touching the independent writer transaction.
       writeJsonAtomic(this.file, { ...grant, candidate })
       // appVersion belongs to the connection claim, not the strict writer candidate.

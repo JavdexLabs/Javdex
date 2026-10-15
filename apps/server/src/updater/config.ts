@@ -2,7 +2,6 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { createPublicKey, randomBytes } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
-import { isIP } from 'node:net'
 import { z } from 'zod'
 import { writeJsonAtomic } from './files'
 
@@ -18,12 +17,13 @@ export interface UpdaterConfig {
   imagesDir: string
   listenHost: string
   port: number
-  publicUrl: string | null
-  gateway?: { origin: string; token: string }
+  publicUrl: string
+  gateway: { origin: string; token: string }
   releaseKeys: Record<string, string>
   stopTimeoutSeconds: number
   businessUid: number
   businessGid: number
+  businessGroups: number[]
 }
 const absolute = (value: string): string => {
   if (!path.isAbsolute(value) || path.resolve(value) === path.parse(value).root) throw new Error('需要具体的绝对路径')
@@ -39,23 +39,21 @@ export function contained(file: string, root: string): boolean {
 export function loadUpdaterConfig(file: string, options: { env?: NodeJS.ProcessEnv; seedDir?: string } = {}): UpdaterConfig {
   const env = options.env ?? process.env
   const serverConfigPath = absolute(file)
-  const input = JSON.parse(fs.readFileSync(file, 'utf8')) as { dataDir?: string; imagesDir?: string; port?: number; accessHosts?: string[] }
+  const input = JSON.parse(fs.readFileSync(file, 'utf8')) as { dataDir?: string; imagesDir?: string; port?: number }
   const dataDir = absolute(env.JAVDEX_DATA_DIR || input.dataDir || '/data')
   const imagesDir = absolute(env.JAVDEX_IMAGES_DIR || input.imagesDir || path.join(dataDir, 'media_assets'))
   if (imagesDir !== dataDir && contained(dataDir, imagesDir)) throw new Error('图片目录不能包含资料目录，请使用资料目录内的图片目录或独立目录')
   const runtimeDir = absolute(env.JAVDEX_RUNTIME_DIR || '/program')
   if (contained(runtimeDir, dataDir) || contained(dataDir, runtimeDir) || contained(runtimeDir, imagesDir) || contained(imagesDir, runtimeDir)) throw new Error('程序与更新目录必须和资料、图片目录分离')
-  const unified = Boolean(env.JAVDEX_PUBLIC_URL)
-  const serverPort = z.coerce.number().int().min(1).max(65535).parse(unified ? (env.JAVDEX_INTERNAL_PORT || 8098) : (env.JAVDEX_LISTEN_PORT || input.port || 8096))
-  const host = unified ? '127.0.0.1' : env.JAVDEX_ACCESS_HOSTS?.split(',')[0]?.trim() || input.accessHosts?.[0] || '127.0.0.1'
-  const healthHost = `${isIP(host) === 6 ? `[${host}]` : host}:${serverPort}`
-  const port = z.coerce.number().int().min(1024).max(65535).parse(unified ? (env.JAVDEX_LISTEN_PORT || input.port || 8096) : (env.JAVDEX_UPDATE_PORT || 8097))
-  if (port === serverPort) throw new Error('业务与更新端口不能相同')
-  const publicUrl = (env.JAVDEX_PUBLIC_URL || env.JAVDEX_UPDATE_PUBLIC_URL)?.trim() || null
-  if (publicUrl) {
-    const url = new URL(publicUrl)
-    if (url.protocol !== 'https:' || url.pathname !== '/' || url.search || url.hash || url.username || url.password) throw new Error('公开地址必须是无路径的 HTTPS 地址')
-  }
+  if (env.JAVDEX_UPDATE_PUBLIC_URL || env.JAVDEX_UPDATE_PORT || env.JAVDEX_UPDATE_LISTEN_HOST) throw new Error('独立更新入口已移除，请使用 JAVDEX_PUBLIC_URL 和统一监听端口')
+  const publicUrl = env.JAVDEX_PUBLIC_URL?.trim()
+  if (!publicUrl) throw new Error('请配置 JAVDEX_PUBLIC_URL 为客户端可访问的 HTTPS 根地址')
+  const url = new URL(publicUrl)
+  if (url.protocol !== 'https:' || url.pathname !== '/' || url.search || url.hash || url.username || url.password) throw new Error('公开地址必须是无路径的 HTTPS 地址')
+  const serverPort = z.coerce.number().int().min(1024).max(65535).parse(env.JAVDEX_INTERNAL_PORT || 8098)
+  const healthHost = `127.0.0.1:${serverPort}`
+  const port = z.coerce.number().int().min(1024).max(65535).parse(env.JAVDEX_LISTEN_PORT || input.port || 8096)
+  if (port === serverPort) throw new Error('公开与内部业务端口不能相同')
   const seedDir = absolute(options.seedDir || env.JAVDEX_SERVER_SEED_DIR || '/app')
   const keysFile = env.JAVDEX_UPDATE_KEYS_FILE || path.join(path.dirname(fileURLToPath(import.meta.url)), 'release-keys.json')
   const releaseKeys = z.record(z.string().regex(/^[\w-]{1,64}$/), z.string().min(1).max(8192)).parse(fs.existsSync(keysFile) ? JSON.parse(fs.readFileSync(keysFile, 'utf8')) : {})
@@ -63,6 +61,12 @@ export function loadUpdaterConfig(file: string, options: { env?: NodeJS.ProcessE
   const stopTimeoutSeconds = z.coerce.number().int().min(1).max(600).parse(env.JAVDEX_UPDATE_STOP_TIMEOUT || 120)
   const businessUid = z.coerce.number().int().nonnegative().parse(env.JAVDEX_SERVER_UID || 1000)
   const businessGid = z.coerce.number().int().nonnegative().parse(env.JAVDEX_SERVER_GID || 1000)
+  const groups = env.JAVDEX_SERVER_GROUPS?.trim()
+  if (groups && (!/^(0|[1-9]\d*)(\s*,\s*(0|[1-9]\d*))*$/.test(groups) || groups.split(',').length > 64)) {
+    throw new Error('JAVDEX_SERVER_GROUPS 必须是逗号分隔的数字 GID，最多 64 个')
+  }
+  const businessGroups = [...new Set(groups ? groups.split(',').map(value =>
+    z.coerce.number().int().min(0).max(4294967294).parse(value.trim())) : [])]
   const marker = path.join(runtimeDir, '.javdex-program')
   if (fs.existsSync(runtimeDir)) {
     if (fs.lstatSync(runtimeDir).isSymbolicLink()) throw new Error('程序目录不能是符号链接')
@@ -87,6 +91,6 @@ export function loadUpdaterConfig(file: string, options: { env?: NodeJS.ProcessE
   if (fs.existsSync(bindingFile)) {
     if (JSON.stringify(JSON.parse(fs.readFileSync(bindingFile, 'utf8'))) !== JSON.stringify(binding)) throw new Error('程序卷已绑定另一份资料库部署，不能复用更新状态')
   } else writeJsonAtomic(bindingFile, binding)
-  return { runtimeDir, stateDir, releasesDir, seedDir, serverConfigPath, dataDir, imagesDir, serverUrl: `http://127.0.0.1:${serverPort}`, healthHost, listenHost: env.JAVDEX_UPDATE_LISTEN_HOST || '0.0.0.0', port, publicUrl, releaseKeys, stopTimeoutSeconds, businessUid, businessGid,
-    ...(unified ? { gateway: { origin: new URL(publicUrl!).origin, token: randomBytes(32).toString('hex') } } : {}) }
+  return { runtimeDir, stateDir, releasesDir, seedDir, serverConfigPath, dataDir, imagesDir, serverUrl: `http://127.0.0.1:${serverPort}`, healthHost, listenHost: env.JAVDEX_LISTEN_HOST || '0.0.0.0', port, publicUrl, releaseKeys, stopTimeoutSeconds, businessUid, businessGid, businessGroups,
+    gateway: { origin: url.origin, token: randomBytes(32).toString('hex') } }
 }

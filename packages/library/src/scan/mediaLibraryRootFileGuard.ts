@@ -18,6 +18,13 @@ export class MediaLibraryRootFileMissingError extends Error {
   }
 }
 
+export class MediaLibraryRootFileAccessError extends Error {
+  constructor() {
+    super(MANAGED_ROOT_FILE_ERROR)
+    this.name = 'MediaLibraryRootFileAccessError'
+  }
+}
+
 export interface AuthorizedMediaLibraryRoot {
   readonly root: MediaLibraryRoot
   readonly realPath: string
@@ -35,7 +42,8 @@ export type AuthorizedMediaLibraryRootFileInspector = (
   expectedRoot?: Readonly<MediaLibraryRoot>
 ) => AuthorizedMediaLibraryRootFile
 
-function rejectManagedRootFile(): never {
+function rejectManagedRootFile(error?: unknown): never {
+  if (['EACCES', 'EPERM'].includes(String((error as NodeJS.ErrnoException)?.code))) throw new MediaLibraryRootFileAccessError()
   throw new Error(MANAGED_ROOT_FILE_ERROR)
 }
 
@@ -80,9 +88,9 @@ function requireCurrentRootIdentity(
 
   let currentRoot: ReturnType<typeof resolveMediaLibraryRootIdentity>
   try {
-    currentRoot = resolveMediaLibraryRootIdentity(root.path)
-  } catch {
-    rejectManagedRootFile()
+    currentRoot = resolveMediaLibraryRootIdentity(root.path, { throwOnAccessDenied: true })
+  } catch (error) {
+    rejectManagedRootFile(error)
   }
   if (
     !currentRoot.realPath ||
@@ -154,7 +162,7 @@ function inspectAuthorizedRootFile(
       requireCurrentRootIdentity(authorization.root)
       throw new MediaLibraryRootFileMissingError()
     }
-    rejectManagedRootFile()
+    rejectManagedRootFile(error)
   }
 }
 

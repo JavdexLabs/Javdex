@@ -94,6 +94,13 @@ export function registerBuiltinPlayback(backend: CatalogBackend, getWindow: () =
       }
     },
     navigate: direction => navigateWindowHistory(getWindow(), direction),
+    escape: () => {
+      const window = getWindow()
+      if (!window || window.isDestroyed()) return
+      // Preserve the renderer's layered Escape behavior, separate from system Back.
+      window.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Escape' })
+      window.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Escape' })
+    },
     started: async source => {
       await recentStarted?.(source.target.videoId)
       await removePlayedWatchLater(backend, source.target.videoId)

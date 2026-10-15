@@ -9,6 +9,7 @@ import {
 } from '@library/db/libraryScanRepo'
 import { recoverCatalogMaintenance } from '@library/catalog/catalogMaintenanceRecover'
 import type { CatalogBackend } from '../application/catalogBackend'
+import type { DefaultPlayerDetectionResult } from '@shared/desktop/settings'
 import {
   configureAgentRunDatabase,
   clearAgentRunDatabase
@@ -21,6 +22,7 @@ import {
   createThisComputerSettingsStore,
   thisComputerSettingsPath
 } from '../desktop/thisComputerSettingsStore'
+import { initializePlayerSettings } from '../desktop/initializePlayerSettings'
 import {
   loadOrCreateLocalCatalogIdentity,
   localCatalogIdentityPath
@@ -28,6 +30,9 @@ import {
 import { copyAgentWorkTables } from '../desktop/agentWorkCopy'
 import { createWriterCredentialStore } from '../desktop/writerCredentialStore'
 import { readServerConnection } from '../desktop/serverConnectionStore'
+import { assertRemoteBaseUrl } from '../desktop/remoteConnectionUrl'
+import { createServerCertificateTrust } from '../desktop/serverCertificateTrust'
+import type { VerifyServerCertificate } from '@http/pinnedFetch'
 import { openDesktopWorkStore, type DesktopWorkStoreHandle } from '../desktop/workStore'
 import { createUnconfiguredRemoteBackend } from '../backends/remote/unconfiguredRemoteBackend'
 import type { DesktopCredentialStore } from '../application/desktopPorts'
@@ -46,6 +51,8 @@ export interface DesktopRuntime {
 export interface CreateDesktopRuntimeOptions {
   local?: Omit<Partial<LocalCatalogBackendDependencies>, 'identity'>
   credentials?: DesktopCredentialStore
+  verifyCertificate?: VerifyServerCertificate
+  detectDefaultPlayer?: () => Promise<DefaultPlayerDetectionResult>
 }
 
 export function workStorePath(userDataPath: string): string {
@@ -72,6 +79,7 @@ export async function createDesktopRuntime(
   options: CreateDesktopRuntimeOptions = {}
 ): Promise<DesktopRuntime> {
   const settings = createThisComputerSettingsStore(thisComputerSettingsPath(userDataPath))
+  await initializePlayerSettings(settings, options.detectDefaultPlayer)
   const workStore = openDesktopWorkStore(workStorePath(userDataPath))
   const snapshot = await settings.read()
   const mode = snapshot.mode
@@ -104,6 +112,12 @@ export async function createDesktopRuntime(
         dispose: () => disposeRemote(backend)
       }
     }
+    if (snapshot.remoteBaseUrl) {
+      try { assertRemoteBaseUrl(snapshot.remoteBaseUrl) } catch {
+        const backend = createUnconfiguredRemoteBackend({ message: '请在资料库连接中填写统一入口的 HTTPS 地址并重新配对。' })
+        return { mode, backend, workStore, settings, openedCatalog: false, scanRecovery: null, dispose: () => disposeRemote(backend) }
+      }
+    }
     const credentials = options.credentials ?? createWriterCredentialStore({ userDataPath })
     const backend = createCatalogBackendForMode(
       'remote',
@@ -112,6 +126,7 @@ export async function createDesktopRuntime(
         ? {
             baseUrl: snapshot.remoteBaseUrl,
             ...readServerConnection(userDataPath, snapshot.remoteBaseUrl),
+            verifyCertificate: options.verifyCertificate ?? createServerCertificateTrust(userDataPath, snapshot.remoteBaseUrl),
             appVersion,
             credentials,
             workStore,

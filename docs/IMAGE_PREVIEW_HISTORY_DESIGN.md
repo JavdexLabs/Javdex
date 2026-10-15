@@ -329,10 +329,16 @@ Windows 至少回归鼠标返回键、Alt+Left、Esc 和关闭按钮；Linux 回
 
 ## 11. 当前共享观看历史（2026-10-03）
 
-`interaction/overlayHistory.ts` 持有一个可注入 history port 和临时层栈；`OverlayHistoryProvider` 是稳定应用级入口。图片 Context 保留预览启用状态、计数和 hook API，但不再独立监听 popstate、运行 back/fallback 或持有第二份历史栈。内置播放的 `playbackHistory.ts` 也通过同一入口管理展开、全屏和选项 token。
+`interaction/overlayHistory.ts` 持有一个可注入 history port 和临时层栈；`OverlayHistoryProvider` 是稳定应用级入口。图片 Context 保留预览启用状态、计数和 hook API，但不再独立监听 popstate、运行 back/fallback 或持有第二份历史栈。内置播放的 `playbackHistory.ts` 最初通过同一入口分别管理展开、全屏和选项 token；播放返回规则已由下述 2026-10-16 调整取代。
 
 marker 只包含 `{kind, token}`，保留 Router 字段；图片层额外兼容旧图片 marker。系统关闭、显式关闭和业务路由离开分别处理，cleanup 仅放弃所有权，不导航。显式关闭旧条目的遍历未结算时，新打开动作排队；fallback 只检查已变化的历史，不追加第二次 back。
 
 设置和插件离开保护由唯一 `NavigationGuardProvider` 组合，不再使用插件的 push/pop trap。同 URL 观看后退不触发草稿确认，真正离开路由才依次询问；在途观看遍历结算后才能继续业务跳转。调用方合同见 [路由文档](ROUTING_DESIGN.md#overlay-history)。
 
 自动回归覆盖图片入口、同 URL 观看层、主动关闭子层、快速关开、父子在途关闭、草稿保护组合与结构化复制。macOS 真实应用已验证播放选项／全屏／展开逐层返回，以及设置草稿取消和放弃返回；现代双指手势、物理鼠标返回键、图片与播放的完整手工共存矩阵仍待验收，不从这些自动回归推断通过。
+
+### 2026-10-16：系统后退等同收起，Esc 保持逐层关闭
+
+播放器改为单一观看历史项，全屏与播放设置不再增加独立历史步数；系统后退一次直接收起到底栏，继续当前会话并保留业务页面。Esc 仍由原有交互层先关闭设置、再退出全屏、最后收起。Windows、macOS 和 Linux 原生输入将 Esc 与历史后退分别上报，避免原生视频焦点下的 Esc 误用新的后退规则。字幕模型设置等主动业务导航仍等待观看历史遍历完成。
+
+本次已同步测试用例，按统一验证安排尚未执行，也未重建原生播放运行库；上文逐层返回的历史验收不作为新系统后退规则的验收证据。

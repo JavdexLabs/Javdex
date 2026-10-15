@@ -4,6 +4,7 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { contained, type UpdaterConfig } from './config'
 import { readJsonIfExists, writeJsonAtomic } from './files'
 import { MANAGED_LOCK } from './storage'
+import { businessProcessCommand } from './businessProcess'
 
 function kernelLockFd(config: UpdaterConfig): number | null {
   if (process.platform !== 'linux' || process.env.JAVDEX_MANAGER_LOCK_HELD !== '1') return null
@@ -40,11 +41,12 @@ export class BusinessSupervisor {
     clearTimeout(this.restartTimer)
     this.launch = { directory, jobId }; this.restartAllowed = restart
     const lockFd = kernelLockFd(this.config)
-    const child = spawn(process.execPath, [path.join(directory, 'index.js'), 'start', '--config', this.config.serverConfigPath], {
+    const command = businessProcessCommand(this.config, [path.join(directory, 'index.js'), 'start', '--config', this.config.serverConfigPath])
+    const child = spawn(command.file, command.args, {
       cwd: directory, detached: true, stdio: lockFd === null ? 'inherit' : ['inherit', 'inherit', 'inherit', lockFd],
-      uid: this.config.businessUid, gid: this.config.businessGid,
+      ...command.credentials,
       env: { ...process.env, NODE_OPTIONS: '', NODE_PATH: '', ELECTRON_RUN_AS_NODE: '1', JAVDEX_STATIC_ROOT: path.join(directory, 'web'), JAVDEX_UPDATE_JOB: jobId || '',
-        ...(this.config.gateway ? { JAVDEX_LISTEN_HOST: '127.0.0.1', JAVDEX_LISTEN_PORT: new URL(this.config.serverUrl).port, JAVDEX_ACCESS_HOSTS: '127.0.0.1', JAVDEX_GATEWAY_TOKEN: this.config.gateway.token, JAVDEX_PUBLIC_URL: this.config.gateway.origin } : {}) }
+        JAVDEX_LISTEN_HOST: '127.0.0.1', JAVDEX_LISTEN_PORT: new URL(this.config.serverUrl).port, JAVDEX_ACCESS_HOSTS: '127.0.0.1', JAVDEX_GATEWAY_TOKEN: this.config.gateway.token, JAVDEX_PUBLIC_URL: this.config.gateway.origin }
     })
     this.child = child
     child.once('exit', () => {

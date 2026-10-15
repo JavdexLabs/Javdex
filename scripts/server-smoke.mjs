@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { createHash, randomBytes, randomUUID } from 'node:crypto'
+import { randomBytes, randomUUID } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
@@ -7,9 +7,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { setTimeout as delay } from 'node:timers/promises'
 
-function digestToken(token) {
-  return createHash('sha256').update(token, 'utf8').digest('hex')
-}
+import { smokeConnection } from './server-smoke-connection.ts'
 
 async function fetchLive(url) {
   const controller = new AbortController()
@@ -66,7 +64,7 @@ fs.writeFileSync(
   `${JSON.stringify(
     {
       listenHost: '0.0.0.0',
-      port,
+      port: 8096,
       accessHosts: ['127.0.0.1'],
       dataDir: '/data',
       imagesDir: '/data/media_assets',
@@ -88,7 +86,7 @@ const run = spawnSync(
     '--name',
     'javdex-server-smoke',
     '-p',
-    `${port}:${port}`,
+    `127.0.0.1:${port}:8096`,
     '-v',
     `${dataMount}:/data`,
     '-v',
@@ -97,6 +95,8 @@ const run = spawnSync(
     `${configDir}:/config:ro`,
     '-e',
     'JAVDEX_WEB_PASSWORD=correct horse battery',
+    '-e',
+    `JAVDEX_PUBLIC_URL=https://127.0.0.1:${port}`,
     image,
     'start',
     '--config',
@@ -111,7 +111,9 @@ if (run.status !== 0) {
   process.exit(run.status ?? 1)
 }
 
-const base = `http://127.0.0.1:${port}`
+const base = `https://127.0.0.1:${port}`
+const connection = smokeConnection(base)
+const fetch = connection.fetch
 try {
   let live = null
   for (let i = 0; i < 240; i += 1) {
@@ -156,39 +158,17 @@ try {
 
   const bind = spawnSync(
     'docker',
-    ['exec', 'javdex-server-smoke', 'node', '/opt/javdex-manager/index.js', 'bind', '--config', '/config/server.json'],
+    ['exec', 'javdex-server-smoke', 'node', '/opt/javdex-manager/index.js', 'token', '--config', '/config/server.json'],
     { encoding: 'utf8' }
   )
   assert.equal(bind.status, 0, bind.stderr + bind.stdout)
-  const issued = JSON.parse(bind.stdout)
-  assert.equal(issued.kind, 'initialBind')
-  assert.equal(typeof issued.oneTimeToken, 'string')
-
+  const issued = bind.stdout.trim()
+  assert.match(issued, /^[a-f0-9]{64}$/)
   const appVersion = JSON.parse(fs.readFileSync(path.join(root, 'out', 'server', 'package.json'), 'utf8')).version
-  const secret = randomBytes(32).toString('base64url')
-  const claim = await fetch(`${base}/manage/v1/writer.claim`, {
-    method: 'POST',
-    headers: {
-      Origin: base,
-      'Content-Type': 'application/json',
-      'X-Javdex-App-Version': appVersion
-    },
-    body: JSON.stringify({
-      serverId: hello.identity.serverId,
-      catalogId: hello.identity.catalogId,
-      input: {
-        kind: 'initialBind',
-        oneTimeToken: issued.oneTimeToken,
-        candidate: { claimId: randomUUID(), secretDigest: digestToken(secret) }
-      }
-    })
-  })
-  const claimBody = await claim.text()
-  assert.equal(claim.status, 200, claimBody)
-  const claimed = JSON.parse(claimBody)
-  assert.equal(claimed.bound, true)
-  assert.equal(typeof claimed.writerEpoch, 'number')
-  assert.ok(claimed.writerEpoch > 0)
+  const secret = randomBytes(32).toString('hex')
+  const claimed = await connection.claim(issued, appVersion, secret)
+  assert.equal(claimed.serverId, hello.identity.serverId)
+  assert.equal(claimed.catalogId, hello.identity.catalogId)
   assert.equal((await fetch(`${base}/api/collections`, { headers: { Cookie: cookie } })).status, 200)
 
   spawnSync('docker', ['restart', 'javdex-server-smoke'], { stdio: 'inherit' })
@@ -209,8 +189,9 @@ try {
     "process.exit(require('node:fs').existsSync('/data/library.db') ? 0 : 1)"
   ], { encoding: 'utf8' })
   assert.equal(dataCheck.status, 0, dataCheck.stderr)
-  console.log('PASS: Docker image, volume SQLite, bind gate, session restart')
+  console.log('PASS: Docker image, volume SQLite, unified HTTPS pairing gate, session restart')
 } finally {
+  await connection.close()
   spawnSync('docker', ['rm', '-f', 'javdex-server-smoke'], { stdio: 'ignore' })
   spawnSync('docker', ['volume', 'rm', dataMount], { stdio: 'ignore' })
   fs.rmSync(media, { recursive: true, force: true })

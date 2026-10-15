@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { lazy, Suspense, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { sessionAllowsCatalogReads, type DesktopSession } from '@shared/desktop/session'
 import Button from '../components/Button'
@@ -6,6 +6,9 @@ import EmptyState from '../components/EmptyState'
 import { settingsPath } from '../settings/settingsRoutes'
 import { useDesktopSession } from './DesktopSessionContext'
 import styles from './DesktopSessionOverlay.module.css'
+import ScrollViewport from '../components/ScrollViewport'
+
+const ServerUpdatePanel = lazy(() => import('../components/settings/ServerUpdatePanel'))
 
 function titleFor(session: DesktopSession): string {
   switch (session.state) {
@@ -36,6 +39,7 @@ function descriptionFor(session: DesktopSession): string {
     return '请先回到本地模式完成工作记录复制，不要在远程模式打开原资料库。'
   }
   if (session.state === 'claimRequired') return '在服务端生成一次性令牌，然后在连接设置中领取写入凭据。'
+  if (session.state === 'versionMismatch') return '资料库访问已暂停，请先将服务端与此客户端同步至同一版本后继续使用。'
   return '可以打开设置修改连接方式，或切回本地模式后重启。'
 }
 
@@ -57,6 +61,15 @@ export default function DesktopSessionOverlay(): JSX.Element | null {
   }
 
   if (!blocking || onSettings) return null
+
+  if (session.state === 'versionMismatch' && session.desktopAppVersion && session.mode === 'remote') return <div className={styles.overlay}>
+    <ScrollViewport variant="scroll"><div className={styles.recovery}>
+      <h2>{titleFor(session)}</h2>
+      <p>{descriptionFor(session)}</p>
+      <Suspense fallback={<p role="status">正在读取服务端升级状态</p>}><ServerUpdatePanel /></Suspense>
+      <div className={styles.actions}><Button variant="ghost" onClick={() => navigate(settingsPath('storage', 'mode'))}>打开连接设置</Button></div>
+    </div></ScrollViewport>
+  </div>
 
   return (
     <div className={styles.overlay} role="alert">

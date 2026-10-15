@@ -8,7 +8,7 @@ import { structuredError } from '@shared/protocol/errors'
 import { getDb } from '@library/db/database'
 import { getMediaLibrary } from '@library/db/mediaLibraryRepo'
 import { getVideoById, getVideoResourceInLibrary } from '@library/db/videoRepo'
-import { createAuthorizedMediaLibraryRootFileInspector } from '@library/scan/mediaLibraryRootFileGuard'
+import { createAuthorizedMediaLibraryRootFileInspector, MediaLibraryRootFileAccessError, MediaLibraryRootFileMissingError } from '@library/scan/mediaLibraryRootFileGuard'
 import { digestEquals, digestToken, generateSecret, sha256Hex } from './catalogSecrets'
 import { readCatalogIdentity } from './catalogIdentity'
 import { readCatalogSetting, writeCatalogSetting } from './catalogSettings'
@@ -214,9 +214,17 @@ function inspectLocalResourceFile(resource: VideoResource): {
       resource.root_id,
       resource.locator
     )
+    fs.accessSync(checked.fileRealPath, fs.constants.R_OK)
     return { file: checked.fileRealPath, mime, stat: checked.stat }
-  } catch {
-    throw structuredError('INVALID_INPUT', '资源文件不可用或不在已授权根目录内')
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException)?.code
+    if (error instanceof MediaLibraryRootFileAccessError || code === 'EACCES' || code === 'EPERM') {
+      throw structuredError('FILE_ACCESS_DENIED', '服务进程无权读取影片文件或媒体目录，请检查业务 UID、GID、附加组及 NAS ACL')
+    }
+    if (error instanceof MediaLibraryRootFileMissingError || code === 'ENOENT' || code === 'ENOTDIR') {
+      throw structuredError('FILE_MISSING', '影片文件不存在，请检查资源位置及存储设备')
+    }
+    throw structuredError('ROOT_OFFLINE', '媒体库根目录不可用、身份已变化或资源不在授权目录内，请检查原挂载')
   }
 }
 

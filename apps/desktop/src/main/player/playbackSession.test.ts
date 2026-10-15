@@ -21,6 +21,7 @@ function fixture(volume?: { read(): Promise<number>; remember(value: number): vo
   let resolves = 0
   let destroys = 0
   let focuses = 0
+  let escapes = 0
   let time = 1000000
   let raw: NativePlaybackState = { alive: true, loadedFiles: 1, pause: false, seekable: true, duration: 120, 'time-pos': 0, presentedFrames: 0 }
   const native: NativePlayback = {
@@ -37,9 +38,10 @@ function fixture(volume?: { read(): Promise<number>; remember(value: number): vo
     windowSize: () => ({ width: 1000, height: 700 }),
     focusControls: () => { focuses++ },
     navigate: direction => { navigations.push(direction) },
+    escape: () => { escapes++ },
     readVolume: volume?.read, volumeChanged: volume?.remember, progress, now: () => time
   })
-  return { session, native, loads, loadOptions, commands, events, viewports, occlusionShapes, presentations, awake, navigations, advance: (ms: number) => { time += ms }, starts: () => starts, resolves: () => resolves, destroys: () => destroys, focuses: () => focuses,
+  return { session, native, loads, loadOptions, commands, events, viewports, occlusionShapes, presentations, awake, navigations, advance: (ms: number) => { time += ms }, starts: () => starts, resolves: () => resolves, destroys: () => destroys, focuses: () => focuses, escapes: () => escapes,
     raw: (patch: Partial<NativePlaybackState>) => { raw = { ...raw, ...patch } },
     resolve: (next: typeof resolve) => { resolve = next }, validate: (next: typeof validate) => { validate = next } }
 }
@@ -185,6 +187,30 @@ test('native history input goes through the window coordinator without pretendin
   assert.equal(f.commands.length, 1)
   assert.equal(f.loads.length, 1)
   assert.equal(playbackControlSchema.safeParse({ kind: 'history-back' }).success, false)
+})
+
+test('native Escape delegates layered dismissal while system history remains independent', async () => {
+  const f = fixture()
+  await f.session.open(target)
+  const id = f.session.snapshot()!.sessionId
+  const destroys = f.destroys()
+  for (const presentation of ['expanded', 'fullscreen'] as const) {
+    f.session.control(id, { kind: 'presentation', value: presentation })
+    f.raw({ actions: [{ kind: 'escape' }] }); f.session.tick()
+    assert.equal(f.session.snapshot()!.presentation, presentation, 'the renderer owns the Escape decision')
+    assert.equal(f.session.snapshot()!.sessionId, id)
+  }
+  assert.equal(f.escapes(), 2)
+  assert.deepEqual(f.navigations, [])
+  f.raw({ actions: [{ kind: 'history-back' }] }); f.session.tick()
+  assert.deepEqual(f.navigations, ['back'])
+  f.session.control(id, { kind: 'presentation', value: 'docked' })
+  f.raw({ actions: [{ kind: 'escape' }] }); f.session.tick()
+  assert.deepEqual(f.navigations, ['back', 'back'], 'preserve the native docked Escape behavior')
+  assert.equal(f.escapes(), 2)
+  assert.equal(f.loads.length, 1)
+  assert.equal(f.destroys(), destroys, 'neither Escape nor system history releases the decoder')
+  assert.equal(playbackControlSchema.safeParse({ kind: 'escape' }).success, false)
 })
 
 test('stop and failure restore HTML focus when releasing native playback', async () => {

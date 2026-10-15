@@ -16,6 +16,7 @@ type CardProps = {
   title?: ReactNode
   hint?: ReactNode
   actions?: ReactNode
+  beforeHeader?: ReactNode
   className?: string
   headerClassName?: string
   children: ReactNode
@@ -38,6 +39,7 @@ export function SettingsCard({
   title,
   hint,
   actions,
+  beforeHeader,
   className = '',
   headerClassName,
   children,
@@ -50,6 +52,7 @@ export function SettingsCard({
       {...ariaProps}
     >
       <SettingsSaveDetailsScope>
+        {beforeHeader}
         {(title || hint || actions) && (
           <SettingsCardHeader title={title} hint={hint} actions={actions} className={headerClassName} />
         )}
@@ -253,13 +256,14 @@ export function SettingsValueRow({ label, value, actions }: {
 }
 
 /** Native disclosure keeps fields mounted and supports keyboard activation. */
-export function SettingsDisclosure({ title, children, defaultOpen = false }: {
+export function SettingsDisclosure({ title, children, defaultOpen = false, className = '' }: {
   title: ReactNode
   children: ReactNode
   defaultOpen?: boolean
+  className?: string
 }): JSX.Element {
   return (
-    <details className={styles.disclosure} open={defaultOpen || undefined}>
+    <details className={`${styles.disclosure}${className ? ` ${className}` : ''}`} open={defaultOpen || undefined}>
       <summary className={styles.disclosureSummary}><ChevronRight className={styles.disclosureChevron} {...UI_ICON_SM} aria-hidden /><span>{title}</span></summary>
       <div className={styles.disclosureBody}>{children}</div>
     </details>

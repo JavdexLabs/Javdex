@@ -44,6 +44,8 @@ npm run dev
 
 ## 检查与构建
 
+托管服务端的业务命令统一经 `updater/businessProcess.ts` 降权：Linux root 管理器使用镜像内 util-linux `setpriv` 显式设置 UID、主 GID 和 `JAVDEX_SERVER_GROUPS`，空配置清空附加组，不继承管理器组。启动与令牌命令共用入口；`group_add` 不作为业务授权来源。`updater/businessProcess.test.ts` 在 Linux root + setpriv 环境以真实业务子进程检查附加组、目录遍历和文件读取；其他宿主明确跳过，不能把 Windows 测试通过当作权限回归通过。此改动位于管理器，发布需更换基础镜像；已发布 Beta.4 的兼容配置与排查命令见网站权限参考。
+
 ```bash
 npm run typecheck       # 主进程与渲染端类型检查
 npm run lint            # TypeScript 与 CSS 检查
@@ -227,7 +229,7 @@ RPATH/RUNPATH 只允许位于运行库内的 `$ORIGIN` 相对目录，RUNPATH �
 
 `server:build` 同时生成业务入口 `out/server` 与容器内管理入口 `out/updater`，后者也可单独运行 `server:updater:build` 构建，不是需要用户额外安装的宿主机程序。镜像生成对应架构的完整发行描述，发布流程从已验证镜像取出 JS、worker、Web 和原生依赖，生成内层 `.tar.gz`，再与签名清单封装为每架构一个 `.javdex-update` 并验证读回摘要。只发布两个单文件包，不再发布分离 JSON 或裸归档，不在升级时运行 npm 安装。运输格式、在线读取与断点续传见 [服务端更新](SERVER_UPDATE.md)，实现位于 `packages/http/src/updateBundle.ts`；旧预发布格式不提供兼容分支。
 
-更新流程测试为 `server:updater:test`，实际浏览器入口为 `test:ui:server-update`；`server:updater:smoke` 必须在 Linux Docker 环境运行，覆盖真实 0.8.0/schema 19、原生闭包、迁移后 worker 失败、容器中断恢复、单容器计数、非 root 业务与持久版本选择，已接入 amd64/arm64 CI。不能把本机合成进程测试或构建通过当成 Linux 容器验收。运行外壳、程序卷、发布签名和两层更新说明见 [服务端更新](SERVER_UPDATE.md) 与 [ADR-0031](adr/0031-manage-server-releases-inside-one-container.md)。
+更新流程测试为 `server:updater:test`，实际浏览器入口为 `test:ui:server-update`；`server:updater:smoke` 必须在 Linux Docker 环境运行，覆盖真实 0.8.0/schema 19 资料首次采用当前源码、原生闭包，以及同源码合成业务版本之间的 worker 失败、容器中断恢复、单容器计数、非 root 业务与持久版本选择，已接入 amd64/arm64 CI。不能把本机合成进程测试或构建通过当成 Linux 容器验收。运行外壳、程序卷、发布签名和两层更新说明见 [服务端更新](SERVER_UPDATE.md) 与 [ADR-0031](adr/0031-manage-server-releases-inside-one-container.md)。
 
 ## 官网开发
 

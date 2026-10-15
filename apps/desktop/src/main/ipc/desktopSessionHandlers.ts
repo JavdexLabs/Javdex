@@ -13,6 +13,9 @@ import { appCommandAdapter, appEventAdapter } from './appContractAdapter'
 import type { IpcContext } from './shared'
 import { detectDefaultPlayer } from '../desktop/defaultPlayerService'
 import { readServerPin } from '../desktop/serverConnectionStore'
+import { assertRemoteBaseUrl } from '../desktop/remoteConnectionUrl'
+import { createServerCertificateTrust } from '../desktop/serverCertificateTrust'
+import type { VerifyServerCertificate } from '@http/pinnedFetch'
 
 export interface DesktopSessionHandlerPorts {
   backend: CatalogBackend
@@ -26,25 +29,11 @@ function snapshot(backend: CatalogBackend): DesktopSessionSnapshot {
   }
 }
 
-function assertRemoteBaseUrl(url: string): void {
-  let parsed: URL
-  try {
-    parsed = new URL(url)
-  } catch {
-    throw structuredError('INVALID_INPUT', '请输入完整的 HTTP / HTTPS 服务器地址')
-  }
-  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-    throw structuredError('INVALID_INPUT', '远程地址只支持 HTTP 或 HTTPS')
-  }
-  if (parsed.username || parsed.password) {
-    throw structuredError('INVALID_INPUT', '远程地址不能包含用户名或密码')
-  }
-}
-
-export async function probeRemoteConnection(baseUrl: string, appVersion: string, certificateSha256?: string): Promise<RemoteConnectionProbeResult> {
+export async function probeRemoteConnection(baseUrl: string, appVersion: string, certificateSha256?: string, verifyCertificate?: VerifyServerCertificate): Promise<RemoteConnectionProbeResult> {
   const url = baseUrl.trim()
   assertRemoteBaseUrl(url)
-  const client = new ManageHttpClient({ baseUrl: url, appVersion, timeoutMs: 5_000, certificateSha256 })
+  const client = new ManageHttpClient({ baseUrl: url, appVersion, timeoutMs: 5_000, certificateSha256,
+    allowSelfSignedCertificate: !certificateSha256, verifyCertificate })
   try {
     const hello = await client
       .post('handshake.get', { input: {} }, { sendAppVersion: false }) as HandshakeResult
@@ -134,7 +123,7 @@ export function registerDesktopSessionHandlers(
     probe: (baseUrl: string) => Promise<RemoteConnectionProbeResult>
     restart: () => void
   } = {
-    probe: (baseUrl) => probeRemoteConnection(baseUrl, app.getVersion(), readServerPin(app.getPath('userData'), baseUrl)),
+    probe: (baseUrl) => probeRemoteConnection(baseUrl, app.getVersion(), readServerPin(app.getPath('userData'), baseUrl), createServerCertificateTrust(app.getPath('userData'), baseUrl)),
     restart: () => { app.relaunch(); setTimeout(() => app.quit(), 0) }
   }
 ): void {

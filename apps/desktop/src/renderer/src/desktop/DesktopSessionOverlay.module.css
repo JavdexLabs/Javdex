@@ -29,3 +29,17 @@
   color: var(--danger);
   font-size: 12px;
 }
+
+.recovery {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: var(--settings-content-max);
+  margin-inline: auto;
+  padding: var(--detail-pad-x);
+  color: var(--text-secondary);
+}
+
+.recovery h2 {
+  color: var(--text-primary);
+  font-size: var(--settings-fs-title, 14px);
+}

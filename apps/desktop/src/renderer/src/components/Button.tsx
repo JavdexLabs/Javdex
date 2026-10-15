@@ -1,7 +1,7 @@
 import { forwardRef, type ButtonHTMLAttributes } from 'react'
 import styles from './Button.module.css'
 
-export type ButtonVariant = 'default' | 'primary' | 'danger' | 'ghost'
+export type ButtonVariant = 'default' | 'primary' | 'danger' | 'ghost' | 'dangerGhost'
 export type ButtonSize = 'md' | 'sm'
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {

@@ -114,6 +114,42 @@ afterEach(async () => {
   sendControl = async () => {}; currentLocation = ''
 })
 
+for (const presentation of ['expanded', 'fullscreen'] as const) test(`system back docks ${presentation} playback with settings open and retains the detail route`, async () => {
+  await mount(undefined, '/libraries/1/video/2')
+  await act(async () => changed({ ...snapshot(), presentation: 'docked' }))
+  const current = { ...snapshot(), presentation, rendererFullscreenControls: true }
+  await act(async () => changed(current))
+  await options()
+  await act(async () => history.go())
+  assert.deepEqual(controls, [{ id: 'first', command: { kind: 'presentation', value: 'docked' } }])
+  assert.equal(currentLocation, '/libraries/1/video/2')
+  await act(async () => changed({ ...current, presentation: 'docked' }))
+  assert.equal(renderer!.root.findByProps({ 'aria-label': '内置播放器' }).props.role, 'region')
+  assert.deepEqual(opened, [])
+  assert.deepEqual(external, [])
+})
+
+for (const presentation of ['expanded', 'fullscreen'] as const) test(`Escape retains layered dismissal in ${presentation} playback`, async () => {
+  await mount()
+  const current = { ...snapshot(), presentation, rendererFullscreenControls: true }
+  await act(async () => changed(current))
+  await options()
+  const escape = () => window.dispatchEvent(Object.assign(new Event('keydown', { cancelable: true }), { key: 'Escape', isComposing: false }))
+  await act(async () => { escape() })
+  assert.equal(button('播放设置').props['aria-expanded'], false)
+  assert.deepEqual(controls, [], 'first Escape only closes settings')
+  if (presentation === 'fullscreen') {
+    await act(async () => { escape() })
+    assert.deepEqual(controls, [{ id: 'first', command: { kind: 'presentation', value: 'expanded' } }])
+    await act(async () => changed({ ...current, presentation: 'expanded' }))
+    controls.length = 0
+  }
+  await act(async () => { escape() })
+  assert.deepEqual(controls, [{ id: 'first', command: { kind: 'presentation', value: 'docked' } }])
+  assert.deepEqual(opened, [])
+  assert.deepEqual(external, [])
+})
+
 for (const eventFirst of [true, false]) test(`subtitle settings wait for asynchronous history traversal (event first: ${eventFirst})`, async context => {
   const stack: unknown[] = [null]
   let index = 0

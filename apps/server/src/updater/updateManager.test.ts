@@ -26,19 +26,18 @@ function signed(manifest = target): SignedServerUpdate {
   return { keyId: 'release', payload, signature: sign(null, Buffer.from(payload), keys.privateKey).toString('base64') }
 }
 class FixtureDeployment implements UpdateDeployment {
-  current: DeploymentSnapshot = { identity: { version: '0.8.0', schema: 19, platform: 'linux/amd64', runtime: 'node22-bookworm-v1', serverId: randomUUID(), catalogId: randomUUID(), dataDir: '/data', imagesDir: '/data/media_assets', busy: false, estimatedBytes: 100, port: 8096 }, release: `0.8.0-${'d'.repeat(64)}`, configHash: 'f'.repeat(64), roots: ['/data'] }
+  current: DeploymentSnapshot = { identity: { version: '0.8.0', schema: 19, platform: 'linux/amd64', runtime: 'node22-bookworm-v1', serverId: randomUUID(), catalogId: randomUUID(), dataDir: '/data', imagesDir: '/data/media_assets', busy: false, port: 8096 }, release: `0.8.0-${'d'.repeat(64)}`, configHash: 'f'.repeat(64), roots: ['/data'] }
   events: string[] = []
   failure: string | null = null
   stopped = false
   async inspect(): Promise<DeploymentSnapshot> { return structuredClone(this.current) }
   async prepare(_manifest: ServerUpdateManifest, file?: string): Promise<void> { this.events.push('prepare'); if (file) assert.deepEqual(fs.readFileSync(file), archive) }
   async stop(): Promise<void> { this.stopped = true; this.events.push('stop') }
-  async backup(jobDir: string): Promise<void> { this.events.push('backup'); if (this.failure === 'backup') throw new Error('backup failed'); fs.writeFileSync(path.join(jobDir, 'snapshot'), 'original user data') }
   async install(manifest: DeploymentRelease): Promise<void> { this.events.push('install'); this.current.identity.schema = manifest.targetSchema; this.current.identity.version = manifest.version; this.current.release = `${manifest.version}-${manifest.archive.sha256}` }
   async verify(): Promise<void> { this.events.push('verify'); if (this.failure === 'verify') throw new Error('worker failed after migration') }
   async activate(): Promise<void> { this.events.push('activate'); if (this.failure === 'activate') throw new Error('connection lost after activation'); this.stopped = false }
   async cleanup(): Promise<void> {}
-  async restore(): Promise<void> { this.events.push('restore'); if (this.failure === 'restore') throw new Error('restore failed'); this.current.identity.schema = 19; this.current.identity.version = '0.8.0'; this.current.release = `0.8.0-${'d'.repeat(64)}`; this.stopped = false }
+  async resume(): Promise<void> { this.events.push('resume'); if (this.failure === 'resume') throw new Error('resume failed'); this.stopped = false }
 }
 function fixture(): { dir: string; deployment: FixtureDeployment; manager: ServerUpdateManager } {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-updater-test-'))
@@ -48,32 +47,29 @@ function fixture(): { dir: string; deployment: FixtureDeployment; manager: Serve
 }
 const image: DeploymentRelease = { version: target.version, build: target.build, platform: target.platform,
   runtime: target.runtime, sourceSchemas: target.sourceSchemas, targetSchema: target.targetSchema, archive: { sha256: target.archive.sha256 } }
-test('image upgrade reuses backup, verification and commit without downloaded signatures', async () => {
+test('image upgrade installs and verifies without copying library data', async () => {
   const f = fixture()
   await f.manager.installImage(image, 100, async () => { f.deployment.events.push('image') })
-  assert.deepEqual(f.deployment.events, ['image', 'stop', 'backup', 'install', 'verify', 'activate'])
+  assert.deepEqual(f.deployment.events, ['image', 'stop', 'install', 'verify', 'activate'])
   assert.equal((await f.manager.status()).job?.phase, 'complete')
   assert.equal(f.deployment.current.identity.version, image.version)
   await f.manager.installImage(image, 100, async () => assert.fail('same version'))
   await f.manager.installImage({ ...image, version: '0.8.0' }, 100, async () => assert.fail('downgrade'))
-  assert.equal(f.deployment.events.length, 6)
+  assert.equal(f.deployment.events.length, 5)
 })
-test('failed image restores original data and is not retried after restart or another job', async () => {
+test('failed image remains in maintenance after restart and cannot retry over migrated data', async () => {
   const f = fixture()
   f.deployment.failure = 'verify'
   await f.manager.installImage(image, 100, async () => {})
-  assert.equal((await f.manager.status()).job?.phase, 'restored')
-  assert.equal(f.deployment.current.identity.version, '0.8.0')
+  assert.equal((await f.manager.status(false)).job?.phase, 'recoveryRequired')
+  assert.equal(f.deployment.current.identity.version, image.version)
+  assert.equal(f.deployment.stopped, true)
   const restarted = new ServerUpdateManager(f.dir, trusted, f.deployment)
   await restarted.recover()
-  await restarted.installImage(image, 100, async () => assert.fail('must not retry'))
+  await assert.rejects(restarted.installImage(image, 100, async () => assert.fail('must not retry')), /人工恢复/)
   assert.equal(f.deployment.events.filter(event => event === 'install').length, 1)
-  // An explicit signed update remains available after fixing the cause.
-  f.deployment.failure = null
-  const id = await prepare(restarted)
-  await restarted.install(id)
-  await wait(restarted, 'complete')
 })
+
 test('image preparation failure and unsupported schema never stop business', async () => {
   for (const unsupported of [false, true]) {
     const f = fixture()
@@ -95,7 +91,7 @@ test('image activation failure is committed and recovery must not restore old da
   f.deployment.failure = 'activate'
   await f.manager.installImage(image, 100, async () => {})
   assert.equal((await f.manager.status()).job?.phase, 'recoveryRequired')
-  assert.ok(!f.deployment.events.includes('restore'))
+  assert.ok(!f.deployment.events.includes('resume'))
   assert.equal(f.deployment.current.identity.version, image.version)
 })
 test('interrupted image activation resumes using the persisted image identity', async () => {
@@ -128,7 +124,7 @@ test('single-file offline upload resumes inner archive offsets and still require
   }
   const fd = fs.openSync(file, 'r')
   try {
-    const result = await uploadServerUpdateBundle(client, fd)
+    const result = await uploadServerUpdateBundle(client, fd, target.version)
     assert.equal(result.job?.phase, 'prepared')
     assert.deepEqual(offsets, [7])
     assert.deepEqual(f.deployment.events, ['prepare'])
@@ -138,7 +134,7 @@ test('single-file offline upload resumes inner archive offsets and still require
   fs.writeFileSync(badFile, Buffer.concat([updateBundlePrefix({ ...selected, signature: 'invalid' }), archive]))
   const invalid = fs.openSync(badFile, 'r')
   try {
-    await assert.rejects(uploadServerUpdateBundle({ import: value => bad.manager.beginOffline(value), upload: async () => { assert.fail('Unsigned archive must never upload') } }, invalid), /签名/)
+    await assert.rejects(uploadServerUpdateBundle({ import: value => bad.manager.beginOffline(value), upload: async () => { assert.fail('Unsigned archive must never upload') } }, invalid, target.version), /签名/)
     assert.equal((await bad.manager.status()).job, null)
   } finally { fs.closeSync(invalid) }
 })
@@ -155,6 +151,57 @@ async function prepare(manager: ServerUpdateManager): Promise<string> {
   await wait(manager, 'prepared')
   return snapshot.job!.id
 }
+
+test('upgrade never copies the library or changes manual backup exports', async () => {
+  const { manager, deployment, dir } = fixture()
+  const exported = path.join(dir, 'manual.javdex-backup')
+  fs.writeFileSync(exported, 'user backup')
+  const id = await prepare(manager)
+  await manager.install(id)
+  await wait(manager, 'complete')
+  assert.equal(fs.readFileSync(exported, 'utf8'), 'user backup')
+  assert.deepEqual(deployment.events, ['prepare', 'stop', 'install', 'verify', 'activate'])
+  assert.equal(fs.existsSync(path.join(dir, 'jobs', id, 'snapshot')), false)
+  assert.equal((await new ServerUpdateManager(dir, trusted, deployment).status()).job?.phase, 'complete')
+})
+
+test('unprotected migration failure keeps maintenance and never restores older data', async () => {
+  const { manager, deployment, dir } = fixture()
+  const id = await prepare(manager)
+  deployment.failure = 'verify'
+  await manager.install(id)
+  await wait(manager, 'recoveryRequired')
+  assert.equal(deployment.events.includes('resume'), false)
+  assert.equal(deployment.stopped, true)
+  assert.match((await manager.status(false)).job!.message!, /人工恢复/)
+  const restarted = new ServerUpdateManager(dir, trusted, deployment)
+  await restarted.recover()
+  assert.equal((await restarted.status(false)).job?.phase, 'recoveryRequired')
+})
+
+test('interrupted unprotected installation requires manual recovery after restart', async () => {
+  const { manager, deployment, dir } = fixture()
+  await prepare(manager)
+  const file = path.join(dir, 'current.json')
+  const raw = JSON.parse(fs.readFileSync(file, 'utf8'))
+  raw.phase = 'installing'
+  fs.writeFileSync(file, JSON.stringify(raw))
+  const restarted = new ServerUpdateManager(dir, trusted, deployment)
+  await restarted.recover()
+  assert.equal((await restarted.status(false)).job?.phase, 'recoveryRequired')
+  assert.equal(deployment.events.includes('resume'), false)
+})
+
+test('requested desktop version is enforced for discovery, upload, preparation and install', async () => {
+  const { manager, deployment } = fixture()
+  const wrong = '0.9.0-beta.4'
+  await assert.rejects(manager.setTarget(signed(), wrong), /客户端/)
+  await assert.rejects(manager.beginOffline(signed(), wrong), /客户端/)
+  const id = await prepare(manager)
+  await assert.rejects(manager.prepare(wrong), /客户端/)
+  await assert.rejects(manager.install(id, wrong), /客户端/)
+  assert.equal(deployment.stopped, false)
+})
 
 test('official signature binds release, architecture and expiry; a checksum alone is insufficient', () => {
   assert.equal(verifyUpdateManifest(signed(), trusted).version, '0.8.1')
@@ -207,10 +254,10 @@ test('an explicitly uploaded signed beta upgrades a beta and preserves the insta
   assert.equal(after.currentVersion, '0.9.0-beta.10')
   assert.equal(after.serverId, before.identity.serverId)
   assert.equal(after.catalogId, before.identity.catalogId)
-  assert.deepEqual(deployment.events, ['prepare', 'stop', 'backup', 'install', 'verify', 'activate'])
+  assert.deepEqual(deployment.events, ['prepare', 'stop', 'install', 'verify', 'activate'])
   await assert.rejects(manager.beginOffline(signed({ ...manifest, version: '0.9.0-beta.2' })), /更新/)
 })
-test('user-confirmed installation backs up before migration, preserves identity and commits before business activation', async () => {
+test('user-confirmed installation preserves identity and commits before business activation', async () => {
   const { manager, deployment } = fixture()
   const before = await deployment.inspect()
   const id = await prepare(manager)
@@ -224,7 +271,7 @@ test('user-confirmed installation backs up before migration, preserves identity 
   assert.equal(result.currentVersion, '0.8.1')
   assert.equal(result.targetVersion, null)
   assert.equal((await manager.setTarget(signed())).targetVersion, null)
-  assert.deepEqual(deployment.events, ['prepare', 'stop', 'backup', 'install', 'verify', 'activate'])
+  assert.deepEqual(deployment.events, ['prepare', 'stop', 'install', 'verify', 'activate'])
 })
 test('new maintenance tasks block installation even after release preparation', async () => {
   const { manager, deployment } = fixture()
@@ -242,43 +289,43 @@ test('cleanup trouble after business activation cannot roll back the installed v
   await manager.install(id)
   await wait(manager, 'complete')
   assert.equal(deployment.current.identity.schema, 20)
-  assert.equal(deployment.events.includes('restore'), false)
+  assert.equal(deployment.events.includes('resume'), false)
   assert.match((await manager.status()).job!.message!, /清理未完成/)
   assert.ok(fs.existsSync(old))
 })
-for (const failure of ['backup', 'verify']) test(`${failure} failure resumes original software and database`, async () => {
+test('stop failure resumes unchanged original service without restoring data', async () => {
   const { manager, deployment } = fixture()
   const id = await prepare(manager)
-  deployment.failure = failure
+  deployment.stop = async () => { throw new Error('stop interrupted') }
   await manager.install(id)
-  await wait(manager, 'restored')
-  assert.equal((await manager.status()).currentVersion, '0.8.0')
+  await wait(manager, 'failed')
   assert.equal(deployment.current.identity.schema, 19)
-  assert.equal(deployment.stopped, false)
+  assert.ok(deployment.events.includes('resume'))
 })
-test('activation uncertainty cannot restore an old snapshot over possible new writes', async () => {
+
+test('activation uncertainty never restarts old software over possible new writes', async () => {
   const { manager, deployment } = fixture()
   const id = await prepare(manager)
   deployment.failure = 'activate'
   await manager.install(id)
   await wait(manager, 'recoveryRequired')
   assert.equal(deployment.current.identity.schema, 20)
-  assert.equal(deployment.events.includes('restore'), false)
+  assert.equal(deployment.events.includes('resume'), false)
 })
 test('failed recovery remains blocked and cannot accept another update', async () => {
   const { manager, deployment, dir } = fixture()
   const id = await prepare(manager)
   const raw = JSON.parse(fs.readFileSync(path.join(dir, 'current.json'), 'utf8')) as Record<string, unknown>
-  raw.phase = 'verifying'
+  raw.phase = 'stopping'
   fs.writeFileSync(path.join(dir, 'current.json'), JSON.stringify(raw))
-  deployment.failure = 'restore'
+  deployment.failure = 'resume'
   const restarted = new ServerUpdateManager(dir, trusted, deployment)
   await restarted.recover()
   assert.equal((await restarted.status(false)).job?.id, id)
   assert.equal((await restarted.status(false)).job?.phase, 'recoveryRequired')
   await assert.rejects(restarted.setTarget(signed()), /人工恢复/)
 })
-test('helper restart restores interrupted migration, but completes a durable activation without rollback', async () => {
+test('restart blocks interrupted installation but completes a durable activation', async () => {
   for (const phase of ['verifying', 'activating']) {
     const { manager, deployment, dir } = fixture()
     await prepare(manager)
@@ -288,8 +335,8 @@ test('helper restart restores interrupted migration, but completes a durable act
     await deployment.install(target)
     const restarted = new ServerUpdateManager(dir, trusted, deployment)
     await restarted.recover()
-    assert.equal((await restarted.status(false)).job?.phase, phase === 'verifying' ? 'restored' : 'complete')
-    assert.equal(deployment.events.includes('restore'), phase === 'verifying')
+    assert.equal((await restarted.status(false)).job?.phase, phase === 'verifying' ? 'recoveryRequired' : 'complete')
+    assert.equal(deployment.events.includes('resume'), false)
   }
 })
 test('offline upload resumes at durable offset after helper restart and validates complete bytes before loading', async () => {
@@ -380,12 +427,12 @@ for (const afterRename of [false, true]) test(`commit journal failure ${afterRen
   })
   try {
     await manager.install(id)
-    await wait(manager, afterRename ? 'recoveryRequired' : 'restored')
+    await wait(manager, 'recoveryRequired')
     assert.equal(failed, true)
     assert.equal(deployment.events.includes('activate'), false)
-    assert.equal(deployment.events.includes('restore'), !afterRename)
-    assert.equal(deployment.current.identity.schema, afterRename ? 20 : 19)
-    assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'current.json'), 'utf8')).phase, afterRename ? 'recoveryRequired' : 'restored')
+    assert.equal(deployment.events.includes('resume'), false)
+    assert.equal(deployment.current.identity.schema, 20)
+    assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'current.json'), 'utf8')).phase, 'recoveryRequired')
   } finally { injected.mock.restore() }
 })
 

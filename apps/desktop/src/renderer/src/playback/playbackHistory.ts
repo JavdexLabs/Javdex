@@ -4,10 +4,13 @@ import type { OverlayHistory } from '../interaction/overlayHistory'
 /** Viewing history belongs to the stable app shell, not the decoder or a route. */
 export function createPlaybackHistory(history: OverlayHistory, command: (id: string, value: PlaybackControl) => void, optionsChanged: (open: boolean) => void) {
   let state: PlaybackSnapshot | null = null
-  let expanded: string | null = null, fullscreen: string | null = null, options: string | null = null
+  let expanded: string | null = null
+  let options = false
   let closingForNavigation = false
   function closeOptions(): void {
-    if (options) history.close(options)
+    if (!options) return
+    options = false
+    optionsChanged(false)
   }
   return {
     observe(value: PlaybackSnapshot | null, initial = false): void {
@@ -20,36 +23,33 @@ export function createPlaybackHistory(history: OverlayHistory, command: (id: str
         if (expanded) history.close(expanded)
         return
       }
-      if (value.presentation !== 'fullscreen' && fullscreen) history.close(fullscreen)
+      // Fullscreen and settings share one viewing entry; system Back always docks.
       if (!expanded) expanded = history.open('playback-expanded', () => {
         expanded = null
+        closeOptions()
         const current = state
         if (closingForNavigation || !current || current.presentation === 'docked') return
         command(current.sessionId, current.phase === 'error' ? { kind: 'stop' } : { kind: 'presentation', value: 'docked' })
-      })
-      if (value.presentation === 'fullscreen' && !fullscreen) fullscreen = history.open('playback-fullscreen', () => {
-        fullscreen = null
-        if (!closingForNavigation && state?.presentation === 'fullscreen') command(state.sessionId, { kind: 'presentation', value: 'expanded' })
       })
     },
     setOptions(value: boolean): void {
       if (!value) { closeOptions(); return }
       if (options || !state || state.presentation === 'docked' || state.phase === 'error') return
-      options = history.open('playback-options', () => { options = null; optionsChanged(false) })
+      options = true
       optionsChanged(true)
     },
     /** Docking is acknowledged; consume layers even if its state event has not arrived. */
     closeForNavigation(): void {
       closingForNavigation = true
       try {
-        const token = expanded ?? fullscreen ?? options
-        if (token) history.close(token)
+        closeOptions()
+        if (expanded) history.close(expanded)
       } finally { closingForNavigation = false }
     },
     /** Effect cleanup can release ownership, but never back/push or control a session. */
     abandon(): void {
-      for (const token of [options, fullscreen, expanded]) if (token) history.abandon(token)
-      options = null; fullscreen = null; expanded = null
+      if (expanded) history.abandon(expanded)
+      options = false; expanded = null
     }
   }
 }

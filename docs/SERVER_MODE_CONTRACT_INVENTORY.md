@@ -20,9 +20,9 @@
 | 资料库 | [migrations.ts](../packages/library/src/db/migrations.ts) 的 `CURRENT_SCHEMA_VERSION = 21`；正式 0.8.0/schema 19 原子升级至 21，不接受更高版本或不完整开发快照，不允许手降 `user_version` |
 | 模型配置 | [modelManagementTypes.ts](../packages/contracts/src/modelManagementTypes.ts) 的 `MODEL_MANAGEMENT_SCHEMA_VERSION = 4`；属于桌面配置，不是服务端 schema，也不包含在资料库备份中 |
 | 普通业务会话 | 桌面与当前服务端业务/网页包同源码版本；不匹配时不打开本机权威库、不自动回退连接 |
-| 独立更新协议 | 协议 1，`node22-bookworm-v1`，Linux amd64/arm64；可跨业务版本使用；统一入口按可信设备授权，旧双端口 token 不替代 writer |
+| 独立更新协议 | 协议 1，`node22-bookworm-v1`，Linux amd64/arm64；可跨业务版本使用；与业务共用统一 HTTPS 入口，按可信设备授权 |
 | 业务更新附件 | 每架构一个 `Javdex-server-<version>-linux-<arch>.javdex-update`；签名约束迁移来源/目标、构建、平台、运行环境、大小、摘要及期限，信任根来自管理器而非上传包 |
-| 版本选择 | 在线读取 latest 正式 Release；预发布显式离线导入。SemVer 只接受更高版本，同版本重装与降级拒绝，正式 0.8.0 的来源 schema 必须为 19 |
+| 版本选择 | 在线读取当前客户端版本的 Release tag（含预发布）；离线、准备和安装须匹配同一版本。SemVer 只接受更高版本，同版本重装与降级拒绝，正式 0.8.0 的来源 schema 必须为 19 |
 
 0.9.0 发布脚本为目标 schema 21 声明来源 schema 19/20/21；实际安装仍须通过版本、结构与身份检查。0.8.0 镜像先由管理员更换运行外壳并新增 `/program`，空卷从镜像种子初始化；已有托管程序卷则保留业务选择，再经签名更新切换。基础镜像标签不等于实际业务版本，管理器不能通过业务包自更新。升级前备份与回退边界见 [服务端更新](SERVER_UPDATE.md#部署与首次采用)。
 
@@ -42,7 +42,7 @@
 | 播放凭据 | 12 小时固定 |
 | 未消费上传 | 24 小时 |
 | 备份包 / 展开内容 / 传输块 | 分别最大 64 GiB / 64 GiB / 8 MiB |
-| 设备管理秘密 | ≥32 字节系统安全随机，服务端只存摘要；桌面主进程加密保存。统一入口更新查询实时设备状态，旧双端口独立 token 另存于受保护的程序卷 |
+| 设备管理秘密 | ≥32 字节系统安全随机，服务端只存摘要；桌面主进程加密保存。更新查询实时设备状态，不再生成或使用独立更新 token |
 
 本地 `VIDEO_LIST` 已有每页 200 条上限，与管理分页上限对齐。现有刮削批次 IPC 可带最多 10000 个 ID；远程管理改为 target list，不把该 IPC 上限搬上 HTTP。
 
@@ -54,7 +54,7 @@
 | 后端端口 | `apps/desktop/src/main/application/catalogBackend.ts` | 桌面 application / workflows |
 | HTTP 管理 | `manage/operations.ts` + `manage/inputs.ts` | RemoteCatalogBackend、server |
 | HTTP 浏览 | `webTypes.ts` / `browser/dto.ts` | 只读网页；独立白名单 |
-| 托管更新 | `serverUpdateTypes.ts` + 独立 HTTPS 更新入口 | 桌面主进程；统一入口按设备凭据授权，旧双端口仍用独立 token；网页凭据不授权 |
+| 托管更新 | `serverUpdateTypes.ts` + 统一 HTTPS 入口 | 桌面主进程；按同一设备凭据授权业务与更新；网页凭据不授权 |
 
 页面只提供业务目标、原版本和用户选择。writer token、HTTP 头、任意服务地址不进入 renderer。本地适配器直接调 library，不创建 localhost HTTP，也不模拟 writer token。
 
@@ -151,15 +151,15 @@ IPC 去向以 inventory 及其覆盖检查为准。兼容入口不要求一对�
 
 ## 托管更新
 
-[updater/index.ts](../apps/server/src/updater/index.ts) 是官方单容器管理入口，以非 root 子进程运行当前发行目录的业务入口。内部通过 [UpdateDeployment](../apps/server/src/updater/deployment.ts) 隔离持久任务编排与进程、发行目录、快照细节；不安装宿主机助手、不控制 Docker daemon，也不让业务包自更新管理器。固定运行环境和签名完整发行包合同见 [serverUpdateTypes.ts](../packages/contracts/src/serverUpdateTypes.ts)。
+[updater/index.ts](../apps/server/src/updater/index.ts) 是官方单容器管理入口，以非 root 子进程运行当前发行目录的业务入口。内部通过 [UpdateDeployment](../apps/server/src/updater/deployment.ts) 隔离持久任务编排与进程、发行目录及失败保留现场的细节；不安装宿主机助手、不控制 Docker daemon，也不让业务包自更新管理器。固定运行环境和签名完整发行包合同见 [serverUpdateTypes.ts](../packages/contracts/src/serverUpdateTypes.ts)。
 
-管理入口的 `start`、`pair`、`pair-recover`、`bind`、`recover` 均经 `/opt/javdex-manager/index.js`；授权命令运行 `/program` 当前选中的业务 CLI，不使用 `/app` 初始化种子。管理器需容器内 root，业务 UID 禁止为 0。业务网页固定从当前发行目录加载，不能沿用旧镜像的 Web。发行选择与校验由 [releaseStore.ts](../apps/server/src/updater/releaseStore.ts) 管理，容器重建不直接覆盖发行目录；仅较新镜像业务通过完整备份、升级、验证和恢复事务切换，同版或更旧则保留当前业务。数据与程序卷不得互相包含。
+管理入口的 `start`、`token` 均经 `/opt/javdex-manager/index.js`；`token` 是唯一获取授权令牌的命令，输出有效期十分钟的一次性令牌，首次授权与新增设备共用；授权命令运行 `/program` 当前选中的业务 CLI，不使用 `/app` 初始化种子。管理器需容器内 root，业务 UID 禁止为 0。业务网页固定从当前发行目录加载，不能沿用旧镜像的 Web。发行选择与校验由 [releaseStore.ts](../apps/server/src/updater/releaseStore.ts) 管理，容器重建不直接覆盖发行目录；仅较新镜像业务通过停服、升级、验证和提交事务切换，同版或更旧则保留当前业务。数据与程序卷不得互相包含。
 
 [updateBundle.ts](../packages/http/src/updateBundle.ts) 定义 `JVDXUPD1` 单文件运输格式：8 字节魔数、4 字节大端 JSON 长度、签名 JSON、原始程序 tar.gz，清单最多 65536 字节。清单绑定内层归档，`SHA256SUMS.txt` 绑定整个文件；归档最大 4 GiB、展开最大 8 GiB。离线上传偏移只计算归档内容；在线检查读取有界前缀，准备时重新验证文件内签名与目标一致。旧 JSON/裸归档不受支持，包内不得提供任意公钥建立信任。
 
-更新 HTTPS 使用独立协议与证书固定配对，凭据保存在桌面主进程安全存储，与业务连接和资料库身份绑定；可跨业务应用版本调用。renderer 只发用户操作，不持有已保存的更新凭据或任意上传路径。安装须人工确认；待验证业务仅开放健康检查，持久提交前核对真实 worker、应用/schema 和资料库身份，提交后只继续激活，不恢复旧数据。实现入口是 [updateManager.ts](../apps/server/src/updater/updateManager.ts)、[processDeployment.ts](../apps/server/src/updater/processDeployment.ts)、[updateGuard.ts](../apps/server/src/updateGuard.ts) 和 [桌面更新服务](../apps/desktop/src/main/desktop/serverUpdateService.ts)。操作与两层更新边界见 [服务端更新](SERVER_UPDATE.md)，验证边界见 [当前状态](SERVER_MODE_NEXT_STEPS.md#验证入口与证据边界)。
+更新与业务共用 HTTPS 根地址及证书固定配对，使用独立协议，凭据保存在桌面主进程安全存储，与业务连接和资料库身份绑定；可跨业务应用版本调用。renderer 只发用户操作，不持有已保存的更新凭据或任意上传路径。安装须人工确认；待验证业务仅开放健康检查，持久提交前核对真实 worker、应用/schema 和资料库身份，提交后只继续激活，不恢复旧数据。实现入口是 [updateManager.ts](../apps/server/src/updater/updateManager.ts)、[processDeployment.ts](../apps/server/src/updater/processDeployment.ts)、[updateGuard.ts](../apps/server/src/updateGuard.ts) 和 [桌面更新服务](../apps/desktop/src/main/desktop/serverUpdateService.ts)。操作与两层更新边界见 [服务端更新](SERVER_UPDATE.md)，验证边界见 [当前状态](SERVER_MODE_NEXT_STEPS.md#验证入口与证据边界)。
 
-安装前检查维护任务、磁盘空间、配置和资料库身份；停止整个业务进程组后快照数据库/WAL、图片与配置，不含原视频。持久 `current.json` 决定上传偏移和提交阶段；提交前失败恢复完整快照，提交后不覆盖新写入；恢复失败或提交状态不明进入 `recoveryRequired` 并阻止后续更新。成功后保留当前/上一版程序及最近快照，未知或损坏记录不自动清理。签名、期限、架构、运行环境、闭包/原生依赖及 schema 检查在正式和预发布中同样有效。
+安装前检查维护任务、程序暂存空间、配置和资料库身份；停止整个业务进程组后再次核对维护状态与资料库身份。升级不遍历或复制资料库/图片，不创建、覆盖或轮换升级备份；重要资料应先用与当前服务端版本一致的客户端通过现有备份功能保存。持久 `current.json` 决定上传偏移和提交阶段；安装未开始且原部署未变时可继续运行原服务，安装/验证失败或中断进入 `recoveryRequired` 并阻止后续升级，提交后只继续激活。成功后保留当前/上一版程序，未知或损坏记录不自动清理。签名、期限、架构、运行环境、闭包/原生依赖及 schema 检查在正式和预发布中同样有效。不兼容旧管理器。
 
 ## 已接线的功能补齐（C1–C7）
 

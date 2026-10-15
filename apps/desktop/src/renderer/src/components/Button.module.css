@@ -82,6 +82,24 @@
   color: var(--text-primary);
 }
 
+.dangerGhost {
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-danger);
+}
+
+.dangerGhost:hover {
+  border-color: transparent;
+  background: var(--surface-danger);
+}
+
+.dangerGhost:disabled:hover,
+.dangerGhost[aria-disabled='true']:hover,
+.dangerGhost[aria-disabled='true']:active {
+  border-color: transparent;
+  background: transparent;
+}
+
 .sm {
   min-height: var(--workspace-button-min-height, var(--control-h-sm));
   padding: 6px 12px;

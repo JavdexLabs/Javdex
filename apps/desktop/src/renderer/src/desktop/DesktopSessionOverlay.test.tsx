@@ -71,6 +71,25 @@ it('shows a version mismatch page without exposing a writer token', () => {
   assert.equal(text.includes('secret'), false)
 })
 
+it('exposes upgrade recovery directly when an older server blocks catalog access', async () => {
+  const previousWindow = globalThis.window
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: { api: { serverUpdate: { control: async () => ({ protocolVersion: 1, paired: true, serverId: 'server-1', catalogId: 'catalog-1', currentVersion: '0.9.0-beta.3', platform: 'linux/amd64', targetVersion: null, job: null }) } } } })
+  const { api } = await import('../api')
+  const previousApi = api.serverUpdate
+  try {
+    api.serverUpdate = window.api.serverUpdate
+    await act(async () => { renderOverlay(session('versionMismatch', { appVersion: '0.9.0-beta.3', desktopAppVersion: '0.9.0-beta.4' })) })
+    assert.match(collectText(renderer!.root), /服务端升级/)
+    assert.match(collectText(renderer!.root), /在线升级/)
+    assert.match(collectText(renderer!.root), /上传离线包升级/)
+  } finally {
+    act(() => renderer?.unmount())
+    renderer = null
+    api.serverUpdate = previousApi
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
+  }
+})
+
 it('routes recovery to connection settings without asking for a token in two places', () => {
   const text = collectText(renderOverlay(session('recoveryRequired')).root)
   assert.match(text, /打开连接设置/)

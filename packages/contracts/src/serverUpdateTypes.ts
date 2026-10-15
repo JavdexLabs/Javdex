@@ -13,6 +13,7 @@ const platform = z.enum(['linux/amd64', 'linux/arm64'])
 const releaseVersion = z.string().max(128)
   .regex(/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/)
   .refine(value => value.slice(value.indexOf('-') + 1).split('.').every(part => !/^0\d+$/.test(part)), '预发布数字编号不能带前导零')
+export const serverUpgradeVersionSchema = releaseVersion
 export const releaseDescriptorSchema = z.object({
   format: z.literal(1), version: releaseVersion,
   build: z.string().regex(/^[a-f0-9]{40}$/), platform,
@@ -58,14 +59,10 @@ export const updaterPairingSchema = z.object({
 }).strict()
 export type UpdaterPairing = z.infer<typeof updaterPairingSchema>
 
-export const serverConnectionBundleSchema = updaterPairingSchema.omit({ token: true }).extend({
-  protocolVersion: z.literal(2), code: z.string().regex(/^[a-f0-9]{64}$/), expiresAt: z.iso.datetime()
-}).strict()
-export type ServerConnectionBundle = z.infer<typeof serverConnectionBundleSchema>
 export const connectionClaimSchema = z.object({ code: z.string().regex(/^[a-f0-9]{64}$/),
   claimId: z.uuid(), secretDigest: hash, name: z.string().trim().min(1).max(80).optional(), appVersion: z.string().min(1).max(128) }).strict()
 
-export const UPDATE_PHASES = ['preparing', 'prepared', 'stopping', 'backup', 'installing', 'verifying', 'activating', 'complete', 'restoring', 'restored', 'failed', 'recoveryRequired'] as const
+export const UPDATE_PHASES = ['preparing', 'prepared', 'stopping', 'installing', 'verifying', 'activating', 'complete', 'failed', 'recoveryRequired'] as const
 export type ServerUpdatePhase = typeof UPDATE_PHASES[number]
 export interface ServerUpdateJob {
   id: string
@@ -87,17 +84,26 @@ export interface ServerUpdateSnapshot {
   targetVersion: string | null
   job: ServerUpdateJob | null
   devices?: import('./protocol/writer').TrustedDevice[]
+  /** Saved local connection identity only; never includes certificates or credentials. */
+  connection?: ServerConnectionSummary | null
+  /** Local connection credentials changed since this desktop process started. */
+  connectionRestartRequired?: boolean
+}
+export interface ServerConnectionSummary {
+  remoteBaseUrl: string
+  serverId: string
+  catalogId: string
 }
 export const serverUpdateCommandSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('status') }).strict(),
-  z.object({ action: z.literal('pair'), pairing: z.string().min(1).max(8192) }).strict(),
-  z.object({ action: z.literal('connect'), pairing: z.string().min(1).max(8192) }).strict(),
+  z.object({ action: z.literal('connectionStatus') }).strict(),
+  z.object({ action: z.literal('forgetConnection') }).strict(),
+  z.object({ action: z.literal('connect'), remoteBaseUrl: updaterPairingSchema.shape.url, oneTimeToken: z.string().regex(/^[a-f0-9]{64}$/) }).strict(),
   z.object({ action: z.literal('devices') }).strict(),
   z.object({ action: z.literal('revokeDevice'), deviceId: z.uuid() }).strict(),
-  z.object({ action: z.literal('forget') }).strict(),
-  z.object({ action: z.literal('check') }).strict(),
-  z.object({ action: z.literal('import') }).strict(),
-  z.object({ action: z.literal('prepare') }).strict(),
-  z.object({ action: z.literal('install'), jobId: z.uuid() }).strict()
+  z.object({ action: z.literal('check'), targetVersion: releaseVersion }).strict(),
+  z.object({ action: z.literal('import'), targetVersion: releaseVersion }).strict(),
+  z.object({ action: z.literal('prepare'), targetVersion: releaseVersion }).strict(),
+  z.object({ action: z.literal('install'), jobId: z.uuid(), targetVersion: releaseVersion }).strict()
 ])
 export type ServerUpdateCommand = z.infer<typeof serverUpdateCommandSchema>

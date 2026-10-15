@@ -12,7 +12,7 @@ import { fixture, makeRelease, archiveRelease } from './testFixtures'
 import { requestBusiness } from './businessHttp'
 import { ServerUpdateManager } from './updateManager'
 
-for (const badWorker of [false, true]) test(`image startup transaction with real child process: ${badWorker ? 'rollback' : 'activation'}`, async () => {
+for (const badWorker of [false, true]) test(`image startup transaction with real child process: ${badWorker ? 'manual recovery' : 'activation'}`, async () => {
   const { root, config } = await fixture()
   const supervisor = new BusinessSupervisor(config)
   try {
@@ -29,11 +29,12 @@ for (const badWorker of [false, true]) test(`image startup transaction with real
     const image = store.imageRelease()
     const manager = new ServerUpdateManager(config.stateDir, {}, deployment)
     await manager.installImage(image.release, image.bytes, () => store.prepareImage(image.release))
-    assert.equal((await manager.status()).job?.phase, badWorker ? 'restored' : 'complete')
-    assert.equal(store.current(), badWorker ? original.release : releaseId(image.release))
+    assert.equal((await manager.status()).job?.phase, badWorker ? 'recoveryRequired' : 'complete')
+    assert.equal(store.current(), releaseId(image.release))
     assert.equal((await deployment.inspect()).identity.serverId, original.identity.serverId)
     assert.equal(fs.readFileSync(path.join(config.dataDir, 'user-bytes'), 'utf8'), 'preserve image upgrade data')
-    assert.equal((await requestBusiness(new URL('/manage/v1/handshake.get', config.serverUrl), config.healthHost)).status, 200)
+    if (badWorker) assert.equal(supervisor.running, false)
+    else assert.equal((await requestBusiness(new URL('/manage/v1/handshake.get', config.serverUrl), config.healthHost)).status, 200)
   } finally { await supervisor.shutdown(); fs.rmSync(root, { recursive: true, force: true }) }
 })
 
@@ -64,7 +65,7 @@ test('online preparation verifies embedded signature then extracts only the sign
   } finally { await supervisor.shutdown(); fs.rmSync(root, { recursive: true, force: true }) }
 })
 
-for (const accessHost of ['127.0.0.1', 'library.local']) for (const badWorker of [false, true]) test(`synthetic host lifecycle (${accessHost}): ${badWorker ? 'migration failure restores' : 'verified activation preserves'} data and persistent release`, async () => {
+for (const accessHost of ['127.0.0.1', 'library.local']) for (const badWorker of [false, true]) test(`synthetic host lifecycle (${accessHost}): ${badWorker ? 'migration failure preserves current' : 'verified activation preserves'} data and persistent release`, async () => {
   const { root, config } = await fixture({ accessHost })
   const handshakeStatus = async () => (await requestBusiness(new URL('/manage/v1/handshake.get', config.serverUrl), config.healthHost)).status
   const supervisor = new BusinessSupervisor(config)
@@ -73,12 +74,10 @@ for (const accessHost of ['127.0.0.1', 'library.local']) for (const badWorker of
     await store.bootstrap()
     const deployment = new ProcessUpdateDeployment(config, store, supervisor, { readyTimeoutMs: 3000, probe: async () => JSON.parse(fs.readFileSync(path.join(config.dataDir, 'catalog.fixture.json'), 'utf8')) })
     await deployment.startCurrent()
-    const original = await deployment.inspect({ measure: true })
+    const original = await deployment.inspect()
     fs.writeFileSync(path.join(config.dataDir, 'user-bytes'), 'user data preserved')
     fs.writeFileSync(path.join(config.dataDir, MANAGED_LOCK), 'locked inode preserved')
     const inode = fs.statSync(path.join(config.dataDir, MANAGED_LOCK)).ino
-    const job = path.join(config.stateDir, randomUUID())
-    fs.mkdirSync(job)
     const next = path.join(root, 'next')
     makeRelease(next, '0.8.1', badWorker)
     const archive = path.join(root, 'next.tar.gz')
@@ -86,13 +85,12 @@ for (const accessHost of ['127.0.0.1', 'library.local']) for (const badWorker of
     await deployment.prepare(manifest, archive)
     assert.equal(supervisor.running, true)
     await deployment.stop()
-    await deployment.backup(job, original)
     await deployment.install(manifest, randomUUID(), original)
     if (badWorker) {
       await assert.rejects(deployment.verify(manifest, original), /启动/)
-      await deployment.restore(job, original)
-      assert.equal((await deployment.inspect()).identity.schema, 19)
-      assert.equal(store.current(), original.release)
+      await assert.rejects(deployment.resume(original), /程序已切换/)
+      assert.equal((await deployment.inspect()).identity.schema, 20)
+      assert.equal(store.current(), releaseId(manifest))
     } else {
       await deployment.verify(manifest, original)
       assert.equal(await handshakeStatus(), 503)
@@ -112,7 +110,7 @@ for (const accessHost of ['127.0.0.1', 'library.local']) for (const badWorker of
     assert.equal((await deployment.inspect()).identity.serverId, original.identity.serverId)
   } finally { await supervisor.shutdown(); fs.rmSync(root, { recursive: true, force: true }) }
 })
-test('incomplete snapshot resumes unchanged original data; changed configuration fails before stopping', async () => {
+test('resuming unchanged service preserves data; changed configuration blocks installation', async () => {
   const { root, config } = await fixture()
   const supervisor = new BusinessSupervisor(config)
   try {
@@ -121,33 +119,13 @@ test('incomplete snapshot resumes unchanged original data; changed configuration
     const deployment = new ProcessUpdateDeployment(config, store, supervisor, { readyTimeoutMs: 3000, probe: async () => JSON.parse(fs.readFileSync(path.join(config.dataDir, 'catalog.fixture.json'), 'utf8')) })
     await deployment.startCurrent()
     const original = await deployment.inspect()
-    const job = path.join(config.stateDir, 'incomplete')
-    fs.mkdirSync(job)
     await deployment.stop()
     fs.writeFileSync(path.join(config.dataDir, 'preserved'), 'no replacement')
-    await deployment.restore(job, original)
+    await deployment.resume(original)
     assert.equal(fs.readFileSync(path.join(config.dataDir, 'preserved'), 'utf8'), 'no replacement')
     fs.appendFileSync(config.serverConfigPath, '\n')
     await assert.rejects(deployment.inspect(), /配置已变化/)
     assert.equal(supervisor.running, true)
-  } finally { await supervisor.shutdown(); fs.rmSync(root, { recursive: true, force: true }) }
-})
-test('corrupted snapshot is rejected without deleting current data', async () => {
-  const { root, config } = await fixture()
-  const supervisor = new BusinessSupervisor(config)
-  try {
-    const store = new ReleaseStore(config)
-    await store.bootstrap()
-    const deployment = new ProcessUpdateDeployment(config, store, supervisor, { probe: async () => JSON.parse(fs.readFileSync(path.join(config.dataDir, 'catalog.fixture.json'), 'utf8')) })
-    fs.writeFileSync(path.join(config.dataDir, 'user-bytes'), 'original')
-    const original = await deployment.inspect()
-    const job = path.join(config.stateDir, 'snapshot-test')
-    fs.mkdirSync(job)
-    await deployment.backup(job, original)
-    fs.writeFileSync(path.join(job, 'snapshot', 'root-0', 'user-bytes'), 'corrupted')
-    fs.writeFileSync(path.join(config.dataDir, 'user-bytes'), 'current data')
-    await assert.rejects(deployment.restore(job, original), /快照内容损坏/)
-    assert.equal(fs.readFileSync(path.join(config.dataDir, 'user-bytes'), 'utf8'), 'current data')
   } finally { await supervisor.shutdown(); fs.rmSync(root, { recursive: true, force: true }) }
 })
 test('unexpected business exit is supervised; planned stop never races a scheduled restart', async () => {
@@ -172,27 +150,30 @@ test('unexpected business exit is supervised; planned stop never races a schedul
   } finally { await supervisor.shutdown(); fs.rmSync(root, { recursive: true, force: true }) }
 })
 
-test('invalid independent image tree is detected before replacing either data root', async () => {
+test('large image libraries and existing backups are never copied by image upgrade', async () => {
   const { root, config } = await fixture({ independentImages: true })
   const supervisor = new BusinessSupervisor(config)
   try {
     const store = new ReleaseStore(config)
     await store.bootstrap()
-    const deployment = new ProcessUpdateDeployment(config, store, supervisor, { probe: async () => JSON.parse(fs.readFileSync(path.join(config.dataDir, 'catalog.fixture.json'), 'utf8')) })
-    const file = path.join(config.dataDir, 'user-bytes')
-    fs.writeFileSync(file, 'original')
-    const original = await deployment.inspect()
-    const job = path.join(config.stateDir, 'independent-snapshot')
-    fs.mkdirSync(job)
-    await deployment.backup(job, original)
-    fs.writeFileSync(file, 'current must survive validation failure')
-    const invalid = path.join(config.imagesDir, 'invalid-link')
-    fs.symlinkSync(file, invalid)
-    await assert.rejects(deployment.restore(job, original), /链接或特殊文件/)
-    assert.equal(fs.readFileSync(file, 'utf8'), 'current must survive validation failure')
-    fs.unlinkSync(invalid)
-    fs.writeFileSync(path.join(job, 'snapshot', 'server-config.json'), 'corrupt configuration')
-    await assert.rejects(deployment.restore(job, original), /快照配置损坏/)
-    assert.equal(fs.readFileSync(file, 'utf8'), 'current must survive validation failure')
+    const deployment = new ProcessUpdateDeployment(config, store, supervisor, { readyTimeoutMs: 3000, probe: async () => JSON.parse(fs.readFileSync(path.join(config.dataDir, 'catalog.fixture.json'), 'utf8')) })
+    await deployment.startCurrent()
+    const large = path.join(config.imagesDir, 'large-sparse-file')
+    fs.writeFileSync(large, '')
+    fs.truncateSync(large, 64 * 1024 ** 3)
+    const existingBackup = path.join(config.dataDir, 'backups', 'manual.javdex-backup')
+    fs.mkdirSync(path.dirname(existingBackup), { recursive: true })
+    fs.writeFileSync(existingBackup, 'existing backup')
+    const before = fs.statSync(existingBackup)
+    makeRelease(config.seedDir, '0.8.1')
+    const image = store.imageRelease()
+    const manager = new ServerUpdateManager(config.stateDir, {}, deployment)
+    await manager.installImage(image.release, image.bytes, () => store.prepareImage(image.release))
+    const status = await manager.status()
+    assert.equal(status.job?.phase, 'complete')
+    assert.equal(fs.statSync(large).size, 64 * 1024 ** 3)
+    assert.equal(fs.statSync(existingBackup).ino, before.ino)
+    assert.equal(fs.readFileSync(existingBackup, 'utf8'), 'existing backup')
+    assert.equal(fs.existsSync(path.join(config.stateDir, 'jobs', status.job!.id, 'snapshot')), false)
   } finally { await supervisor.shutdown(); fs.rmSync(root, { recursive: true, force: true }) }
 })

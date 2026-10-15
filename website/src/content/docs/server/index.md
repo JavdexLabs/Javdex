@@ -11,7 +11,7 @@ description: 使用单个 Docker 容器，把资料库放在 NAS 或常开设备
 
 1. 核对[目标 Beta.4 Release](https://github.com/JavdexLabs/Javdex/releases/tag/v0.9.0-beta.4)的实际产物，准备 Docker 与 Compose 插件；[默认下载](/Javdex/download/)仍只跟随正式版。
 2. 按 [Docker Compose 部署](/Javdex/server/deploy/)保存同版本示例，设置数据卷、媒体挂载和账号。
-3. 按[配对说明](/Javdex/server/pairing/)在服务端运行 `pair`，在桌面粘贴一次性信息，一次保存统一地址、证书与资料管理／更新授权。
+3. 按[配对说明](/Javdex/server/pairing/)在服务端运行 `token`，在桌面填写统一 HTTPS 地址并粘贴一次性令牌，保存资料管理／更新授权。
 4. 重启桌面，再创建媒体库并扫描；添加其他电脑时重新生成一份配对信息。
 
 已有 0.8.0 部署先读[首次采用托管更新](/Javdex/server/adoption/)，不要把后续升级包当作旧容器的安装器。
@@ -20,7 +20,7 @@ description: 使用单个 Docker 容器，把资料库放在 NAS 或常开设备
 
 - 独立持久保存 `/data`、`/program` 和媒体挂载；不要运行 `docker compose down -v`。
 - 媒体目录需要业务进程可读写，`/data` 可写不表示媒体目录可写。详见[存储与权限](/Javdex/reference/server/)。
-- 新部署的业务、播放与更新共用一个 HTTPS 地址和每台电脑独立的可信设备授权；只在可信局域网或私有网络开放。旧双端口部署的独立授权流程见[配对说明](/Javdex/server/pairing/)。
+- 业务、播放与更新共用一个 HTTPS 地址和每台电脑独立的可信设备授权；只在可信局域网或私有网络开放。统一地址与设备授权流程见[配对说明](/Javdex/server/pairing/)。
 - 更新会中断访问与播放，并非不停机热更新。先了解[恢复边界](/Javdex/server/recovery/)。
 
 ## 使用之后

@@ -11,13 +11,11 @@ import { contained, type UpdaterConfig } from './config'
 import type { DeploymentIdentity, DeploymentSnapshot, DeploymentRelease, UpdateDeployment } from './deployment'
 import { ReleaseStore, fileHash, releaseId } from './releaseStore'
 import { BusinessSupervisor } from './supervisor'
-import { copyTree, restoreTree, treeBytes, treeHash } from './storage'
-import { readJsonIfExists, syncDirectory, writeJsonAtomic } from './files'
+import { writeJsonAtomic } from './files'
 import { requestBusiness } from './businessHttp'
 
 const run = promisify(execFile)
 const identitySchema = z.object({ schema: z.number().int().positive(), serverId: z.uuid(), catalogId: z.uuid(), busy: z.boolean() }).strict()
-const snapshotSchema = z.object({ format: z.literal(1), release: z.string(), configHash: z.string(), roots: z.array(z.string()), hashes: z.array(z.string().regex(/^[a-f0-9]{64}$/)) }).strict()
 export class ProcessUpdateDeployment implements UpdateDeployment {
   private readonly configHash: Promise<string>
   constructor(private readonly config: UpdaterConfig, readonly releases: ReleaseStore, readonly supervisor: BusinessSupervisor,
@@ -43,7 +41,7 @@ export class ProcessUpdateDeployment implements UpdateDeployment {
     }).catch(() => { throw new Error('无法读取资料库身份，请核对业务状态和原生依赖') })
     return identitySchema.parse(JSON.parse(result.stdout))
   }
-  async inspect(options: { measure?: boolean } = {}): Promise<DeploymentSnapshot> {
+  async inspect(): Promise<DeploymentSnapshot> {
     if (await fileHash(this.config.serverConfigPath) !== await this.configHash) throw new Error('配置已变化，请先重新启动容器再更新')
     const release = this.releases.current()
     if (!release) throw new Error('服务端发行包尚未初始化')
@@ -51,10 +49,8 @@ export class ProcessUpdateDeployment implements UpdateDeployment {
     const descriptor = this.releases.descriptor(directory)
     const roots = await this.roots()
     const database = await this.probe(directory)
-    let estimatedBytes = 0
-    if (options.measure) for (const root of roots) estimatedBytes += await treeBytes(root, { excludeRootLock: root === this.config.dataDir })
     const identity: DeploymentIdentity = { ...database, version: descriptor.version, platform: descriptor.platform, runtime: SERVER_RUNTIME_ID,
-      dataDir: this.config.dataDir, imagesDir: this.config.imagesDir, busy: database.busy, estimatedBytes, port: Number(new URL(this.config.serverUrl).port) }
+      dataDir: this.config.dataDir, imagesDir: this.config.imagesDir, busy: database.busy, port: Number(new URL(this.config.serverUrl).port) }
     return { identity, release, roots, configHash: await this.configHash }
   }
   async prepare(manifest: ServerUpdateManifest, archive?: string): Promise<void> {
@@ -92,27 +88,11 @@ export class ProcessUpdateDeployment implements UpdateDeployment {
     const descriptor = this.releases.descriptor(this.releases.directory(original.release))
     if (descriptor.version !== original.identity.version || descriptor.platform !== original.identity.platform) throw new Error('原发行记录损坏')
   }
-  async backup(jobDir: string, original: DeploymentSnapshot): Promise<void> {
-    if (this.supervisor.running) throw new Error('必须先停止全部业务写入')
-    await this.validateOriginal(original)
-    const stopped = await this.inspect({ measure: true })
-    if (stopped.identity.busy || stopped.identity.serverId !== original.identity.serverId || stopped.identity.catalogId !== original.identity.catalogId || stopped.identity.schema !== original.identity.schema) throw new Error('停机后仍有维护任务或资料库身份已变化')
-    const snapshot = path.join(jobDir, 'snapshot')
-    fs.mkdirSync(snapshot, { recursive: true, mode: 0o700 })
-    const hashes: string[] = []
-    for (let i = 0; i < original.roots.length; i++) {
-      const destination = path.join(snapshot, `root-${i}`)
-      await copyTree(original.roots[i], destination, { excludeRootLock: original.roots[i] === this.config.dataDir })
-      hashes.push(await treeHash(destination))
-    }
-    await copyTree(this.config.serverConfigPath, path.join(snapshot, 'server-config.json'))
-    if (await fileHash(path.join(snapshot, 'server-config.json')) !== original.configHash) throw new Error('快照配置与原部署不一致')
-    syncDirectory(snapshot)
-    writeJsonAtomic(path.join(jobDir, 'snapshot-complete.json'), { format: 1, release: original.release, configHash: original.configHash, roots: original.roots, hashes })
-  }
   async install(manifest: DeploymentRelease, jobId: string, original: DeploymentSnapshot): Promise<void> {
     if (this.supervisor.running) throw new Error('旧业务进程尚未退出')
     await this.validateOriginal(original)
+    const stopped = await this.inspect()
+    if (stopped.identity.busy || stopped.identity.serverId !== original.identity.serverId || stopped.identity.catalogId !== original.identity.catalogId || stopped.identity.schema !== original.identity.schema) throw new Error('停机后仍有维护任务或资料库身份已变化')
     await this.releases.verify(this.releases.directory(releaseId(manifest)), manifest)
     writeJsonAtomic(path.join(this.config.dataDir, 'server-update-guard.json'), { id: jobId, phase: 'verifying' })
     fs.chmodSync(path.join(this.config.dataDir, 'server-update-guard.json'), 0o644)
@@ -168,22 +148,12 @@ export class ProcessUpdateDeployment implements UpdateDeployment {
     }
     throw new Error('新版本已提交，业务开放状态需人工核对')
   }
-  async restore(jobDir: string, original: DeploymentSnapshot): Promise<void> {
+  async resume(original: DeploymentSnapshot): Promise<void> {
     await this.validateOriginal(original)
     await this.stop()
-    const raw = readJsonIfExists(path.join(jobDir, 'snapshot-complete.json'))
-    if (raw) {
-      const snapshot = snapshotSchema.parse(raw)
-      if (snapshot.release !== original.release || snapshot.configHash !== original.configHash || JSON.stringify(snapshot.roots) !== JSON.stringify(original.roots) || snapshot.hashes.length !== original.roots.length) throw new Error('快照记录与原资料库不一致')
-      if (await fileHash(path.join(jobDir, 'snapshot', 'server-config.json')) !== original.configHash) throw new Error('快照配置损坏，停止恢复以保留现场')
-      for (let i = 0; i < original.roots.length; i++) if (await treeHash(path.join(jobDir, 'snapshot', `root-${i}`)) !== snapshot.hashes[i]) throw new Error('快照内容损坏，停止恢复以保留现场')
-      // Validate all destinations before replacing the first root.
-      for (const root of original.roots) await treeBytes(root, { excludeRootLock: root === this.config.dataDir })
-      for (let i = 0; i < original.roots.length; i++) await restoreTree(path.join(jobDir, 'snapshot', `root-${i}`), original.roots[i], { excludeRootLock: original.roots[i] === this.config.dataDir })
-    } else if (this.releases.current() !== original.release) throw new Error('切换后缺少完整快照，需要人工恢复')
-    this.releases.select(original.release)
-    await this.startCurrent()
+    if (this.releases.current() !== original.release) throw new Error('程序已切换，不能直接恢复原版本')
     const checked = await this.inspect()
-    if (checked.identity.version !== original.identity.version || checked.identity.schema !== original.identity.schema || checked.identity.serverId !== original.identity.serverId || checked.identity.catalogId !== original.identity.catalogId) throw new Error('原版本恢复验证失败')
+    if (checked.identity.version !== original.identity.version || checked.identity.schema !== original.identity.schema || checked.identity.serverId !== original.identity.serverId || checked.identity.catalogId !== original.identity.catalogId) throw new Error('原资料库身份或 schema 已变化')
+    await this.startCurrent()
   }
 }

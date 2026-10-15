@@ -134,7 +134,7 @@ bool key(HWND window, UINT message, WPARAM code, LPARAM flags) {
     }
     if (alt || control || (GetKeyState(VK_LWIN) & 0x8000) || (GetKeyState(VK_RWIN) & 0x8000)) return false;
     if (code == VK_TAB) { focusNext(window, shift); return true; }
-    if (code == VK_ESCAPE) { if (!repeat) queue("history-back"); return true; }
+    if (code == VK_ESCAPE) { if (!repeat) queue("escape"); return true; }
     if (window == seekSlider || window == volumeSlider) {
         if (code == VK_LEFT || code == VK_DOWN || code == VK_RIGHT || code == VK_UP) {
             if (IsWindowEnabled(window)) {

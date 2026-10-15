@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { createServer } from 'node:https'
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { randomBytes, timingSafeEqual, X509Certificate } from 'node:crypto'
+import { X509Certificate } from 'node:crypto'
 import { execFileSync, spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { z } from 'zod'
@@ -15,19 +15,21 @@ import { MANAGED_LOCK } from './storage'
 import { ServerUpdateManager, readLimitedJson } from './updateManager'
 import { sha256 } from './manifest'
 import { signedUpdateSchema } from '@shared/serverUpdateTypes'
-import { fetchUpdateBundleManifest } from '@http/updateBundle'
+import { discoverUpgrade } from './upgradeDiscovery'
+import { serverUpgradeVersionSchema } from '@shared/serverUpdateTypes'
 import { gatewayRequestAllowed, proxyBusiness } from './gateway'
 import { ConnectionPairing } from './connectionPairing'
 import { requestBusiness } from './businessHttp'
 import { connectionClaimSchema } from '@shared/serverUpdateTypes'
 import { authorizeDeviceUpdate } from './deviceAuthorization'
+import { businessProcessCommand } from './businessProcess'
 
 const controlSchema = z.discriminatedUnion('action', [
   z.object({ protocolVersion: z.literal(1), action: z.literal('status') }).strict(),
-  z.object({ protocolVersion: z.literal(1), action: z.literal('check') }).strict(),
-  z.object({ protocolVersion: z.literal(1), action: z.literal('prepare') }).strict(),
-  z.object({ protocolVersion: z.literal(1), action: z.literal('import'), signed: signedUpdateSchema }).strict(),
-  z.object({ protocolVersion: z.literal(1), action: z.literal('install'), jobId: z.uuid() }).strict()
+  z.object({ protocolVersion: z.literal(1), action: z.literal('check'), targetVersion: serverUpgradeVersionSchema }).strict(),
+  z.object({ protocolVersion: z.literal(1), action: z.literal('prepare'), targetVersion: serverUpgradeVersionSchema }).strict(),
+  z.object({ protocolVersion: z.literal(1), action: z.literal('import'), signed: signedUpdateSchema, targetVersion: serverUpgradeVersionSchema }).strict(),
+  z.object({ protocolVersion: z.literal(1), action: z.literal('install'), jobId: z.uuid(), targetVersion: serverUpgradeVersionSchema }).strict()
 ])
 let cleanup: (() => Promise<void>) | undefined
 
@@ -47,7 +49,7 @@ async function fetchJson(url: string | URL, limit: number): Promise<unknown> {
 async function main(): Promise<void> {
   const args = process.argv.slice(2)
   const command = args[0] && !args[0].startsWith('--') ? args.shift()! : 'start'
-  if (!['start', 'pair', 'pair-recover', 'bind', 'recover'].includes(command) || (args.length && (args.length !== 2 || args[0] !== '--config'))) throw new Error('用法：node index.js start|pair|pair-recover|bind|recover [--config /config/server.json]')
+  if (!['start', 'token'].includes(command) || (args.length && (args.length !== 2 || args[0] !== '--config'))) throw new Error('用法：node index.js start|token [--config /config/server.json]')
   const file = args[1] || process.env.JAVDEX_SERVER_CONFIG || '/config/server.json'
   if (process.platform !== 'linux' || process.versions.node.split('.')[0] !== '22') throw new Error('托管运行环境需要 Linux 和 Node.js 22')
   if (process.getuid?.() !== 0) throw new Error('管理入口需由容器内 root 运行，业务子进程使用独立非 root UID')
@@ -58,22 +60,15 @@ async function main(): Promise<void> {
   cleanup = () => supervisor.shutdown()
   const deployment = new ProcessUpdateDeployment(config, releases, supervisor)
   const pairing = new ConnectionPairing(config.stateDir)
-  if (command === 'pair' || command === 'pair-recover') {
-    if (!config.publicUrl) throw new Error('请先配置 JAVDEX_PUBLIC_URL 为客户端可访问的 HTTPS 地址')
-    if (command === 'pair-recover' && !config.gateway) throw new Error('一次性接管配对需要启用 JAVDEX_PUBLIC_URL')
-    const { identity } = await deployment.inspect()
-    const certificate = new X509Certificate(fs.readFileSync(path.join(config.stateDir, 'certificate.pem')))
-    if (config.gateway) {
-      const current = releases.directory(releases.current()!)
-      const issued = execFileSync(process.execPath, [path.join(current, 'index.js'), command === 'pair-recover' ? 'recover' : 'pair', '--config', file], {
-        cwd: current, uid: config.businessUid, gid: config.businessGid, encoding: 'utf8', timeout: 15000,
-        env: { ...process.env, NODE_OPTIONS: '', NODE_PATH: '' }, stdio: ['ignore', 'pipe', 'pipe']
-      })
-      process.stdout.write(`${JSON.stringify({ protocolVersion: 2, url: config.gateway.origin, certificateSha256: sha256(certificate.raw), ...pairing.issue(JSON.parse(issued)) })}\n`)
-      return
-    }
-    const token = fs.readFileSync(path.join(config.stateDir, 'token'), 'utf8').trim()
-    process.stdout.write(`${JSON.stringify({ protocolVersion: 1, url: config.publicUrl, certificateSha256: sha256(certificate.raw), token, serverId: identity.serverId, catalogId: identity.catalogId })}\n`)
+  if (command === 'token') {
+    await deployment.inspect()
+    const current = releases.directory(releases.current()!)
+    const business = businessProcessCommand(config, [path.join(current, 'index.js'), 'token', '--config', file])
+    const issued = execFileSync(business.file, business.args, {
+      cwd: current, ...business.credentials, encoding: 'utf8', timeout: 15000,
+      env: { ...process.env, NODE_OPTIONS: '', NODE_PATH: '' }, stdio: ['ignore', 'pipe', 'pipe']
+    })
+    process.stdout.write(`${pairing.issue(JSON.parse(issued)).code}\n`)
     return
   }
   if (command === 'start' && process.env.JAVDEX_MANAGER_LOCK_HELD !== '1') {
@@ -90,26 +85,13 @@ async function main(): Promise<void> {
   }
   const certificateFile = path.join(config.stateDir, 'certificate.pem')
   const privateFile = path.join(config.stateDir, 'private.pem')
-  const tokenFile = path.join(config.stateDir, 'token')
-  const existing = [certificateFile, privateFile, tokenFile].filter(file => fs.existsSync(file)).length
-  if (existing !== 0 && existing !== 3) throw new Error('更新凭据初始化不完整，保留现场；不会覆盖已有配对')
+  const existing = [certificateFile, privateFile].filter(file => fs.existsSync(file)).length
+  if (existing !== 0 && existing !== 2) throw new Error('证书初始化不完整，保留现场；不会覆盖已有配对')
   if (existing === 0) {
     execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:3072', '-sha256', '-nodes', '-days', '3650', '-subj', '/CN=JavdexUpdater', '-keyout', privateFile, '-out', certificateFile], { stdio: 'ignore' })
     fs.chmodSync(privateFile, 0o600)
-    fs.writeFileSync(tokenFile, randomBytes(32).toString('hex'), { flag: 'wx', mode: 0o600 })
   }
-  const token = fs.readFileSync(tokenFile, 'utf8').trim()
-  if (!/^[a-f0-9]{64}$/.test(token)) throw new Error('更新凭据无效')
   await releases.bootstrap()
-  if (command === 'bind' || command === 'recover') {
-    const current = releases.current()!
-    const child = spawn(process.execPath, [path.join(releases.directory(current), 'index.js'), command, '--config', file], {
-      cwd: releases.directory(current), stdio: 'inherit', uid: config.businessUid, gid: config.businessGid,
-      env: { ...process.env, NODE_OPTIONS: '', NODE_PATH: '' }
-    })
-    process.exitCode = await new Promise<number>((resolve, reject) => { child.once('error', reject); child.once('exit', code => resolve(code ?? 1)) })
-    return
-  }
   clearStaleManagedMarker(config)
   const manager = new ServerUpdateManager(config.stateDir, config.releaseKeys, deployment)
   const serverRef: { current?: ReturnType<typeof createServer> } = {}
@@ -133,39 +115,35 @@ async function main(): Promise<void> {
       response.end(JSON.stringify(value))
     }
     const url = new URL(request.url ?? '/', 'https://updater.invalid')
-    if (config.gateway) {
-      if (!gatewayRequestAllowed(request, config.gateway.origin)) { reply(403, { error: '访问地址或来源无效' }); return }
-      if (!url.pathname.startsWith('/update/') && !url.pathname.startsWith('/connect/')) {
-        proxyBusiness(request, response, config.serverUrl, config.healthHost, config.gateway)
-        return
-      }
-      if (url.pathname === '/connect/v1/claim' && request.method === 'POST') {
-        if (request.headers.origin || commandBusy) { reply(409, { error: '启动或更新中，请稍后配对' }); return }
-        try {
-          const input = connectionClaimSchema.parse(await readLimitedJson(request, 4096))
-          const current = releases.descriptor(releases.directory(releases.current()!))
-          if (input.appVersion !== current.version) throw new Error('首次配对需使用与服务端相同版本的桌面客户端')
-          const result = await pairing.claim(input, async (issued, candidate) => {
-            const identity = (await deployment.inspect()).identity
-            if (identity.serverId !== issued.serverId || identity.catalogId !== issued.catalogId) throw new Error('资料库身份已变化，请重新生成配对信息')
-            const claimed = await requestBusiness(new URL('/manage/v1/writer.claim', config.serverUrl), config.healthHost, {
-              appVersion: current.version, body: JSON.stringify({ serverId: issued.serverId, catalogId: issued.catalogId,
-                input: { kind: issued.kind, oneTimeToken: issued.oneTimeToken, candidate } })
-            })
-            const receipt = JSON.parse(claimed.body) as { status?: string; bound?: boolean }
-            if (!claimed.ok || receipt.status !== 'consumed' || !receipt.bound) throw new Error('写入授权未完成或已失效，请重试或生成新的配对信息')
-            return { protocolVersion: 1, url: config.gateway!.origin, certificateSha256: sha256(new X509Certificate(fs.readFileSync(certificateFile)).raw),
-              serverId: identity.serverId, catalogId: identity.catalogId }
+    if (!gatewayRequestAllowed(request, config.gateway.origin)) { reply(403, { error: '访问地址或来源无效' }); return }
+    if (!url.pathname.startsWith('/update/') && !url.pathname.startsWith('/connect/')) {
+      proxyBusiness(request, response, config.serverUrl, config.healthHost, config.gateway)
+      return
+    }
+    if (url.pathname === '/connect/v1/claim' && request.method === 'POST') {
+      if (request.headers.origin || commandBusy) { reply(409, { error: '启动或更新中，请稍后授权' }); return }
+      try {
+        const input = connectionClaimSchema.parse(await readLimitedJson(request, 4096))
+        const current = releases.descriptor(releases.directory(releases.current()!))
+        if (input.appVersion !== current.version) throw new Error('连接需使用与服务端相同版本的桌面客户端')
+        const result = await pairing.claim(input, async (issued, candidate) => {
+          const identity = (await deployment.inspect()).identity
+          if (identity.serverId !== issued.serverId || identity.catalogId !== issued.catalogId) throw new Error('资料库身份已变化，请重新生成配对信息')
+          const claimed = await requestBusiness(new URL('/manage/v1/writer.claim', config.serverUrl), config.healthHost, {
+            appVersion: current.version, body: JSON.stringify({ serverId: issued.serverId, catalogId: issued.catalogId,
+              input: { kind: issued.kind, oneTimeToken: issued.oneTimeToken, candidate } })
           })
-          reply(200, result)
-        } catch (error) { reply(409, { error: error instanceof Error ? error.message : '配对失败' }) }
-        return
-      }
+          const receipt = JSON.parse(claimed.body) as { status?: string; bound?: boolean }
+          if (!claimed.ok || receipt.status !== 'consumed' || !receipt.bound) throw new Error('写入授权未完成或已失效，请重试或生成新的令牌')
+          return { protocolVersion: 1, url: config.gateway.origin, certificateSha256: sha256(new X509Certificate(fs.readFileSync(certificateFile)).raw),
+            serverId: identity.serverId, catalogId: identity.catalogId }
+        })
+        reply(200, result)
+      } catch (error) { reply(409, { error: error instanceof Error ? error.message : '配对失败' }) }
+      return
     }
     const bearer = request.headers.authorization?.match(/^Bearer ([a-f0-9]{64})$/)?.[1]
-    const authorized = bearer && (config.gateway
-      ? authorizeDeviceUpdate(releases.directory(releases.current()!), config.dataDir, bearer)
-      : timingSafeEqual(Buffer.from(bearer), Buffer.from(token)))
+    const authorized = bearer && authorizeDeviceUpdate(releases.directory(releases.current()!), config.dataDir, bearer)
     if (request.headers.origin || !authorized) { reply(401, { error: '更新授权无效' }); return }
     try {
       const upload = /^\/update\/v1\/uploads\/([a-f0-9-]{36})$/.exec(url.pathname)
@@ -178,23 +156,18 @@ async function main(): Promise<void> {
       }
       if (url.pathname !== '/update/v1/control' || request.method !== 'POST') { reply(404, { error: '更新接口不存在' }); return }
       const input = controlSchema.parse(await readLimitedJson(request))
-      if (config.gateway && !authorizeDeviceUpdate(releases.directory(releases.current()!), config.dataDir, bearer!)) { reply(401, { error: '设备授权已撤销' }); return }
+      if (!authorizeDeviceUpdate(releases.directory(releases.current()!), config.dataDir, bearer!)) { reply(401, { error: '设备授权已撤销' }); return }
       if (input.action === 'status') { reply(200, await manager.status()); return }
       if (commandBusy) throw new Error('已有更新请求正在处理')
       commandBusy = true
       try {
         if (input.action === 'check') {
           const status = await manager.status()
-          const release = await fetchJson('https://api.github.com/repos/JavdexLabs/Javdex/releases/latest', 1024 * 1024) as { assets?: Array<{ name: string; browser_download_url: string }> }
-          const platform = status.platform?.replace('/', '-')
-          const asset = release.assets?.find(a => a.name.startsWith('Javdex-server-') && a.name.endsWith(`-${platform}.javdex-update`))
-          if (!asset) throw new Error('当前正式发布尚未提供单文件服务端升级包')
-          const source = new URL(asset.browser_download_url)
-          if (source.protocol !== 'https:' || source.hostname !== 'github.com' || !source.pathname.startsWith('/JavdexLabs/Javdex/releases/download/')) throw new Error('更新清单来源无效')
-          reply(200, await manager.setTarget(await fetchUpdateBundleManifest(source)))
-        } else if (input.action === 'import') reply(200, await manager.beginOffline(input.signed))
-        else if (input.action === 'prepare') reply(200, await manager.prepare())
-        else reply(200, await manager.install(input.jobId))
+          const signed = await discoverUpgrade(status.platform, input.targetVersion, url => fetchJson(url, 1024 * 1024))
+          reply(200, await manager.setTarget(signed, input.targetVersion))
+        } else if (input.action === 'import') reply(200, await manager.beginOffline(input.signed, input.targetVersion))
+        else if (input.action === 'prepare') reply(200, await manager.prepare(input.targetVersion))
+        else reply(200, await manager.install(input.jobId, input.targetVersion))
       } finally { commandBusy = false }
     } catch (error) { reply(409, { error: error instanceof Error ? error.message : '更新请求失败' }) }
   }

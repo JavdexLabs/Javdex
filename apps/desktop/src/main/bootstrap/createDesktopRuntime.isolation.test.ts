@@ -1,7 +1,8 @@
 import { afterEach, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
-import { createServer as createHttpServer, type Server } from 'node:http'
+import { createServer as createHttpServer, type Server } from 'node:https'
+import { testTls } from '../../../../../scripts/test-tls'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -9,7 +10,7 @@ import { fileURLToPath } from 'node:url'
 import { closeDatabase, getDb, initDatabaseAtPath } from '@library/db/database'
 import { clearAgentRunDatabase } from '../agent-platform/agentRunStore'
 import {
-  createDesktopRuntime,
+  createDesktopRuntime as createRuntime,
   localCatalogDatabasePath,
   workStorePath
 } from './createDesktopRuntime'
@@ -23,6 +24,13 @@ import { loadCatalogActressAvatarCropSnapshot } from '../application/catalogActr
 import { createPlaylistImportModule } from '../services/playlistImport/playlistImportModule'
 import { createMemoryPlaylistImportCatalogLookup } from '../services/playlistImport/playlistImportCatalogLookup'
 import { ipcMutation } from '../application/mutationContext'
+
+function createDesktopRuntime(...args: Parameters<typeof createRuntime>) {
+  return createRuntime(args[0], args[1], {
+    detectDefaultPlayer: async () => ({ status: 'unavailable', message: 'No system association in this test' }),
+    ...args[2], verifyCertificate: async () => {}
+  })
+}
 
 const thisFile = fileURLToPath(import.meta.url)
 
@@ -272,7 +280,7 @@ if (process.env.JAVDEX_D03_CHILD === '1') {
   })
 
   function listenHandshake(appVersion: string, writerEpoch = 1): Promise<string> {
-    handshakeServer = createHttpServer((_request, response) => {
+    handshakeServer = createHttpServer(testTls(), (_request, response) => {
       response.setHeader('Content-Type', 'application/json')
       response.end(
         JSON.stringify({
@@ -302,7 +310,7 @@ if (process.env.JAVDEX_D03_CHILD === '1') {
           reject(new Error('port'))
           return
         }
-        resolve(`http://127.0.0.1:${address.port}`)
+        resolve(`https://127.0.0.1:${address.port}`)
       })
     })
   }
@@ -501,7 +509,7 @@ if (process.env.JAVDEX_D03_CHILD === '1') {
       const cases: Array<{ name: string; url: () => Promise<string>; appVersion: string; state: string }> = [
         {
           name: 'disconnected',
-          url: async () => 'http://127.0.0.1:1',
+          url: async () => 'https://127.0.0.1:1',
           appVersion: '0.7.0',
           state: 'disconnected'
         },
@@ -666,7 +674,7 @@ if (process.env.JAVDEX_D03_CHILD === '1') {
       closeDatabase()
 
       const settings = createThisComputerSettingsStore(thisComputerSettingsPath(root))
-      await settings.write({ mode: 'remote', remoteBaseUrl: 'http://127.0.0.1:1' })
+      await settings.write({ mode: 'remote', remoteBaseUrl: 'https://127.0.0.1:1' })
       const blocked = await createDesktopRuntime(root, '0.7.0')
       try {
         assert.equal(blocked.backend.session().state, 'modePrepRequired')
@@ -760,7 +768,7 @@ if (process.env.JAVDEX_D03_CHILD === '1') {
       closeDatabase()
 
       const settings = createThisComputerSettingsStore(thisComputerSettingsPath(root))
-      await settings.write({ mode: 'remote', remoteBaseUrl: 'http://127.0.0.1:1' })
+      await settings.write({ mode: 'remote', remoteBaseUrl: 'https://127.0.0.1:1' })
       const blocked = await createDesktopRuntime(root, '0.7.0')
       try {
         assert.equal(blocked.backend.session().state, 'modePrepRequired')

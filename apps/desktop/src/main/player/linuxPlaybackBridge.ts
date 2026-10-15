@@ -3,7 +3,7 @@ import type { NativePlaybackState } from './nativePlayback'
 
 interface Bounds { x: number; y: number; width: number; height: number; scale?: number }
 const LIMIT = 1024 * 1024
-const actionKinds = new Set(['toggle-pause', 'toggle-mute', 'expand', 'dock', 'fullscreen', 'stop', 'seek', 'seek-relative', 'volume', 'volume-relative', 'focus-forward', 'focus-backward', 'history-back', 'history-forward'])
+const actionKinds = new Set(['toggle-pause', 'toggle-mute', 'expand', 'dock', 'fullscreen', 'stop', 'seek', 'seek-relative', 'volume', 'volume-relative', 'focus-forward', 'focus-backward', 'history-back', 'history-forward', 'escape'])
 function validAction(value: unknown): boolean {
   if (!value || typeof value !== 'object') return false
   const action = value as { kind?: unknown; value?: unknown }

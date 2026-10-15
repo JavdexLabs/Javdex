@@ -58,7 +58,7 @@ function dispatch(fields) {
     switch (fields[1]) {
       case 'actions':
         process.stdout.write(JSON.stringify({ alive: true, loadedFiles: process.pid, 'time-pos': 10, actions: [{ kind: 'toggle-pause' }] }) + '\\n'
-          + JSON.stringify({ alive: true, loadedFiles: process.pid, 'time-pos': 11, actions: [{ kind: 'seek-relative', value: 5 }] }) + '\\n'); break;
+          + JSON.stringify({ alive: true, loadedFiles: process.pid, 'time-pos': 11, actions: [{ kind: 'seek-relative', value: 5 }, { kind: 'escape' }] }) + '\\n'); break;
       case 'invalid-json': process.stdout.write('not json\\n'); break;
       case 'invalid-state': emit({ alive: 'yes' }); break;
       case 'invalid-actions': emit({ alive: true, actions: 'toggle-pause' }); break;
@@ -158,7 +158,7 @@ test('Linux bridge exchanges real pipe messages, caches state, drains actions an
   for (const kind of ['bounds', 'visible', 'presentation']) assert.equal(f.entries().filter(entry => entry.fields[0] === kind).length, 1)
   f.bridge.command(['actions'])
   const state = await until(() => f.bridge.state(), value => value['time-pos'] === 11, 'actions did not arrive')
-  assert.deepEqual(state.actions, [{ kind: 'toggle-pause' }, { kind: 'seek-relative', value: 5 }])
+  assert.deepEqual(state.actions, [{ kind: 'toggle-pause' }, { kind: 'seek-relative', value: 5 }, { kind: 'escape' }])
   assert.deepEqual(f.bridge.state().actions, [])
   assert.equal(f.bridge.state()['time-pos'], 11)
   f.bridge.render()

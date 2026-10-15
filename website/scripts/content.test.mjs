@@ -29,6 +29,6 @@ test('public documents are explicit and do not include engineering archives', as
   assert.equal(entries.some(file => /(?:^|\/)(reviews|performance|adr|archive)(?:\/|$)/.test(file)), false);
   for (const file of entries.filter(file => file.endsWith('.md'))) {
     const body = await readFile(path.join(content, file), 'utf8');
-    assert.match(body, /^---\ntitle: /, `Missing title: ${file}`);
+    assert.match(body, /^---\r?\ntitle: /, `Missing title: ${file}`);
   }
 });

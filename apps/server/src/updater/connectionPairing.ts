@@ -33,7 +33,11 @@ export class ConnectionPairing {
       } else if (this.now() >= grant.expiresAt) throw new Error('配对信息已过期，请重新生成')
       // Persist the candidate BEFORE touching the independent writer transaction.
       writeJsonAtomic(this.file, { ...grant, candidate })
-      return await consume(grant.issued, candidate)
+      // appVersion belongs to the connection claim, not the strict writer candidate.
+      return await consume(grant.issued, {
+        claimId: candidate.claimId, secretDigest: candidate.secretDigest,
+        ...(candidate.name === undefined ? {} : { name: candidate.name })
+      })
     } finally { this.busy = false }
   }
   private digest(code: string): string { return createHash('sha256').update(code).digest('hex') }

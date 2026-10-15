@@ -273,6 +273,11 @@ jobs:
           JAVDEX_SERVER_UPDATE_KEY_ID: ${{ vars.JAVDEX_SERVER_UPDATE_KEY_ID }}
       - run: npm run server:test
       - run: npm run server:updater:test
+      - name: Verify supplementary business groups under Linux root
+        run: |
+          set -euo pipefail
+          setpriv --version
+          sudo "$(command -v node)" --require ./scripts/register-test-paths.cjs --import tsx --test apps/server/src/updater/businessProcess.test.ts
       - name: Verify single-container updates before publishing this architecture
         run: npm run server:updater:smoke
       - run: npm run server:smoke

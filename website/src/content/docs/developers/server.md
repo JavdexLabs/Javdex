@@ -1,6 +1,6 @@
 ---
 title: "服务端源码构建与进阶管理"
-description: "Javdex 0.9.0-beta.4 · 服务端源码构建与进阶管理"
+description: "Javdex 0.9.0-beta.5 · 服务端源码构建与进阶管理"
 ---
 
 从仓库根目录构建：
@@ -32,21 +32,18 @@ npm run server:build
 
 环境覆盖项为 `JAVDEX_DATA_DIR`、`JAVDEX_IMAGES_DIR`、`JAVDEX_STATIC_ROOT`、`JAVDEX_LISTEN_HOST`、`JAVDEX_LISTEN_PORT`、`JAVDEX_ACCESS_HOSTS`（逗号分隔）、`JAVDEX_WEB_USERNAME`、`JAVDEX_WEB_PASSWORD`。配置文件仍为必需；字段及默认值以 [config.ts](https://github.com/JavdexLabs/Javdex/blob/main/apps/server/src/config.ts) 为准。日常部署使用固定端口；端口 0 仅用于需要系统分配端口的场景。
 
-## 启动与认主
+## 启动与设备授权
 
-配置文件经 `--config` 或 `JAVDEX_SERVER_CONFIG` 提供。官方托管容器由 Compose 启动，认主和恢复应执行程序卷中当前版本的业务 CLI：
+配置文件经 `--config` 或 `JAVDEX_SERVER_CONFIG` 提供。官方托管容器由 Compose 启动，管理员通过固定管理入口生成一次性令牌；管理器会使用程序卷中当前版本的业务 CLI：
 
 ```bash
-docker compose -f docker-compose.example.yml exec javdex node /opt/javdex-manager/index.js bind --config /config/server.json
-docker compose -f docker-compose.example.yml exec javdex node /opt/javdex-manager/index.js recover --config /config/server.json
+docker compose -f docker-compose.example.yml exec javdex node /opt/javdex-manager/index.js token --config /config/server.json
 ```
 
 不要直接运行镜像内 `/app/index.js`：它是初始化种子，不一定是当前业务版本。独立 Node 源码部署不含托管更新；运行构建产物时使用 `node /部署目录/index.js`，安装了 `javdex-server` 命令时使用下列形式：
 
 ```bash
 javdex-server start --config /etc/javdex/server.json
-javdex-server bind --config /etc/javdex/server.json
-javdex-server recover --config /etc/javdex/server.json
 ```
 
 统一 HTTPS 入口仅提供管理器 `token` 命令：尚未认主时首次授权，其后新增一台可信设备并保留现有设备。命令输出一次性令牌，桌面将地址与令牌提交 `/connect/v1/claim`，成功后保存独立设备秘密。已移除 `bind`、`recover`、`pair` 和 `pair-recover` CLI；遗失设备由新授权电脑在可信设备列表逐台撤销。首次自动保存证书，合法公开证书按系统信任及主机名校验后自动更新，自签名证书指纹变化需在发送凭据前取得用户确认。网页 Cookie 不授权管理或更新接口。
@@ -71,11 +68,11 @@ javdex-server recover --config /etc/javdex/server.json
 
 ## 更新与恢复限制
 
-0.9.0-beta.4 使用单容器内置更新管理器，提供正式版在线更新与完整签名包离线上传。0.8.0 镜像没有这项能力：首次升级须正常停服并完整备份 `dataDir`、`imagesDir`、部署配置及旧镜像，再采用 0.9.0-beta.4 基础镜像、增加独立 `/program` 卷和更新端口；新卷首次启动直接采用镜像中的业务程序并迁移数据库，不会先为这次部署变更生成托管升级快照。具体步骤见 [部署与首次采用](/Javdex/server/adoption/)。
+当前源码使用单容器内置更新管理器，提供与客户端完全同版本（含预发布）的在线升级与完整签名包离线上传。0.8.0 镜像没有这项能力：首次升级须正常停服并完整备份 `dataDir`、`imagesDir`、部署配置及旧镜像，再采用当前版本基础镜像、增加独立 `/program` 卷并配置统一 HTTPS 入口；新卷首次启动直接采用镜像中的业务程序并迁移数据库，不生成升级备份。具体步骤见 [部署与首次采用](/Javdex/server/adoption/)。
 
-已有托管程序卷时，更改 `.env` 的 `JAVDEX_VERSION` 并 `pull` / `up -d` 会更换基础镜像；采用 Beta.4 管理器后，镜像业务版本更高时还会自动执行停服备份、升级、验证及恢复事务，同版或更旧时保留当前业务。业务升级文件仍可独立安装，但不能更新管理器。默认在线检查只读取正式 Release，预发布需显式离线导入；同版本、降级、错误架构、未知签名和不支持的 schema 路径均不能绕过。
+已有托管程序卷时，更改 `.env` 的 `JAVDEX_VERSION` 并 `pull` / `up -d` 会更换基础镜像；镜像业务版本更高时还会自动执行停服、升级与验证，同版或更旧时保留当前业务。业务升级文件仍可独立安装，但不能更新管理器。服务端落后时，客户端在线检查固定读取自身版本的 Release；目标不存在时明确失败，不改选其他版本。同版本重装、降级、错误架构、未知签名和不支持的 schema 路径均不能绕过。
 
-保留原数据与程序卷，不要执行 `docker compose down -v`。schema 21 不能交给 0.8.0 或其他旧版应用；回退需恢复升级前完整备份及匹配程序，不可手工降低 `user_version`、修改模型文档版本或清空程序卷强制切换。未发布或不完整的开发 schema 快照会被拒绝，应恢复受支持的升级前备份。提交前托管更新失败可自动恢复，提交后不自动覆盖新写入；出现“需要人工恢复”时保留现场，按 [安装、验证和恢复](/Javdex/server/recovery/) 处理。
+保留原数据与程序卷，不要执行 `docker compose down -v`。schema 21 不能交给 0.8.0 或其他旧版应用；回退需恢复升级前完整备份及匹配程序，不可手工降低 `user_version`、修改模型文档版本或清空程序卷强制切换。未发布或不完整的开发 schema 快照会被拒绝，应恢复受支持的升级前备份。升级本身不复制资料库或图片；仅在安装尚未开始且原部署未变时重启原业务。安装或验证失败、中断时保持维护状态并要求人工恢复，提交后只继续激活，不自动覆盖新写入。保留现场并按 [安装、验证和恢复](/Javdex/server/recovery/) 处理。
 
 服务端备份不包含桌面采集草稿和运行记录，后者在桌面 `desktop-work.db` 中，桌面数据目录也需单独备份。资料库维护期间不能领取写入凭据。
 

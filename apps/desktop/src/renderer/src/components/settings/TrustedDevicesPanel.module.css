@@ -129,8 +129,7 @@
   .client {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr);
-    column-gap: var(--settings-gap-sm, 8px);
-    row-gap: calc(var(--settings-gap-sm, 8px) / 2);
+    gap: calc(var(--settings-gap-sm, 8px) / 2) var(--settings-gap-sm, 8px);
   }
 
   .clientIcon {

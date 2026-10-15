@@ -88,7 +88,7 @@
   flex: 1 1 auto;
 }
 
-.ready strong {
+.ready > div > strong {
   color: var(--text-primary);
 }
 
@@ -121,7 +121,7 @@
   list-style: none;
 }
 
-.stages li {
+.stages > li {
   display: flex;
   flex: 1 1 auto;
   align-items: center;
@@ -130,7 +130,7 @@
   font-size: var(--settings-fs-secondary, 12px);
 }
 
-.stages li[data-state='done'], .stages li[data-state='current'] {
+.stages > li[data-state='done'], .stages > li[data-state='current'] {
   color: var(--text-accent);
 }
 
@@ -143,7 +143,7 @@
   font-size: var(--settings-fs-secondary, 12px);
 }
 
-.technical dd {
+.technical > dd {
   margin: 0;
   overflow-wrap: anywhere;
 }

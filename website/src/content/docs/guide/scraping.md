@@ -1,6 +1,6 @@
 ---
 title: "刮削：补齐影片和演员资料"
-description: "Javdex 0.9.0-beta.4 · 补齐影片和演员资料"
+description: "Javdex 0.9.0-beta.5 · 补齐影片和演员资料"
 ---
 
 ## 选择刮削来源

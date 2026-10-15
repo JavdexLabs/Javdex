@@ -1,6 +1,6 @@
 {
   "name": "@javdex/http",
-  "version": "0.9.0-beta.4",
+  "version": "0.9.0-beta.5",
   "private": true,
   "license": "GPL-3.0-or-later",
   "description": "Runtime-neutral LAN browser HTTP, pairing/auth storage, browse DTO projection, static file serving, manage upload/asset GET, chunked backup transfer, and original-file play Range streams. Desktop keeps webAccess lifecycle; management HTTP is registered separately by the server host.",

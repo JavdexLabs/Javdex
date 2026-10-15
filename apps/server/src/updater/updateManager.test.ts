@@ -47,6 +47,30 @@ function fixture(): { dir: string; deployment: FixtureDeployment; manager: Serve
 }
 const image: DeploymentRelease = { version: target.version, build: target.build, platform: target.platform,
   runtime: target.runtime, sourceSchemas: target.sourceSchemas, targetSchema: target.targetSchema, archive: { sha256: target.archive.sha256 } }
+
+for (const phase of ['restored', 'backup', 'restoring']) test(`published updater journal ${phase} preserves the program volume on manager replacement`, async () => {
+  const f = fixture()
+  const id = randomUUID()
+  const jobDir = path.join(f.dir, 'jobs', id)
+  fs.mkdirSync(jobDir)
+  const snapshot = path.join(jobDir, 'legacy-snapshot')
+  fs.writeFileSync(snapshot, 'administrator recovery material')
+  const saved = { id, version: target.version, phase, receivedBytes: archive.length, totalBytes: archive.length,
+    updatedAt: new Date().toISOString(), message: null, signed: signed(), offline: false,
+    deployment: { ...f.deployment.current, identity: { ...f.deployment.current.identity, estimatedBytes: 1000 } } }
+  fs.writeFileSync(path.join(f.dir, 'current.json'), JSON.stringify(saved))
+  fs.writeFileSync(path.join(jobDir, 'job.json'), JSON.stringify(saved))
+  const restarted = new ServerUpdateManager(f.dir, trusted, f.deployment)
+  await restarted.recover()
+  assert.equal((await restarted.status(false)).job?.phase, phase === 'restored' ? 'failed' : 'recoveryRequired')
+  assert.equal(restarted.recoveryRequired, phase !== 'restored')
+  assert.deepEqual(f.deployment.events, [], 'no old snapshot restore, migration or automatic restart')
+  assert.equal(fs.readFileSync(snapshot, 'utf8'), 'administrator recovery material')
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(f.dir, 'current.json'), 'utf8')), saved, 'read normalization does not overwrite the old journal')
+  if (phase === 'restored') await restarted.setTarget(signed())
+  else await assert.rejects(restarted.setTarget(signed()), /人工恢复/)
+})
+
 test('image upgrade installs and verifies without copying library data', async () => {
   const f = fixture()
   await f.manager.installImage(image, 100, async () => { f.deployment.events.push('image') })
@@ -113,6 +137,7 @@ test('single-file offline upload resumes inner archive offsets and still require
   let state = await f.manager.beginOffline(selected)
   state = await f.manager.upload(state.job!.id, 0, (async function* () { yield archive.subarray(0, 7) })())
   assert.equal(state.job?.receivedBytes, 7)
+  assert.equal(state.job?.resumableUpload, true)
   const offsets: number[] = []
   const client = {
     import: (value: SignedServerUpdate) => f.manager.beginOffline(value),

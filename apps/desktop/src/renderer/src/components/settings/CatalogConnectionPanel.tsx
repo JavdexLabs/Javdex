@@ -52,6 +52,7 @@ export default function CatalogConnectionPanel(): JSX.Element {
   const playerProgramHintId = useId()
   const playerPathId = useId()
   const serverAddressId = useId()
+  const connectionFeedbackId = useId()
   const [savedSettings, setSavedSettings] = useState<ThisComputerSettings | null>(null)
   const [connecting, setConnecting] = useState(false)
   const [authorizing, setAuthorizing] = useState(false)
@@ -61,6 +62,7 @@ export default function CatalogConnectionPanel(): JSX.Element {
   const [readingConnection, setReadingConnection] = useState(Boolean(api.serverUpdate))
   const [connectionReadError, setConnectionReadError] = useState<string | null>(null)
   const [forgetting, setForgetting] = useState(false)
+  const [confirmForget, setConfirmForget] = useState(false)
   const connectionGeneration = useRef(0)
   const connectionAction = useRef(false)
   const serverAddressInput = useRef<HTMLInputElement>(null)
@@ -206,12 +208,14 @@ export default function CatalogConnectionPanel(): JSX.Element {
       setConnection(null)
       setConnectionSaved(false)
       setConnectionForgotten(true)
+      setConfirmForget(false)
       probeGeneration.current++
       setProbing(false)
       setProbeResult(null)
       focusAddress.current = true
     } catch (reason) {
       if (generation === connectionGeneration.current) setConnectionError((reason as Error).message)
+      throw reason
     } finally {
       connectionAction.current = false
       if (generation === connectionGeneration.current) setForgetting(false)
@@ -425,7 +429,7 @@ export default function CatalogConnectionPanel(): JSX.Element {
               <label className={styles.connectionLabel} htmlFor={serverAddressId}>服务器地址</label>
               <div className={styles.connectionControls}>
                 <div className={styles.urlInputRow}>
-                  <TextInput id={serverAddressId} ref={serverAddressInput} density="workspace" className={styles.urlInput}
+                  <TextInput id={serverAddressId} aria-describedby={connectionFeedbackId} ref={serverAddressInput} density="workspace" className={styles.urlInput}
                     value={draft.remoteBaseUrl} disabled={connectionBusy} placeholder="https://192.168.1.10:8096" spellCheck={false}
                     onChange={event => {
                       probeGeneration.current++
@@ -437,13 +441,13 @@ export default function CatalogConnectionPanel(): JSX.Element {
                   <Button aria-busy={probing} disabled={connectionBusy || probing || !draft.remoteBaseUrl.trim()}
                     onClick={() => void testConnection()}>测试连接</Button>
                 </div>
-                {probing || probeResult ? <div className={styles.probeResult}>
-                  <span className={styles.probeSummary} role="status" tabIndex={probeResult ? 0 : undefined}
-                    title={probing ? '正在测试当前输入的服务器地址…' : probeResult?.message}
-                    data-tone={probeResult?.status === 'reachable' ? 'success' : probeResult ? 'warning' : undefined}>
-                    {probing ? '正在测试当前输入的服务器地址…' : probeResult?.status === 'reachable' ? '服务可达，版本匹配' : probeResult?.message}
-                  </span>
-                </div> : !matchingConnection ? <p className={styles.connectionNote}>首次自动接受证书；自签名证书变化时需确认，合法公开证书无需确认。</p> : null}
+                <div id={connectionFeedbackId}>
+                  <SettingsFeedback
+                    message={probing ? '正在测试当前输入的服务器地址…' : probeResult ? probeResult.status === 'reachable' ? '服务可达，版本匹配' : probeResult.message : matchingConnection || targetAuthorized ? '测试当前输入的服务器地址。' : '首次自动接受证书；自签名证书变化时需确认，合法公开证书无需确认。'}
+                    error={Boolean(probeResult && probeResult.status !== 'reachable')}
+                    detail={probeResult ? [probeResult.message, `服务器版本：${probeResult.serverVersion ?? '—'}`, `服务身份：${probeResult.serverId ?? '—'}`, `资料库身份：${probeResult.catalogId ?? '—'}`].join('\n') : null}
+                  />
+                </div>
                 {activeTarget && session.state === 'disconnected' ? <div className={styles.sessionActions}>
                   <Button size="sm" busy={sessionBusy} disabled={sessionBusy || connectionBusy} onClick={() => {
                     setSessionBusy(true)
@@ -460,7 +464,7 @@ export default function CatalogConnectionPanel(): JSX.Element {
                 <div className={styles.savedAuthorization}>
                   <p className={styles.authorizationCopy}>{matchingConnection ? '已保存此电脑的管理授权。' : '此电脑当前已获得管理授权。'}</p>
                   {matchingConnection ? <Button variant="danger" busy={forgetting} disabled={connectionBusy || savingPlayer}
-                    onClick={() => void forgetConnection()}>取消配对</Button> : null}
+                    onClick={() => setConfirmForget(true)}>取消配对</Button> : null}
                 </div>
                 {matchingConnection ? <p className={styles.connectionNote}>取消配对仅移除此电脑的授权，重启后生效；服务端资料保留。</p> : null}
               </div>
@@ -504,6 +508,10 @@ export default function CatalogConnectionPanel(): JSX.Element {
         ) : null}
       </SettingsCard>
       <TrustedDevicesPanel />
+      {confirmForget && matchingConnection ? <Modal title="取消此电脑的配对" danger confirmText="取消配对" onCancel={() => setConfirmForget(false)} onConfirm={forgetConnection}>
+        <p>移除此电脑保存的连接和设备凭据，重启后停止使用原授权。服务端资料与其他设备不受影响。</p>
+        <p>再次连接需要管理员生成新的一次性令牌。</p>
+      </Modal> : null}
       <ServerUpdatePanel />
       <SettingsCard as="section" aria-label="播放器" title="播放器" className={styles.card}
         hint="仅影响此电脑；保存后从下一次播放生效。"

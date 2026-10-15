@@ -28,6 +28,7 @@ it('keeps mode choices visible and replaces pairing inputs with persisted connec
   const previousComputer = api.thisComputer
   const previousUpdate = api.serverUpdate
   const { default: Panel } = await import('./CatalogConnectionPanel')
+  const { default: Modal } = await import('../Modal')
   const { default: SettingsFormActions } = await import('./SettingsFormActions')
   let settings = { mode: 'local', remoteBaseUrl: null, playerPath: null } as ThisComputerSettings
   const target: ServerConnectionSummary = { remoteBaseUrl: 'https://example.test', serverId: 'server', catalogId: 'catalog' }
@@ -154,12 +155,19 @@ it('keeps mode choices visible and replaces pairing inputs with persisted connec
     session = { ...session, state: 'available', serverId: target.serverId, catalogId: 'restored-catalog' }
     await mount()
     assert.match(textOf(tree!.root), /已授权/, 'a restored catalog on the authenticated server retains device authorization')
+    const beforeForgetting = actions.filter(action => action === 'forgetConnection').length
     await act(async () => { button('取消配对').props.onClick() })
+    assert.equal(actions.filter(action => action === 'forgetConnection').length, beforeForgetting, 'opening confirmation never deletes credentials')
+    assert.equal(tree!.root.findByType(Modal).props.title, '取消此电脑的配对')
+    act(() => tree!.root.findByType(Modal).props.onCancel())
+    assert.equal(actions.filter(action => action === 'forgetConnection').length, beforeForgetting, 'cancelling keeps credentials')
+    await act(async () => { button('取消配对').props.onClick() })
+    await act(async () => { await assert.rejects(tree!.root.findByType(Modal).props.onConfirm(), /secure storage unavailable/) })
     assert.ok(button('取消配对'), 'failed cancellation keeps the paired summary')
     assert.equal(inputs().length, 0)
     assert.match(textOf(tree!.root), /服务端配对操作失败/)
     failForget = false
-    await act(async () => { button('取消配对').props.onClick() })
+    await act(async () => { await tree!.root.findByType(Modal).props.onConfirm() })
     assert.equal(inputs().length, 1)
     assert.equal(inputs()[0].props.value, '', 'one-time pairing input is cleared')
     assert.equal(focusedPairings, 1, 'successful cancellation returns focus to the server address')
@@ -550,6 +558,7 @@ it('saves remote-to-local mode without leaving a dirty draft or losing the serve
   let router: ReturnType<typeof createMemoryRouter> | undefined
   try {
     const { default: CatalogConnectionPanel } = await import('./CatalogConnectionPanel')
+    const { default: Feedback } = await import('./SettingsFeedback')
     const { api } = await import('../../api')
     api.thisComputer = window.api.thisComputer
     const session: DesktopSession = {
@@ -592,10 +601,13 @@ it('saves remote-to-local mode without leaving a dirty draft or losing the serve
     assert.match(textOf(renderer!.root), /当前使用：远程资料库.*重启后使用：本地资料库/)
     act(() => modeChoice('remote').props.onClick())
     assert.equal(renderer!.root.findByProps({ placeholder: 'https://192.168.1.10:8096' }).props.value, serverUrl)
+    assert.ok(renderer!.root.findAllByType(Feedback).some(node => node.props.message === '测试当前输入的服务器地址。'), 'connection feedback reserves its row before the first test')
     const probe = renderer!.root.findAllByType('button').find((button) => renderedText(button) === '测试连接')!
     await act(async () => { probe.props.onClick() })
     assert.match(textOf(renderer!.root), /服务可达，版本匹配/)
-    assert.equal(renderer!.root.findAllByType('button').filter(button => textOf(button) === '查看详情' && !button.props['aria-hidden']).length, 0)
+    assert.equal(renderer!.root.findAllByType('button').filter(button => textOf(button) === '查看详情' && !button.props['aria-hidden']).length, 1)
+    const feedback = renderer!.root.findAllByType(Feedback).find(node => node.props.message === '服务可达，版本匹配')!
+    assert.match(feedback.props.detail, /server[\s\S]*catalog/)
     delayProbe = true
     await act(async () => { probe.props.onClick() })
     assert.equal(textOf(probe), '测试连接')

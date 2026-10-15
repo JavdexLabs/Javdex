@@ -1,6 +1,6 @@
 ---
 title: "内置播放与外部播放器"
-description: "Javdex 0.9.0-beta.4 · 内置播放与外部播放器"
+description: "Javdex 0.9.0-beta.5 · 内置播放与外部播放器"
 ---
 
 ## 选择默认播放方式

@@ -72,6 +72,8 @@ export interface ServerUpdateJob {
   totalBytes: number
   updatedAt: string
   message: string | null
+  /** A paused offline transfer can be resumed by selecting the same signed file. */
+  resumableUpload?: boolean
 }
 export interface ServerUpdateSnapshot {
   protocolVersion: 1

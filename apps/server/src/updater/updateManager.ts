@@ -4,7 +4,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import type { IncomingMessage } from 'node:http'
 import { z } from 'zod'
 import semver from 'semver'
-import { UPDATE_PHASES, signedUpdateSchema, updateManifestSchema, type SignedServerUpdate, type ServerUpdateManifest, type ServerUpdateSnapshot, type ServerUpdateJob } from '@shared/serverUpdateTypes'
+import { UPDATE_PHASES, signedUpdateSchema, updateManifestSchema, type SignedServerUpdate, type ServerUpdateManifest, type ServerUpdateSnapshot, type ServerUpdateJob, type ServerUpdatePhase } from '@shared/serverUpdateTypes'
 import type { DeploymentRelease, DeploymentSnapshot, UpdateDeployment } from './deployment'
 import { checkUpdateTarget, verifyUpdateManifest } from './manifest'
 import { readJsonIfExists, syncDirectory, writeJsonAtomic } from './files'
@@ -12,15 +12,24 @@ import { readJsonIfExists, syncDirectory, writeJsonAtomic } from './files'
 const imageReleaseSchema = updateManifestSchema.pick({ version: true, build: true, platform: true, runtime: true, targetSchema: true, sourceSchemas: true })
   .extend({ archive: updateManifestSchema.shape.archive.pick({ sha256: true }) }).strict()
 const jobSchema = z.object({
-  id: z.uuid(), version: z.string(), phase: z.enum(UPDATE_PHASES),
+  id: z.uuid(), version: z.string(), phase: z.enum([...UPDATE_PHASES, 'backup', 'restoring', 'restored']),
   receivedBytes: z.number().int().nonnegative(), totalBytes: z.number().int().positive(), updatedAt: z.iso.datetime(), message: z.string().nullable(),
   signed: signedUpdateSchema.nullable(),
   image: imageReleaseSchema.optional(),
   deployment: z.unknown().nullable(),
   offline: z.boolean()
 }).strict().refine(job => Boolean(job.signed) !== Boolean(job.image), '更新来源必须唯一')
-type StoredJob = z.infer<typeof jobSchema> & { deployment: DeploymentSnapshot | null }
+type StoredJob = Omit<z.infer<typeof jobSchema>, 'phase' | 'deployment'> & { phase: ServerUpdatePhase; deployment: DeploymentSnapshot | null }
 const terminal = new Set(['complete', 'failed'])
+
+function readCurrentJob(value: unknown): StoredJob {
+  const saved = jobSchema.parse(value)
+  // Read published journals without resuming the removed snapshot workflow.
+  // Leave the original journal and recovery materials untouched on disk.
+  if (saved.phase === 'restored') return { ...saved, phase: 'failed', message: '旧版升级已回退，原服务保留；可重新检查升级' } as StoredJob
+  if (saved.phase === 'backup' || saved.phase === 'restoring') return { ...saved, phase: 'recoveryRequired', message: '旧版升级在备份或恢复期间中断，请保留程序卷及资料并人工核对' } as StoredJob
+  return saved as StoredJob
+}
 
 export class ServerUpdateManager {
   private busy = false
@@ -33,7 +42,7 @@ export class ServerUpdateManager {
   constructor(private readonly directory: string, private readonly keys: Record<string, string>, private readonly deployment: UpdateDeployment) {
     fs.mkdirSync(path.join(directory, 'jobs'), { recursive: true, mode: 0o700 })
     const saved = readJsonIfExists(path.join(directory, 'current.json'))
-    if (saved) this.job = jobSchema.parse(saved) as StoredJob
+    if (saved) this.job = readCurrentJob(saved)
     if (this.job?.phase === 'preparing' && this.job.offline) {
       const archive = path.join(directory, 'jobs', this.job.id, 'release.tar.gz')
       if (fs.existsSync(archive)) {
@@ -59,7 +68,7 @@ export class ServerUpdateManager {
       // uncertain. Read the authoritative record before deciding to roll back.
       try {
         const saved = readJsonIfExists(current)
-        this.job = saved ? jobSchema.parse(saved) as StoredJob : null
+        this.job = saved ? readCurrentJob(saved) : null
       } catch { this.job = { ...next, phase: 'recoveryRequired', message: '更新记录无法确认，请保留现场并人工核对' } }
       throw error
     }
@@ -126,7 +135,8 @@ export class ServerUpdateManager {
     } catch { /* Expired metadata is not an installable target. */ }
     const job: ServerUpdateJob | null = this.job ? {
       id: this.job.id, version: this.job.version, phase: this.job.phase, receivedBytes: this.job.receivedBytes,
-      totalBytes: this.job.totalBytes, updatedAt: this.job.updatedAt, message: this.job.message
+      totalBytes: this.job.totalBytes, updatedAt: this.job.updatedAt, message: this.job.message,
+      resumableUpload: this.job.phase === 'preparing' && this.job.offline
     } : null
     return { protocolVersion: 1, paired: true, serverId: identity?.identity.serverId ?? null, catalogId: identity?.identity.catalogId ?? null, currentVersion: identity?.identity.version ?? null, platform: identity?.identity.platform ?? null, runtime: identity?.identity.runtime ?? null, targetVersion, job }
   }

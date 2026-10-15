@@ -32,3 +32,12 @@ test('public documents are explicit and do not include engineering archives', as
     assert.match(body, /^---\r?\ntitle: /, `Missing title: ${file}`);
   }
 });
+
+test('server developer instructions use the current authorization and upgrade contracts', async () => {
+  const body = await readFile(path.join(content, 'developers/server.md'), 'utf8');
+  const commands = [...body.matchAll(/```(?:bash|sh)\r?\n([\s\S]*?)```/g)].map(match => match[1]).join('\n');
+  assert.doesNotMatch(commands, /(?:index\.js|javdex-server)\s+(?:bind|recover|pair|pair-recover)\b/);
+  assert.match(commands, /\/opt\/javdex-manager\/index\.js token --config/);
+  assert.doesNotMatch(body, /增加独立[^\n]*更新端口|默认在线检查只读取正式 Release|提交前托管更新失败可自动恢复|自动执行停服备份/);
+  assert.match(body, /安装[\s\S]*人工恢复/);
+});

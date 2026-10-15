@@ -24,6 +24,14 @@ try {
   await card.getByText('请先在资料库连接中连接此服务端。', { exact: true }).waitFor()
   assert.equal(await card.getByRole('textbox').count(), 0)
   assert.equal(await card.getByRole('button', { name: '在线升级', exact: true }).isDisabled(), true)
+  for (const state of ['historical', 'partial']) {
+    await page.goto(`${url}?${state}=1`)
+    const upload = card.getByRole('button', { name: '上传离线包升级', exact: true })
+    await upload.waitFor()
+    assert.equal(await upload.isEnabled(), true, `${state} state keeps the matching offline-file entry`)
+    await upload.click()
+    await card.getByRole('button', { name: '确认升级', exact: true }).waitFor()
+  }
   for (const viewport of [{ width: 1440, height: 900 }, { width: 1000, height: 640 }]) {
     await page.setViewportSize(viewport)
     for (const theme of ['light', 'graphite']) {

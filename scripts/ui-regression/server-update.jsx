@@ -16,6 +16,8 @@ const desktopVersion = '0.9.0-beta.4'
 let state = { protocolVersion: 1, paired: query.get('unpaired') !== '1', serverId: '11111111-1111-4111-8111-111111111111', catalogId: '22222222-2222-4222-8222-222222222222', currentVersion: '0.9.0-beta.3', platform: 'linux/amd64', runtime: 'node22-bookworm-v1', targetVersion: null, job: null }
 const makeJob = (phase = 'prepared') => ({ id: '33333333-3333-4333-8333-333333333333', version: desktopVersion, phase, receivedBytes: 100 * 1024 ** 2, totalBytes: 100 * 1024 ** 2, updatedAt: new Date().toISOString(), message: null })
 if (query.has('state')) state.job = makeJob(query.get('state'))
+if (query.get('historical') === '1') state.job = { ...makeJob('complete'), version: state.currentVersion }
+if (query.get('partial') === '1') state.job = { ...makeJob('preparing'), receivedBytes: 7, resumableUpload: true }
 if (query.get('error') === '1') window.failUpdateCheck = true
 window.api = { serverUpdate: { control: async command => {
   window.updateCalls.push(command)

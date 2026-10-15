@@ -2,7 +2,7 @@
 
 Independent Node host for the catalog database, plaintext image store, query worker, and LAN browse HTTP.
 
-Use a version-matched desktop and Linux amd64/arm64 server release. The current source targets 0.9.0-beta.4 with catalog schema 21; source changes do not publish an image. See the [deployment guide](../../docs/SERVER_MODE.md), [managed updates](../../docs/SERVER_UPDATE.md), and [release readiness](../../docs/reviews/v0.9.0-readiness.md); a source version bump does not publish an image.
+Use a version-matched desktop and Linux amd64/arm64 server release. The current source targets 0.9.0-beta.5 with catalog schema 21; source changes do not publish an image. See the [deployment guide](../../docs/SERVER_MODE.md), [managed updates](../../docs/SERVER_UPDATE.md), and [release audit](../../docs/reviews/v0.9.0-beta.5-release-audit.md). Beta.1–4 installations must replace the base image to adopt the new token command, supplementary groups and upgrade manager; a business update bundle cannot replace the manager.
 
 This process does **not** run Electron, Playwright, scrapers, or the plugin agent. Desktop keeps local mode. Management HTTP is registered by this host only (`/manage/v1`); the desktop LAN browse server must omit it.
 

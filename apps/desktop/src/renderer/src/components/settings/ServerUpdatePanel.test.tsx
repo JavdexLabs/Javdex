@@ -71,6 +71,40 @@ test('same and newer server versions do not expose the recovery card', async () 
   }
 })
 
+for (const interrupted of [false, true]) test(`an older completed job cannot block a new upgrade and interrupted uploads can resume (${interrupted})`, async () => {
+  const previousWindow = globalThis.window
+  const current = { ...initial, job: { id: 'old-job', version: interrupted ? session.desktopAppVersion : initial.currentVersion!,
+    phase: interrupted ? 'preparing' as const : 'complete' as const, receivedBytes: 7, totalBytes: 10,
+    updatedAt: new Date().toISOString(), message: null, resumableUpload: interrupted } }
+  const calls: ServerUpdateCommand[] = []
+  const control = async (command: ServerUpdateCommand): Promise<ServerUpdateSnapshot> => {
+    calls.push(command)
+    return command.action === 'import' ? { ...current, job: { ...current.job, version: session.desktopAppVersion, phase: 'prepared', receivedBytes: 10, resumableUpload: false } } : current
+  }
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: { api: { serverUpdate: { control } } } })
+  const { api } = await import('../../api')
+  const previousApi = api.serverUpdate
+  let tree: TestRenderer.ReactTestRenderer | undefined
+  let reconnects = 0
+  try {
+    api.serverUpdate = window.api.serverUpdate
+    const [{ default: Panel }, { default: Button }] = await Promise.all([import('./ServerUpdatePanel'), import('../Button')])
+    await act(async () => { tree = TestRenderer.create(<DesktopSessionContext.Provider value={{ session, capabilities: {} as never, catalogReadsEnabled: false, reconnect: async () => { reconnects++ }, claimWriter: async () => { throw new Error('unused') } }}><Panel /></DesktopSessionContext.Provider>) })
+    assert.equal(reconnects, 0)
+    const upload = tree!.root.findAllByType(Button).find(node => renderedText(node) === '上传离线包升级')
+    assert.ok(upload, 'the matching offline file can be selected again')
+    assert.equal(upload.props.disabled, false)
+    if (!interrupted) assert.ok(tree!.root.findAllByType(Button).some(node => renderedText(node) === '在线升级'))
+    await act(async () => { upload.props.onClick() })
+    assert.deepEqual(calls.filter(command => command.action !== 'status'), [{ action: 'import', targetVersion: session.desktopAppVersion }])
+    assert.ok(tree!.root.findAllByType(Button).some(node => renderedText(node) === '确认升级'))
+  } finally {
+    act(() => tree?.unmount())
+    api.serverUpdate = previousApi
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
+  }
+})
+
 test('retry preserves error details and shows busy feedback on the actual action', async () => {
   const previousWindow = globalThis.window
   let finish: (value: ServerUpdateSnapshot) => void = () => {}

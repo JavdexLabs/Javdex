@@ -52,12 +52,12 @@
   border-inline-start: 1px solid var(--border-subtle);
 }
 
-.statusFact dt {
+.statusFact > dt {
   color: var(--text-muted);
   font-size: var(--settings-fs-secondary);
 }
 
-.statusFact dd {
+.statusFact > dd {
   display: flex;
   min-width: 0;
   align-items: center;
@@ -70,8 +70,29 @@
   user-select: text;
 }
 
-.statusFact dd svg {
+.playerFooter > svg {
+  flex-shrink: 0;
+  margin-top: calc(var(--settings-gap-sm, 8px) / 4);
+}
+
+.statusFact > dd > svg {
   flex: 0 0 auto;
+}
+
+.sessionMessage,
+.sessionError {
+  margin: var(--settings-gap, 12px) 0 0;
+  font-size: var(--settings-fs-secondary, 12px);
+  line-height: var(--settings-lh, 1.45);
+  overflow-wrap: anywhere;
+}
+
+.sessionMessage {
+  color: var(--text-secondary);
+}
+
+.sessionError {
+  color: var(--text-danger);
 }
 
 .statusFooter {
@@ -85,7 +106,7 @@
   border-top: 1px solid var(--border-subtle);
 }
 
-.statusFooter .sessionMessage {
+.statusFooter > .sessionMessage {
   margin: 0;
 }
 
@@ -105,7 +126,7 @@
   gap: var(--settings-gap-sm);
 }
 
-.statusVersions dd {
+.statusVersions > div > dd {
   margin: 0;
   overflow-wrap: anywhere;
   user-select: text;
@@ -331,32 +352,9 @@
   min-width: 0;
 }
 
-.probeResult {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--form-label-gap);
-  height: calc(var(--settings-fs-caption) * var(--settings-lh, 1.45));
-  min-width: 0;
-  color: var(--text-muted);
-  font-size: var(--settings-fs-caption);
-}
-
-.probeSummary {
-  flex: 1;
-  min-width: 0;
-  overflow-x: auto;
-  scrollbar-width: none;
-  white-space: nowrap;
-  line-height: var(--settings-lh, 1.45);
-  user-select: text;
-}
-
-.probeSummary[data-tone='success'] {
-  color: var(--text-accent);
-}
-
 .playerButtons {
   --workspace-button-min-height: var(--control-h-md);
+
   display: flex;
   flex-wrap: wrap;
   gap: var(--settings-gap-sm, 8px);
@@ -423,6 +421,7 @@
 
 .playerResumeRow {
   --settings-switch-row-pad-x: 0px;
+
   padding-block: calc(var(--settings-gap-sm, 8px) / 2);
 }
 
@@ -465,27 +464,6 @@
   font-size: var(--settings-fs-secondary, 12px);
   line-height: var(--settings-lh, 1.45);
   overflow-wrap: anywhere;
-}
-
-.playerFooter > svg {
-  flex-shrink: 0;
-  margin-top: calc(var(--settings-gap-sm, 8px) / 4);
-}
-
-.sessionMessage,
-.sessionError {
-  margin: var(--settings-gap, 12px) 0 0;
-  font-size: var(--settings-fs-secondary, 12px);
-  line-height: var(--settings-lh, 1.45);
-  overflow-wrap: anywhere;
-}
-
-.sessionMessage {
-  color: var(--text-secondary);
-}
-
-.sessionError {
-  color: var(--text-danger);
 }
 
 .sessionActions {

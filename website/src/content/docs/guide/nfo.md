@@ -1,6 +1,6 @@
 ---
 title: "NFO 导入与导出"
-description: "Javdex 0.9.0-beta.4 · NFO 导入与导出"
+description: "Javdex 0.9.0-beta.5 · NFO 导入与导出"
 ---
 
 NFO 是保存在影片旁的资料文件，可包含标题、演员等信息以及图片引用。

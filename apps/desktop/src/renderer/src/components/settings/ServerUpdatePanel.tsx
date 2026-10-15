@@ -98,9 +98,10 @@ export default function ServerUpdatePanel(): JSX.Element | null {
   const clientVersion = session.desktopAppVersion
   const older = Boolean(serverVersion && clientVersion && valid(serverVersion) && valid(clientVersion) && lt(serverVersion, clientVersion))
   const activeJob = Boolean(job && !['complete', 'failed'].includes(job.phase))
-  const reconnectPending = job?.phase === 'complete' && !sessionAllowsCatalogReads(session)
+  const reconnectPending = job?.phase === 'complete' && job.version === clientVersion && serverVersion === clientVersion && !sessionAllowsCatalogReads(session)
   if (!older && !activeJob && !reconnectPending) return null
-  const installing = Boolean(job && running.has(job.phase))
+  const resumableUpload = job?.phase === 'preparing' && job.resumableUpload === true && !busy
+  const installing = Boolean(job && running.has(job.phase) && !resumableUpload)
   const locked = installing || job?.phase === 'recoveryRequired' || Boolean(reconnectPending)
   const supported = snapshot?.paired
   const ready = job?.phase === 'prepared' && job.version === clientVersion

@@ -1,6 +1,6 @@
 {
   "name": "Javdex",
-  "version": "0.9.0-beta.4",
+  "version": "0.9.0-beta.5",
   "description": "Javdex — local JAV library manager",
   "main": "./out/main/index.js",
   "author": "Javdex",

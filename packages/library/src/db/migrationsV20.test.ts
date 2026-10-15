@@ -1,15 +1,16 @@
 import assert from 'node:assert/strict'
+import { randomUUID } from 'node:crypto'
 import { it } from 'node:test'
 import Database from 'better-sqlite3'
 import { releasedV19Database } from '../testFixtures/releasedV19Database'
 import { CURRENT_SCHEMA_VERSION, migrateDatabase } from './migrations'
 
 it('advances the released 0.8.0 database schema exactly once', () => {
-  assert.equal(CURRENT_SCHEMA_VERSION, 20)
+  assert.equal(CURRENT_SCHEMA_VERSION, 21)
   const db = releasedV19Database()
   try {
     migrateDatabase(db)
-    assert.equal(db.pragma('user_version', { simple: true }), 20)
+    assert.equal(db.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)
     assert.deepEqual(db.pragma('foreign_key_check'), [])
   } finally { db.close() }
 })
@@ -41,7 +42,42 @@ it('upgrades released scores and custom playlists together without adopting same
   } finally { db.close() }
 })
 
-for (const stage of ['rating-column', 'rating-backfill', 'playlists'] as const) {
+it('preserves legacy credentials, claims and tokens while enabling schema 21 trusted devices', () => {
+  const db = releasedV19Database()
+  const claimId = randomUUID(), nextClaimId = randomUUID()
+  const secretDigest = 'a'.repeat(64), tokenDigest = 'b'.repeat(64)
+  try {
+    db.prepare('INSERT INTO catalog_writer_credentials (writer_epoch,secret_digest,claim_id,created_at) VALUES (?,?,?,?)')
+      .run(1, secretDigest, claimId, 'before-upgrade')
+    db.prepare('INSERT INTO catalog_writer_claims (claim_id,kind,candidate_secret_digest,status,writer_epoch,result_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)')
+      .run(claimId, 'initialBind', secretDigest, 'consumed', 1, '{"preserved":true}', 'before-upgrade', 'before-upgrade')
+    db.prepare('INSERT INTO catalog_one_time_tokens (token_digest,kind,expires_at,issued_at) VALUES (?,?,?,?)')
+      .run(tokenDigest, 'handoff', '2099-01-01', 'before-upgrade')
+    const credential = db.prepare('SELECT * FROM catalog_writer_credentials').all()
+    const claims = db.prepare('SELECT * FROM catalog_writer_claims').all()
+    const tokens = db.prepare('SELECT * FROM catalog_one_time_tokens').all()
+    migrateDatabase(db)
+    assert.equal(db.pragma('user_version', { simple: true }), 21)
+    assert.deepEqual(db.prepare('SELECT writer_epoch,secret_digest,claim_id,created_at,superseded_at FROM catalog_writer_credentials').all(), credential)
+    assert.deepEqual(db.prepare('SELECT * FROM catalog_writer_claims').all(), claims)
+    assert.deepEqual(db.prepare('SELECT * FROM catalog_one_time_tokens').all(), tokens)
+    assert.deepEqual(db.prepare('SELECT name FROM catalog_writer_credentials').all(), [{ name: '管理电脑' }])
+    db.prepare('INSERT INTO catalog_writer_credentials (writer_epoch,secret_digest,claim_id,name,created_at) VALUES (?,?,?,?,?)')
+      .run(1, 'c'.repeat(64), nextClaimId, '第二台电脑', 'after-upgrade')
+    assert.throws(() => db.prepare('INSERT INTO catalog_writer_credentials (writer_epoch,secret_digest,claim_id,created_at) VALUES (?,?,?,?)')
+      .run(1, secretDigest, randomUUID(), 'duplicate-active-secret'), /UNIQUE/)
+    db.prepare('INSERT INTO catalog_one_time_tokens (token_digest,kind,expires_at,issued_at) VALUES (?,?,?,?)')
+      .run('d'.repeat(64), 'deviceAdd', '2099-01-01', 'after-upgrade')
+    db.prepare('INSERT INTO catalog_writer_claims (claim_id,kind,candidate_secret_digest,status,result_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?)')
+      .run(nextClaimId, 'deviceAdd', 'c'.repeat(64), 'pending', '{}', 'after-upgrade', 'after-upgrade')
+    assert.deepEqual(db.pragma('foreign_key_check'), [])
+    const beforeReopen = db.serialize()
+    migrateDatabase(db)
+    assert.deepEqual(db.serialize(), beforeReopen)
+  } finally { db.close() }
+})
+
+for (const stage of ['rating-column', 'rating-backfill', 'playlists', 'trusted-devices'] as const) {
   it(`rolls back the whole single upgrade when ${stage} fails and permits retry`, t => {
     const db = releasedV19Database()
     try {
@@ -51,7 +87,8 @@ for (const stage of ['rating-column', 'rating-backfill', 'playlists'] as const) 
       const execFault = t.mock.method(db, 'exec', (sql: string) => {
         const result = exec.call(db, sql)
         if ((stage === 'rating-column' && sql.includes('ADD COLUMN is_default'))
-          || (stage === 'playlists' && sql.includes('ADD COLUMN system_kind'))) throw new Error(`failed ${stage}`)
+          || (stage === 'playlists' && sql.includes('ADD COLUMN system_kind'))
+          || (stage === 'trusted-devices' && sql.includes('CREATE TABLE catalog_writer_credentials_v21'))) throw new Error(`failed ${stage}`)
         return result
       })
       const prepareFault = t.mock.method(db, 'prepare', (sql: string) => {
@@ -63,7 +100,7 @@ for (const stage of ['rating-column', 'rating-backfill', 'playlists'] as const) 
       assert.equal(db.pragma('foreign_keys', { simple: true }), 1)
       execFault.mock.restore(); prepareFault.mock.restore()
       migrateDatabase(db)
-      assert.equal(db.pragma('user_version', { simple: true }), 20)
+      assert.equal(db.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)
     } finally { t.mock.restoreAll(); db.close() }
   })
 }

@@ -1,7 +1,7 @@
 import { it } from 'node:test'
 import assert from 'node:assert/strict'
 import Database from 'better-sqlite3'
-import { SCHEMA_SQL, SCAN_AUDIT_ENTRIES_SCHEMA_SQL } from './schema'
+import { CATALOG_MULTI_DEVICE_MIGRATION_SQL, SCHEMA_SQL, SCAN_AUDIT_ENTRIES_SCHEMA_SQL } from './schema'
 import { CURRENT_SCHEMA_VERSION, migrateDatabase } from './migrations'
 import { releasedV15Database } from '../testFixtures/releasedV15Database'
 
@@ -104,6 +104,7 @@ function assertUpgrade(db: Database.Database, before: ReturnType<typeof snapshot
   try {
     fresh.pragma('foreign_keys = ON')
     fresh.exec(SCHEMA_SQL)
+    fresh.exec(CATALOG_MULTI_DEVICE_MIGRATION_SQL)
     assert.deepEqual(comparableSchema(db), comparableSchema(fresh))
   } finally { fresh.close() }
 }

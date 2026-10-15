@@ -30,7 +30,7 @@ describe('catalogPlay locator revision', () => {
   })
 })
 
-for (const cause of ['missing', 'rootChanged', 'rootPermission', 'filePermission', 'traversalPermission'] as const) {
+for (const cause of ['missing', 'rootChanged', 'rootPermission', 'filePermission', 'filePermissionAlias', 'traversalPermission'] as const) {
   it(`playback grants distinguish ${cause} without exposing filesystem paths or granting inaccessible media`, t => {
     const directory = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-play-grant-error-')))
     t.after(() => { closeDatabase(); fs.rmSync(directory, { recursive: true, force: true }) })
@@ -45,15 +45,30 @@ for (const cause of ['missing', 'rootChanged', 'rootPermission', 'filePermission
     const resource = getVideoResourceInLibrary(1, fileId)!
     const target = { libraryId: 1, videoId, resourceId: fileId, locatorRevision: resourceLocatorRevision(resource) }
     assert.equal(grantCatalogPlayback(target).resourceId, fileId, 'readable media must pass the same inspection')
+    let deniedReads = 0
     if (cause === 'missing') fs.unlinkSync(file)
     else if (cause === 'rootChanged') {
       fs.renameSync(mount, path.join(directory, 'retired'))
       fs.mkdirSync(mount)
       fs.writeFileSync(file, 'replacement must remain unauthorized')
-    } else if (cause === 'filePermission') {
+    } else if (cause === 'filePermission' || cause === 'filePermissionAlias') {
+      if (cause === 'filePermissionAlias') {
+        const realpath = fs.realpathSync.native
+        // Native canonical paths may differ from the fixture spelling (e.g. on Windows).
+        // Use a valid alternate spelling on every OS to catch a lexical-only mock.
+        t.mock.method(fs.realpathSync, 'native', (value: fs.PathLike, ...args: unknown[]) => {
+          if (value === file) return `${mount}${path.sep}.${path.sep}movie.mp4`
+          return Reflect.apply(realpath, fs.realpathSync, [value, ...args])
+        })
+      }
       const access = fs.accessSync
+      const readTarget = fs.realpathSync.native(file)
       t.mock.method(fs, 'accessSync', (...args: Parameters<typeof fs.accessSync>) => {
-        if (args[0] === file) throw Object.assign(new Error(`EACCES ${file}`), { code: 'EACCES' })
+        if (args[0] === readTarget) {
+          assert.equal(args[1], fs.constants.R_OK)
+          deniedReads++
+          throw Object.assign(new Error(`EACCES ${readTarget}`), { code: 'EACCES' })
+        }
         return access(...args)
       })
     } else {
@@ -72,6 +87,7 @@ for (const cause of ['missing', 'rootChanged', 'rootPermission', 'filePermission
       assert.ok(!JSON.stringify(error).includes(directory), 'controlled errors must withhold host paths')
       return true
     })
+    assert.equal(deniedReads, cause === 'filePermission' || cause === 'filePermissionAlias' ? 1 : 0)
     assert.equal(getDb().prepare("SELECT key FROM catalog_settings WHERE key LIKE 'play-grant:%'").all().length, before)
   })
 }

@@ -1,7 +1,7 @@
 services:
   javdex:
     # 新程序卷以镜像初始化；已有 /program 在镜像业务版本更高时自动备份升级，不降级。
-    image: ghcr.io/javdexlabs/javdex-server:${JAVDEX_VERSION:?Set JAVDEX_VERSION to the base image version, for example 0.9.0}
+    image: ghcr.io/javdexlabs/javdex-server:${JAVDEX_VERSION:?Set JAVDEX_VERSION to the base image version, for example 0.9.0-beta.4}
     restart: unless-stopped
     stop_grace_period: 150s
     security_opt:

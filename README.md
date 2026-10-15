@@ -25,7 +25,7 @@
   &nbsp;·&nbsp;
   <a href="https://javdexlabs.github.io/Javdex/start/">使用文档</a>
   &nbsp;·&nbsp;
-  <a href=".github/release-notes/v0.9.0.md">0.9.0 发布说明</a>
+  <a href=".github/release-notes/v0.9.0-beta.4.md">0.9.0 Beta.4 发布说明</a>
   &nbsp;·&nbsp;
   <a href="CHANGELOG.md">更新日志</a>
   &nbsp;·&nbsp;
@@ -34,7 +34,7 @@
 
 Javdex 是一款以番号为核心的本地影片管理工具。扫描目录、补齐封面与资料，按演员、厂商和系列浏览，也可以创建清单、导入网页收藏，并通过 NFO 与其他媒体软件交换资料。
 
-> 发布准备说明（临时）：本页与使用指南面向 0.9.0 稳定版功能；0.9.0 尚未发布，线上最新正式版仍为 0.8.0。下载按钮和版本徽章继续跟随实际最新正式 Release；待 0.9.0 正式发布并核对产物后移除此说明。
+> 本页与使用指南面向 **0.9.0-beta.4 预发布**。Beta.4 的安装包、镜像和升级文件以[对应 Release](https://github.com/JavdexLabs/Javdex/releases/tag/v0.9.0-beta.4)实际发布状态为准；最新正式版仍为 0.8.0，默认下载和更新提醒不切换到 Beta。升级前完整备份，schema 21 不能直接交给旧版打开。
 
 <p align="center">
   <img src="docs/images/library.webp" alt="媒体库演示：竖版封面浏览、搜索、筛选与排序" width="1200">
@@ -62,9 +62,9 @@ Javdex 是一款以番号为核心的本地影片管理工具。扫描目录、�
 
 服务端可独立运行，无需保持桌面应用开启；刮削插件、AI 采集和网页登录仍在桌面执行。网页不是管理后台，不提供视频转码。服务端与桌面须使用同一版本，当前面向可信局域网。
 
-服务端使用单个 Docker 容器，支持 x86_64 和 ARM64，无需编译源码或安装宿主机更新助手。0.9.0 桌面须配合同版本服务端；请在所选版本正式发布后，按 [服务端部署与托管更新](docs/SERVER_UPDATE.md) 配置数据卷、独立的 `/program` 程序卷及首次配对。媒体挂载与权限说明见 [服务端指南](docs/SERVER_MODE.md#媒体目录权限)。部署示例从对应版本源码获取，安装包和每架构单个 `.javdex-update` 签名升级文件以 [GitHub Releases](https://github.com/JavdexLabs/Javdex/releases/latest) 实际附件为准。
+服务端使用单个 Docker 容器，支持 x86_64 和 ARM64，无需编译源码或安装宿主机更新助手。Beta.4 桌面须配合同版本服务端；按 [服务端部署与托管更新](docs/SERVER_UPDATE.md) 配置数据卷、独立的 `/program` 程序卷及首次配对。业务、播放与更新共用一个 HTTPS 地址，一次配对即可授权，可管理和单独撤销多台可信电脑；网页账号仍独立。媒体挂载与权限说明见 [服务端指南](docs/SERVER_MODE.md#媒体目录权限)。部署示例从对应版本源码获取，安装包和每架构单个 `.javdex-update` 签名升级文件以[对应 Beta.4 Release](https://github.com/JavdexLabs/Javdex/releases/tag/v0.9.0-beta.4)实际附件为准。
 
-首次从 0.8.0 升级须由管理员停服备份、更换支持托管更新的镜像并保留数据；此后可在桌面检查更新或上传升级文件，确认后停服安装。管理器与容器运行环境更新仍需更换基础镜像。“备份与恢复”支持本地与服务端互相导入，保留来源资料库，不自动同步两份资料；安全升级与回退步骤见 [使用指南](docs/USER_GUIDE.md#从-080-升级到-090)。
+首次从 0.8.0 升级须由管理员停服备份、更换支持托管更新的镜像并保留数据。Beta.1–3 升级到统一入口也须先更换 Beta.4 基础镜像，业务升级包不会更新管理器；保留 `/data`、`/program` 和图片卷。采用新管理器后，更高业务版本的镜像会自动备份、升级和验证，同版或更旧版本不降级；仍可上传签名升级文件。Beta 不进入正式在线检查。“备份与恢复”支持本地与服务端互相导入，保留来源资料库，不自动同步两份资料；安全升级与回退步骤见[升级指南](https://javdexlabs.github.io/Javdex/releases/upgrade/)。
 
 ## 在应用内播放，边看边整理
 

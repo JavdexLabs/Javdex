@@ -1,6 +1,6 @@
 # 服务端实现与合同
 
-核对日期：2026-10-15，目标为 `0.9.0` 正式版准备（资料库 schema 21、桌面模型管理文档版本 4）。本页集中维护当前架构、功能接线及合同导航，不表示 Release 已发布或最终 CI 已通过；部署步骤见 [操作说明](SERVER_MODE.md)，功能边界见 [当前状态](SERVER_MODE_NEXT_STEPS.md)，发布与验证状态见 [发布准备检查](reviews/v0.9.0-readiness.md)。
+核对日期：2026-10-15，目标为 `0.9.0-beta.4` 预发布（资料库 schema 21、桌面模型管理文档版本 4）。本页集中维护当前架构、功能接线及合同导航，不表示 Release 已发布或最终 CI 已通过；部署步骤见 [操作说明](SERVER_MODE.md)，功能边界见 [当前状态](SERVER_MODE_NEXT_STEPS.md)，发布与验证状态见 [Beta.4 发布审计](reviews/v0.9.0-beta.4-release-audit.md)。
 
 0.9.0 的维护改动包括影片来源分页及生命周期预览／提交结果运行时校验，以及桌面/服务端共用 `videoQueryService`；既有输入、授权、事务与本地/远程路径策略继续有效。单容器托管更新采用独立协议，不扩大普通管理接口的跨版本兼容范围。
 
@@ -153,7 +153,7 @@ IPC 去向以 inventory 及其覆盖检查为准。兼容入口不要求一对�
 
 [updater/index.ts](../apps/server/src/updater/index.ts) 是官方单容器管理入口，以非 root 子进程运行当前发行目录的业务入口。内部通过 [UpdateDeployment](../apps/server/src/updater/deployment.ts) 隔离持久任务编排与进程、发行目录、快照细节；不安装宿主机助手、不控制 Docker daemon，也不让业务包自更新管理器。固定运行环境和签名完整发行包合同见 [serverUpdateTypes.ts](../packages/contracts/src/serverUpdateTypes.ts)。
 
-管理入口的 `start`、`pair`、`bind`、`recover` 均经 `/opt/javdex-manager/index.js`；后两者运行 `/program` 当前选中的业务 CLI，不使用 `/app` 初始化种子。管理器需容器内 root，业务 UID 禁止为 0。业务网页固定从当前发行目录加载，不能沿用旧镜像的 Web。发行选择与校验由 [releaseStore.ts](../apps/server/src/updater/releaseStore.ts) 管理，容器重建不能覆盖已选业务版本；数据与程序卷不得互相包含。
+管理入口的 `start`、`pair`、`pair-recover`、`bind`、`recover` 均经 `/opt/javdex-manager/index.js`；授权命令运行 `/program` 当前选中的业务 CLI，不使用 `/app` 初始化种子。管理器需容器内 root，业务 UID 禁止为 0。业务网页固定从当前发行目录加载，不能沿用旧镜像的 Web。发行选择与校验由 [releaseStore.ts](../apps/server/src/updater/releaseStore.ts) 管理，容器重建不直接覆盖发行目录；仅较新镜像业务通过完整备份、升级、验证和恢复事务切换，同版或更旧则保留当前业务。数据与程序卷不得互相包含。
 
 [updateBundle.ts](../packages/http/src/updateBundle.ts) 定义 `JVDXUPD1` 单文件运输格式：8 字节魔数、4 字节大端 JSON 长度、签名 JSON、原始程序 tar.gz，清单最多 65536 字节。清单绑定内层归档，`SHA256SUMS.txt` 绑定整个文件；归档最大 4 GiB、展开最大 8 GiB。离线上传偏移只计算归档内容；在线检查读取有界前缀，准备时重新验证文件内签名与目标一致。旧 JSON/裸归档不受支持，包内不得提供任意公钥建立信任。
 

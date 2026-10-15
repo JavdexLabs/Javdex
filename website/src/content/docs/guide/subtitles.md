@@ -1,6 +1,6 @@
 ---
 title: "AI 日中字幕"
-description: "Javdex 0.9.0 · AI 日中字幕"
+description: "Javdex 0.9.0-beta.4 · AI 日中字幕"
 ---
 
 AI 字幕在内置播放器中识别日语音轨并翻译为中文，无需配置云端 AI 服务。

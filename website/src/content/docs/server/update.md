@@ -1,6 +1,6 @@
 ---
 title: "升级文件（.javdex-update）"
-description: "Javdex 0.9.0 · 升级文件与两层更新"
+description: "Javdex 0.9.0-beta.4 · 升级文件与两层更新"
 sidebar:
   label: 升级文件与两层更新
 ---

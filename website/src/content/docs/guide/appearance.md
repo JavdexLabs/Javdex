@@ -1,6 +1,6 @@
 ---
 title: "外观、隐私与图片"
-description: "Javdex 0.9.0 · 外观、隐私与图片"
+description: "Javdex 0.9.0-beta.4 · 外观、隐私与图片"
 ---
 
 ## 调整显示

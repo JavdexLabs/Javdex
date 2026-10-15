@@ -9,7 +9,7 @@ description: 使用单个 Docker 容器，把资料库放在 NAS 或常开设备
 
 ## 首次部署
 
-1. 核对[正式下载版本](/Javdex/download/)，准备 Docker 与 Compose 插件。
+1. 核对[目标 Beta.4 Release](https://github.com/JavdexLabs/Javdex/releases/tag/v0.9.0-beta.4)的实际产物，准备 Docker 与 Compose 插件；[默认下载](/Javdex/download/)仍只跟随正式版。
 2. 按 [Docker Compose 部署](/Javdex/server/deploy/)保存同版本示例，设置数据卷、媒体挂载和账号。
 3. 按[配对说明](/Javdex/server/pairing/)在服务端运行 `pair`，在桌面粘贴一次性信息，一次保存统一地址、证书与资料管理／更新授权。
 4. 重启桌面，再创建媒体库并扫描；添加其他电脑时重新生成一份配对信息。

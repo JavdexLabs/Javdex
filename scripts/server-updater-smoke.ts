@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { createServer } from 'node:net'
-import { createHash, generateKeyPairSync, randomUUID, sign } from 'node:crypto'
+import { createHash, generateKeyPairSync, randomBytes, randomUUID, sign } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { ServerUpdateClient, uploadServerUpdateBundle } from '../packages/http/src/updateClient'
 import { writeUpdateBundle } from '../packages/http/src/updateBundle'
@@ -11,6 +11,9 @@ import { updaterPairingSchema, type ServerReleaseDescriptor, type ServerUpdateMa
 import { requestBusiness } from '../apps/server/src/updater/businessHttp'
 import { waitForUpdateStatus } from './server-updater-smoke-wait'
 import { CURRENT_SCHEMA_VERSION } from '../packages/library/src/db/migrations'
+import { serverConnectionBundleSchema } from '../packages/contracts/src/serverUpdateTypes'
+import { createPinnedFetch } from '../packages/http/src/pinnedFetch'
+import { ManageHttpClient } from '../packages/http/src/manageClient'
 
 async function main(): Promise<void> {
   // Real Linux images, real native modules and published schema 19. No mocked Docker.
@@ -166,7 +169,63 @@ async function main(): Promise<void> {
     const retained = await waitForUpdateStatus(() => client.control('status'))
     assert.equal(retained.currentVersion, '0.9.0', 'older image seed must not downgrade the program volume')
     assert.equal(retained.job?.id, imageJob)
-    console.log('Single-container acceptance passed: signed update, rollback/restart recovery, image replacement upgrade, same/older seed retention, native closure, persistent identity and non-root business.')
+
+    // Exercise the actual root gateway and non-root business in one container,
+    // not just the legacy independent updater or mocked gateway handlers.
+    docker(['stop', '--time', '150', name]); docker(['rm', name]); created.splice(created.indexOf(name), 1)
+    const unifiedOrigin = `https://127.0.0.1:${businessPort}`
+    docker(['run', '--detach', '--name', name, '--label', `javdex.update-test=${name}`, '--stop-timeout', '150',
+      '-p', `127.0.0.1:${businessPort}:8096`, '-v', `${dataVolume}:/data`, '-v', `${programVolume}:/program`, '-v', `${configDir}:/config:ro`,
+      '-e', 'JAVDEX_WEB_PASSWORD=isolated-smoke-password', '-e', 'JAVDEX_UPDATE_KEYS_FILE=/config/keys.json',
+      '-e', `JAVDEX_PUBLIC_URL=${unifiedOrigin}`, image, 'start', '--config', '/config/server.json'])
+    created.push(name)
+    let unifiedReady = false
+    for (let attempt = 0; attempt < 120; attempt++) {
+      try {
+        docker(['exec', name, 'node', '-e', "fetch('http://127.0.0.1:8098/ready',{signal:AbortSignal.timeout(1000)}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"])
+        unifiedReady = true
+        break
+      } catch { await new Promise(resolve => setTimeout(resolve, 250)) }
+    }
+    assert.equal(unifiedReady, true, 'unified business must become ready on the private internal listener')
+    const devices: { manage: ManageHttpClient; update: ServerUpdateClient }[] = []
+    try {
+      for (let index = 0; index < 2; index++) {
+        // Each grant is consumed before issuing the next device's grant.
+        const bundle = serverConnectionBundleSchema.parse(JSON.parse(docker(['exec', name, 'node', '/opt/javdex-manager/index.js', 'pair', '--config', '/config/server.json'])))
+        assert.equal(bundle.url, unifiedOrigin)
+        const transport = createPinnedFetch(bundle.url, bundle.certificateSha256)
+        const secret = randomBytes(32).toString('hex')
+        try {
+          const response = await transport.fetch(new URL('/connect/v1/claim', bundle.url), {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(15_000),
+            body: JSON.stringify({ code: bundle.code, claimId: randomUUID(), secretDigest: createHash('sha256').update(secret).digest('hex'), name: `Smoke device ${index}`, appVersion: '0.9.0' })
+          })
+          const claimed = await response.json()
+          assert.equal(response.status, 200, JSON.stringify(claimed))
+          const paired = updaterPairingSchema.parse({ ...claimed as object, token: secret })
+          const manage = new ManageHttpClient({ baseUrl: paired.url, appVersion: '0.9.0', certificateSha256: paired.certificateSha256 })
+          const update = new ServerUpdateClient(paired)
+          devices.push({ manage, update })
+          assert.equal((await update.control('status')).currentVersion, '0.9.0')
+        } finally { await transport.close() }
+      }
+      const first = devices[0]
+      const hello = await first.manage.post('handshake.get', { input: {} }, { sendAppVersion: false }) as { identity: { serverId: string; catalogId: string }; writerEpoch: number }
+      assert.equal(hello.identity.serverId, original.server_id)
+      assert.equal(hello.identity.catalogId, original.catalog_id)
+      const envelope = { ...hello.identity, writerEpoch: hello.writerEpoch, input: {} }
+      const trusted = await first.manage.post('devices.list', envelope, { bearer: first.update.pairing.token }) as { id: string; current: boolean }[]
+      assert.equal(trusted.length, 2)
+      const other = trusted.find(device => !device.current)!
+      await first.manage.post('devices.revoke', { ...envelope, operationId: randomUUID(), expectedVersions: {}, input: { deviceId: other.id } }, { bearer: first.update.pairing.token })
+      await assert.rejects(devices[1].update.control('status'), /授权/)
+      assert.equal((await first.update.control('status')).currentVersion, '0.9.0', 'revoking another device preserves update authorization')
+      const refreshed = await first.manage.post('handshake.get', { input: {} }, { sendAppVersion: false }) as typeof hello
+      await assert.rejects(devices[1].manage.post('writer.status', { ...refreshed.identity, writerEpoch: refreshed.writerEpoch, input: {} }, { bearer: devices[1].update.pairing.token }), { code: 'AUTH_REQUIRED' })
+      await first.manage.post('writer.status', { ...refreshed.identity, writerEpoch: refreshed.writerEpoch, input: {} }, { bearer: first.update.pairing.token })
+    } finally { await Promise.all(devices.map(device => device.manage.close())) }
+    console.log('Single-container acceptance passed: signed update, rollback/restart recovery, image replacement upgrade, same/older seed retention, unified pinned HTTPS pairing, selective device revocation, native closure, persistent identity and non-root business.')
   } catch (error) {
     // Preserve bounded startup evidence before removing the owned test containers.
     for (const container of created) {

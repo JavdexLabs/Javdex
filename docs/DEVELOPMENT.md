@@ -4,7 +4,7 @@
 
 本文面向从源码运行、修改或打包 Javdex 的开发者。安装和日常操作见使用指南。
 
-本文对应 0.9.0 稳定版准备，资料库使用 schema 20，模型管理文档使用格式 4；稳定版版本号不新增迁移。当前准备状态与验证边界见 [0.9.0 发布准备](reviews/v0.9.0-readiness.md)。本文描述源码与分发合同，不表示稳定版已发布或本次文档更新重新完成了原生构建、安装包及 GUI 验收。
+本文对应 0.9.0-beta.4，资料库使用 schema 21，模型管理文档使用格式 4；本次仅调整应用版本，不增加迁移。发布状态与验证边界见 [Beta.4 发布审计](reviews/v0.9.0-beta.4-release-audit.md)；[0.9.0 正式版准备](reviews/v0.9.0-readiness.md)保留为历史准备材料。本文描述源码与分发合同，不表示正式版已发布，也不把历史 CI 或本机测试当作本轮原生产物及 GUI 验收。
 
 ## 环境与本地启动
 
@@ -26,7 +26,7 @@ npm run dev
 
 桌面本机“最近播放”不增加数据库表：`player/recentPlayback.ts` 在 Electron `userData/recent-playback.json` 中原子保存最多 1,000 个窄影片快照，同时限制 UTF-8 文件为 8 MiB，超出任一限制均从最旧记录开始淘汰，确保写入后仍可读取。按 mode／catalogId／serverId 的摘要隔离，不保存播放 URL、授权或资源路径。独立 `recentPlayback:*` IPC 读取／分页／移除／清空；桌面 `/playlists/0` 是虚拟入口，不能传给资料库清单接口。自动记录复用内置播放的真实启动信号与外部系统接受打开信号，晚到的资料读取不能跨资料库写入、覆盖较新播放或撤销已确认的清空／单条移除。资料库备份、服务器与 Web 不包含此数据。
 
-历史版本中，v0.6.2 使用 schema 15，v0.7.x 使用 schema 16，v0.8.0 使用 schema 19：17 引入 catalog 身份、写入凭据和操作回执；18 引入图片上传及关联实体版本保护；19 引入持久任务表。0.7.x 升级至 0.8.0 时执行 16 → 19，已有相同结构不重复升级。当前 0.9.0 使用 **schema 20**；从旧版升级会继续执行至 20，具体迁移以 [migrations.ts](../packages/library/src/db/migrations.ts) 为准。
+历史版本中，v0.6.2 使用 schema 15，v0.7.x 使用 schema 16，v0.8.0 使用 schema 19：17 引入 catalog 身份、写入凭据和操作回执；18 引入图片上传及关联实体版本保护；19 引入持久任务表。0.7.x 升级至 0.8.0 时执行 16 → 19，已有相同结构不重复升级。当前 0.9.0-beta.4 使用 **schema 21**；从旧版升级会继续执行至 21，具体迁移以 [migrations.ts](../packages/library/src/db/migrations.ts) 为准。
 
 已运行旧开发分支的数据库不属于已发布升级路径。旧不完整 schema 16 与开发 schema 17/18 会明确拒绝打开，保持数据和版本不变；使用匹配的开发构建或升级前备份处理，不要手动降低 `user_version`。合并迁移不会替用户改写已有开发数据库。正式 17 仍靠协议表结构识别，不能仅靠 `user_version = 17` 接受历史实验快照。
 
@@ -195,7 +195,7 @@ Release 的 `playback-sources` 任务在四个平台打包门禁之后执行 `no
 | macOS arm64 | Apple Silicon `.dmg` | 只读挂载，匹配运行库及来源绑定，校验 app 签名 |
 | Linux x64 | `.deb`、`.AppImage` | 分别提取，匹配运行库及来源绑定 |
 
-文件名映射以 [playback-source-materials.mjs](../scripts/playback-source-materials.mjs) 为准。[历史源码与产物核验](reviews/v0.9.0-beta.3-release-audit.md) 记录 Release run `38601458029` 的四目标构建、包内加载与 PCM EOF、六个最终安装产物核验，以及公开总源码包四目标恢复和摘要核对。0.9.0 稳定版须对自身提交及产物执行 [Release 工作流](../.github/workflows/release.yml)，不能沿用历史摘要或把上述无显示门禁记为新增 GUI、硬解或干净机器验证；当前状态见 [发布准备](reviews/v0.9.0-readiness.md)。
+文件名映射以 [playback-source-materials.mjs](../scripts/playback-source-materials.mjs) 为准。[历史源码与产物核验](reviews/v0.9.0-beta.3-release-audit.md) 记录 Release run `38601458029` 的四目标构建、包内加载与 PCM EOF、六个最终安装产物核验，以及公开总源码包四目标恢复和摘要核对。本轮 Beta.4 须对自身提交及产物执行 [Release 工作流](../.github/workflows/release.yml)，不能沿用历史摘要或把上述无显示门禁记为新增 GUI、硬解或干净机器验证；当前状态见 [Beta.4 发布审计](reviews/v0.9.0-beta.4-release-audit.md)。
 
 解开总包后，使用 Node.js 22+ 执行 `node restore.mjs windows-x64 <新目录路径>`（目标还包括 `macos-x64`、`macos-arm64`、`linux-x64`）；目标目录必须尚不存在。恢复工具先验证全部引用材料，再恢复原 `reviewed-runtime/`、`packaging-tools/` 和说明文件，保留文件模式。按平台 `build.json` 的工具链、补丁和配方重建；恢复工具不执行构建脚本。原单平台压缩包摘要记录来源，不能用来校验总包；总包摘要见 Release 的 SHA256SUMS。`SOURCE-ACCESS.txt` 同时说明公开总包与原 CI 绑定；分发安装包时须继续提供对应源码访问方式，不能仅提供未交付的文件名。普通用户无需下载源码包；系统 SDK、编译器和签名不由恢复工具提供。
 

@@ -1,6 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import { createPublicKey } from 'node:crypto'
+import { createPublicKey, randomBytes } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { isIP } from 'node:net'
 import { z } from 'zod'
@@ -19,6 +19,7 @@ export interface UpdaterConfig {
   listenHost: string
   port: number
   publicUrl: string | null
+  gateway?: { origin: string; token: string }
   releaseKeys: Record<string, string>
   stopTimeoutSeconds: number
   businessUid: number
@@ -44,15 +45,16 @@ export function loadUpdaterConfig(file: string, options: { env?: NodeJS.ProcessE
   if (imagesDir !== dataDir && contained(dataDir, imagesDir)) throw new Error('图片目录不能包含资料目录，请使用资料目录内的图片目录或独立目录')
   const runtimeDir = absolute(env.JAVDEX_RUNTIME_DIR || '/program')
   if (contained(runtimeDir, dataDir) || contained(dataDir, runtimeDir) || contained(runtimeDir, imagesDir) || contained(imagesDir, runtimeDir)) throw new Error('程序与更新目录必须和资料、图片目录分离')
-  const serverPort = z.coerce.number().int().min(1).max(65535).parse(env.JAVDEX_LISTEN_PORT || input.port || 8096)
-  const host = env.JAVDEX_ACCESS_HOSTS?.split(',')[0]?.trim() || input.accessHosts?.[0] || '127.0.0.1'
+  const unified = Boolean(env.JAVDEX_PUBLIC_URL)
+  const serverPort = z.coerce.number().int().min(1).max(65535).parse(unified ? (env.JAVDEX_INTERNAL_PORT || 8098) : (env.JAVDEX_LISTEN_PORT || input.port || 8096))
+  const host = unified ? '127.0.0.1' : env.JAVDEX_ACCESS_HOSTS?.split(',')[0]?.trim() || input.accessHosts?.[0] || '127.0.0.1'
   const healthHost = `${isIP(host) === 6 ? `[${host}]` : host}:${serverPort}`
-  const port = z.coerce.number().int().min(1024).max(65535).parse(env.JAVDEX_UPDATE_PORT || 8097)
+  const port = z.coerce.number().int().min(1024).max(65535).parse(unified ? (env.JAVDEX_LISTEN_PORT || input.port || 8096) : (env.JAVDEX_UPDATE_PORT || 8097))
   if (port === serverPort) throw new Error('业务与更新端口不能相同')
-  const publicUrl = env.JAVDEX_UPDATE_PUBLIC_URL?.trim() || null
+  const publicUrl = (env.JAVDEX_PUBLIC_URL || env.JAVDEX_UPDATE_PUBLIC_URL)?.trim() || null
   if (publicUrl) {
     const url = new URL(publicUrl)
-    if (url.protocol !== 'https:' || url.pathname !== '/' || url.search || url.hash || url.username || url.password) throw new Error('JAVDEX_UPDATE_PUBLIC_URL 必须是无路径的 HTTPS 地址')
+    if (url.protocol !== 'https:' || url.pathname !== '/' || url.search || url.hash || url.username || url.password) throw new Error('公开地址必须是无路径的 HTTPS 地址')
   }
   const seedDir = absolute(options.seedDir || env.JAVDEX_SERVER_SEED_DIR || '/app')
   const keysFile = env.JAVDEX_UPDATE_KEYS_FILE || path.join(path.dirname(fileURLToPath(import.meta.url)), 'release-keys.json')
@@ -85,5 +87,6 @@ export function loadUpdaterConfig(file: string, options: { env?: NodeJS.ProcessE
   if (fs.existsSync(bindingFile)) {
     if (JSON.stringify(JSON.parse(fs.readFileSync(bindingFile, 'utf8'))) !== JSON.stringify(binding)) throw new Error('程序卷已绑定另一份资料库部署，不能复用更新状态')
   } else writeJsonAtomic(bindingFile, binding)
-  return { runtimeDir, stateDir, releasesDir, seedDir, serverConfigPath, dataDir, imagesDir, serverUrl: `http://127.0.0.1:${serverPort}`, healthHost, listenHost: env.JAVDEX_UPDATE_LISTEN_HOST || '0.0.0.0', port, publicUrl, releaseKeys, stopTimeoutSeconds, businessUid, businessGid }
+  return { runtimeDir, stateDir, releasesDir, seedDir, serverConfigPath, dataDir, imagesDir, serverUrl: `http://127.0.0.1:${serverPort}`, healthHost, listenHost: env.JAVDEX_UPDATE_LISTEN_HOST || '0.0.0.0', port, publicUrl, releaseKeys, stopTimeoutSeconds, businessUid, businessGid,
+    ...(unified ? { gateway: { origin: new URL(publicUrl!).origin, token: randomBytes(32).toString('hex') } } : {}) }
 }

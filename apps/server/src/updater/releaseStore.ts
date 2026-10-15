@@ -8,6 +8,7 @@ import { t as list, x as extract } from 'tar'
 import { isServerReleasePath, releaseDescriptorSchema, SERVER_RELEASE_REQUIRED_FILES, SERVER_RUNTIME_ID, type ServerReleaseDescriptor, type ServerUpdateManifest } from '@shared/serverUpdateTypes'
 import type { UpdaterConfig } from './config'
 import { readJsonIfExists, writeJsonAtomic } from './files'
+import type { DeploymentRelease } from './deployment'
 
 const run = promisify(execFile)
 export { isServerReleasePath as releasePath } from '@shared/serverUpdateTypes'
@@ -16,7 +17,7 @@ export async function fileHash(file: string): Promise<string> {
   for await (const chunk of fs.createReadStream(file)) hash.update(chunk)
   return hash.digest('hex')
 }
-export function releaseId(manifest: ServerUpdateManifest): string {
+export function releaseId(manifest: DeploymentRelease): string {
   return `${manifest.version}-${manifest.archive.sha256}`
 }
 export class ReleaseStore {
@@ -76,7 +77,7 @@ export class ReleaseStore {
     for (const name of SERVER_RELEASE_REQUIRED_FILES) if (!Object.hasOwn(result.files, name)) throw new Error(`完整发行包缺少 ${name}`)
     return result
   }
-  async verify(directory: string, manifest?: ServerUpdateManifest): Promise<ServerReleaseDescriptor> {
+  async verify(directory: string, manifest?: DeploymentRelease): Promise<ServerReleaseDescriptor> {
     const descriptor = this.descriptor(directory)
     if (manifest && (descriptor.version !== manifest.version || descriptor.build !== manifest.build || descriptor.targetSchema !== manifest.targetSchema || descriptor.platform !== manifest.platform || descriptor.runtime !== manifest.runtime)) throw new Error('发行内容与签名清单不一致')
     const found = new Set<string>()
@@ -121,6 +122,26 @@ export class ReleaseStore {
   async bootstrap(): Promise<void> {
     const current = this.current()
     if (current) { await this.verifyInstalled(current); return }
+    this.select(await this.stageSeed())
+  }
+  imageRelease(): { release: DeploymentRelease; bytes: number } {
+    const descriptor = this.descriptor(this.config.seedDir)
+    const fingerprint = createHash('sha256').update(JSON.stringify(descriptor)).digest('hex')
+    // Same supported schema range as the official single-file release builder.
+    if (descriptor.targetSchema < 19) throw new Error('镜像不支持当前升级协议')
+    return { release: { version: descriptor.version, build: descriptor.build, platform: descriptor.platform,
+      runtime: descriptor.runtime, targetSchema: descriptor.targetSchema,
+      sourceSchemas: Array.from({ length: descriptor.targetSchema - 18 }, (_, i) => i + 19),
+      archive: { sha256: fingerprint } },
+    bytes: Object.values(descriptor.files).reduce((sum, file) => sum + file.bytes, fs.statSync(path.join(this.config.seedDir, 'release.json')).size) }
+  }
+  async prepareImage(expected: DeploymentRelease): Promise<void> {
+    if (releaseId(this.imageRelease().release) !== releaseId(expected)) throw new Error('镜像发行内容已变化')
+    const id = await this.stageSeed()
+    await this.verify(this.directory(id), expected)
+    await this.checkNative(this.directory(id))
+  }
+  private async stageSeed(): Promise<string> {
     const descriptor = this.descriptor(this.config.seedDir)
     const fingerprint = createHash('sha256').update(JSON.stringify(descriptor)).digest('hex')
     const id = `${descriptor.version}-${fingerprint}`
@@ -141,7 +162,7 @@ export class ReleaseStore {
       } finally { if (fs.existsSync(staging)) fs.rmSync(staging, { recursive: true, force: true }) }
     } else await this.verify(destination)
     await this.register(id)
-    this.select(id)
+    return id
   }
   async prepare(manifest: ServerUpdateManifest, archive: string): Promise<void> {
     if (manifest.platform !== this.platform || manifest.runtime !== SERVER_RUNTIME_ID) throw new Error('请升级匹配的容器运行环境')

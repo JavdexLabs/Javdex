@@ -10,6 +10,32 @@ import { ProcessUpdateDeployment } from './processDeployment'
 import { MANAGED_LOCK } from './storage'
 import { fixture, makeRelease, archiveRelease } from './testFixtures'
 import { requestBusiness } from './businessHttp'
+import { ServerUpdateManager } from './updateManager'
+
+for (const badWorker of [false, true]) test(`image startup transaction with real child process: ${badWorker ? 'rollback' : 'activation'}`, async () => {
+  const { root, config } = await fixture()
+  const supervisor = new BusinessSupervisor(config)
+  try {
+    const store = new ReleaseStore(config)
+    await store.bootstrap()
+    const deployment = new ProcessUpdateDeployment(config, store, supervisor, {
+      readyTimeoutMs: 3000, probe: async () => JSON.parse(fs.readFileSync(path.join(config.dataDir, 'catalog.fixture.json'), 'utf8'))
+    })
+    await deployment.startCurrent()
+    const original = await deployment.inspect()
+    await deployment.stop()
+    fs.writeFileSync(path.join(config.dataDir, 'user-bytes'), 'preserve image upgrade data')
+    makeRelease(config.seedDir, '0.8.1', badWorker)
+    const image = store.imageRelease()
+    const manager = new ServerUpdateManager(config.stateDir, {}, deployment)
+    await manager.installImage(image.release, image.bytes, () => store.prepareImage(image.release))
+    assert.equal((await manager.status()).job?.phase, badWorker ? 'restored' : 'complete')
+    assert.equal(store.current(), badWorker ? original.release : releaseId(image.release))
+    assert.equal((await deployment.inspect()).identity.serverId, original.identity.serverId)
+    assert.equal(fs.readFileSync(path.join(config.dataDir, 'user-bytes'), 'utf8'), 'preserve image upgrade data')
+    assert.equal((await requestBusiness(new URL('/manage/v1/handshake.get', config.serverUrl), config.healthHost)).status, 200)
+  } finally { await supervisor.shutdown(); fs.rmSync(root, { recursive: true, force: true }) }
+})
 
 test('online preparation verifies embedded signature then extracts only the signed program archive', async t => {
   const { root, config } = await fixture()

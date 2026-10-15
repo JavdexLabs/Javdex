@@ -292,6 +292,10 @@ export interface CatalogBackend {
   onSessionChanged?(listener: () => void): () => void
   reconnect(): Promise<DesktopSession>
   claimWriter(input: DesktopWriterClaimRequest): Promise<DesktopWriterClaimResult>
+  devices?: {
+    list(): Promise<import('@shared/protocol/writer').TrustedDevice[]>
+    revoke(id: string): Promise<import('@shared/protocol/writer').TrustedDevice[]>
+  }
   queries: CatalogQueries
   videos: CatalogVideoCommands
   actresses: CatalogActressCommands

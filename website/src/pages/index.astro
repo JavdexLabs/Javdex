@@ -1,0 +1,22 @@
+---
+import StarlightPage from '@astrojs/starlight/components/StarlightPage.astro';
+import { sitePath } from '../../site.config.mjs';
+const paths = [
+  ['01 / 桌面', '在这台电脑开始', '安装、建库、扫描与播放。无需先配置 AI。', 'start/'],
+  ['02 / 服务端', '部署到 NAS', '用单个容器保存资料，通过桌面和浏览器访问。', 'server/'],
+  ['03 / 已有用户', '升级与维护', '先备份，再升级。核对版本、数据范围与恢复条件。', 'releases/upgrade/'],
+];
+const tasks = [
+  ['配置刮削来源', 'guide/scraping/'], ['使用内置播放器', 'guide/playback/'],
+  ['导入已有 NFO', 'guide/nfo/'], ['下载与切换本地模型', 'guide/local-models/'],
+  ['处理待确认资源', 'guide/pending/'], ['备份或恢复资料', 'guide/backup/'],
+];
+---
+<StarlightPage frontmatter={{ title: 'Javdex 文档', description: '从第一个媒体库开始，到服务端部署与维护。', template: 'splash', editUrl: false }}>
+  <p class="portal-lead">把影片、人物与收藏整理在一起。<br />从一个任务开始，找到适合你的使用方式。</p>
+  <div class="portal-paths not-content">
+    {paths.map(([number, title, copy, target]) => <a class="portal-path" href={sitePath(target)} draggable="false"><span>{number}</span><strong>{title} →</strong><p>{copy}</p></a>)}
+  </div>
+  <section aria-labelledby="common-tasks"><h2 id="common-tasks">你想完成什么？</h2><div class="task-links not-content">{tasks.map(([label, target]) => <a href={sitePath(target)}>{label} →</a>)}</div></section>
+  <section class="portal-about" aria-labelledby="about-site"><h2 id="about-site">还在了解 Javdex？</h2><p><a id="product" href={sitePath('product/')}>查看产品介绍与真实截图</a> · <a id="download" href={sitePath('download/')}>下载正式版</a> · <a id="workflow" href={sitePath('start/')}>开始使用</a> · <a id="nfo" href={sitePath('guide/nfo/')}>NFO 资料迁移</a></p></section>
+</StarlightPage>

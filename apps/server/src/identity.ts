@@ -38,7 +38,7 @@ export function ensureServerCatalog(
 /** One-time bind/recover tokens. Not occupancy files, writer secrets, or recovery passwords. */
 export function issueDeployToken(
   config: ServerConfig,
-  kind: 'initialBind' | 'deployRecover',
+  kind: 'initialBind' | 'deployRecover' | 'deviceAdd' | 'pair',
   options: { bootstrapToken?: string } = {}
 ): IssuedOneTimeToken {
   const owned = !isDatabaseOpen()
@@ -53,7 +53,7 @@ export function issueDeployToken(
     if (kind === 'initialBind' && options.bootstrapToken) {
       return issueOneTimeToken('initialBind', { token: options.bootstrapToken })
     }
-    return issueOneTimeToken(kind)
+    return issueOneTimeToken(kind === 'pair' ? (isWriterBound() ? 'deviceAdd' : 'initialBind') : kind)
   } finally {
     if (owned) closeDatabase()
   }

@@ -1,0 +1,11 @@
+---
+import StarlightPage from '@astrojs/starlight/components/StarlightPage.astro';
+import content from '../components/ProductContent.html?raw';
+import '../styles/product.css';
+import { sitePath } from '../../site.config.mjs';
+const html = content.replaceAll('@@BASE@@', sitePath()).replaceAll('./assets/', sitePath('assets/'));
+---
+<StarlightPage frontmatter={{ title: 'Javdex · 从文件夹，到资料库', description: '本地优先的开源影片资料库，支持 Windows、macOS 和 Linux。', template: 'splash', editUrl: false, pagefind: false }}>
+  <div id="_top" class="product-content not-content" set:html={html} />
+</StarlightPage>
+<script>import '../scripts/product.js';</script>

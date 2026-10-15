@@ -27,6 +27,7 @@ import {
 } from '../desktop/localCatalogIdentity'
 import { copyAgentWorkTables } from '../desktop/agentWorkCopy'
 import { createWriterCredentialStore } from '../desktop/writerCredentialStore'
+import { readServerConnection } from '../desktop/serverConnectionStore'
 import { openDesktopWorkStore, type DesktopWorkStoreHandle } from '../desktop/workStore'
 import { createUnconfiguredRemoteBackend } from '../backends/remote/unconfiguredRemoteBackend'
 import type { DesktopCredentialStore } from '../application/desktopPorts'
@@ -110,6 +111,7 @@ export async function createDesktopRuntime(
       snapshot.remoteBaseUrl
         ? {
             baseUrl: snapshot.remoteBaseUrl,
+            ...readServerConnection(userDataPath, snapshot.remoteBaseUrl),
             appVersion,
             credentials,
             workStore,

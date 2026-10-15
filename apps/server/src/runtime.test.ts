@@ -4206,7 +4206,8 @@ describe('server runtime lifecycle', () => {
     }
     assert.equal(play.range, true)
     assert.deepEqual(play.methods, ['HEAD', 'GET'])
-    assert.match(play.playbackHandle, /^http:\/\/127\.0\.0\.1:\d+\/play\/v1\//)
+    assert.match(play.playbackHandle, /^\/play\/v1\//)
+    play.playbackHandle = new URL(play.playbackHandle, base).href
     const ttlMs = Date.parse(play.expiresAt) - Date.now()
     assert.ok(ttlMs > PLAY_GRANT_TTL_MS - 60_000)
     assert.ok(ttlMs <= PLAY_GRANT_TTL_MS + 5_000)
@@ -4268,7 +4269,7 @@ describe('server runtime lifecycle', () => {
         }
       }, { bearer: writer.secret })
       assert.equal(originalGrant.status, 200, JSON.stringify(originalGrant.json))
-      const originalHandle = (originalGrant.json as { playbackHandle: string }).playbackHandle
+      const originalHandle = new URL((originalGrant.json as { playbackHandle: string }).playbackHandle, base).href
       assert.equal(decodeURIComponent(new URL(originalHandle).pathname.split('/').at(-1) ?? ''), path.basename(file))
       const originalHead = await fetch(originalHandle, { method: 'HEAD' })
       assert.equal(originalHead.status, 200)
@@ -4393,6 +4394,7 @@ describe('server runtime lifecycle', () => {
     )
     assert.equal(nextGrant.status, 200, JSON.stringify(nextGrant.json))
     const nextPlay = nextGrant.json as { grantId: string; playbackHandle: string; expiresAt: string }
+    nextPlay.playbackHandle = new URL(nextPlay.playbackHandle, base).href
     const nextHandle = new URL(nextPlay.playbackHandle)
     const live = await fetch(nextPlay.playbackHandle, { method: 'HEAD' })
     assert.equal(live.status, 200)
@@ -4491,6 +4493,7 @@ describe('server runtime lifecycle', () => {
     )
     assert.equal(granted.status, 200, JSON.stringify(granted.json))
     const play = granted.json as { grantId: string; playbackHandle: string }
+    play.playbackHandle = new URL(play.playbackHandle, base).href
     const socketPath = path.join(dataDir, 'mpv.sock')
     const mpv = await startMpv(socketPath)
     try {
@@ -4545,6 +4548,7 @@ describe('server runtime lifecycle', () => {
       )
       assert.equal(nextGranted.status, 200, JSON.stringify(nextGranted.json))
       const nextPlay = nextGranted.json as { grantId: string; playbackHandle: string }
+      nextPlay.playbackHandle = new URL(nextPlay.playbackHandle, base).href
       const seekLoad = await mpvRpc(socketPath, ['loadfile', nextPlay.playbackHandle, 'replace'], 8000, true)
       assert.equal(seekLoad.error, 'success', JSON.stringify(seekLoad))
       await waitMpvTimePos(socketPath, (value) => value >= 0.15)
@@ -4571,6 +4575,7 @@ describe('server runtime lifecycle', () => {
       )
       assert.equal(mkvGrant.status, 200, JSON.stringify(mkvGrant.json))
       const mkvPlay = mkvGrant.json as { playbackHandle: string }
+      mkvPlay.playbackHandle = new URL(mkvPlay.playbackHandle, base).href
       const mkvLoad = await mpvRpc(socketPath, ['loadfile', mkvPlay.playbackHandle, 'replace'], 8000, true)
       assert.equal(mkvLoad.error, 'success', JSON.stringify(mkvLoad))
       const mkvPos = await waitMpvTimePos(socketPath, (value) => value >= 0.2)
@@ -4658,6 +4663,7 @@ describe('server runtime lifecycle', () => {
       )
       assert.equal(granted.status, 200, JSON.stringify(granted.json))
       const play = granted.json as { grantId: string; playbackHandle: string }
+      play.playbackHandle = new URL(play.playbackHandle, base).href
       assert.match(
         play.playbackHandle,
         new RegExp(`^http://${lan.host.replaceAll('.', '\\.')}:\\d+/play/v1/`)

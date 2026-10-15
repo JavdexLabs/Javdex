@@ -23,8 +23,10 @@ export interface PlaybackSource {
 }
 export function playbackCatalogKey(backend: CatalogBackend): string {
   const session = backend.session()
+  // Remote epochs fence writes across all devices, not this device's playback
+  // identity. Its grant and authenticated validation still enforce revocation.
   return JSON.stringify([backend.identity.mode, backend.identity.catalogId, backend.identity.serverId ?? null,
-    backend.generation, session.writerEpoch, session.state])
+    backend.generation, backend.mode === 'remote' ? null : session.writerEpoch, session.state])
 }
 
 export function createPlaybackSourceResolver(backend: CatalogBackend) {

@@ -1,97 +1,4 @@
-const RELEASE_PAGE = "https://github.com/JavdexLabs/Javdex/releases/latest";
-
-function formatBytes(bytes) {
-  if (!Number.isFinite(bytes) || bytes <= 0) return "";
-  const megabytes = bytes / (1024 * 1024);
-  return `${megabytes >= 100 ? megabytes.toFixed(0) : megabytes.toFixed(1)} MB`;
-}
-
-function formatDate(value) {
-  if (!value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  return new Intl.DateTimeFormat("zh-CN", {
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  }).format(date);
-}
-
-function updateRelease(manifest) {
-  const version = manifest.version || "最新正式版";
-  document.querySelectorAll("[data-release-version]").forEach((element) => {
-    element.textContent = version;
-  });
-
-  const releaseDate = document.querySelector("[data-release-date]");
-  if (releaseDate) releaseDate.textContent = formatDate(manifest.publishedAt);
-
-  document.querySelectorAll("[data-download]").forEach((link) => {
-    const key = link.dataset.download;
-    const asset = manifest.downloads?.[key];
-    const meta = link.querySelector("[data-download-meta]");
-
-    if (!asset?.url) {
-      link.href = manifest.releaseUrl || RELEASE_PAGE;
-      if (meta) meta.textContent = "前往 Release 选择文件";
-      return;
-    }
-
-    link.href = asset.url;
-    link.setAttribute("aria-label", `下载 ${asset.name}`);
-    if (meta) {
-      const size = formatBytes(asset.size);
-      meta.textContent = size ? `${asset.name} · ${size}` : asset.name;
-      meta.title = asset.name;
-    }
-  });
-
-  const status = document.querySelector("[data-release-status]");
-  if (status)
-    status.textContent = Object.values(manifest.downloads || {}).some(
-      (asset) => asset?.url,
-    )
-      ? `安装包来自 GitHub Release · ${version}`
-      : "暂时无法读取安装包清单，可前往 GitHub Release 选择文件";
-}
-
-async function loadRelease() {
-  const status = document.querySelector("[data-release-status]");
-  try {
-    const response = await fetch("./release.json", { cache: "no-cache" });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const manifest = await response.json();
-    if (manifest.schemaVersion !== 1) throw new Error("Unsupported manifest");
-    updateRelease(manifest);
-  } catch {
-    updateRelease({ downloads: {}, releaseUrl: RELEASE_PAGE });
-    if (status)
-      status.textContent =
-        "暂时无法读取安装包清单，按钮将前往 GitHub Latest Release";
-  }
-}
-
-function detectPlatform() {
-  const platform =
-    `${navigator.userAgentData?.platform || ""} ${navigator.platform || ""} ${
-      navigator.userAgent || ""
-    }`.toLowerCase();
-
-  if (platform.includes("win")) return "windows";
-  if (platform.includes("mac")) return "macos";
-  if (platform.includes("linux") || platform.includes("x11")) return "linux";
-  return null;
-}
-
-function markRecommendedPlatform() {
-  const platform = detectPlatform();
-  if (!platform) return;
-  const card = document.querySelector(`[data-platform-card="${platform}"]`);
-  if (!card) return;
-  card.classList.add("is-recommended");
-  const badge = card.querySelector("[data-recommended-badge]");
-  if (badge) badge.hidden = false;
-}
+import { sitePath } from '../../site.config.mjs';
 
 function setupReveal() {
   const elements = [...document.querySelectorAll(".reveal")];
@@ -114,7 +21,7 @@ function setupReveal() {
     { rootMargin: "0px 0px -8% 0px", threshold: 0.08 },
   );
 
-  document.documentElement.classList.add("js-motion");
+  document.querySelector(".product-content")?.classList.add("js-motion");
   elements.forEach((element) => observer.observe(element));
 }
 
@@ -220,7 +127,7 @@ function animatePanel(panel) {
 }
 
 function updateScreenshot(button, file, label) {
-  const src = `./assets/screenshots/${file}.webp`;
+  const src = sitePath(`assets/screenshots/${file}.webp`);
   button.dataset.lightboxSrc = src;
   button.dataset.lightboxAlt = label;
   button.setAttribute("aria-label", `放大${label}`);
@@ -292,7 +199,5 @@ document
   .querySelector("[data-next]")
   ?.addEventListener("click", () => nextStep?.());
 
-markRecommendedPlatform();
 setupReveal();
 setupLightbox();
-loadRelease();

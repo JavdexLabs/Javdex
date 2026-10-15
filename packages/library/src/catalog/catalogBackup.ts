@@ -440,7 +440,9 @@ export function backupControl(host: BackupHost, database: Database.Database, raw
   if (!identity) invalid('资料库尚未初始化')
   if (input.action === 'list') return { jobs: jobs(host).filter(x => x.owner === owner && !x.recordDeletedAt).map(publicJob).sort((a, b) => b.createdAt.localeCompare(a.createdAt)) }
   const existing = fs.existsSync(path.join(jobDir(host, input.id), 'job.json')) ? readJob(host, input.id) : null
-  if (existing && (existing.owner !== owner || existing.epoch !== identity.writerEpoch)) throw structuredError('AUTH_REQUIRED', '备份任务不属于当前写入授权')
+  // The caller is authenticated against its active device credential. Another
+  // device's revocation changes the shared fence, not this task's ownership.
+  if (existing && existing.owner !== owner) throw structuredError('AUTH_REQUIRED', '备份任务不属于当前设备')
   let job: StoredJob
   if (input.action === 'create' || input.action === 'receive') {
     if (existing) {

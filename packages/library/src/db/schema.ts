@@ -1041,6 +1041,42 @@ CREATE TABLE IF NOT EXISTS catalog_operation_receipts (
 );
 `
 
+/** Schema 21 keeps the original manager credential and adds trusted devices. */
+export const CATALOG_MULTI_DEVICE_MIGRATION_SQL = `
+CREATE TABLE catalog_writer_credentials_v21 (
+    claim_id TEXT PRIMARY KEY CHECK(length(claim_id) = 36),
+    writer_epoch INTEGER NOT NULL CHECK(writer_epoch > 0),
+    secret_digest TEXT NOT NULL CHECK(length(secret_digest) = 64),
+    name TEXT NOT NULL DEFAULT '管理电脑' CHECK(length(name) BETWEEN 1 AND 80),
+    created_at TEXT NOT NULL,
+    superseded_at TEXT
+);
+INSERT INTO catalog_writer_credentials_v21 (claim_id, writer_epoch, secret_digest, created_at, superseded_at)
+    SELECT claim_id, writer_epoch, secret_digest, created_at, superseded_at FROM catalog_writer_credentials;
+DROP TABLE catalog_writer_credentials;
+ALTER TABLE catalog_writer_credentials_v21 RENAME TO catalog_writer_credentials;
+CREATE UNIQUE INDEX idx_catalog_active_device_secret ON catalog_writer_credentials(secret_digest) WHERE superseded_at IS NULL;
+CREATE TABLE catalog_one_time_tokens_v21 (
+    token_digest TEXT PRIMARY KEY CHECK(length(token_digest) = 64),
+    kind TEXT NOT NULL CHECK(kind IN ('initialBind', 'handoff', 'deployRecover', 'deviceAdd')),
+    expires_at TEXT NOT NULL, issued_at TEXT NOT NULL, consumed_at TEXT, claim_id TEXT
+);
+INSERT INTO catalog_one_time_tokens_v21 SELECT * FROM catalog_one_time_tokens;
+DROP TABLE catalog_one_time_tokens;
+ALTER TABLE catalog_one_time_tokens_v21 RENAME TO catalog_one_time_tokens;
+CREATE INDEX idx_catalog_one_time_tokens_kind ON catalog_one_time_tokens(kind, consumed_at);
+CREATE TABLE catalog_writer_claims_v21 (
+    claim_id TEXT PRIMARY KEY CHECK(length(claim_id) = 36),
+    kind TEXT NOT NULL CHECK(kind IN ('initialBind', 'handoff', 'deployRecover', 'deviceAdd')),
+    candidate_secret_digest TEXT NOT NULL CHECK(length(candidate_secret_digest) = 64),
+    status TEXT NOT NULL CHECK(status IN ('pending', 'waitingMaintenance', 'consumed', 'expired', 'superseded')),
+    writer_epoch INTEGER, result_json TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+INSERT INTO catalog_writer_claims_v21 SELECT * FROM catalog_writer_claims;
+DROP TABLE catalog_writer_claims;
+ALTER TABLE catalog_writer_claims_v21 RENAME TO catalog_writer_claims;
+`
+
 /** Official schema 18 image upload slots and crash-recovery file jobs. */
 export const CATALOG_IMAGE_UPLOAD_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS catalog_image_uploads (

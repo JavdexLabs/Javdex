@@ -13,6 +13,7 @@ import {
   AGENT_PLATFORM_SCHEMA_SQL,
   AGENT_RESOURCE_CLEANUP_SCHEMA_SQL,
   CATALOG_PROTOCOL_SCHEMA_SQL,
+  CATALOG_MULTI_DEVICE_MIGRATION_SQL,
   CATALOG_IMAGE_UPLOAD_SCHEMA_SQL,
   CATALOG_TASK_SCHEMA_SQL,
   MEDIA_LIBRARY_CORE_SCHEMA_SQL,
@@ -29,7 +30,7 @@ import {
   VIDEO_SOURCES_SCHEMA_SQL
 } from './schema'
 
-export const CURRENT_SCHEMA_VERSION = 20
+export const CURRENT_SCHEMA_VERSION = 21
 
 type Migration = {
   version: number
@@ -1553,7 +1554,8 @@ const MIGRATIONS: Migration[] = [
       for (const video of videos) ensureDefaultExternalRating(database, video.video_id)
       database.exec(BUILTIN_PLAYLISTS_SQL)
     }
-  }
+  },
+  { version: 21, migrate(database) { database.exec(CATALOG_MULTI_DEVICE_MIGRATION_SQL) } }
 ]
 
 function migrationForVersion(version: number): Migration | undefined {
@@ -1563,12 +1565,15 @@ function migrationForVersion(version: number): Migration | undefined {
 /** Initialise or upgrade the database schema. */
 export function migrateDatabase(database: Database.Database): void {
   const current = Number(database.pragma('user_version', { simple: true }) ?? 0)
+  if (current === 21 && !columnNames(database, 'catalog_writer_credentials').has('name')) {
+    throw new Error('Database uses an unreleased or incomplete schema 21 snapshot. Restore a released pre-upgrade backup; do not change user_version manually.')
+  }
   if (current > CURRENT_SCHEMA_VERSION) {
     throw new Error(
       `Database schema version ${current} is no longer supported. Use a matching application version or restore a pre-upgrade backup; do not lower user_version manually.`
     )
   }
-  if (current === CURRENT_SCHEMA_VERSION && (!columnNames(database, 'video_external_stats').has('is_default')
+  if (current >= 20 && (!columnNames(database, 'video_external_stats').has('is_default')
     || !columnNames(database, 'playlists').has('system_kind') || !columnNames(database, 'playlists').has('remove_after_play'))) {
     throw new Error('Database uses an unreleased or incomplete schema 20 snapshot. Restore a released pre-upgrade backup; do not change user_version manually.')
   }
@@ -1601,6 +1606,7 @@ export function migrateDatabase(database: Database.Database): void {
   if (current === 0) {
     database.transaction(() => {
       database.exec(SCHEMA_SQL)
+      database.exec(CATALOG_MULTI_DEVICE_MIGRATION_SQL)
       database.pragma(`user_version = ${CURRENT_SCHEMA_VERSION}`)
     })()
     return

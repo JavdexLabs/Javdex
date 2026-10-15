@@ -18,6 +18,8 @@ export interface ManageOperationMeta {
 export const MANAGE_OPERATIONS = {
   'handshake.get': { auth: 'publicHandshake', versions: [], completion: 'sync', summary: 'Protocol, app, schema, identity, readiness' },
   'writer.status': { auth: 'manageRead', versions: [], completion: 'sync', summary: 'Current writer epoch and claim state' },
+  'devices.list': { auth: 'manageRead', versions: [], completion: 'sync', summary: 'Trusted desktop devices; credentials are never returned' },
+  'devices.revoke': { auth: 'manageWrite', versions: [], completion: 'sync', summary: 'Revoke one device and its playback/update access' },
   'writer.claim': { auth: 'claim', versions: [], completion: 'sync', summary: 'Redeem one-time token with pre-saved candidate secret' },
   'writer.claimStatus': { auth: 'claim', versions: [], completion: 'sync', summary: 'Idempotent claim result by claimId' },
   'writer.handoffBegin': { auth: 'manageWrite', versions: [], completion: 'sync', summary: 'Issue a one-time handoff token without revoking the current writer yet' },

@@ -23,13 +23,13 @@
 <p align="center">
   <a href="https://github.com/JavdexLabs/Javdex/releases/latest">下载最新版</a>
   &nbsp;·&nbsp;
-  <a href="docs/USER_GUIDE.md">使用指南</a>
+  <a href="https://javdexlabs.github.io/Javdex/start/">使用文档</a>
   &nbsp;·&nbsp;
   <a href=".github/release-notes/v0.9.0.md">0.9.0 发布说明</a>
   &nbsp;·&nbsp;
   <a href="CHANGELOG.md">更新日志</a>
   &nbsp;·&nbsp;
-  <a href="https://javdexlabs.github.io/Javdex/">访问官网</a>
+  <a href="https://javdexlabs.github.io/Javdex/product/">产品介绍</a>
 </p>
 
 Javdex 是一款以番号为核心的本地影片管理工具。扫描目录、补齐封面与资料，按演员、厂商和系列浏览，也可以创建清单、导入网页收藏，并通过 NFO 与其他媒体软件交换资料。
@@ -170,7 +170,7 @@ NFO 导入与导出是一次性操作，不会持续同步，也不等于完整�
 3. **补齐资料**：在“设置 → 刮削来源”选择可用来源，再对影片执行单部或批量刮削。
 4. **开始整理与播放**：浏览影片和演员、加入收藏或稍后观看，打开影片使用内置播放器；有待确认项时，核对后再完成关联。
 
-安装与更新方式、链接导入和各项功能的具体步骤见 [使用指南](docs/USER_GUIDE.md)，平台与升级前提见 [0.9.0 发布说明](.github/release-notes/v0.9.0.md)。从 0.8.0 升级前请备份完整数据与图片目录；数据库 schema 19 → 20、模型管理 schema 3 → 4 会在首次使用新版时升级，回退须恢复升级前备份，不能直接用旧版打开升级后的数据。
+安装与更新方式、链接导入和各项功能的具体步骤见 [使用指南](docs/USER_GUIDE.md)，平台与升级前提见 [0.9.0 发布说明](.github/release-notes/v0.9.0.md)。从 0.8.0 升级前请备份完整数据与图片目录；数据库 schema 19 → 21、模型管理 schema 3 → 4 会在首次使用新版时升级，回退须恢复升级前备份，不能直接用旧版打开升级后的数据。
 
 > 当前安装包尚未进行商业代码签名，系统可能显示发布者或安全提示。请从项目官网或 GitHub Releases 下载。应用可检查版本，但更新需要重新下载安装包。
 

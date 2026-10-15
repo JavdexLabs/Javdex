@@ -12,3 +12,8 @@ release-artifacts-*/
 .agents/
 .tmp-*/
 skills-lock.json
+website/.astro/
+website/.generated/
+website/public/assets/
+website/public/release.json
+website/public/.nojekyll

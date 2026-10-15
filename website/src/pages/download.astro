@@ -1,0 +1,61 @@
+---
+import StarlightPage from '@astrojs/starlight/components/StarlightPage.astro';
+import { Code } from '@astrojs/starlight/components';
+import release from '../../.generated/release.json';
+import { sitePath, site } from '../../site.config.mjs';
+const platforms = [
+  { name: 'Windows', icon: 'windows', description: '64 位（x64）', items: [['windowsX64', 'EXE 安装版', '按向导安装，推荐'], ['windowsZip', 'ZIP 免安装版', '完整解压后运行，保留配套文件']] },
+  { name: 'macOS', icon: 'apple', description: 'DMG · 按芯片选择', items: [['macArm64', 'Apple Silicon', 'Apple M 系列芯片'], ['macX64', 'Intel Mac', 'Intel 处理器']] },
+  { name: 'Linux', icon: 'linux', description: '64 位（x86_64）', items: [['linuxAppImage', 'AppImage', '赋予执行权限后运行'], ['linuxDeb', 'DEB 软件包', 'Ubuntu / Debian / Mint']] },
+];
+const extraLabels = { serverAmd64: 'Linux amd64 升级文件', serverArm64: 'Linux arm64 升级文件', playbackSources: '四平台播放总源码包', checksums: 'SHA256SUMS.txt' };
+const size = (n) => Number.isFinite(n) && n > 0 ? `${(n / 1024 / 1024).toFixed(1)} MB` : '';
+const version = release.available ? release.version.replace(/^v/, '') : null;
+const image = version ? `ghcr.io/javdexlabs/javdex-server:${version}` : null;
+const hasManagedUpdate = !!release.extras?.serverAmd64 && !!release.extras?.serverArm64;
+const deployUrl = version ? `https://github.com/${site.repository}/tree/${release.version}/deploy` : release.releaseUrl;
+---
+<StarlightPage frontmatter={{ title: '下载 Javdex', description: '选择实际正式 Release 提供的安装包与升级文件。', template: 'splash', editUrl: false }}>
+  <p class="download-version">当前正式版 <strong data-release-version>{release.version}</strong>{release.publishedAt && <span> · {new Date(release.publishedAt).toISOString().slice(0, 10)}</span>}</p>
+  {!release.available && <p class="version-notice">当前为离线或未核实下载清单，按钮会打开 GitHub 正式 Release，不表示 0.9.0 已发布。</p>}
+  <div class="download-platforms not-content">
+    {platforms.map(platform => <section class="download-platform" aria-label={platform.name}>
+      <h2><img src={sitePath(`assets/platforms/${platform.icon}.svg`)} alt="" width="23" height="23" />{platform.name}</h2>
+      <p class="platform-description">{platform.description}</p>
+      {platform.items.map(([key, label, copy]) => {
+        const asset = release.downloads[key];
+        return <a class="download-file" data-download={key} href={asset?.url ?? release.releaseUrl}><strong>{label} ↓</strong><span>{copy}</span><small>{asset ? `${asset.name} · ${size(asset.size)}` : '前往正式 Release 选择文件'}</small></a>;
+      })}
+    </section>)}
+  </div>
+  <p><a href={sitePath('start/install/')}>安装与首次启动说明</a> · <a href={sitePath('releases/upgrade/')}>已有资料先阅读升级指南</a> · <a href={release.releaseUrl}>发布说明与全部文件</a></p>
+  <aside class="download-note">安装包尚未进行商业代码签名，系统可能显示发布者或安全提示。只从本项目 Release 下载；许可与平台要求以对应版本的随包文件和发布说明为准。</aside>
+  <section class="download-server" aria-labelledby="server-download">
+    <h2 id="server-download">服务端</h2>
+    <p>首次部署使用 Docker 镜像与同版本配置；升级文件只用于已具备托管更新能力的部署，不是 Docker 镜像归档。</p>
+    {image && <Code code={`docker pull ${image}`} lang="bash" />}
+    <p><a href={sitePath('server/deploy/')}>部署步骤与权限要求</a> · <a href={deployUrl}>对应正式版部署示例</a></p>
+    {hasManagedUpdate ? <><p>后续离线更新选择与服务器架构一致的单个 <code>.javdex-update</code> 文件。停服前先完成配对并核对备份。</p><div class="download-extras">{['serverAmd64', 'serverArm64'].map(key => <a href={release.extras[key].url}>{extraLabels[key]} ↓<small>{size(release.extras[key].size)}</small></a>)}</div></> : <p>此正式 Release 没有本站所述的单文件托管升级包。请遵循该版本发布说明；旧部署首次采用新版前先阅读<a href={sitePath('server/adoption/')}>迁移前提</a>。</p>}
+  </section>
+  <details class="download-source"><summary>源码、许可证与下载校验</summary><p>普通用户无需下载播放源码。总源码包含四个平台的对应材料、构建配置和恢复说明；SHA256SUMS 用于核对下载字节。</p><div class="download-extras">{['playbackSources', 'checksums'].map(key => release.extras?.[key] && <a href={release.extras[key].url}>{extraLabels[key]} ↓</a>)}<a href={release.releaseUrl}>查看该版本全部附件</a><a href={`https://github.com/${site.repository}/tree/${release.available ? release.version : 'main'}`}>项目源码与许可</a></div></details>
+</StarlightPage>
+<style>
+  .download-version { color: var(--sl-color-gray-2); }
+  .download-version strong { color: var(--site-accent); font-size: 1.15rem; }
+  .download-platforms { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; margin-block: 2rem; }
+  .download-platform { border: 1px solid var(--site-border); border-radius: .5rem; padding: 1.25rem; background: var(--site-panel); min-width: 0; }
+  .download-platform h2 { display: flex; gap: .6rem; align-items: center; margin-top: 0; font-size: 1.2rem; }
+  .download-platform img { border: 0; border-radius: 0; }
+  .platform-description { min-height: 1.5rem; font-size: .85rem; color: var(--sl-color-gray-2); }
+  .download-file { display: flex; flex-direction: column; gap: .35rem; padding-block: 1rem; text-decoration: none; border-top: 1px solid var(--site-border); color: var(--site-accent); }
+  .download-file span { font-size: .85rem; color: var(--sl-color-gray-2); }
+  .download-file small { font-size: .75rem; color: var(--sl-color-gray-3); overflow-wrap: anywhere; }
+  .download-file:hover strong { text-decoration: underline; }
+  .download-note { padding-inline-start: 1rem; border-inline-start: 3px solid var(--site-border); color: var(--sl-color-gray-2); font-size: .85rem; }
+  .download-server { margin-block: 3rem; }
+  .download-extras { display: flex; flex-wrap: wrap; gap: 1rem 2rem; }
+  .download-extras small { margin-inline-start: .5rem; color: var(--sl-color-gray-3); }
+  .download-source { padding-block: 1rem; border-block: 1px solid var(--site-border); }
+  .download-source summary { cursor: pointer; }
+  @media (max-width: 49.99rem) { .download-platforms { grid-template-columns: 1fr; } }
+</style>

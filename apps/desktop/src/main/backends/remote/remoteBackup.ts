@@ -7,13 +7,13 @@ import { isStructuredError, structuredError } from '@shared/protocol/errors'
 import type { CatalogBackupCommands } from '../../application/catalogBackend'
 import type { RemoteCatalogBackendOptions } from './remoteCatalogBackend'
 
-export function createRemoteBackup(options: RemoteCatalogBackendOptions, refresh: () => Promise<unknown>, connectionSignal: () => AbortSignal = () => new AbortController().signal): CatalogBackupCommands {
-  const client = new ManageHttpClient(options)
+export function createRemoteBackup(options: RemoteCatalogBackendOptions, refresh: () => Promise<unknown>, connectionSignal: () => AbortSignal = () => new AbortController().signal, client = new ManageHttpClient(options)): CatalogBackupCommands {
   const pendingPath = options.userDataPath ? path.join(options.userDataPath, 'backup-connection-recovery.json') : null
   async function connection(signal: AbortSignal) {
     const hello = await client.post('handshake.get', { input: {} }, { sendAppVersion: false, signal: AbortSignal.any([signal, AbortSignal.timeout(client.timeoutMs)]) }) as HandshakeResult
     if (hello.appVersion !== options.appVersion) throw structuredError('VERSION_MISMATCH', '桌面与服务器版本不一致')
     let secret = await options.credentials.readWriterSecret(hello.identity.catalogId)
+    if (!secret && options.deviceIdentity?.serverId === hello.identity.serverId) secret = options.deviceIdentity.secret
     if (!secret && pendingPath && fs.existsSync(pendingPath)) {
       const pending = JSON.parse(fs.readFileSync(pendingPath, 'utf8')) as { catalogId: string; serverId: string; baseUrl: string }
       if (pending.serverId === hello.identity.serverId && pending.baseUrl === options.baseUrl) secret = await options.credentials.readWriterSecret(pending.catalogId)
@@ -25,7 +25,7 @@ export function createRemoteBackup(options: RemoteCatalogBackendOptions, refresh
   async function transfer(id: string, offset: number, body?: Buffer): Promise<Response> {
     const signal = connectionSignal()
     const { secret } = await connection(signal)
-    const response = await fetch(`${client.baseUrl}/manage/v1/backups/${encodeURIComponent(id)}?offset=${offset}`, {
+    const response = await client.fetch(`${client.baseUrl}/manage/v1/backups/${encodeURIComponent(id)}?offset=${offset}`, {
       method: body ? 'PUT' : 'GET',
       headers: { Authorization: `Bearer ${secret}`, 'X-Javdex-App-Version': options.appVersion, Origin: client.origin, 'Content-Type': 'application/octet-stream' },
       body: body ? new Uint8Array(body) : undefined,

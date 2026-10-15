@@ -1,6 +1,7 @@
 import { z } from 'zod'
 
 export const SERVER_UPDATE_PROTOCOL = 1
+export const trustedDevicesSchema = z.array(z.object({ id: z.uuid(), name: z.string().min(1).max(80), createdAt: z.string(), current: z.boolean() }).strict())
 export const SERVER_RUNTIME_ID = 'node22-bookworm-v1'
 export const SERVER_RELEASE_REQUIRED_FILES = ['index.js', 'webCatalogWorker.js', 'web/index.html', 'package.json', 'LICENSE', 'NOTICE', 'node_modules/better-sqlite3/package.json', 'node_modules/sharp/package.json'] as const
 export function isServerReleasePath(value: string): boolean {
@@ -57,6 +58,13 @@ export const updaterPairingSchema = z.object({
 }).strict()
 export type UpdaterPairing = z.infer<typeof updaterPairingSchema>
 
+export const serverConnectionBundleSchema = updaterPairingSchema.omit({ token: true }).extend({
+  protocolVersion: z.literal(2), code: z.string().regex(/^[a-f0-9]{64}$/), expiresAt: z.iso.datetime()
+}).strict()
+export type ServerConnectionBundle = z.infer<typeof serverConnectionBundleSchema>
+export const connectionClaimSchema = z.object({ code: z.string().regex(/^[a-f0-9]{64}$/),
+  claimId: z.uuid(), secretDigest: hash, name: z.string().trim().min(1).max(80).optional(), appVersion: z.string().min(1).max(128) }).strict()
+
 export const UPDATE_PHASES = ['preparing', 'prepared', 'stopping', 'backup', 'installing', 'verifying', 'activating', 'complete', 'restoring', 'restored', 'failed', 'recoveryRequired'] as const
 export type ServerUpdatePhase = typeof UPDATE_PHASES[number]
 export interface ServerUpdateJob {
@@ -78,10 +86,14 @@ export interface ServerUpdateSnapshot {
   runtime?: string | null
   targetVersion: string | null
   job: ServerUpdateJob | null
+  devices?: import('./protocol/writer').TrustedDevice[]
 }
 export const serverUpdateCommandSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('status') }).strict(),
   z.object({ action: z.literal('pair'), pairing: z.string().min(1).max(8192) }).strict(),
+  z.object({ action: z.literal('connect'), pairing: z.string().min(1).max(8192) }).strict(),
+  z.object({ action: z.literal('devices') }).strict(),
+  z.object({ action: z.literal('revokeDevice'), deviceId: z.uuid() }).strict(),
   z.object({ action: z.literal('forget') }).strict(),
   z.object({ action: z.literal('check') }).strict(),
   z.object({ action: z.literal('import') }).strict(),

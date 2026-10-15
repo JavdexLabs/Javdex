@@ -1,4 +1,5 @@
-:root {
+@scope (.product-content) {
+:scope {
   color-scheme: light;
   --surface-base: #fff;
   --surface-panel: #f6f8fc;
@@ -18,11 +19,11 @@
 * {
   box-sizing: border-box;
 }
-html {
+:scope {
   scroll-behavior: smooth;
   scroll-padding-top: 108px;
 }
-body {
+:scope {
   margin: 0;
 }
 button {
@@ -1754,3 +1755,16 @@ h2 {
     transform: none;
   }
 }
+
+}
+
+.product-content { color: var(--text-primary); background: var(--surface-base); }
+.product-download { padding-block: 4rem; border-block: 1px solid var(--site-border); }
+.product-download p { margin-block: 1rem; }
+:root[data-theme='dark'] .product-content { color-scheme: dark; --surface-base: #13171d; --surface-panel: #1b2028; --surface-tint: #202a38; --text-primary: #edf0f5; --text-secondary: #b4bfce; --text-muted: #a1acbc; --border: #3b4553; --accent: #8eb6f2; }
+:root[data-theme='dark'] .product-content :is(.eyebrow-pill, .window-heading, .showcase, .showcase-toolbar, .workflow-section, .workflow, .workflow-tabs, .workflow-tabs button[aria-selected='true'], .nfo-panel, .feature-icon, .workflow-tip, .workflow-next) { background: var(--surface-panel); border-color: var(--border); }
+:root[data-theme='dark'] .product-content .button { color: var(--surface-base); }
+:root[data-theme='dark'] .product-content .button:hover { background: #b5cff7; }
+:root[data-theme='dark'] .product-content .hero-platforms img { filter: invert(1); }
+.content-panel:has(.product-content) { padding: 0; border: 0; }
+.sl-container:has(.product-content) { max-width: 82rem; }

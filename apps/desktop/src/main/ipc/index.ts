@@ -55,7 +55,7 @@ export function registerIpcHandlers(
   registerNfoExportHandlers(ctx, options.backend)
   registerMediaLibraryHandlers(options.backend, options.mediaLibraryDesktop)
   registerUpdateHandlers(ctx)
-  appCommandAdapter.register(IPC.SERVER_UPDATE_CONTROL, createServerUpdateService(options.backend, ctx))
+  appCommandAdapter.register(IPC.SERVER_UPDATE_CONTROL, createServerUpdateService(options.backend, ctx, options.settings))
   registerAssetHandlers()
   registerScanHandlers(ctx, options.backend)
   registerVideoHandlers(options.backend, options.videoDesktop)

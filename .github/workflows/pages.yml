@@ -6,9 +6,11 @@ on:
       - main
     paths:
       - "website/**"
-      - "docs/images/**"
+      - "docs/**"
+      - "CHANGELOG.md"
       - "build/icon-1024.png"
       - "package.json"
+      - "package-lock.json"
       - ".github/workflows/pages.yml"
   release:
     types:
@@ -46,6 +48,13 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: 22
+          cache: npm
+
+      - name: Install website dependencies only
+        run: npm ci --workspace @javdex/website --include-workspace-root=false
+
+      - name: Test Release manifest contracts
+        run: npm run pages:test
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v6

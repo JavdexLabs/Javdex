@@ -1,13 +1,13 @@
 import type Database from 'better-sqlite3'
 import { CLAIM_CREDENTIAL_TTL_MS } from '@shared/protocol/limits'
 import { structuredError } from '@shared/protocol/errors'
-import type { WriterClaimKind, WriterClaimResult, WriterStatus } from '@shared/protocol/writer'
+import type { WriterClaimKind, WriterClaimResult, WriterStatus, TrustedDevice, WriterCandidate } from '@shared/protocol/writer'
 import { getDb } from '@library/db/database'
 import { digestEquals, digestToken, generateSecret } from './catalogSecrets'
 import { ensureCatalogIdentity, readCatalogIdentity, type CatalogIdentityState } from './catalogIdentity'
-import { notifyPlayGrantsRevoked, revokeAllPlayGrants } from './catalogPlay'
+import { notifyPlayGrantsRevoked, revokeAllPlayGrants, revokeDevicePlayGrants } from './catalogPlay'
 
-const CLAIM_KINDS = new Set<WriterClaimKind>(['initialBind', 'handoff', 'deployRecover'])
+const CLAIM_KINDS = new Set<WriterClaimKind>(['initialBind', 'handoff', 'deployRecover', 'deviceAdd'])
 const ASYNC_MAINTENANCE_KEYS = [
   'catalog-mutation-intent:%',
   'catalog-file-maintenance:%'
@@ -24,7 +24,7 @@ export interface IssuedOneTimeToken {
 export interface WriterClaimRequest {
   kind: WriterClaimKind
   oneTimeToken: string
-  candidate: { claimId: string; secretDigest: string }
+  candidate: WriterCandidate
 }
 
 interface TokenRow {
@@ -125,7 +125,7 @@ export function issueOneTimeToken(
   })()
 }
 
-export function readWriterStatus(database: Database.Database = getDb()): WriterStatus {
+export function readWriterStatus(database: Database.Database = getDb(), currentId?: string): WriterStatus {
   const identity = readCatalogIdentity(database)
   const maintenanceBusy = fileMaintenanceBlocksHandoff(database)
   const claim = database
@@ -138,7 +138,7 @@ export function readWriterStatus(database: Database.Database = getDb()): WriterS
   return {
     writerEpoch: identity?.writerEpoch ?? 0,
     bound: Boolean(identity && identity.writerEpoch > 0),
-    claimId: claim?.claim_id ?? null,
+    claimId: currentId ?? claim?.claim_id ?? null,
     maintenanceBusy
   }
 }
@@ -166,12 +166,11 @@ function verifyWriterSecret(
     .prepare(
       `SELECT writer_epoch, secret_digest, claim_id
        FROM catalog_writer_credentials
-       WHERE superseded_at IS NULL
-       ORDER BY writer_epoch DESC LIMIT 1`
+       WHERE superseded_at IS NULL AND secret_digest = ?`
     )
-    .get() as { writer_epoch: number; secret_digest: string; claim_id: string } | undefined
+    .get(digest) as { writer_epoch: number; secret_digest: string; claim_id: string } | undefined
   if (!row || !digestEquals(row.secret_digest, digest)) return null
-  return { epoch: row.writer_epoch, claimId: row.claim_id }
+  return { epoch: requireIdentity(database).writerEpoch, claimId: row.claim_id }
 }
 
 export function authenticateWriter(
@@ -221,6 +220,9 @@ export function claimWriter(
         throw structuredError('OPERATION_KEY_REUSED', '领取编号已被不同内容使用')
       }
       if (existing.status !== 'waitingMaintenance') {
+        if (!database.prepare('SELECT 1 FROM catalog_writer_credentials WHERE claim_id = ? AND superseded_at IS NULL').get(existing.claim_id)) {
+          throw structuredError('AUTH_REQUIRED', '该设备授权已撤销，请重新配对')
+        }
         return JSON.parse(existing.result_json) as WriterClaimResult
       }
       database.prepare('DELETE FROM catalog_writer_claims WHERE claim_id = ?').run(existing.claim_id)
@@ -249,13 +251,14 @@ export function claimWriter(
     if (input.kind !== 'initialBind' && identity.writerEpoch === 0) {
       throw structuredError('AUTH_REQUIRED', '实例尚未认主')
     }
-    if (input.kind !== 'initialBind' && fileMaintenanceBlocksHandoff(database)) {
+    if (input.kind !== 'initialBind' && input.kind !== 'deviceAdd' && fileMaintenanceBlocksHandoff(database)) {
       throw structuredError('MAINTENANCE_BUSY', '当前有维护任务，请完成或取消任务后重新交接')
     }
 
-    const nextEpoch = identity.writerEpoch + 1
+    const adding = input.kind === 'deviceAdd'
+    const nextEpoch = adding ? identity.writerEpoch : identity.writerEpoch + 1
     const createdAt = at.toISOString()
-    database
+    if (!adding) database
       .prepare(
         `UPDATE catalog_writer_credentials
          SET superseded_at = ?
@@ -265,10 +268,10 @@ export function claimWriter(
     database
       .prepare(
         `INSERT INTO catalog_writer_credentials (
-           writer_epoch, secret_digest, claim_id, created_at, superseded_at
-         ) VALUES (?, ?, ?, ?, NULL)`
+           writer_epoch, secret_digest, claim_id, name, created_at, superseded_at
+         ) VALUES (?, ?, ?, ?, ?, NULL)`
       )
-      .run(nextEpoch, input.candidate.secretDigest, input.candidate.claimId, createdAt)
+      .run(nextEpoch, input.candidate.secretDigest, input.candidate.claimId, input.candidate.name?.trim().slice(0, 80) || '管理电脑', createdAt)
     database
       .prepare(
         `UPDATE catalog_identity SET writer_epoch = ?, updated_at = ? WHERE id = 1`
@@ -302,9 +305,38 @@ export function claimWriter(
         createdAt,
         createdAt
       )
-    revoked = revokeAllPlayGrants(database)
+    if (!adding) {
+      database.prepare("DELETE FROM catalog_one_time_tokens WHERE kind = 'deviceAdd' AND consumed_at IS NULL").run()
+      revoked = revokeAllPlayGrants(database)
+    }
     return result
   })()
   notifyPlayGrantsRevoked(revoked)
   return result
+}
+
+export function listTrustedDevices(currentId: string, database: Database.Database = getDb()): TrustedDevice[] {
+  const rows = database.prepare('SELECT claim_id, name, created_at FROM catalog_writer_credentials WHERE superseded_at IS NULL ORDER BY created_at, claim_id')
+    .all() as { claim_id: string; name: string; created_at: string }[]
+  return rows.map(row => ({ id: row.claim_id, name: row.name, createdAt: row.created_at, current: row.claim_id === currentId }))
+}
+
+/** Advance the shared fence so requests authenticated before revocation cannot commit later. */
+export function revokeTrustedDevice(deviceId: string, currentId: string, database: Database.Database = getDb()): void {
+  let revoked: string[] = []
+  database.transaction(() => {
+    const identity = requireIdentity(database)
+    if (deviceId === currentId) throw structuredError('INVALID_INPUT', '请在另一台管理电脑撤销此设备')
+    if (!database.prepare('SELECT 1 FROM catalog_writer_credentials WHERE claim_id = ? AND superseded_at IS NULL').get(currentId)) throw structuredError('AUTH_REQUIRED', '管理凭据已失效')
+    if (!database.prepare('SELECT 1 FROM catalog_writer_credentials WHERE claim_id = ? AND superseded_at IS NULL').get(deviceId)) return
+    if (fileMaintenanceBlocksHandoff(database)) throw structuredError('MAINTENANCE_BUSY', '请先完成或取消维护任务，再撤销设备')
+    const epoch = identity.writerEpoch + 1
+    const now = new Date().toISOString()
+    database.prepare('UPDATE catalog_writer_credentials SET superseded_at = ? WHERE claim_id = ?').run(now, deviceId)
+    database.prepare('UPDATE catalog_writer_credentials SET writer_epoch = ? WHERE superseded_at IS NULL').run(epoch)
+    database.prepare('UPDATE catalog_identity SET writer_epoch = ?, updated_at = ? WHERE id = 1').run(epoch, now)
+    database.prepare('DELETE FROM catalog_one_time_tokens WHERE consumed_at IS NULL').run()
+    revoked = revokeDevicePlayGrants(deviceId, epoch, database)
+  })()
+  notifyPlayGrantsRevoked(revoked)
 }

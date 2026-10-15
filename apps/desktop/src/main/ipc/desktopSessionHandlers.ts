@@ -12,6 +12,7 @@ import type { DesktopSettingsStore } from '../application/desktopPorts'
 import { appCommandAdapter, appEventAdapter } from './appContractAdapter'
 import type { IpcContext } from './shared'
 import { detectDefaultPlayer } from '../desktop/defaultPlayerService'
+import { readServerPin } from '../desktop/serverConnectionStore'
 
 export interface DesktopSessionHandlerPorts {
   backend: CatalogBackend
@@ -40,11 +41,12 @@ function assertRemoteBaseUrl(url: string): void {
   }
 }
 
-export async function probeRemoteConnection(baseUrl: string, appVersion: string): Promise<RemoteConnectionProbeResult> {
+export async function probeRemoteConnection(baseUrl: string, appVersion: string, certificateSha256?: string): Promise<RemoteConnectionProbeResult> {
   const url = baseUrl.trim()
   assertRemoteBaseUrl(url)
+  const client = new ManageHttpClient({ baseUrl: url, appVersion, timeoutMs: 5_000, certificateSha256 })
   try {
-    const hello = await new ManageHttpClient({ baseUrl: url, appVersion, timeoutMs: 5_000 })
+    const hello = await client
       .post('handshake.get', { input: {} }, { sendAppVersion: false }) as HandshakeResult
     if (!hello || typeof hello.appVersion !== 'string' ||
         typeof hello.identity?.serverId !== 'string' || typeof hello.identity.catalogId !== 'string' ||
@@ -72,7 +74,7 @@ export async function probeRemoteConnection(baseUrl: string, appVersion: string)
       message: isStructuredError(reason) ? reason.message : '无法连接服务器，请检查地址、端口与服务状态',
       serverVersion: null, serverId: null, catalogId: null
     }
-  }
+  } finally { await client.close() }
 }
 
 async function pickPlayerProgram(ctx: IpcContext, currentPath: string | null): Promise<string | null> {
@@ -132,7 +134,7 @@ export function registerDesktopSessionHandlers(
     probe: (baseUrl: string) => Promise<RemoteConnectionProbeResult>
     restart: () => void
   } = {
-    probe: (baseUrl) => probeRemoteConnection(baseUrl, app.getVersion()),
+    probe: (baseUrl) => probeRemoteConnection(baseUrl, app.getVersion(), readServerPin(app.getPath('userData'), baseUrl)),
     restart: () => { app.relaunch(); setTimeout(() => app.quit(), 0) }
   }
 ): void {

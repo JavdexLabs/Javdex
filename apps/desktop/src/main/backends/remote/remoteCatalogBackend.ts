@@ -5,6 +5,8 @@ import type { CatalogOperationInput, CatalogWireInput } from '../../application/
 import type { CatalogOperationResults } from '../../application/catalogOperationResults'
 import { randomUUID } from 'node:crypto'
 import { ManageHttpClient } from '@http/manageClient'
+import { createPlaybackBridge } from '@http/playbackBridge'
+import { trustedDevicesSchema } from '@shared/serverUpdateTypes'
 import { digestToken, generateSecret } from '@library/catalog/catalogSecrets'
 import { structuredError, isStructuredError, type StructuredError } from '@shared/protocol/errors'
 import type { HandshakeResult } from '@shared/protocol/handshake'
@@ -30,6 +32,9 @@ export interface RemoteCatalogBackendOptions {
   credentials: DesktopCredentialStore
   generation?: number
   timeoutMs?: number
+  certificateSha256?: string
+  /** Server-bound device identity survives an authorized catalog restore. */
+  deviceIdentity?: { serverId: string; secret: string }
   workStore?: { putVerification(operationId: string, catalogId: string): void }
   userDataPath?: string
 }
@@ -43,8 +48,10 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
   const client = new ManageHttpClient({
     baseUrl: options.baseUrl,
     appVersion: options.appVersion,
-    timeoutMs: options.timeoutMs
+    timeoutMs: options.timeoutMs,
+    certificateSha256: options.certificateSha256
   })
+  const playback = options.certificateSha256 ? createPlaybackBridge(client.origin, client.fetch) : null
   let generation = options.generation ?? 1
   const identity: CatalogIdentity = { mode: 'remote', catalogId: '' }
   let handshake: HandshakeResult | null = null
@@ -137,11 +144,28 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
   const authenticated = async <T>(work: () => Promise<T>, refreshesIdentity = false): Promise<T> => {
     if (sessionState === 'authInvalid') throw structuredError('AUTH_REQUIRED', '写入授权已失效，请恢复授权后重试')
     const revision = connectionRevision
-    try {
+    // Another in-flight request may refresh the shared handshake before this
+    // request receives its old-fence rejection. Compare to our starting fence.
+    const previous = handshake
+    for (let attempt = 0; ; attempt++) try {
       const result = await work()
       if (!refreshesIdentity && revision !== connectionRevision) throw structuredError('CONNECTION_UNAVAILABLE', '资料库连接已变化，请重新核对操作结果')
       return result
     } catch (error) {
+      if (attempt === 0 && !refreshesIdentity && revision === connectionRevision && isStructuredError(error) && error.code === 'WRITER_REVOKED' && secret && previous) {
+        const hello = await handshakeOnly()
+        if (hello.writerEpoch !== previous.writerEpoch && hello.identity.serverId === previous.identity.serverId && hello.identity.catalogId === previous.identity.catalogId) {
+          try {
+            await client.post('writer.status', { serverId: hello.identity.serverId, catalogId: hello.identity.catalogId, writerEpoch: hello.writerEpoch, input: {} }, { bearer: secret })
+          } catch (reason) {
+            if (revision !== connectionRevision) throw structuredError('CONNECTION_UNAVAILABLE', '资料库连接已变化，请重新核对操作结果')
+            if (isStructuredError(reason) && (reason.code === 'AUTH_REQUIRED' || reason.code === 'WRITER_REVOKED')) markUnavailable(reason)
+            throw reason
+          }
+          if (revision !== connectionRevision) throw structuredError('CONNECTION_UNAVAILABLE', '资料库连接已变化，请重新核对操作结果')
+          continue
+        }
+      }
       if (revision === connectionRevision && isStructuredError(error) && (error.code === 'AUTH_REQUIRED' || error.code === 'WRITER_REVOKED')) markUnavailable(error)
       throw error
     }
@@ -173,7 +197,8 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
     let claimRequired = false
     try {
       const hello = await handshakeOnly(signal)
-      const storedSecret = await options.credentials.readWriterSecret(hello.identity.catalogId)
+      const storedSecret = await options.credentials.readWriterSecret(hello.identity.catalogId) ??
+        (options.deviceIdentity?.serverId === hello.identity.serverId ? options.deviceIdentity.secret : null)
       if (revision !== connectionRevision) throw structuredError('CONNECTION_UNAVAILABLE', '资料库连接已变化')
       secret = storedSecret
       if (!secret || hello.writerEpoch === 0) {
@@ -351,6 +376,7 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
   })
 
   const reconnect = async (): Promise<DesktopSession> => {
+    playback?.clear()
     connectionRevision += 1
     const revision = connectionRevision
     authorizationAbort.abort()
@@ -399,7 +425,7 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
     }
   }
 
-  const backup = createRemoteBackup(options, reconnect, () => authorizationAbort.signal)
+  const backup = createRemoteBackup(options, reconnect, () => authorizationAbort.signal, client)
   return {
     backup: {
       // A completed restore deliberately refreshes the catalog identity before returning its receipt.
@@ -417,6 +443,19 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
     onSessionChanged(listener) { sessionListeners.add(listener); return () => { sessionListeners.delete(listener) } },
     reconnect,
     claimWriter,
+    devices: {
+      list: () => authenticated(async () => {
+        const hello = await ensureConnected()
+        return trustedDevicesSchema.parse(await client.post('devices.list', { serverId: hello.identity.serverId, catalogId: hello.identity.catalogId, writerEpoch: hello.writerEpoch, input: {} }, { bearer: secret! }))
+      }),
+      revoke: id => authenticated(async () => {
+        const hello = await ensureConnected()
+        const result = trustedDevicesSchema.parse(await client.post('devices.revoke', { serverId: hello.identity.serverId, catalogId: hello.identity.catalogId, writerEpoch: hello.writerEpoch,
+          operationId: randomUUID(), expectedVersions: {}, input: { deviceId: id } }, { bearer: secret! }))
+        await handshakeOnly()
+        return result
+      })
+    },
     queries: {
       homeLoad: q('home.load'),
       homeSearch: q('home.search'),
@@ -883,6 +922,7 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
         ) {
           grant.playbackHandle = `${client.origin}${grant.playbackHandle}`
         }
+        if (playback) grant.playbackHandle = await playback.grant(grant.playbackHandle, grant.expiresAt)
         return grant
       },
       async readImage(input, ctx) {
@@ -910,6 +950,8 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
       }
     },
     async dispose(): Promise<void> {
+      await playback?.close()
+      await client.close()
       connectionRevision += 1
       authorizationAbort.abort()
       sessionListeners.clear()

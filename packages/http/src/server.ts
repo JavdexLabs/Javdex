@@ -7,7 +7,6 @@ import {
   type ServerResponse
 } from 'node:http'
 import { networkInterfaces } from 'node:os'
-import { isIP } from 'node:net'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
 import type { WebCatalogReader } from './catalog'
@@ -21,22 +20,10 @@ import {
 } from './surfaces'
 import { handleManageHttpRequest, type ManageHttpSurface } from './manage'
 import { handlePlayHttpRequest, closePlayStreams, type PlayHttpSurface } from './play'
+import { gatewayPeer, isLocalPeer, type GatewayConfig } from './gatewayPeer'
+export { isLocalPeer } from './gatewayPeer'
 
 const COOKIE = 'javdex_web_session'
-export function isLocalPeer(address: string): boolean {
-  const ip = address.replace(/^::ffff:/, '')
-  if (isIP(ip) === 4) {
-    const [a, b] = ip.split('.').map(Number)
-    return (
-      a === 127 ||
-      a === 10 ||
-      (a === 172 && b >= 16 && b <= 31) ||
-      (a === 192 && b === 168) ||
-      (a === 169 && b === 254)
-    )
-  }
-  return isIP(ip) === 6 && (ip === '::1' || /^(fc|fd|fe[89ab])/i.test(ip))
-}
 export function localAddresses(): string[] {
   return [
     ...new Set([
@@ -134,6 +121,7 @@ export class WebServer {
       listenHost?: string
       /** Host header names allowed for this process. Never taken from forwarded headers. */
       accessHosts?: string[]
+      gateway?: GatewayConfig
       surface?: HttpSurface
       /** Server host only. Desktop LAN browse must omit this so /live and /ready stay absent. */
       probes?: WebHealthProbes
@@ -258,9 +246,12 @@ export class WebServer {
       'Content-Security-Policy',
       "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self' http: https:; connect-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
     )
-    if (!isLocalPeer(request.socket.remoteAddress ?? ''))
+    const forwardedPeer = gatewayPeer(request, this.options.gateway)
+    const remoteAddress = forwardedPeer ?? request.socket.remoteAddress ?? ''
+    if (!isLocalPeer(remoteAddress))
       throw new WebError(403, '仅允许局域网访问')
     const authority = request.headers.host ?? ''
+    const origin = forwardedPeer ? this.options.gateway!.origin : `http://${authority}`
     const port = request.socket.localPort ?? 0
     // Literal access hosts only: prevents DNS rebinding and ignores forwarded headers.
     if (!this.allowedAuthorities(port).has(authority))
@@ -269,17 +260,17 @@ export class WebServer {
       throw new WebError(403, '不允许跨站请求')
     if (
       request.headers.origin &&
-      request.headers.origin !== `http://${authority}`
+      request.headers.origin !== origin
     )
       throw new WebError(403, '不允许跨站请求')
-    const url = new URL(request.url ?? '/', `http://${authority}`)
-    if (url.origin !== `http://${authority}`)
+    const url = new URL(request.url ?? '/', origin)
+    if (url.origin !== origin)
       throw new WebError(400, '请求地址无效')
-    const originOk = !request.headers.origin || request.headers.origin === `http://${authority}`
+    const originOk = !request.headers.origin || request.headers.origin === origin
     if (this.options.maintenance?.() && !((request.method === 'GET' || request.method === 'HEAD') && (url.pathname === '/live' || url.pathname === '/ready'))) {
       throw new WebError(503, '服务端正在更新验证，请稍后重试')
     }
-    if (await handleManageHttpRequest(request, response, url, this.options.manage, originOk)) {
+    if (await handleManageHttpRequest(request, response, url, this.options.manage, originOk, forwardedPeer ? { remoteAddress, isLoopback: false } : undefined)) {
       return
     }
     if (await handlePlayHttpRequest(request, response, url, this.options.play)) {
@@ -313,20 +304,20 @@ export class WebServer {
     }
     if (method === 'POST') {
       if (
-        request.headers.origin !== `http://${authority}` ||
+        request.headers.origin !== origin ||
         request.headers['x-javdex-client'] !== 'web'
       )
         throw new WebError(403, '请求来源无效')
       this.pruneDeliveries()
       if (url.pathname === '/api/pair/start') {
         const release = this.pairLimiter.enter(
-          request.socket.remoteAddress ?? ''
+          remoteAddress
         )
         if (!release) throw new WebError(429, '配对请求过于频繁，请稍后重试')
         try {
           const body = await readJson(request)
           ensureActive()
-          const name = `${String(body.name || '浏览器').slice(0, 50)} · ${request.socket.remoteAddress}`
+          const name = `${String(body.name || '浏览器').slice(0, 50)} · ${remoteAddress}`
           const pair = this.pairing.create(body.remember === true, name)
           response.setHeader(
             'Set-Cookie',
@@ -436,7 +427,7 @@ export class WebServer {
         return
       }
       if (url.pathname === '/api/login') {
-        const release = this.limiter.enter(request.socket.remoteAddress ?? '')
+        const release = this.limiter.enter(remoteAddress)
         if (!release) {
           response.setHeader('Retry-After', '900')
           throw new WebError(429, '尝试过于频繁，请 15 分钟后重试')

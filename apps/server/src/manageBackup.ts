@@ -14,7 +14,7 @@ export function setBackupRestoredHandler(handler: typeof onRestored): void { onR
 const host: BackupHost = { mode: 'remote', appVersion: SERVER_APP_VERSION, onRestored: id => onRestored?.(id) }
 function authorize(secret: string | null, db: Database.Database): string {
   if (!secret) throw structuredError('AUTH_REQUIRED', '需要写入凭据')
-  const row = db.prepare('SELECT secret_digest, writer_epoch FROM catalog_writer_credentials WHERE superseded_at IS NULL ORDER BY writer_epoch DESC LIMIT 1').get() as { secret_digest: string; writer_epoch: number } | undefined
+  const row = db.prepare('SELECT secret_digest, writer_epoch FROM catalog_writer_credentials WHERE superseded_at IS NULL AND secret_digest = ?').get(digestToken(secret)) as { secret_digest: string; writer_epoch: number } | undefined
   if (!row || !digestEquals(row.secret_digest, digestToken(secret)) || readCatalogIdentity(db)?.writerEpoch !== row.writer_epoch) throw structuredError('AUTH_REQUIRED', '写入凭据已失效')
   return row.secret_digest
 }
@@ -40,5 +40,6 @@ export async function transferBackup(context: ManageBackupFileContext, db: Datab
     if (size > BACKUP_CHUNK_BYTES) throw structuredError('LIMIT_EXCEEDED', '上传分块过大')
     chunks.push(chunk as Buffer)
   }
+  authorize(context.bearerSecret, db)
   return { offset: writeBackupChunk(host, context.id, owner, context.offset, Buffer.concat(chunks)) }
 }

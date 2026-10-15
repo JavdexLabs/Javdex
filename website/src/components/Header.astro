@@ -1,0 +1,13 @@
+---
+import DefaultHeader from '@astrojs/starlight/components/Header.astro';
+import ThemeSelect from '@astrojs/starlight/components/ThemeSelect.astro';
+import { sitePath } from '../../site.config.mjs';
+const links = [['使用指南', 'start/'], ['服务端', 'server/'], ['开发', 'developers/'], ['下载', 'download/'], ['产品介绍', 'product/']];
+---
+<div class="header-shell">
+  <DefaultHeader {...Astro.props} />
+  <nav class="top-nav" aria-label="网站导航">
+    {links.map(([label, target]) => <a href={sitePath(target)} draggable="false" aria-current={Astro.url.pathname.startsWith(sitePath(target)) ? 'page' : undefined}>{label}</a>)}
+    <div class="mobile-theme"><ThemeSelect /></div>
+  </nav>
+</div>

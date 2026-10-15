@@ -8,7 +8,7 @@ import { z } from 'zod'
 import type { ServerUpdateManifest } from '@shared/serverUpdateTypes'
 import { SERVER_RUNTIME_ID } from '@shared/serverUpdateTypes'
 import { contained, type UpdaterConfig } from './config'
-import type { DeploymentIdentity, DeploymentSnapshot, UpdateDeployment } from './deployment'
+import type { DeploymentIdentity, DeploymentSnapshot, DeploymentRelease, UpdateDeployment } from './deployment'
 import { ReleaseStore, fileHash, releaseId } from './releaseStore'
 import { BusinessSupervisor } from './supervisor'
 import { copyTree, restoreTree, treeBytes, treeHash } from './storage'
@@ -110,7 +110,7 @@ export class ProcessUpdateDeployment implements UpdateDeployment {
     syncDirectory(snapshot)
     writeJsonAtomic(path.join(jobDir, 'snapshot-complete.json'), { format: 1, release: original.release, configHash: original.configHash, roots: original.roots, hashes })
   }
-  async install(manifest: ServerUpdateManifest, jobId: string, original: DeploymentSnapshot): Promise<void> {
+  async install(manifest: DeploymentRelease, jobId: string, original: DeploymentSnapshot): Promise<void> {
     if (this.supervisor.running) throw new Error('旧业务进程尚未退出')
     await this.validateOriginal(original)
     await this.releases.verify(this.releases.directory(releaseId(manifest)), manifest)
@@ -139,12 +139,12 @@ export class ProcessUpdateDeployment implements UpdateDeployment {
     await this.waitReady()
     this.supervisor.allowRestart()
   }
-  async verify(manifest: ServerUpdateManifest, original: DeploymentSnapshot): Promise<void> {
+  async verify(manifest: DeploymentRelease, original: DeploymentSnapshot): Promise<void> {
     await this.waitReady()
     const checked = await this.inspect()
     if (checked.release !== releaseId(manifest) || checked.identity.version !== manifest.version || checked.identity.schema !== manifest.targetSchema || checked.identity.serverId !== original.identity.serverId || checked.identity.catalogId !== original.identity.catalogId) throw new Error('新版本、schema 或资料库身份验证失败')
   }
-  async activate(jobId: string, manifest: ServerUpdateManifest, original: DeploymentSnapshot): Promise<void> {
+  async activate(jobId: string, manifest: DeploymentRelease, original: DeploymentSnapshot): Promise<void> {
     const release = releaseId(manifest)
     if (this.releases.current() !== release) throw new Error('已提交发行目录不一致，需要人工恢复')
     await this.validateOriginal(original)

@@ -39,6 +39,22 @@ describe('Web authentication and streaming', () => {
       },
       body: JSON.stringify({ username: 'viewer', password })
     })
+  it('accepts authenticated gateway origin without granting loopback management privileges', async () => {
+    const origin = 'https://nas.local:8096'
+    const token = 'a'.repeat(64)
+    const isolated = new WebServer({ username: 'viewer', passwordHash, catalog, staticRoot: directory,
+      gateway: { origin, token },
+      manage: { appVersion: '0.9.0', dispatch: context => ({ isLoopback: context.isLoopback, remoteAddress: context.remoteAddress, bearer: context.bearerSecret }) }
+    })
+    const base = `http://127.0.0.1:${await isolated.start(0, '127.0.0.1')}`
+    try {
+      const headers = { Origin: origin, 'Content-Type': 'application/json', 'x-javdex-gateway': token, 'x-javdex-peer': '192.168.1.5', Cookie: 'javdex_web_session=not-a-writer' }
+      const response = await fetch(`${base}/manage/v1/handshake.get`, { method: 'POST', headers, body: '{}' })
+      assert.equal(response.status, 200)
+      assert.deepEqual(await response.json(), { isLoopback: false, remoteAddress: '192.168.1.5', bearer: null })
+      assert.equal((await fetch(`${base}/manage/v1/handshake.get`, { method: 'POST', headers: { ...headers, 'x-javdex-gateway': 'b'.repeat(64) }, body: '{}' })).status, 403)
+    } finally { await isolated.stop() }
+  })
   before(async () => {
     fs.writeFileSync(movie, bytes)
     fs.mkdirSync(path.join(directory, 'assets'))

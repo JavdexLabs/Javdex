@@ -470,14 +470,17 @@ const mediaLibraryConfigPatchSchema = z
 export const MANAGE_OPERATION_INPUTS = {
   'handshake.get': emptyInput,
   'writer.status': emptyInput,
+  'devices.list': emptyInput,
+  'devices.revoke': z.object({ deviceId: uuidSchema }).strict(),
   'writer.claim': z
     .object({
-      kind: z.enum(['initialBind', 'handoff', 'deployRecover']),
+      kind: z.enum(['initialBind', 'handoff', 'deployRecover', 'deviceAdd']),
       oneTimeToken: z.string().min(32).max(256),
       candidate: z
         .object({
           claimId: uuidSchema,
-          secretDigest: digestSchema
+          secretDigest: digestSchema,
+          name: z.string().trim().min(1).max(80).optional()
         })
         .strict()
     })

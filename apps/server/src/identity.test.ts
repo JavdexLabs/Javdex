@@ -4,7 +4,9 @@ import os from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
 import { randomUUID } from 'node:crypto'
-import { closeDatabase } from '@library/db/database'
+import { closeDatabase, initDatabaseAtPath } from '@library/db/database'
+import { claimWriter, authenticateWriter } from '@library/catalog/catalogWriter'
+import { digestToken } from '@library/catalog/catalogSecrets'
 import { resetLibraryHostForTests } from '@library/runtime/host'
 import { hashPassword } from '@http/auth'
 import { issueDeployToken } from './identity'
@@ -38,6 +40,12 @@ describe('deploy one-time tokens', () => {
       assert.equal(sameUnbound.oneTimeToken, bootstrap)
       assert.equal(sameUnbound.catalogId, first.catalogId)
       assert.equal(fs.existsSync(path.join(dataDir, 'instance-bind.json')), false)
+      initDatabaseAtPath(path.join(dataDir, 'library.db'))
+      claimWriter({ kind: 'initialBind', oneTimeToken: bootstrap,
+        candidate: { claimId: randomUUID(), secretDigest: digestToken('existing-device-secret') } })
+      const next = issueDeployToken(config, 'pair')
+      assert.equal(next.kind, 'deviceAdd')
+      assert.equal(authenticateWriter('existing-device-secret', { serverId: first.serverId, catalogId: first.catalogId }).epoch, 1)
     } finally {
       closeDatabase()
       resetLibraryHostForTests()

@@ -1,0 +1,10 @@
+---
+import DefaultPageTitle from '@astrojs/starlight/components/PageTitle.astro';
+import VersionNotice from './VersionNotice.astro';
+import { sitePath, site, sections } from '../../site.config.mjs';
+const slug = Astro.url.pathname.slice(site.base.length).replace(/\/$/, '');
+const group = sections.find(section => section.items.some(item => item.replace(/\/index$/, '') === slug));
+---
+<VersionNotice />
+{group && <nav class="doc-breadcrumb" aria-label="当前位置"><a href={sitePath()}>文档</a><span aria-hidden="true">/</span><a href={sitePath(group.items[0].replace(/\/index$/, '') + '/')}>{group.label}</a></nav>}
+{Astro.url.pathname !== sitePath('product/') && <div data-pagefind-weight={slug.startsWith('developers/') ? '1' : '2'}><DefaultPageTitle {...Astro.props} /></div>}

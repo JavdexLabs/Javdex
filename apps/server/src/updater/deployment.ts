@@ -1,5 +1,9 @@
 import type { ServerUpdateManifest } from '@shared/serverUpdateTypes'
 
+// Installation needs a verified release identity, not a download URL or signature.
+// Image releases enter only through the manager's local startup path.
+export type DeploymentRelease = Pick<ServerUpdateManifest, 'version' | 'build' | 'platform' | 'runtime' | 'targetSchema' | 'sourceSchemas'> & { archive: { sha256: string } }
+
 export interface DeploymentIdentity {
   version: string
   schema: number
@@ -24,9 +28,9 @@ export interface UpdateDeployment {
   prepare(manifest: ServerUpdateManifest, archive?: string): Promise<void>
   stop(): Promise<void>
   backup(jobDir: string, original: DeploymentSnapshot): Promise<void>
-  install(manifest: ServerUpdateManifest, jobId: string, original: DeploymentSnapshot): Promise<void>
-  verify(manifest: ServerUpdateManifest, original: DeploymentSnapshot): Promise<void>
-  activate(jobId: string, manifest: ServerUpdateManifest, original: DeploymentSnapshot): Promise<void>
+  install(manifest: DeploymentRelease, jobId: string, original: DeploymentSnapshot): Promise<void>
+  verify(manifest: DeploymentRelease, original: DeploymentSnapshot): Promise<void>
+  activate(jobId: string, manifest: DeploymentRelease, original: DeploymentSnapshot): Promise<void>
   restore(jobDir: string, original: DeploymentSnapshot): Promise<void>
   cleanup(original: DeploymentSnapshot): Promise<void>
 }

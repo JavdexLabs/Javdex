@@ -99,15 +99,16 @@ export default function ServerUpdatePanel(): JSX.Element | null {
         </div>
         {snapshot.currentVersion && session.desktopAppVersion && snapshot.currentVersion !== session.desktopAppVersion ? <p className={styles.note}>桌面与服务端版本不同，请同步升级桌面后重新连接。</p> : null}
         <SettingsDisclosure title="更新授权">
-          <p>解除本机配对仅移除这台电脑保存的授权；撤销所有设备需由部署管理员更换容器程序卷中的更新凭据。</p>
+          <p>解除配对会移除本机保存的更新授权及统一连接的证书固定信息，下次连接需要重新配对；不撤销服务端已有设备权限。</p>
           <Button size="sm" busy={busy && busyAction === 'forget'} disabled={busy || Boolean(installing)} onClick={() => { void command({ action: 'forget' }) }}>解除本机配对</Button>
         </SettingsDisclosure>
-      </> : <>
+      </> : <SettingsDisclosure title="旧部署的独立更新配对">
+        <p>统一入口部署请在「资料库连接」粘贴一次性配对信息，无需另行配置更新地址。</p>
         <AppFormField label="容器生成的配对信息">
           <TextArea density="workspace" rows={3} value={pairing} autoComplete="off" spellCheck={false} onChange={event => setPairing(event.target.value)} />
         </AppFormField>
         <div className={styles.actions}><Button size="sm" busy={busy} disabled={!pairing.trim()} onClick={() => { void command({ action: 'pair', pairing }) }}>配对更新管理器</Button></div>
-      </>}
+      </SettingsDisclosure>}
       <SettingsFeedback message={busy ? `正在更新状态；上次结果：${pollError ?? message}` : pollError ?? message} error={Boolean(error || pollError || job?.phase === 'recoveryRequired')} detail={error ?? pollError ?? job?.message} />
     </div>
     {confirm && job ? <Modal title={`更新服务端至 ${job.version}`} confirmText="停服并更新" onCancel={() => setConfirm(false)} onConfirm={async () => {

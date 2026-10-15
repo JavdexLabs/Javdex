@@ -12,10 +12,11 @@
 
 本仓库使用 npm workspaces。桌面源码在 `apps/desktop/src`，浏览页面在 `apps/web/src`，共享类型/纯工具在 `packages/contracts/src`（含 browser/manage/desktop/protocol 分组），Node 路径身份与资料库数据库在 `packages/library/src`，局域网浏览 HTTP 在 `packages/http/src`（桌面 Web 生命周期仍在 `apps/desktop/src/main/web/webAccess.ts`），共用 Checkbox 在 `packages/ui/src`。`apps/server` 包含独立 Node 宿主与管理接口，资料转移统一使用备份恢复和本机导入。当前状态及验证边界见 `docs/SERVER_MODE_NEXT_STEPS.md`，实现与合同见 `docs/SERVER_MODE_CONTRACT_INVENTORY.md`，阶段要求及历史证据见 `docs/archive/server-mode/README.md`。根命令、打包 metadata 和 `out/` 暂保持统一，运行检查时从仓库根目录开始。
 
-0.9.0 稳定版准备沿用 schema 20 与模型管理文档格式 4，不因版本号去掉预发布后缀新增迁移。开发与打包合同见 [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md)，发布规则见 [`docs/VERSIONING_AND_RELEASE.md`](docs/VERSIONING_AND_RELEASE.md)，当前准备状态见 [0.9.0 发布准备](docs/reviews/v0.9.0-readiness.md)。历史 CI、签名与安装包结果不自动成为 0.9.0 稳定版发布或新增 GUI 验收的证据。
+0.9.0 当前资料库 schema 为 21（多可信设备授权新增迁移），模型管理文档格式仍为 4；去除预发布后缀本身不产生迁移。开发与打包合同见 [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md)，发布规则见 [`docs/VERSIONING_AND_RELEASE.md`](docs/VERSIONING_AND_RELEASE.md)，当前准备状态见 [0.9.0 发布准备](docs/reviews/v0.9.0-readiness.md)。历史 CI、签名与安装包结果不自动成为 0.9.0 稳定版发布或新增 GUI 验收的证据。
 
 | 你在改什么 | 必读 | 可选 |
 |------------|------|------|
+| 官网、文档站、下载中心、Pages 构建 | [`website/README.md`](website/README.md) | `website/site.config.mjs` |
 | UI、布局、样式、交互、无障碍 | [`docs/UI_DESIGN_GUIDELINES.md`](docs/UI_DESIGN_GUIDELINES.md) | [`docs/UI_COMPONENT_CONTRACTS.md`](docs/UI_COMPONENT_CONTRACTS.md) |
 | 局域网 Web 页面、移动端交互 | [`docs/MOBILE_WEB_GUIDELINES.md`](docs/MOBILE_WEB_GUIDELINES.md) | — |
 | 列表/详情页、路由、URL 筛选、返回栈 | [`docs/ROUTING_DESIGN.md`](docs/ROUTING_DESIGN.md) | `UI_COMPONENT_CONTRACTS.md`（若动 toolbar/筛选） |
@@ -36,7 +37,7 @@
 - **`SCRAPER_PLUGIN_FORMAT.md`** — 插件包格式与沙箱 API（产物规范）。
 - **`PLUGIN_DEV_AGENT.md`** — 开发助手工作流与工具说明（生产工具）。
 
-产品概览见根目录 `README.md`，日常操作见 `docs/USER_GUIDE.md`，版本变化见 `CHANGELOG.md`。开发环境与技术文档索引见 `docs/DEVELOPMENT.md`，MetaTube 用户配置见 `docs/METATUBE_SETUP.md`。新增功能时按文档职责更新，避免把实现细节堆入 README。
+产品概览见根目录 `README.md`，公开使用文档正文在 `website/src/content/docs/`，`docs/USER_GUIDE.md`、`SERVER_MODE.md`、`SERVER_UPDATE.md`、`METATUBE_SETUP.md`、`NFO_COMPATIBILITY.md` 保留旧章节索引，不重复维护正文。网站为独立 Starlight 工作区，运行命令见 `website/README.md`。版本变化仍以 `CHANGELOG.md` 为唯一来源；开发环境与工程文档索引仍在 `docs/DEVELOPMENT.md`。评审、性能、ADR 和归档不自动发布到网站。新增功能时按文档职责更新，避免把实现细节堆入 README。
 
 ## Agent skills
 

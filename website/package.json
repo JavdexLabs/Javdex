@@ -1,0 +1,19 @@
+{
+  "name": "@javdex/website",
+  "version": "0.9.0",
+  "private": true,
+  "type": "module",
+  "license": "GPL-3.0-or-later",
+  "scripts": {
+    "dev": "node scripts/prepare.mjs --offline && astro dev --host 127.0.0.1",
+    "build": "astro build",
+    "preview": "astro preview --host 127.0.0.1 --port 4319"
+  },
+  "devDependencies": {
+    "@astrojs/starlight": "0.42.6",
+    "astro": "7.3.8"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  }
+}

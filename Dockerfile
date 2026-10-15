@@ -27,7 +27,7 @@ RUN node /opt/javdex-manager/package.mjs metadata /app \
   && mkdir -p /program && chown -R root:root /app /opt/javdex-manager /program \
   && chmod 755 /app /opt/javdex-manager /program
 
-EXPOSE 8096 8097
+EXPOSE 8096
 VOLUME ["/data", "/media", "/program"]
 ENTRYPOINT ["/usr/bin/tini", "--", "node", "/opt/javdex-manager/index.js"]
 CMD ["start"]

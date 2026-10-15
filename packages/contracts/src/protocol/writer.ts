@@ -1,8 +1,16 @@
-export type WriterClaimKind = 'initialBind' | 'handoff' | 'deployRecover'
+export type WriterClaimKind = 'initialBind' | 'handoff' | 'deployRecover' | 'deviceAdd'
 
 export interface WriterCandidate {
   claimId: string
   secretDigest: string
+  name?: string
+}
+
+export interface TrustedDevice {
+  id: string
+  name: string
+  createdAt: string
+  current: boolean
 }
 
 export interface WriterClaimInput {

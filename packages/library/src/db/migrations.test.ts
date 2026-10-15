@@ -10,6 +10,26 @@ import { CURRENT_SCHEMA_VERSION, migrateDatabase } from './migrations'
 import { ActressIdentityConflictWorkflow } from '../../../../apps/desktop/src/main/services/actressIdentityConflictWorkflow'
 import { normalizeLocalPathIdentity } from '@library/localPathIdentity'
 import { releasedV19Database } from '../testFixtures/releasedV19Database'
+import { SCHEMA_SQL } from './schema'
+import { authenticateWriter } from '../catalog/catalogWriter'
+import { digestToken } from '../catalog/catalogSecrets'
+import { randomUUID } from 'node:crypto'
+
+it('migrates a schema 20 manager to a named device without rotating its credential', () => {
+  const db = new Database(':memory:')
+  const serverId = randomUUID(), catalogId = randomUUID(), claimId = randomUUID()
+  try {
+    db.exec(SCHEMA_SQL)
+    db.pragma('user_version = 20')
+    db.prepare('INSERT INTO catalog_identity (id,catalog_id,server_id,writer_epoch,frozen,created_at,updated_at) VALUES (1,?,?,1,0,?,?)').run(catalogId, serverId, '2026-01-01', '2026-01-01')
+    db.prepare('INSERT INTO catalog_writer_credentials VALUES (1,?,?,?,NULL)').run(digestToken('old-secret'), claimId, '2026-01-01')
+    migrateDatabase(db)
+    migrateDatabase(db)
+    assert.equal(db.pragma('user_version', { simple: true }), 21)
+    assert.equal(authenticateWriter('old-secret', { serverId, catalogId }, db).claimId, claimId)
+    assert.equal((db.prepare('SELECT name FROM catalog_writer_credentials').get() as { name: string }).name, '管理电脑')
+  } finally { db.close() }
+})
 
 it('adds built-in playlists on upgrade without claiming existing same-name lists', () => {
   const db = releasedV19Database()

@@ -1,0 +1,11 @@
+---
+import DefaultHead from '@astrojs/starlight/components/Head.astro';
+import { legacyHashes, sitePath } from '../../site.config.mjs';
+---
+<DefaultHead {...Astro.props} />
+<script is:inline define:vars={{ legacyHashes, base: sitePath() }}>
+  if (location.pathname === base || location.pathname === base + 'index.html') {
+    const destination = legacyHashes[location.hash.slice(1)];
+    if (destination) location.replace(base + destination);
+  }
+</script>

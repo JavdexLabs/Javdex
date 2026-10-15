@@ -16,6 +16,8 @@ import {
   issueOneTimeToken,
   readWriterClaim,
   readWriterStatus,
+  listTrustedDevices,
+  revokeTrustedDevice,
   type WriterClaimRequest
 } from '@library/catalog/catalogWriter'
 import { commitCatalogMutation, readOperationReceipt } from '@library/catalog/catalogOperations'
@@ -239,7 +241,12 @@ export function dispatchManageOperation(context: ManageHttpContext, database?: D
       catalogId: envelope.catalogId,
       writerEpoch: envelope.writerEpoch
     })
-    if (operation === 'writer.status') return readWriterStatus(database)
+    if (operation === 'writer.status') return readWriterStatus(database, auth.claimId)
+    if (operation === 'devices.list') return listTrustedDevices(auth.claimId, database)
+    if (operation === 'devices.revoke') {
+      revokeTrustedDevice((envelope.input as { deviceId: string }).deviceId, auth.claimId, database)
+      return listTrustedDevices(auth.claimId, database)
+    }
     if (operation === 'writer.handoffBegin') {
       return issueOneTimeToken('handoff', {}, database)
     }
@@ -293,8 +300,7 @@ export function dispatchManageOperation(context: ManageHttpContext, database?: D
         resourceId: number
         locatorRevision: string
       }
-      const origin = context.host ? `http://${context.host}` : undefined
-      return grantCatalogPlayback(input, { publicOrigin: origin }, catalogDb(database))
+      return grantCatalogPlayback(input, { deviceId: auth.claimId }, catalogDb(database))
     }
     if (operation === 'uploads.create') {
       const mutation = requireMutation(envelope)

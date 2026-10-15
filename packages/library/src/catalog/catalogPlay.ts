@@ -33,6 +33,7 @@ export interface StoredPlayGrant {
   resourceId: number
   locatorRevision: string
   writerEpoch: number
+  deviceId?: string
   expiresAt: string
   createdAt: string
 }
@@ -113,9 +114,21 @@ export function revokeAllPlayGrants(database: Database.Database = getDb()): stri
   return ids
 }
 
+export function revokeDevicePlayGrants(deviceId: string, nextEpoch: number, database: Database.Database = getDb()): string[] {
+  const revoked: string[] = []
+  for (const id of listStoredPlayGrantIds(database)) {
+    const grant = readGrant(id, database)
+    if (!grant) continue
+    // Grants issued before device attribution cannot safely survive a revocation.
+    if (!grant.deviceId || grant.deviceId === deviceId) { deleteGrantKeys(grant, database); revoked.push(id) }
+    else writeCatalogSetting(grantKey(id), { ...grant, writerEpoch: nextEpoch }, database)
+  }
+  return revoked
+}
+
 export function grantCatalogPlayback(
   input: PlayGrantInput,
-  options: { now?: Date; ttlMs?: number; publicOrigin?: string } = {},
+  options: { now?: Date; ttlMs?: number; publicOrigin?: string; deviceId?: string } = {},
   database: Database.Database = getDb()
 ): PlayGrant {
   const identity = readCatalogIdentity(database)
@@ -161,6 +174,7 @@ export function grantCatalogPlayback(
     resourceId: input.resourceId,
     locatorRevision,
     writerEpoch: identity.writerEpoch,
+    deviceId: options.deviceId,
     expiresAt: new Date(now.getTime() + ttlMs).toISOString(),
     createdAt: now.toISOString()
   }

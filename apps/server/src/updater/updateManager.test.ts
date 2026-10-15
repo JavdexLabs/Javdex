@@ -5,7 +5,7 @@ import path from 'node:path'
 import { generateKeyPairSync, sign, randomUUID } from 'node:crypto'
 import { afterEach, mock, test } from 'node:test'
 import type { ServerUpdateManifest, SignedServerUpdate } from '@shared/serverUpdateTypes'
-import type { DeploymentSnapshot, UpdateDeployment } from './deployment'
+import type { DeploymentRelease, DeploymentSnapshot, UpdateDeployment } from './deployment'
 import { verifyUpdateManifest, checkUpdateTarget, sha256 } from './manifest'
 import { ServerUpdateManager } from './updateManager'
 import { updateBundlePrefix } from '@http/updateBundle'
@@ -34,7 +34,7 @@ class FixtureDeployment implements UpdateDeployment {
   async prepare(_manifest: ServerUpdateManifest, file?: string): Promise<void> { this.events.push('prepare'); if (file) assert.deepEqual(fs.readFileSync(file), archive) }
   async stop(): Promise<void> { this.stopped = true; this.events.push('stop') }
   async backup(jobDir: string): Promise<void> { this.events.push('backup'); if (this.failure === 'backup') throw new Error('backup failed'); fs.writeFileSync(path.join(jobDir, 'snapshot'), 'original user data') }
-  async install(manifest: ServerUpdateManifest): Promise<void> { this.events.push('install'); this.current.identity.schema = manifest.targetSchema; this.current.identity.version = manifest.version; this.current.release = `${manifest.version}-${manifest.archive.sha256}` }
+  async install(manifest: DeploymentRelease): Promise<void> { this.events.push('install'); this.current.identity.schema = manifest.targetSchema; this.current.identity.version = manifest.version; this.current.release = `${manifest.version}-${manifest.archive.sha256}` }
   async verify(): Promise<void> { this.events.push('verify'); if (this.failure === 'verify') throw new Error('worker failed after migration') }
   async activate(): Promise<void> { this.events.push('activate'); if (this.failure === 'activate') throw new Error('connection lost after activation'); this.stopped = false }
   async cleanup(): Promise<void> {}
@@ -46,6 +46,70 @@ function fixture(): { dir: string; deployment: FixtureDeployment; manager: Serve
   const deployment = new FixtureDeployment()
   return { dir, deployment, manager: new ServerUpdateManager(dir, trusted, deployment) }
 }
+const image: DeploymentRelease = { version: target.version, build: target.build, platform: target.platform,
+  runtime: target.runtime, sourceSchemas: target.sourceSchemas, targetSchema: target.targetSchema, archive: { sha256: target.archive.sha256 } }
+test('image upgrade reuses backup, verification and commit without downloaded signatures', async () => {
+  const f = fixture()
+  await f.manager.installImage(image, 100, async () => { f.deployment.events.push('image') })
+  assert.deepEqual(f.deployment.events, ['image', 'stop', 'backup', 'install', 'verify', 'activate'])
+  assert.equal((await f.manager.status()).job?.phase, 'complete')
+  assert.equal(f.deployment.current.identity.version, image.version)
+  await f.manager.installImage(image, 100, async () => assert.fail('same version'))
+  await f.manager.installImage({ ...image, version: '0.8.0' }, 100, async () => assert.fail('downgrade'))
+  assert.equal(f.deployment.events.length, 6)
+})
+test('failed image restores original data and is not retried after restart or another job', async () => {
+  const f = fixture()
+  f.deployment.failure = 'verify'
+  await f.manager.installImage(image, 100, async () => {})
+  assert.equal((await f.manager.status()).job?.phase, 'restored')
+  assert.equal(f.deployment.current.identity.version, '0.8.0')
+  const restarted = new ServerUpdateManager(f.dir, trusted, f.deployment)
+  await restarted.recover()
+  await restarted.installImage(image, 100, async () => assert.fail('must not retry'))
+  assert.equal(f.deployment.events.filter(event => event === 'install').length, 1)
+  // An explicit signed update remains available after fixing the cause.
+  f.deployment.failure = null
+  const id = await prepare(restarted)
+  await restarted.install(id)
+  await wait(restarted, 'complete')
+})
+test('image preparation failure and unsupported schema never stop business', async () => {
+  for (const unsupported of [false, true]) {
+    const f = fixture()
+    await f.manager.installImage({ ...image, sourceSchemas: unsupported ? [20] : [19] }, 100, async () => { throw new Error('corrupt image') })
+    assert.equal((await f.manager.status()).job?.phase, 'failed')
+    assert.deepEqual(f.deployment.events, [])
+    await new ServerUpdateManager(f.dir, trusted, f.deployment).installImage(image, 100, async () => assert.fail('must not retry'))
+  }
+})
+test('image startup preserves a prepared administrator update', async () => {
+  const f = fixture()
+  const id = await prepare(f.manager)
+  await f.manager.installImage(image, 100, async () => assert.fail('prepared job must be preserved'))
+  assert.equal((await f.manager.status()).job?.id, id)
+  assert.equal((await f.manager.status()).job?.phase, 'prepared')
+})
+test('image activation failure is committed and recovery must not restore old data', async () => {
+  const f = fixture()
+  f.deployment.failure = 'activate'
+  await f.manager.installImage(image, 100, async () => {})
+  assert.equal((await f.manager.status()).job?.phase, 'recoveryRequired')
+  assert.ok(!f.deployment.events.includes('restore'))
+  assert.equal(f.deployment.current.identity.version, image.version)
+})
+test('interrupted image activation resumes using the persisted image identity', async () => {
+  const f = fixture()
+  await f.manager.installImage(image, 100, async () => {})
+  const file = path.join(f.dir, 'current.json')
+  const saved = JSON.parse(fs.readFileSync(file, 'utf8'))
+  fs.writeFileSync(file, JSON.stringify({ ...saved, phase: 'activating' }))
+  f.deployment.events = []
+  const restarted = new ServerUpdateManager(f.dir, trusted, f.deployment)
+  await restarted.recover()
+  assert.deepEqual(f.deployment.events, ['activate'])
+  assert.equal((await restarted.status()).job?.phase, 'complete')
+})
 test('single-file offline upload resumes inner archive offsets and still requires trusted signatures', async () => {
   const f = fixture(), selected = signed()
   const file = path.join(f.dir, 'fixture.javdex-update')

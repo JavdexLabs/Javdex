@@ -44,7 +44,7 @@ it('detects a player into the draft only and retains the chosen path on failed d
     await act(async () => { tree = TestRenderer.create(<RouterProvider router={router!} />) })
     assert.match(textOf(tree!.root), /请先选择或输入程序路径/)
     assert.doesNotMatch(textOf(tree!.root), /播放设置（可选）/)
-    await act(async () => { tree!.root.findByProps({ placeholder: 'http://192.168.1.10:8096' }).props.onChange({ target: { value: 'http://new-server:8096' } }) })
+    await act(async () => { tree!.root.findByProps({ placeholder: 'https://192.168.1.10:8096' }).props.onChange({ target: { value: 'http://new-server:8096' } }) })
     const detect = () => tree!.root.findAllByType('button').find(node => textOf(node) === '使用系统默认播放器')!
     await act(async () => { detect().props.onClick() })
     assert.equal(writes, 0)
@@ -64,7 +64,7 @@ it('detects a player into the draft only and retains the chosen path on failed d
     await act(async () => { tree!.root.findAllByType('button').find(node => textOf(node) === '保存')!.props.onClick() })
     assert.equal(writes, 1)
     assert.deepEqual(patches, [{ playerPath: 'D:\\播放器\\Player.exe', playerPreference: 'builtin', resumePlayback: true }])
-    assert.equal(tree!.root.findByProps({ placeholder: 'http://192.168.1.10:8096' }).props.value, 'http://new-server:8096')
+    assert.equal(tree!.root.findByProps({ placeholder: 'https://192.168.1.10:8096' }).props.value, 'http://new-server:8096')
     assert.match(textOf(tree!.root), /待保存/)
     assert.doesNotMatch(textOf(tree!.root), /保存后生效/)
   } finally {
@@ -79,6 +79,44 @@ function textOf(node: TestRenderer.ReactTestInstance | string): string {
     ? node
     : node.children.map((child) => textOf(child as TestRenderer.ReactTestInstance)).join('')
 }
+
+it('keeps the full pairing error available through the feedback details action', async () => {
+  const previousWindow = globalThis.window
+  const { api } = await import('../../api')
+  const previousComputer = api.thisComputer
+  const previousUpdate = api.serverUpdate
+  const detail = '配对失败：' + '很长的技术详情和恢复建议。'.repeat(30)
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: {
+    addEventListener() {}, removeEventListener() {}, api: {
+      thisComputer: { get: async () => ({ mode: 'local', remoteBaseUrl: null, playerPath: null }) },
+      serverUpdate: { control: async () => { throw new Error(detail) } }
+    }
+  } })
+  let tree: TestRenderer.ReactTestRenderer | undefined
+  let router: ReturnType<typeof createMemoryRouter> | undefined
+  try {
+    api.thisComputer = window.api.thisComputer
+    api.serverUpdate = window.api.serverUpdate
+    const { default: Panel } = await import('./CatalogConnectionPanel')
+    const { default: TextArea } = await import('../TextArea')
+    const { default: Feedback } = await import('./SettingsFeedback')
+    router = createMemoryRouter([{ path: '*', element: <DesktopSessionContext.Provider value={{
+      session: { ...EMPTY_DESKTOP_SESSION, mode: 'local', state: 'available' }, capabilities: {} as never, catalogReadsEnabled: true,
+      reconnect: async () => {}, claimWriter: async () => { throw new Error('unused') }
+    }}><SettingsLeaveGuard><Panel /></SettingsLeaveGuard></DesktopSessionContext.Provider> }])
+    await act(async () => { tree = TestRenderer.create(<RouterProvider router={router!} />) })
+    act(() => tree!.root.findByType(TextArea).props.onChange({ target: { value: '{}' } }))
+    await act(async () => { tree!.root.findAllByType('button').find(button => textOf(button) === '配对并保存连接')!.props.onClick() })
+    const feedback = tree!.root.findAllByType(Feedback).find(node => node.props.error)!
+    assert.equal(feedback.props.detail, detail)
+    assert.ok(feedback.props.message.length < 40, 'the compact line remains a summary')
+    assert.ok(feedback.findAllByType('button').some(button => textOf(button) === '查看详情' && !button.props.disabled && button.props.tabIndex !== -1))
+  } finally {
+    act(() => tree?.unmount()); router?.dispose()
+    api.thisComputer = previousComputer; api.serverUpdate = previousUpdate
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
+  }
+})
 
 it('shows built-in playback as the default and saves an external selection only after confirmation', async () => {
   const previousWindow = globalThis.window
@@ -296,7 +334,7 @@ it('saves remote-to-local mode without leaving a dirty draft or losing the serve
     assert.ok(renderer!.root.findAllByType(SelectControl).some(node => node.props['aria-label'] === '默认播放方式'), 'local mode also exposes player preferences')
     assert.match(textOf(renderer!.root), /当前使用：远程资料库.*重启后使用：本地资料库/)
     act(() => renderer!.root.findAllByType(SelectControl).find(node => node.props['aria-label'] === '资料库位置')!.props.onChange({ target: { value: 'remote' } }))
-    assert.equal(renderer!.root.findByProps({ placeholder: 'http://192.168.1.10:8096' }).props.value, serverUrl)
+    assert.equal(renderer!.root.findByProps({ placeholder: 'https://192.168.1.10:8096' }).props.value, serverUrl)
     const probe = renderer!.root.findAllByType('button').find((button) => renderedText(button) === '测试连接')!
     await act(async () => { probe.props.onClick() })
     assert.match(textOf(renderer!.root), /服务可达，版本匹配/)

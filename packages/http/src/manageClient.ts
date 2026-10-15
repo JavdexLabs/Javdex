@@ -1,4 +1,5 @@
 import { isStructuredError, structuredError, toStructuredError, type StructuredError } from '@shared/protocol/errors'
+import { createPinnedFetch } from './pinnedFetch'
 
 const APP_VERSION_HEADER = 'X-Javdex-App-Version'
 
@@ -6,6 +7,7 @@ export interface ManageHttpClientOptions {
   baseUrl: string
   appVersion: string
   timeoutMs?: number
+  certificateSha256?: string
 }
 
 export interface ManageHttpCallOptions {
@@ -40,12 +42,17 @@ export class ManageHttpClient {
   readonly baseUrl: string
   readonly appVersion: string
   readonly timeoutMs: number
+  readonly fetch: ReturnType<typeof createPinnedFetch>['fetch']
+  readonly close: () => Promise<void>
 
   constructor(options: ManageHttpClientOptions) {
     this.baseUrl = options.baseUrl.replace(/\/+$/, '')
     this.origin = new URL(this.baseUrl).origin
     this.appVersion = options.appVersion
     this.timeoutMs = options.timeoutMs ?? 15_000
+    const transport = createPinnedFetch(this.origin, options.certificateSha256)
+    this.fetch = transport.fetch
+    this.close = transport.close
   }
 
   async post(
@@ -62,7 +69,7 @@ export class ManageHttpClient {
     }
     if (options.bearer) headers.Authorization = `Bearer ${options.bearer}`
     try {
-      const response = await fetch(joinUrl(this.baseUrl, `/manage/v1/${operation}`), {
+      const response = await this.fetch(joinUrl(this.baseUrl, `/manage/v1/${operation}`), {
         method: 'POST',
         headers,
         body: JSON.stringify(body),
@@ -89,7 +96,7 @@ export class ManageHttpClient {
     }
     if (options.bearer) headers.Authorization = `Bearer ${options.bearer}`
     try {
-      const response = await fetch(joinUrl(this.baseUrl, `/manage/v1/uploads/${uploadId}`), {
+      const response = await this.fetch(joinUrl(this.baseUrl, `/manage/v1/uploads/${uploadId}`), {
         method: 'PUT',
         headers,
         body: new Uint8Array(body),
@@ -119,7 +126,7 @@ export class ManageHttpClient {
       .join('/')
     const search = options.size ? `?size=${options.size}` : ''
     try {
-      const response = await fetch(joinUrl(this.baseUrl, `/manage/v1/assets/${encoded}${search}`), {
+      const response = await this.fetch(joinUrl(this.baseUrl, `/manage/v1/assets/${encoded}${search}`), {
         method: 'GET',
         headers,
         signal: options.signal ?? AbortSignal.timeout(this.timeoutMs)

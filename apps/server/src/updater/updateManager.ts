@@ -3,18 +3,22 @@ import path from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
 import type { IncomingMessage } from 'node:http'
 import { z } from 'zod'
+import semver from 'semver'
 import { UPDATE_PHASES, signedUpdateSchema, updateManifestSchema, type SignedServerUpdate, type ServerUpdateManifest, type ServerUpdateSnapshot, type ServerUpdateJob } from '@shared/serverUpdateTypes'
-import type { DeploymentSnapshot, UpdateDeployment } from './deployment'
+import type { DeploymentRelease, DeploymentSnapshot, UpdateDeployment } from './deployment'
 import { checkUpdateTarget, verifyUpdateManifest } from './manifest'
 import { readJsonIfExists, syncDirectory, writeJsonAtomic } from './files'
 
+const imageReleaseSchema = updateManifestSchema.pick({ version: true, build: true, platform: true, runtime: true, targetSchema: true, sourceSchemas: true })
+  .extend({ archive: updateManifestSchema.shape.archive.pick({ sha256: true }) }).strict()
 const jobSchema = z.object({
   id: z.uuid(), version: z.string(), phase: z.enum(UPDATE_PHASES),
   receivedBytes: z.number().int().nonnegative(), totalBytes: z.number().int().positive(), updatedAt: z.iso.datetime(), message: z.string().nullable(),
-  signed: signedUpdateSchema,
+  signed: signedUpdateSchema.nullable(),
+  image: imageReleaseSchema.optional(),
   deployment: z.unknown().nullable(),
   offline: z.boolean()
-}).strict()
+}).strict().refine(job => Boolean(job.signed) !== Boolean(job.image), '更新来源必须唯一')
 type StoredJob = z.infer<typeof jobSchema> & { deployment: DeploymentSnapshot | null }
 const terminal = new Set(['complete', 'restored', 'failed'])
 
@@ -72,6 +76,44 @@ export class ServerUpdateManager {
     this.controlBusy = true
     try { return await operation() } finally { this.controlBusy = false }
   }
+  /** Local image startup only; never exposed by the HTTP control dispatcher. */
+  installImage(release: DeploymentRelease, bytes: number, prepare: () => Promise<void>): Promise<void> {
+    return this.control(async () => {
+      this.assertIdle()
+      // Do not replace an administrator's prepared/uploading job on restart.
+      if (this.job && !terminal.has(this.job.phase)) return
+      const image = imageReleaseSchema.parse(release)
+      const current = await this.deployment.inspect({ measure: true })
+      if (!semver.valid(current.identity.version)) throw new Error('当前业务版本无效')
+      if (!semver.gt(image.version, current.identity.version)) return
+      const attemptsFile = path.join(this.directory, 'image-attempts.json')
+      const attempts = z.array(z.string().regex(/^[a-f0-9]{64}$/)).parse(readJsonIfExists(attemptsFile) ?? [])
+      if (attempts.includes(image.archive.sha256)) return
+      if (!Number.isSafeInteger(bytes) || bytes <= 0) throw new Error('镜像发行大小无效')
+      this.identity = current
+      this.job = { id: randomUUID(), version: image.version, phase: 'preparing', receivedBytes: 0, totalBytes: bytes,
+        updatedAt: new Date().toISOString(), message: null, signed: null, image, deployment: current, offline: false }
+      fs.mkdirSync(this.jobDir(), { mode: 0o700 })
+      syncDirectory(path.join(this.directory, 'jobs'))
+      this.save('preparing')
+      // Reserve before any preparation or destructive work, surviving even SIGKILL.
+      writeJsonAtomic(attemptsFile, [...attempts, image.archive.sha256])
+      this.busy = true
+      this.work = (async () => {
+        try {
+          checkUpdateTarget(image, current.identity)
+          if (current.identity.busy) throw new Error('服务端有未完成的扫描或维护任务')
+          const space = fs.statfsSync(this.directory)
+          if (Number(space.bavail) * Number(space.bsize) < bytes + current.identity.estimatedBytes + 256 * 1024 ** 2) throw new Error('镜像升级及完整备份空间不足')
+          await prepare()
+          if (this.shuttingDown) return
+          this.save('stopping')
+        } catch (error) { this.save('failed', `镜像升级未执行：${(error as Error).message}；请处理原因后通过客户端更新`); return }
+        await this.execute(image, current)
+      })().finally(() => { this.busy = false })
+      await this.work
+    })
+  }
   async status(refresh = true): Promise<ServerUpdateSnapshot> {
     if (refresh && !this.busy && (!this.job || terminal.has(this.job.phase) || ['preparing', 'prepared'].includes(this.job.phase))) this.identity = await this.deployment.inspect()
     const identity = this.identity ?? this.job?.deployment
@@ -115,7 +157,7 @@ export class ServerUpdateManager {
     if (current.identity.busy) throw new Error('服务端有扫描或维护任务，请完成后重试')
     // Archive, unpacked release and snapshot share the protected program volume.
     const stat = fs.statfsSync(this.directory)
-    const resume = offline && this.job?.phase === 'preparing' && this.job.offline && this.job.signed.payload === signed.payload
+    const resume = offline && this.job?.phase === 'preparing' && this.job.offline && this.job.signed?.payload === signed.payload
     const remaining = manifest.archive.bytes - (resume ? this.job!.receivedBytes : 0)
     if (Number(stat.bavail) * Number(stat.bsize) < remaining + manifest.archive.unpackedBytes + current.identity.estimatedBytes + 256 * 1024 ** 2) throw new Error('更新暂存及完整备份空间不足')
     if (resume) return manifest
@@ -129,7 +171,7 @@ export class ServerUpdateManager {
   beginOffline(signed: unknown): Promise<ServerUpdateSnapshot> { return this.control(() => this.beginOfflineLocked(signed)) }
   private async beginOfflineLocked(signed: unknown): Promise<ServerUpdateSnapshot> {
     await this.selectTarget(signed)
-    if (this.job?.phase === 'prepared' && this.job.offline && this.job.signed.payload === this.target?.payload) return this.status(false)
+    if (this.job?.phase === 'prepared' && this.job.offline && this.job.signed?.payload === this.target?.payload) return this.status(false)
     await this.createJob(true)
     if (this.job && this.job.receivedBytes === this.job.totalBytes) await this.completeOffline()
     return this.status(false)
@@ -137,7 +179,7 @@ export class ServerUpdateManager {
   prepare(): Promise<ServerUpdateSnapshot> { return this.control(() => this.prepareLocked()) }
   private async prepareLocked(): Promise<ServerUpdateSnapshot> {
     if (this.busy) throw new Error('已有更新任务正在准备')
-    if (this.job?.phase === 'prepared' && this.job.signed.payload === this.target?.payload) return this.status(false)
+    if (this.job?.phase === 'prepared' && this.job.signed?.payload === this.target?.payload) return this.status(false)
     const manifest = await this.createJob(false)
     this.busy = true
     this.work = this.deployment.prepare(manifest).then(() => { if (!this.shuttingDown) this.save('prepared') }, () => { if (!this.shuttingDown) this.save('failed', '发行包准备失败，原服务继续运行') }).finally(() => { this.busy = false })
@@ -200,7 +242,7 @@ export class ServerUpdateManager {
     this.work = this.execute(manifest, current).finally(() => { this.busy = false })
     return this.status(false)
   }
-  private async execute(manifest: ServerUpdateManifest, current: DeploymentSnapshot): Promise<void> {
+  private async execute(manifest: DeploymentRelease, current: DeploymentSnapshot): Promise<void> {
     try {
       await this.deployment.stop()
       if (this.shuttingDown) return
@@ -268,7 +310,7 @@ export class ServerUpdateManager {
     this.busy = true
     try {
       if (this.job.phase === 'activating' && this.job.deployment) {
-        await this.deployment.activate(this.job.id, updateManifestSchema.parse(JSON.parse(this.job.signed.payload)), this.job.deployment)
+        await this.deployment.activate(this.job.id, this.job.image ?? updateManifestSchema.parse(JSON.parse(this.job.signed!.payload)), this.job.deployment)
         this.identity = await this.deployment.inspect()
         this.save('complete')
       } else if (this.job.deployment) await this.rollback(this.job.deployment, new Error('更新助手重启，恢复更新前状态'))

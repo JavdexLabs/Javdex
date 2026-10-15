@@ -20,6 +20,7 @@ function fixture(locator: string, mode: 'local' | 'remote' = 'local') {
     is_primary: 1, add_time: '2026-10-03T00:00:00.000Z'
   }
   let epoch = 1
+  let sessionState: 'available' | 'authInvalid' = 'available'
   let status = 'active'
   let queries = 0
   let grantId = 3
@@ -27,7 +28,7 @@ function fixture(locator: string, mode: 'local' | 'remote' = 'local') {
   const grants: unknown[] = []
   const backend = {
     mode, identity: { mode, catalogId: 'catalog-1', serverId: mode === 'remote' ? 'server-1' : undefined }, generation: 1,
-    session: () => ({ state: 'available', writerEpoch: epoch }),
+    session: () => ({ state: sessionState, writerEpoch: epoch }),
     libraries: { get: async () => ({ status }) },
     queries: { getResource: async () => { queries++; return row } },
     assets: { grantPlayback: async (input: unknown) => { grants.push(input); return { resourceId: grantId, playbackHandle: handle } } }
@@ -35,6 +36,7 @@ function fixture(locator: string, mode: 'local' | 'remote' = 'local') {
   return { resolver: createPlaybackSourceResolver(backend), backend, grants, queries: () => queries,
     patch: (value: Partial<VideoResource>) => { row = { ...row!, ...value } },
     epoch: (value: number) => { epoch = value }, status: (value: string) => { status = value },
+    sessionState: (value: typeof sessionState) => { sessionState = value },
     grant: (resourceId: number, url: string) => { grantId = resourceId; handle = url } }
 }
 
@@ -144,7 +146,7 @@ test('ownership and archive checks run before granting or probing any locator', 
   assert.equal(f.grants.length, 0)
 })
 
-test('remote sources use a scoped grant and stable progress identity, not credentials or writer epochs', async () => {
+test('remote playback remains valid when another device revocation advances only the shared epoch', async () => {
   const f = fixture('/server/movie.mkv', 'remote')
   const source = await f.resolver.resolve(target)
   assert.equal(source.locator, 'https://server.invalid/play?token=secret')
@@ -153,12 +155,29 @@ test('remote sources use a scoped grant and stable progress identity, not creden
   assert.deepEqual(f.grants, [{ ...target, locatorRevision: source.revision }])
   await f.resolver.validate(source)
   assert.equal(f.grants.length, 1, 'validation never acquires another grant')
-  f.epoch(2); f.grant(3, 'https://server.invalid/play?token=rotated')
-  await assert.rejects(f.resolver.validate(source), error => error instanceof PlaybackFailure && error.code === 'identity')
+  f.epoch(2)
+  await assert.doesNotReject(f.resolver.validate(source), 'this device is still authorized for the same catalog and resource')
+  assert.equal(f.grants.length, 1, 'a fence refresh must not require another playback grant')
+  f.grant(3, 'https://server.invalid/play?token=rotated')
   const rotated = await f.resolver.resolve(target)
   assert.equal(rotated.resumeKey, source.resumeKey)
-  assert.notEqual(rotated.identityKey, source.identityKey)
   assert.ok(!rotated.resumeKey.includes('rotated'))
+})
+
+test('remote playback still rejects its own revoked authorization after an epoch change', async () => {
+  const f = fixture('/server/movie.mkv', 'remote')
+  const source = await f.resolver.resolve(target)
+  f.epoch(2); f.sessionState('authInvalid')
+  await assert.rejects(f.resolver.validate(source), error => error instanceof PlaybackFailure && error.code === 'authorization')
+  assert.equal(f.grants.length, 1)
+})
+
+test('remote playback still rejects switching to a different catalog', async () => {
+  const f = fixture('/server/movie.mkv', 'remote')
+  const source = await f.resolver.resolve(target)
+  f.backend.identity.catalogId = 'catalog-2'
+  await assert.rejects(f.resolver.validate(source), error => error instanceof PlaybackFailure && error.code === 'identity')
+  assert.equal(f.grants.length, 1)
 })
 
 test('mismatched resources, URL credentials and non-HTTP grants are rejected without exposing their values', async () => {

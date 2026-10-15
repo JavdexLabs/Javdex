@@ -1,0 +1,10 @@
+---
+import DefaultFooter from '@astrojs/starlight/components/Footer.astro';
+import { sitePath } from '../../site.config.mjs';
+---
+<DefaultFooter {...Astro.props} />
+<div class="site-footer-links" data-pagefind-ignore>
+  <a href={sitePath('product/')}>关于 Javdex</a>
+  <a href={sitePath('help/')}>获取帮助</a>
+  <a href="https://github.com/JavdexLabs/Javdex">GPL-3.0-or-later · GitHub</a>
+</div>

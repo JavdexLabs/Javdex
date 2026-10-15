@@ -1,42 +1,63 @@
-# Javdex 官网
+# Javdex 官网与文档站
 
-静态产品介绍与下载页，源码是本目录的 `index.html`、`styles.css`、`app.js`。产品文案面向 0.9.0 稳定版功能，发布准备状态统一见 [根目录说明](../README.md)；功能与升级前提见 [使用指南](../docs/USER_GUIDE.md)、[0.9.0 发布说明](../.github/release-notes/v0.9.0.md) 和 [更新日志](../CHANGELOG.md)。
+Astro Starlight 站点，独立工作区 `@javdex/website`。站点根路径是文档门户；原官网迁到 `/product/`，安装包与服务端升级统一在 `/download/`。GitHub Pages 继续使用 `https://javdexlabs.github.io/Javdex/`。
 
-## 构建与预览
+## 安装、构建与预览
+
+从仓库根目录运行，使用 Node 22.12+。只改网站时无需安装或重建 Electron：
 
 ```sh
-node website/scripts/build.mjs
-npx vite dist-pages --host 127.0.0.1 --port 4319 --strictPort
+npm ci --workspace @javdex/website --include-workspace-root=false
+npm run pages:test
+npm run pages:build:offline
+npm run pages:preview
 ```
 
-构建时读取 GitHub 最新正式 Release，生成六个安装包的直接下载地址、文件名和大小。版本来自实际 Release，不跟随尚未发布的 package.json 版本。CI 中缺失安装包会使构建失败；本地网络异常使用 Release 页面兜底。可用 `--offline` 显式离线构建。
+打开 `http://127.0.0.1:4319/Javdex/`。预览命令只服务已生成产物；修改后重新构建，或使用 `npm run pages:dev` 热更新。正式清单构建使用 `npm run pages:build`，构建结束自动执行 `pages:check`，也可单独运行该检查。
 
-保持 `releases/latest`、动态版本与 `release.json` 下载清单机制；不要为发布准备写死 0.9.0 标签、安装包地址或发布日期。正式发布后重新构建，才会读取新的实际正式版。
+离线清单不虚构版本、发布日期或资产；下载按钮回到 GitHub 正式 Release。离线验证不等于最新正式下载或线上部署已验收。Starlight、Astro 直接依赖精确锁定，升级应单独验证。Astro 的 Cookie 2 在网站构建中独立解析，不能通过升级应用的旧 Cookie 使用方来解决网站依赖问题。
 
-## 产品截图
+## 内容与页面
 
-页面全部使用当前应用真实渲染的截图，演示数据是虚构的。保留横版封面原图，媒体库和清单按软件的竖版卡片模式，从右侧裁切为 7:10；没有使用重新生成的竖版海报。详情页沿用软件本来的横向封面区域，背景来自独立场景图。截图没有替换或重绘软件控件。
+- `src/content/docs/`：公开文档唯一正文来源，普通页面用 Markdown 与标题 frontmatter；仅这里的内容生成文档与搜索。
+- `src/pages/`：门户、产品、下载等定制页面，共用 Starlight 顶栏、搜索和主题。
+- `src/components/ProductContent.html`：原产品页主体；`src/styles/product.css` 通过 CSS scope 限制在产品页，交互位于 `src/scripts/product.js`。
+- `site.config.mjs`：站点前缀、文档适用版本、显式导航与旧首页锚点映射。
+- `assets/screenshots/`：真实软件截图；只复制最终截图，不发布 artwork 原图。
+- `docs/` 中性能、评审、ADR 与历史材料不复制到网站。
+
+`docs/USER_GUIDE.md`、`SERVER_MODE.md`、`SERVER_UPDATE.md`、`METATUBE_SETUP.md`、`NFO_COMPATIBILITY.md` 保留旧章节与源码链接索引，更新正文应改网站对应页面。更新日志、插件产物规范与工程开发合同继续在仓库单独维护，网站只提供入口。不要复制第二份完整正文。
+
+新页面需显式加入 `site.config.mjs` 导航。站内链接保留 `/Javdex/` 前缀；Astro 页面通过 `sitePath()` 生成地址。直接刷新深层页面必须可用，不能依赖开发服务器的 SPA fallback。文档页显示中文页内目录，移动端折叠导航；搜索索引由构建后的 Pagefind 生成，开发预览的搜索能力以构建产物为准。
+
+## 正式版下载与版本提示
+
+`scripts/release.mjs` 在构建时读取 GitHub `releases/latest`；拒绝 draft、prerelease 和带预发布后缀的版本。CI 网络错误、缺桌面包及新版本缺升级材料均使构建失败，不从 `package.json` 推测已发布版本。
+
+同一份 schema 1 清单写入生成目录与公开 `release.json`：保留六桌面 `downloads`，通过可选 `extras` 提供两个 `.javdex-update`、一份播放总源码与 SHA256SUMS。历史正式版未提供新格式时不捏造链接。产品页不另写下载匹配逻辑，统一跳转下载中心。
+
+`contentVersion` 表示文档适用版本；清单是实际下载版本。不一致或离线时显示明显提示。更新到新的正式版文档时修改内容与适用版本配置，不能因为改了应用版本就隐去提示。
+
+## 旧地址与部署
+
+旧根页 `#download` 跳到下载中心，`#product`、`#workflow`、`#nfo` 跳到产品页对应章节；不支持脚本时，首页仍保留可见链接。片段不发送到服务器，这不是 HTTP 301。
+
+`.github/workflows/website.yml` 对 PR 和 dev 网站改动做离线验证，不部署。`.github/workflows/pages.yml` 从默认分支读取内容，安装网站依赖、核验清单、构建并部署 `dist-pages/`；正式 Release 和成功的 Release 工作流仍可触发重建。不修改软件标签、Release 附件或镜像。回退网站通过重新部署旧提交，不回退业务数据库。
+
+## 产品截图与素材
+
+截图全部来自应用真实渲染，演示人物、影片与封面为虚构资料。截图生成与网站构建分开，普通改文档不要启动 Electron 或读取用户资料。
 
 ```sh
 npm run build
 node website/scripts/capture.mjs
 python website/scripts/optimize-assets.py
-node website/scripts/build.mjs
 ```
 
-截图脚本仅启动 `output/playwright/website-product-profile` 专用 Electron 配置目录，通过 `JAVDEX_TEST_USER_DATA` 隔离，不读取或修改正常用户资料库。真实创建向导包含基本信息、根目录、扫描配置、首次扫描四步；网页随后说明刮削来源配置和浏览整理。当前向导截图演示跳过目录创建空库，文案明确说明立即扫描不可用。
+截图脚本仅使用 `output/playwright/website-product-profile` 隔离目录。README 配图使用 `capture.mjs --readme` 与 `optimize-assets.py --readme`，写入 `docs/images/`；网站截图写入 `assets/screenshots/`。压缩需要 Pillow，不在网站构建时安装。
 
-更新根目录 README 的两张配图：运行 `node website/scripts/capture.mjs --readme`，随后运行 `python website/scripts/optimize-assets.py --readme`。此模式写入 `docs/images/`，展示浅色媒体库和深色影片详情，不覆盖官网截图。
+保留 `assets/LUCIDE-LICENSE.txt` 与平台图标的许可/声明；品牌图标由 `build/icon-1024.png` 缩小生成。封面和背景来源见 `assets/artwork/README.md`，原始素材不进入发布站点。
 
-功能依据：桌面的 `MediaLibraryCreateModal.tsx`、`DetailPage.tsx`、`VideoDetailMeta.tsx`、`playback/PlaybackPanel.tsx`、`pages/PlaylistsPage.tsx`、`components/settings/LocalModelsPanel.tsx`、`LocalModelUsagePanel.tsx`、`ServerUpdatePanel.tsx`，以及 [使用指南](../docs/USER_GUIDE.md)、[服务端托管更新](../docs/SERVER_UPDATE.md) 和 [NFO 兼容性](../docs/NFO_COMPATIBILITY.md)。播放文案需区分桌面 libmpv 与浏览器播放；最近播放、续播及本地推理只在当前电脑，不能描述成服务端同步或网页能力。NFO 导入软件名单表示固定版本样本验证，不宣称支持其所有历史版本。
+## 验证边界
 
-## 素材
-
-- 品牌图标由 `build/icon-1024.png` 缩小为 256px PNG，保留透明通道与高分屏清晰度。
-- 界面装饰图标使用 Lucide，保留 `assets/LUCIDE-LICENSE.txt`。
-- 影片封面和背景由内置 imagegen 生成；主题与提示词说明见 `assets/artwork/README.md`。
-- 网站构建仅复制最终软件截图，不打包用于生成截图的原始大图。
-
-`optimize-assets.py` 需要 Pillow（`python -m pip install Pillow`）。封面和背景使用质量 88 的 WebP，保留原尺寸、横向构图；界面截图使用无损 WebP，并逐像素验证转换结果，避免损伤文字。转换成功后删除对应 PNG，避免重复保留。重新截图后运行压缩脚本，再构建网站。
-
-本地构建或截图不会触发线上发布。GitHub Pages 由 `.github/workflows/pages.yml` 部署：默认分支的官网相关改动、正式 Release 发布或成功的 Release 工作流会触发更新。0.9.0 正式发布后，需检查线上版本、六个下载入口与清单均来自该正式 Release；发布前继续显示实际最新正式版，不能把本地构建视为版本已发布或线上下载地址已更新。
+`pages:test` 检查下载清单、正式版选择、缺包、离线与旧地址合同；`pages:check` 核对构建 HTML 的本地页面、图片、章节锚点、中文语言、索引、站点地图与公开范围。浏览器还需检查中文搜索、键盘焦点、代码复制、产品页切换/截图预览，以及桌面、窄屏、深浅主题。构建成功不等于线上已更新，页面验收不等于应用播放器/硬件解码验收。

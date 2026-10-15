@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { createServer } from 'node:http'
+import { createServer, type ServerResponse } from 'node:http'
 import { it } from 'node:test'
 import { createRemoteCatalogBackend } from './remoteCatalogBackend'
 import { structuredError } from '@shared/protocol/errors'
@@ -46,30 +46,34 @@ it('requires first authorization on an unbound server even with a stale cached w
   }
 })
 
+type TestAuthError = 'AUTH_REQUIRED' | 'WRITER_REVOKED' | 'INVALID_INPUT'
+
 async function authFixture() {
   const calls: string[] = []
+  let epoch = 1
   let rejectedRoute = ''
   let metadataAbsent = false
   let storedSecret = 'old-secret'
-  let rejectCode: 'AUTH_REQUIRED' | 'WRITER_REVOKED' | 'INVALID_INPUT' = 'AUTH_REQUIRED'
+  let rejectCode: TestAuthError = 'AUTH_REQUIRED'
   let holdRoute = ''
-  let release: () => void = () => undefined
+  let release: (code?: TestAuthError) => void = () => undefined
   let arrived: () => void = () => undefined
-  let hold: Promise<void> = Promise.resolve()
+  let hold: Promise<TestAuthError | undefined> = Promise.resolve(undefined)
   const server = createServer(async (request, response) => {
     const route = request.url!.split('/').at(-1)!
     calls.push(route)
     for await (const _ of request) { /* Drain uploads before responding. */ }
     const shouldReject = route === rejectedRoute
-    if (route === holdRoute) { arrived(); await hold }
+    let heldError: TestAuthError | undefined
+    if (route === holdRoute) { arrived(); heldError = await hold }
     response.setHeader('Content-Type', 'application/json')
     if (route === 'handshake.get') return response.end(JSON.stringify({
       appVersion: '0.8.0-beta.1', schemaVersion: 19,
-      identity: { serverId: 'server-1', catalogId: 'catalog-1' }, writerEpoch: 1, ready: 'ready'
+      identity: { serverId: 'server-1', catalogId: 'catalog-1' }, writerEpoch: epoch, ready: 'ready'
     }))
-    if (shouldReject) {
+    if (shouldReject || heldError) {
       response.statusCode = 401
-      return response.end(JSON.stringify(structuredError(rejectCode, '测试授权错误')))
+      return response.end(JSON.stringify(structuredError(heldError ?? rejectCode, '测试授权错误')))
     }
     if (route === 'catalog.storageInfo' && metadataAbsent) {
       response.statusCode = 404
@@ -77,7 +81,7 @@ async function authFixture() {
     }
     response.end(JSON.stringify(route === 'writer.claim' ? { status: 'consumed', bound: true, writerEpoch: 2, claimId: 'claim' }
       : route === 'catalog.storageInfo' ? { imagesDir: '/data/images' }
-        : route === 'libraries.list' ? [] : {}))
+        : route === 'libraries.list' ? [] : route === 'videos.edit' ? true : {}))
   })
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
   const address = server.address() as { port: number }
@@ -86,8 +90,9 @@ async function authFixture() {
     writeWriterSecret: async (_id, secret) => { storedSecret = secret }, deleteWriterSecret: async () => undefined
   } })
   return { backend, calls, reject: (route: string, code = 'AUTH_REQUIRED' as typeof rejectCode) => { rejectedRoute = route; rejectCode = code },
-    pause: (route: string) => { holdRoute = route; hold = new Promise<void>(resolve => { release = resolve }); return new Promise<void>(resolve => { arrived = resolve }) },
-    release: () => { holdRoute = ''; release() },
+    epoch: (value: number) => { epoch = value },
+    pause: (route: string) => { holdRoute = route; hold = new Promise<TestAuthError | undefined>(resolve => { release = resolve }); return new Promise<void>(resolve => { arrived = resolve }) },
+    release: (code?: TestAuthError) => { holdRoute = ''; release(code) },
     omitMetadata: () => { metadataAbsent = true }, secret: () => storedSecret,
     close: async () => { release(); await backend.dispose(); await new Promise<void>(resolve => server.close(() => resolve())) } }
 }
@@ -116,6 +121,69 @@ it('validates authentication separately when an older server lacks optional meta
     assert.ok(!publicSession.includes(f.secret()))
     assert.doesNotMatch(publicSession, /"(?:writerToken|oneTimeToken|writerSecret)":/)
   } finally { await f.close() }
+})
+
+it('a delayed old-epoch rejection cannot invalidate a device after another request refreshes its fence', { timeout: 5_000 }, async t => {
+  let epoch = 1
+  const staleResponses = new Map<boolean, ServerResponse>()
+  let bothArrived: () => void = () => undefined
+  const bothOldRequests = new Promise<void>(resolve => { bothArrived = resolve })
+  const server = createServer(async (request, response) => {
+    let text = ''
+    for await (const chunk of request) text += chunk
+    const body = JSON.parse(text) as { writerEpoch?: number; input: { includeArchived?: boolean } }
+    const route = request.url!.split('/').at(-1)!
+    response.setHeader('Content-Type', 'application/json')
+    if (route === 'handshake.get') return response.end(JSON.stringify({
+      appVersion: '0.9.0', schemaVersion: 21,
+      identity: { serverId: 'server-1', catalogId: 'catalog-1' }, writerEpoch: epoch, ready: 'ready'
+    }))
+    if (route === 'libraries.list' && body.writerEpoch !== epoch) {
+      assert.equal(body.writerEpoch, 1)
+      staleResponses.set(body.input.includeArchived === true, response)
+      if (staleResponses.size === 2) bothArrived()
+      return
+    }
+    if (route === 'writer.status') {
+      assert.equal(request.headers.authorization, 'Bearer active-device-secret')
+      assert.equal(body.writerEpoch, epoch)
+    }
+    response.end(JSON.stringify(route === 'catalog.storageInfo' ? { imagesDir: '/data/images' }
+      : route === 'libraries.list' ? [] : { writerEpoch: epoch, bound: true }))
+  })
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+  const address = server.address() as { port: number }
+  const backend = createRemoteCatalogBackend({ baseUrl: `http://127.0.0.1:${address.port}`, appVersion: '0.9.0', credentials: {
+    isAvailable: async () => true, readWriterSecret: async () => 'active-device-secret',
+    writeWriterSecret: async () => undefined, deleteWriterSecret: async () => undefined
+  } })
+  t.after(async () => {
+    server.closeAllConnections()
+    await backend.dispose()
+    await new Promise<void>(resolve => server.close(() => resolve()))
+  })
+  assert.equal((await backend.reconnect()).state, 'available')
+  const states: string[] = []
+  backend.onSessionChanged!(() => states.push(backend.session().state))
+  epoch = 2 // Another device was revoked; this device's credential remains valid.
+  const first = backend.libraries.list({ includeArchived: false })
+  const second = backend.libraries.list({ includeArchived: true })
+  const settled = Promise.allSettled([first, second])
+  await bothOldRequests
+  const rejectOldRequest = (includeArchived: boolean): void => {
+    const response = staleResponses.get(includeArchived)!
+    response.statusCode = 409
+    response.end(JSON.stringify(structuredError('WRITER_REVOKED', '写入代次已变化')))
+  }
+  rejectOldRequest(false)
+  assert.deepEqual(await first, [])
+  assert.equal(backend.session().writerEpoch, 2)
+  // The second old response arrives only after the first refresh AND retry finish.
+  rejectOldRequest(true)
+  const results = await settled
+  assert.equal(backend.session().state, 'available', 'a stale response must not revoke an active device')
+  assert.deepEqual(results, [{ status: 'fulfilled', value: [] }, { status: 'fulfilled', value: [] }])
+  assert.deepEqual(states, [], 'a shared fence refresh is not an authorization failure')
 })
 
 const id = 'aa31510e-6389-48d9-ad58-225635954dbc'
@@ -181,6 +249,37 @@ it('reconnection aborts an old request and its late rejection cannot revoke the 
     await f.backend.libraries.list({})
   } finally { await f.close() }
 })
+
+for (const statusError of ['AUTH_REQUIRED', undefined] as const) {
+  it(`an old writer.status ${statusError ?? 'success'} cannot revoke or replay a mutation after reconnection`, { timeout: 5_000 }, async () => {
+    const f = await authFixture()
+    try {
+      assert.equal((await f.backend.reconnect()).state, 'available')
+      f.epoch(2)
+      f.reject('videos.edit', 'WRITER_REVOKED')
+      const statusArrived = f.pause('writer.status')
+      const pending = Promise.allSettled([f.backend.videos.edit({ videoId: 1, fields: { title: 'old draft' } }, mutation)])
+      await statusArrived
+      assert.equal(f.calls.filter(route => route === 'videos.edit').length, 1)
+      f.reject('')
+      const reconnected = await f.backend.reconnect()
+      assert.equal(reconnected.state, 'available')
+      assert.equal(reconnected.writerEpoch, 2)
+      const states: string[] = []
+      f.backend.onSessionChanged!(() => states.push(f.backend.session().state))
+      // Release the old status only once the replacement session is authenticated.
+      f.release(statusError)
+      const [result] = await pending
+      assert.equal(f.backend.session().state, 'available', 'an old status rejection must not revoke the replacement session')
+      assert.equal(f.backend.session().generation, reconnected.generation)
+      assert.equal(f.calls.filter(route => route === 'videos.edit').length, 1, 'an old mutation must not be replayed into the replacement session')
+      assert.deepEqual(states, [])
+      assert.equal(result.status, 'rejected')
+      if (result.status === 'rejected') assert.equal(result.reason.code, 'CONNECTION_UNAVAILABLE')
+      await f.backend.libraries.list({})
+    } finally { await f.close() }
+  })
+}
 
 it('one rejected credential aborts another active request without repeating state notifications', async () => {
   const f = await authFixture()

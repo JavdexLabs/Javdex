@@ -1,6 +1,7 @@
 import { createHash, createPublicKey, verify } from 'node:crypto'
 import semver from 'semver'
 import { signedUpdateSchema, updateManifestSchema, type ServerUpdateManifest } from '@shared/serverUpdateTypes'
+import type { DeploymentRelease } from './deployment'
 
 export function verifyUpdateManifest(value: unknown, keys: Record<string, string>, now = Date.now()): ServerUpdateManifest {
   const signed = signedUpdateSchema.parse(value)
@@ -15,7 +16,7 @@ export function verifyUpdateManifest(value: unknown, keys: Record<string, string
   return manifest
 }
 
-export function checkUpdateTarget(manifest: ServerUpdateManifest, current: { version: string; schema: number; platform: string; runtime?: string }): void {
+export function checkUpdateTarget(manifest: DeploymentRelease, current: { version: string; schema: number; platform: string; runtime?: string }): void {
   if (current.version === '0.8.0' && current.schema !== 19) throw new Error('0.8.0 正式库应为 schema 19；旧开发快照不支持自动升级')
   if (semver.valid(current.version) !== current.version || semver.valid(manifest.version) !== manifest.version || !semver.gt(manifest.version, current.version)) throw new Error('只能安装比当前版本更新的版本')
   if (current.platform !== manifest.platform) throw new Error('更新包架构与服务器不一致')

@@ -1,6 +1,6 @@
 # 服务端实现与合同
 
-核对日期：2026-10-15，目标为 `0.9.0` 正式版准备（资料库 schema 20、桌面模型管理文档版本 4）。本页集中维护当前架构、功能接线及合同导航，不表示 Release 已发布或最终 CI 已通过；部署步骤见 [操作说明](SERVER_MODE.md)，功能边界见 [当前状态](SERVER_MODE_NEXT_STEPS.md)，发布与验证状态见 [发布准备检查](reviews/v0.9.0-readiness.md)。
+核对日期：2026-10-15，目标为 `0.9.0` 正式版准备（资料库 schema 21、桌面模型管理文档版本 4）。本页集中维护当前架构、功能接线及合同导航，不表示 Release 已发布或最终 CI 已通过；部署步骤见 [操作说明](SERVER_MODE.md)，功能边界见 [当前状态](SERVER_MODE_NEXT_STEPS.md)，发布与验证状态见 [发布准备检查](reviews/v0.9.0-readiness.md)。
 
 0.9.0 的维护改动包括影片来源分页及生命周期预览／提交结果运行时校验，以及桌面/服务端共用 `videoQueryService`；既有输入、授权、事务与本地/远程路径策略继续有效。单容器托管更新采用独立协议，不扩大普通管理接口的跨版本兼容范围。
 
@@ -17,14 +17,14 @@
 
 | 对象 | 0.9.0 约定与权威入口 |
 |---|---|
-| 资料库 | [migrations.ts](../packages/library/src/db/migrations.ts) 的 `CURRENT_SCHEMA_VERSION = 20`；正式 0.8.0/schema 19 原子升级至 20，不接受更高版本或不完整开发快照，不允许手降 `user_version` |
+| 资料库 | [migrations.ts](../packages/library/src/db/migrations.ts) 的 `CURRENT_SCHEMA_VERSION = 21`；正式 0.8.0/schema 19 原子升级至 21，不接受更高版本或不完整开发快照，不允许手降 `user_version` |
 | 模型配置 | [modelManagementTypes.ts](../packages/contracts/src/modelManagementTypes.ts) 的 `MODEL_MANAGEMENT_SCHEMA_VERSION = 4`；属于桌面配置，不是服务端 schema，也不包含在资料库备份中 |
 | 普通业务会话 | 桌面与当前服务端业务/网页包同源码版本；不匹配时不打开本机权威库、不自动回退连接 |
-| 独立更新 | 协议 1，`node22-bookworm-v1`，Linux amd64/arm64；独立配对可跨业务版本使用，不能替代 writer |
+| 独立更新协议 | 协议 1，`node22-bookworm-v1`，Linux amd64/arm64；可跨业务版本使用；统一入口按可信设备授权，旧双端口 token 不替代 writer |
 | 业务更新附件 | 每架构一个 `Javdex-server-<version>-linux-<arch>.javdex-update`；签名约束迁移来源/目标、构建、平台、运行环境、大小、摘要及期限，信任根来自管理器而非上传包 |
 | 版本选择 | 在线读取 latest 正式 Release；预发布显式离线导入。SemVer 只接受更高版本，同版本重装与降级拒绝，正式 0.8.0 的来源 schema 必须为 19 |
 
-0.9.0 发布脚本为目标 schema 20 声明来源 schema 19/20；实际安装仍须通过版本、结构与身份检查。0.8.0 镜像先由管理员更换运行外壳并新增 `/program`，空卷从镜像种子初始化；已有托管程序卷则保留业务选择，再经签名更新切换。基础镜像标签不等于实际业务版本，管理器不能通过业务包自更新。升级前备份与回退边界见 [服务端更新](SERVER_UPDATE.md#部署与首次采用)。
+0.9.0 发布脚本为目标 schema 21 声明来源 schema 19/20/21；实际安装仍须通过版本、结构与身份检查。0.8.0 镜像先由管理员更换运行外壳并新增 `/program`，空卷从镜像种子初始化；已有托管程序卷则保留业务选择，再经签名更新切换。基础镜像标签不等于实际业务版本，管理器不能通过业务包自更新。升级前备份与回退边界见 [服务端更新](SERVER_UPDATE.md#部署与首次采用)。
 
 ## 工程默认（可实测后调整，不得静默截断）
 
@@ -42,7 +42,7 @@
 | 播放凭据 | 12 小时固定 |
 | 未消费上传 | 24 小时 |
 | 备份包 / 展开内容 / 传输块 | 分别最大 64 GiB / 64 GiB / 8 MiB |
-| writer 等业务秘密 | ≥32 字节系统安全随机；服务端存摘要。独立更新 token 另存于受保护的程序卷，桌面加密保存配对 |
+| 设备管理秘密 | ≥32 字节系统安全随机，服务端只存摘要；桌面主进程加密保存。统一入口更新查询实时设备状态，旧双端口独立 token 另存于受保护的程序卷 |
 
 本地 `VIDEO_LIST` 已有每页 200 条上限，与管理分页上限对齐。现有刮削批次 IPC 可带最多 10000 个 ID；远程管理改为 target list，不把该 IPC 上限搬上 HTTP。
 
@@ -54,7 +54,7 @@
 | 后端端口 | `apps/desktop/src/main/application/catalogBackend.ts` | 桌面 application / workflows |
 | HTTP 管理 | `manage/operations.ts` + `manage/inputs.ts` | RemoteCatalogBackend、server |
 | HTTP 浏览 | `webTypes.ts` / `browser/dto.ts` | 只读网页；独立白名单 |
-| 托管更新 | `serverUpdateTypes.ts` + 独立 HTTPS 更新入口 | 桌面主进程；独立部署授权，不使用 writer / 网页凭据 |
+| 托管更新 | `serverUpdateTypes.ts` + 独立 HTTPS 更新入口 | 桌面主进程；统一入口按设备凭据授权，旧双端口仍用独立 token；网页凭据不授权 |
 
 页面只提供业务目标、原版本和用户选择。writer token、HTTP 头、任意服务地址不进入 renderer。本地适配器直接调 library，不创建 localhost HTTP，也不模拟 writer token。
 
@@ -198,7 +198,7 @@ C6 的最终语义集中如下，不再采用旧实施记录中的中间状态�
 
 ## 保留的边界与限制
 
-- 首版为局域网、单 writer、无资料库同步。网页只读账号/Cookie 不授予管理、管理图片或授权播放权限；桌面主进程保存秘密。
+- 当前为局域网、多可信桌面同权限、无资料库同步。网页只读账号/Cookie 不授予管理、管理图片或授权播放权限；桌面主进程保存秘密。
 - 服务端使用固定挂载标记保护离线/卸载，不识别换卷，不提供已绑定挂载目录重绑；本机物理目录身份仍遵循 ADR-0024。
 - 远程不能打开服务端本机文件夹、选择桌面目录当服务端根、重绑本地根、加密图片或搬迁图片目录。正式图片为明文；无转码、无任意 URL 代理。
 - 能力按会话状态控制，见 [desktopCapabilities.ts](../apps/desktop/src/main/application/desktopCapabilities.ts)。远程可用会话开放 `manageBrowserPairing`；本机目录能力按原因禁用。维护期间不能编辑，备份任务查询和取消由任务阶段及当前 writer 授权控制。

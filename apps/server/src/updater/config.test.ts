@@ -6,6 +6,22 @@ import { spawn, spawnSync } from 'node:child_process'
 import { test } from 'node:test'
 import { loadUpdaterConfig } from './config'
 
+test('unified configuration separates public TLS from private business authority', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-gateway-config-'))
+  try {
+    const file = path.join(root, 'config.json')
+    fs.writeFileSync(file, JSON.stringify({ dataDir: path.join(root, 'data'), port: 8096, accessHosts: ['old-host'] }))
+    const env = { JAVDEX_RUNTIME_DIR: path.join(root, 'program'), JAVDEX_PUBLIC_URL: 'https://nas.local:9443' }
+    const config = loadUpdaterConfig(file, { env })
+    assert.equal(config.port, 8096)
+    assert.equal(config.healthHost, '127.0.0.1:8098')
+    assert.equal(config.gateway?.origin, 'https://nas.local:9443')
+    assert.match(config.gateway!.token, /^[a-f0-9]{64}$/)
+    assert.throws(() => loadUpdaterConfig(file, { env: { ...env, JAVDEX_PUBLIC_URL: 'http://nas.local:8096' } }), /HTTPS/)
+    assert.throws(() => loadUpdaterConfig(file, { env: { ...env, JAVDEX_INTERNAL_PORT: '8096' } }), /端口不能相同/)
+  } finally { fs.rmSync(root, { recursive: true, force: true }) }
+})
+
 test('image roots cannot contain the data root and cause overlapping restore targets', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-updater-roots-'))
   try {

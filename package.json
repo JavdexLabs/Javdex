@@ -10,7 +10,10 @@
     "dev": "npm run web:build && node scripts/dev.mjs",
     "pages:build": "node website/scripts/build.mjs",
     "pages:build:offline": "node website/scripts/build.mjs --offline",
-    "pages:preview": "npm run pages:build && vite dist-pages",
+    "pages:preview": "npm run preview --workspace @javdex/website",
+    "pages:dev": "npm run dev --workspace @javdex/website",
+    "pages:test": "node --test website/scripts/*.test.mjs",
+    "pages:check": "node website/scripts/check.mjs",
     "build": "npm run desktop:build && npm run web:build",
     "generate:icons": "python scripts/generate-app-icons.py",
     "packaging:list": "node scripts/dist.mjs --list",
@@ -71,7 +74,7 @@
     "server:build": "npm run web:build && node scripts/server-build.mjs && node scripts/check-server-production-closure.mjs",
     "server:updater:build": "node scripts/updater-build.mjs",
     "server:updater:smoke": "node --require ./scripts/register-test-paths.cjs --import tsx scripts/server-updater-smoke.ts",
-    "server:updater:test": "node --require ./scripts/register-test-paths.cjs --import tsx --test apps/server/src/updater/*.test.ts apps/server/src/updateGuard.test.ts packages/http/src/updateClient.test.ts packages/http/src/updateBundle.test.ts scripts/server-release-package.test.mjs scripts/server-update-release.test.mjs",
+    "server:updater:test": "node --require ./scripts/register-test-paths.cjs --import tsx --test apps/server/src/updater/*.test.ts apps/server/src/updateGuard.test.ts packages/http/src/updateClient.test.ts packages/http/src/updateBundle.test.ts packages/http/src/pinnedFetch.test.ts scripts/server-release-package.test.mjs scripts/server-update-release.test.mjs",
     "server:test": "npm run check:server-boundaries && node scripts/server-test.mjs",
     "server:smoke": "node --import tsx scripts/server-smoke.mjs",
     "server:smoke:agent": "node scripts/run-electron-tests.mjs apps/desktop/src/main/services/agentMetadata/agentMetadataDocker.smoke.ts",
@@ -141,6 +144,7 @@
   },
   "workspaces": [
     "apps/*",
-    "packages/*"
+    "packages/*",
+    "website"
   ]
 }

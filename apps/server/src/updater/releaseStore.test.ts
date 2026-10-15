@@ -7,6 +7,26 @@ import { c } from 'tar'
 import { ReleaseStore, releaseId, releasePath } from './releaseStore'
 import { fixture, makeRelease, archiveRelease } from './testFixtures'
 
+test('image preparation validates content and native closure without selecting it', async () => {
+  const { root, config } = await fixture()
+  try {
+    const store = new ReleaseStore(config)
+    await store.bootstrap()
+    const original = store.current()
+    makeRelease(config.seedDir, '0.8.1')
+    const image = store.imageRelease()
+    await store.prepareImage(image.release)
+    await store.verifyInstalled(releaseId(image.release))
+    assert.equal(store.current(), original)
+    makeRelease(config.seedDir, '0.8.2')
+    await assert.rejects(store.prepareImage(image.release), /已变化/)
+    const corrupt = store.imageRelease()
+    fs.writeFileSync(path.join(config.seedDir, 'index.js'), 'corrupt')
+    await assert.rejects(store.prepareImage(corrupt.release), /损坏/)
+    assert.equal(store.current(), original)
+  } finally { fs.rmSync(root, { recursive: true, force: true }) }
+})
+
 test('seed is installed once; persistent active release survives a rebuilt image and tampering is rejected', async () => {
   const { root, config } = await fixture()
   try {

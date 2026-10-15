@@ -1,4 +1,5 @@
 import TextInput from '../TextInput'
+import TextArea from '../TextArea'
 import { useEffect, useId, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import type { RemoteConnectionProbeResult, ThisComputerSettings } from '@shared/desktop/settings'
@@ -17,6 +18,7 @@ import SettingsFeedback from './SettingsFeedback'
 import SettingsFormActions from './SettingsFormActions'
 import WriterAuthorizationForm from './WriterAuthorizationForm'
 import ServerUpdatePanel from './ServerUpdatePanel'
+import TrustedDevicesPanel from './TrustedDevicesPanel'
 import { useSettingsDraft } from '../../settings/useSettingsDraft'
 import { useSettingsFormGuard } from '../../settings/SettingsLeaveGuard'
 import { settingsPath } from '../../settings/settingsRoutes'
@@ -43,6 +45,10 @@ export default function CatalogConnectionPanel(): JSX.Element {
   const { session, reconnect } = useDesktopSession()
   const playerHintId = useId()
   const [savedSettings, setSavedSettings] = useState<ThisComputerSettings | null>(null)
+  const [connectionBundle, setConnectionBundle] = useState('')
+  const [connecting, setConnecting] = useState(false)
+  const [connectionSaved, setConnectionSaved] = useState(false)
+  const [connectionError, setConnectionError] = useState<string | null>(null)
   const saved: ConnectionDraft = {
     mode: savedSettings?.mode ?? 'local',
     remoteBaseUrl: savedSettings?.remoteBaseUrl ?? ''
@@ -230,7 +236,10 @@ export default function CatalogConnectionPanel(): JSX.Element {
         ) : null}
         {session.mode === 'remote' &&
           (session.state === 'claimRequired' || session.state === 'recoveryRequired' || session.state === 'authInvalid') ? (
-          <WriterAuthorizationForm />
+          <>
+            <p className={styles.sessionMessage}>请管理员生成新的配对信息，在下方完成此电脑授权；已有电脑继续可用。</p>
+            <SettingsDisclosure title="旧部署的令牌授权"><WriterAuthorizationForm /></SettingsDisclosure>
+          </>
         ) : null}
         {sessionError ? <p className={styles.sessionError} role="alert">{sessionError}</p> : null}
         <SettingsDisclosure title="连接详情">
@@ -259,7 +268,6 @@ export default function CatalogConnectionPanel(): JSX.Element {
           </dl>
         </SettingsDisclosure>
       </SettingsCard>
-      <ServerUpdatePanel />
       <SettingsCard
         title="资料库连接"
         hint="切换连接在重启后生效，现有资料不会自动转移。"
@@ -270,7 +278,7 @@ export default function CatalogConnectionPanel(): JSX.Element {
             dirty={form.dirty}
             saving={saving}
             saveLabel="应用连接"
-            disabled={savingPlayer || !savedSettings}
+            disabled={connecting || savingPlayer || !savedSettings}
             idleLabel={pendingRestart ? '已保存 · 重启后生效' : '已保存'}
             error={error}
             conflict={form.conflict}
@@ -282,12 +290,30 @@ export default function CatalogConnectionPanel(): JSX.Element {
           />
         }
       >
+        <AppFormField label="服务端一次性配对信息" hint="在容器运行 pair 命令后粘贴；一次保存地址、证书与写入／更新授权，可添加多台管理电脑。">
+          <TextArea density="workspace" rows={3} value={connectionBundle} disabled={connecting || saving} autoComplete="off" spellCheck={false}
+            onChange={event => setConnectionBundle(event.target.value)} />
+        </AppFormField>
+        <div className={styles.sessionActions}>
+          <Button busy={connecting} disabled={connecting || saving || savingPlayer || !connectionBundle.trim()} onClick={() => {
+            setConnecting(true); setConnectionError(null)
+            void api.serverUpdate.control({ action: 'connect', pairing: connectionBundle }).then(async () => {
+              const settings = await api.thisComputer.get()
+              setSavedSettings(settings)
+              form.accept({ mode: settings.mode, remoteBaseUrl: settings.remoteBaseUrl ?? '' })
+              setConnectionBundle(''); setConnectionSaved(true)
+            }).catch(reason => setConnectionError((reason as Error).message)).finally(() => setConnecting(false))
+          }}>配对并保存连接</Button>
+          {connectionSaved && !pendingRestart ? <Button disabled={connecting || restarting || playerForm.dirty} onClick={() => void restart()}>重启以使用新授权</Button> : null}
+        </div>
+        <SettingsFeedback message={connectionError ? '服务端配对失败，请查看详情。' : connectionSaved ? '配对已保存，重启后使用统一连接。' : '配对信息包含临时授权，请勿发送给他人。'} detail={connectionError} error={Boolean(connectionError)} />
+        <SettingsDisclosure title="手动连接与本地模式">
         <div className={styles.fields}>
           <AppFormField className={styles.connectionField} label="资料库位置" hint={draft.mode === 'local' ? '资料保存在这台电脑。' : '资料保存在服务端。'}>
             <SelectControl
               aria-label="资料库位置"
               value={draft.mode}
-              disabled={saving}
+              disabled={connecting || saving}
               onChange={(event) => {
                 probeGeneration.current += 1
                 setProbing(false)
@@ -305,8 +331,8 @@ export default function CatalogConnectionPanel(): JSX.Element {
                 <TextInput
                   density="workspace" className={styles.urlInput}
                   value={draft.remoteBaseUrl}
-                  disabled={saving}
-                  placeholder="http://192.168.1.10:8096"
+                  disabled={connecting || saving}
+                  placeholder="https://192.168.1.10:8096"
                   spellCheck={false}
                   onChange={(event) => {
                     probeGeneration.current += 1
@@ -316,7 +342,7 @@ export default function CatalogConnectionPanel(): JSX.Element {
                   }}
                 />
                 <Button aria-busy={probing}
-                  disabled={saving || probing || !draft.remoteBaseUrl.trim()}
+                  disabled={connecting || saving || probing || !draft.remoteBaseUrl.trim()}
                   onClick={() => void testConnection()}
                 >测试连接</Button>
               </div>
@@ -332,6 +358,7 @@ export default function CatalogConnectionPanel(): JSX.Element {
             </AppFormField>
           ) : null}
         </div>
+        </SettingsDisclosure>
         {pendingRestart ? (
           <div className={styles.restartNotice} role="status">
             <div className={styles.restartCopy}>
@@ -343,7 +370,7 @@ export default function CatalogConnectionPanel(): JSX.Element {
               </span>
             </div>
             <Button
-              disabled={form.dirty || playerForm.dirty || saving || savingPlayer || pickingPlayer || detectingPlayer || restarting}
+              disabled={connecting || form.dirty || playerForm.dirty || saving || savingPlayer || pickingPlayer || detectingPlayer || restarting}
               onClick={() => void restart()}
             >
               <RotateCw {...UI_ICON_SM} aria-hidden />
@@ -365,6 +392,8 @@ export default function CatalogConnectionPanel(): JSX.Element {
           </aside>
         ) : null}
       </SettingsCard>
+      <TrustedDevicesPanel />
+      <ServerUpdatePanel />
           <SettingsCard title="播放器" className={styles.card}
             hint="仅影响此电脑；保存后从下一次播放生效。"
             actions={

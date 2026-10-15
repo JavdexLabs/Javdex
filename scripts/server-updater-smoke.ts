@@ -10,6 +10,7 @@ import { writeUpdateBundle } from '../packages/http/src/updateBundle'
 import { updaterPairingSchema, type ServerReleaseDescriptor, type ServerUpdateManifest } from '../packages/contracts/src/serverUpdateTypes'
 import { requestBusiness } from '../apps/server/src/updater/businessHttp'
 import { waitForUpdateStatus } from './server-updater-smoke-wait'
+import { CURRENT_SCHEMA_VERSION } from '../packages/library/src/db/migrations'
 
 async function main(): Promise<void> {
   // Real Linux images, real native modules and published schema 19. No mocked Docker.
@@ -100,7 +101,7 @@ async function main(): Promise<void> {
       const archive = path.join(directory, `${kind}.tar.gz`)
       execFileSync(process.execPath, ['scripts/server-release-package.mjs', 'archive', closure, archive], { stdio: 'inherit' })
       const payloadDescriptor = JSON.parse(dockerArchiveMetadata(archive, directory)) as ServerReleaseDescriptor
-      const manifest: ServerUpdateManifest = { format: 1, version: targetVersion, build: payloadDescriptor.build, expiresAt: new Date(Date.now() + 86400_000).toISOString(), platform: `linux/${arch}`, sourceSchemas: [19], targetSchema: 20, minUpdaterProtocol: 1, runtime: 'node22-bookworm-v1', archive: { url: `https://github.com/JavdexLabs/Javdex/releases/download/v${targetVersion}/${kind}.javdex-update`, bytes: fs.statSync(archive).size, unpackedBytes: Object.values(payloadDescriptor.files).reduce((sum, value) => sum + value.bytes, Buffer.byteLength(JSON.stringify(payloadDescriptor)) + 1), sha256: fingerprint(archive) } }
+      const manifest: ServerUpdateManifest = { format: 1, version: targetVersion, build: payloadDescriptor.build, expiresAt: new Date(Date.now() + 86400_000).toISOString(), platform: `linux/${arch}`, sourceSchemas: [19], targetSchema: CURRENT_SCHEMA_VERSION, minUpdaterProtocol: 1, runtime: 'node22-bookworm-v1', archive: { url: `https://github.com/JavdexLabs/Javdex/releases/download/v${targetVersion}/${kind}.javdex-update`, bytes: fs.statSync(archive).size, unpackedBytes: Object.values(payloadDescriptor.files).reduce((sum, value) => sum + value.bytes, Buffer.byteLength(JSON.stringify(payloadDescriptor)) + 1), sha256: fingerprint(archive) } }
       const payload = JSON.stringify(manifest)
       const bundle = path.join(directory, `${kind}.javdex-update`)
       await writeUpdateBundle(archive, bundle, { keyId: 'smoke', payload, signature: sign(null, Buffer.from(payload), keys.privateKey).toString('base64') })
@@ -122,18 +123,50 @@ async function main(): Promise<void> {
       }
       assert.equal(state.job?.phase, kind === 'good' ? 'complete' : 'restored', state.job?.message ?? undefined)
       if (kind === 'interrupted') assert.equal(interrupted, true, 'interruption acceptance must actually kill and restart the container during verification')
-      assert.match(docker(['logs', name]), /UPDATER_TEST_SCHEMA=20/)
+      assert.match(docker(['logs', name]), new RegExp(`UPDATER_TEST_SCHEMA=${CURRENT_SCHEMA_VERSION}`))
       assert.equal(state.serverId, original.server_id); assert.equal(state.catalogId, original.catalog_id)
       assert.equal(docker(['ps', '--filter', `label=javdex.update-test=${name}`, '--format', '{{.Names}}']), name, 'updates must not start another container')
       const identity = JSON.parse(docker(['exec', name, 'node', '-e', "const D=require('/app/node_modules/better-sqlite3');const d=new D('/data/library.db',{readonly:true});console.log(JSON.stringify({schema:d.pragma('user_version',{simple:true}),lists:d.prepare(\"SELECT count(*) AS n FROM playlists WHERE name='preserved user list'\").get().n}));d.close();"])) as { schema: number; lists: number }
-      assert.equal(identity.schema, kind === 'good' ? 20 : 19); assert.equal(identity.lists, 1)
+      assert.equal(identity.schema, kind === 'good' ? CURRENT_SCHEMA_VERSION : 19); assert.equal(identity.lists, 1)
     }
     docker(['restart', '--time', '150', name])
     await waitReady()
     assert.equal((await waitForUpdateStatus(() => client.control('status'))).currentVersion, targetVersion, 'seed cannot overwrite a persistently selected release')
     const uid = docker(['exec', name, 'node', '-e', "const fs=require('node:fs');for(const p of fs.readdirSync('/proc').filter(x=>/^\\d+$/.test(x))){try{const cmd=fs.readFileSync('/proc/'+p+'/cmdline','utf8');const script=cmd.split('\\0')[1];if(script?.startsWith('/program/releases/')&&script.endsWith('/index.js'))console.log(fs.readFileSync('/proc/'+p+'/status','utf8').match(/^Uid:\\s+(\\d+)/m)[1])}catch{}}"])
     assert.equal(uid, '1000', 'business process must remain non-root')
-    console.log('Single-container acceptance passed: real schema 19 upgrade to a signed beta, native closure, worker-failure and restart recovery, one running container, non-root business and persistent selection.')
+    // Replace the actual image, keeping both volumes and pinned credentials.
+    // No upload or install request may be needed to adopt its newer business.
+    product.version = '0.9.0'
+    fs.writeFileSync(productFile, JSON.stringify(product))
+    execFileSync('docker', ['build', '-t', image, context], { stdio: 'inherit' })
+    const recreate = async (oldSeed: boolean): Promise<void> => {
+      docker(['stop', '--time', '150', name]); docker(['rm', name]); created.splice(created.indexOf(name), 1)
+      docker(['run', '--detach', '--name', name, '--label', `javdex.update-test=${name}`, '--stop-timeout', '150',
+        '-p', `127.0.0.1:${businessPort}:8096`, '-p', `127.0.0.1:${updatePort}:8097`,
+        '-v', `${dataVolume}:/data`, '-v', `${programVolume}:/program`, '-v', `${configDir}:/config:ro`,
+        ...(oldSeed ? ['-v', `${seed}:/seed:ro`, '-e', 'JAVDEX_SERVER_SEED_DIR=/seed'] : []),
+        '-e', 'JAVDEX_WEB_PASSWORD=isolated-smoke-password', '-e', 'JAVDEX_UPDATE_KEYS_FILE=/config/keys.json',
+        '-e', `JAVDEX_UPDATE_PUBLIC_URL=https://127.0.0.1:${updatePort}`, image, 'start', '--config', '/config/server.json'])
+      created.push(name)
+      await waitReady()
+    }
+    await recreate(false)
+    let imageState = await waitForUpdateStatus(() => client.control('status'))
+    for (let i = 0; i < 480 && imageState.job?.phase !== 'complete' && !['failed', 'restored', 'recoveryRequired'].includes(imageState.job?.phase ?? ''); i++) {
+      await new Promise(resolve => setTimeout(resolve, 250))
+      imageState = await client.control('status')
+    }
+    assert.equal(imageState.currentVersion, '0.9.0')
+    assert.equal(imageState.job?.phase, 'complete', imageState.job?.message ?? undefined)
+    assert.equal(imageState.serverId, original.server_id); assert.equal(imageState.catalogId, original.catalog_id)
+    const imageJob = imageState.job.id
+    docker(['restart', '--time', '150', name]); await waitReady()
+    assert.equal((await waitForUpdateStatus(() => client.control('status'))).job?.id, imageJob, 'same image must not reinstall')
+    await recreate(true)
+    const retained = await waitForUpdateStatus(() => client.control('status'))
+    assert.equal(retained.currentVersion, '0.9.0', 'older image seed must not downgrade the program volume')
+    assert.equal(retained.job?.id, imageJob)
+    console.log('Single-container acceptance passed: signed update, rollback/restart recovery, image replacement upgrade, same/older seed retention, native closure, persistent identity and non-root business.')
   } catch (error) {
     // Preserve bounded startup evidence before removing the owned test containers.
     for (const container of created) {

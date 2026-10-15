@@ -71,7 +71,7 @@ function createBrowserSurface(
     port,
     username: config.web.username,
     hasPassword: true,
-    urls: (config.accessHosts.length > 0 ? config.accessHosts : ['127.0.0.1']).map(
+    urls: process.env.JAVDEX_GATEWAY_TOKEN && process.env.JAVDEX_PUBLIC_URL ? [new URL(process.env.JAVDEX_PUBLIC_URL).origin] : (config.accessHosts.length > 0 ? config.accessHosts : ['127.0.0.1']).map(
       (host) => `http://${host}:${port}`
     ),
     devices: http.devices,
@@ -184,6 +184,7 @@ export async function startJavdexServer(
       sessions,
       listenHost: config.listenHost,
       accessHosts: config.accessHosts,
+      gateway: process.env.JAVDEX_GATEWAY_TOKEN && process.env.JAVDEX_PUBLIC_URL ? { token: process.env.JAVDEX_GATEWAY_TOKEN, origin: new URL(process.env.JAVDEX_PUBLIC_URL).origin } : undefined,
       surface: 'browser',
       maintenance: () => updatePending,
       probes: {

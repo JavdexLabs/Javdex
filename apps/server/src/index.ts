@@ -18,6 +18,10 @@ async function main(): Promise<void> {
     staticRoot: defaultStaticRoot()
   })
   const bootstrapToken = bootstrapTokenFromEnv(process.env)
+  if (command === 'pair') {
+    process.stdout.write(`${JSON.stringify(issueDeployToken(config, 'pair'))}\n`)
+    return
+  }
   if (command === 'bind') {
     const issued = issueDeployToken(config, 'initialBind', { bootstrapToken })
     process.stdout.write(`${JSON.stringify(issued)}\n`)

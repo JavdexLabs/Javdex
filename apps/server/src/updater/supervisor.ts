@@ -43,7 +43,8 @@ export class BusinessSupervisor {
     const child = spawn(process.execPath, [path.join(directory, 'index.js'), 'start', '--config', this.config.serverConfigPath], {
       cwd: directory, detached: true, stdio: lockFd === null ? 'inherit' : ['inherit', 'inherit', 'inherit', lockFd],
       uid: this.config.businessUid, gid: this.config.businessGid,
-      env: { ...process.env, NODE_OPTIONS: '', NODE_PATH: '', ELECTRON_RUN_AS_NODE: '1', JAVDEX_STATIC_ROOT: path.join(directory, 'web'), JAVDEX_UPDATE_JOB: jobId || '' }
+      env: { ...process.env, NODE_OPTIONS: '', NODE_PATH: '', ELECTRON_RUN_AS_NODE: '1', JAVDEX_STATIC_ROOT: path.join(directory, 'web'), JAVDEX_UPDATE_JOB: jobId || '',
+        ...(this.config.gateway ? { JAVDEX_LISTEN_HOST: '127.0.0.1', JAVDEX_LISTEN_PORT: new URL(this.config.serverUrl).port, JAVDEX_ACCESS_HOSTS: '127.0.0.1', JAVDEX_GATEWAY_TOKEN: this.config.gateway.token, JAVDEX_PUBLIC_URL: this.config.gateway.origin } : {}) }
     })
     this.child = child
     child.once('exit', () => {

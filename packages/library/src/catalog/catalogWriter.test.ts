@@ -16,8 +16,11 @@ import {
   claimWriter,
   issueOneTimeToken,
   readWriterClaim,
-  readWriterStatus
+  readWriterStatus,
+  listTrustedDevices, revokeTrustedDevice
 } from './catalogWriter'
+import { authorizeDeviceUpdate } from '../../../../apps/server/src/updater/deviceAuthorization'
+import { readCatalogSetting, writeCatalogSetting } from './catalogSettings'
 import { digestToken, generateSecret } from './catalogSecrets'
 
 let root: string | null = null
@@ -34,6 +37,41 @@ afterEach(() => {
 })
 
 describe('catalog writer protocol', () => {
+  it('adds independent devices, revokes only one, preserves other playback and fences old writes', () => {
+    setup()
+    const identity = ensureCatalogIdentity({ serverId: randomUUID() })
+    const add = (kind: 'initialBind' | 'deviceAdd', name: string) => {
+      const issued = issueOneTimeToken(kind)
+      const secret = generateSecret()
+      const candidate = { claimId: randomUUID(), secretDigest: digestToken(secret), name }
+      const input = { kind, oneTimeToken: issued.oneTimeToken, candidate }
+      claimWriter(input)
+      return { id: candidate.claimId, secret, input }
+    }
+    const first = add('initialBind', '工作电脑')
+    const second = add('deviceAdd', '客厅电脑')
+    const expected = { serverId: identity.serverId!, catalogId: identity.catalogId }
+    assert.equal(authenticateWriter(first.secret, expected).epoch, 1)
+    assert.equal(authenticateWriter(second.secret, expected).epoch, 1)
+    assert.equal(listTrustedDevices(first.id).length, 2)
+    assert.equal(claimWriter(second.input).bound, true, 'lost-response retry does not enroll twice')
+    assert.equal(authorizeDeviceUpdate(process.cwd(), root!, second.secret), true)
+    for (const [id, deviceId] of [['first', first.id], ['second', second.id]]) {
+      writeCatalogSetting(`play-grant:${id}`, { grantId: id, tokenDigest: id, writerEpoch: 1, deviceId })
+      writeCatalogSetting(`play-token:${id}`, id)
+    }
+    revokeTrustedDevice(second.id, first.id)
+    assert.equal(listTrustedDevices(first.id).length, 1)
+    assert.equal(authenticateWriter(first.secret, expected).epoch, 2)
+    assert.throws(() => authenticateWriter(second.secret, expected), error => isStructuredError(error) && error.code === 'AUTH_REQUIRED')
+    assert.throws(() => authenticateWriter(first.secret, { ...expected, writerEpoch: 1 }), error => isStructuredError(error) && error.code === 'WRITER_REVOKED')
+    assert.equal(authorizeDeviceUpdate(process.cwd(), root!, second.secret), false)
+    assert.equal(authorizeDeviceUpdate(process.cwd(), root!, first.secret), true)
+    assert.equal(readCatalogSetting('play-grant:second', null), null)
+    assert.equal(readCatalogSetting<{ writerEpoch: number }>('play-grant:first', { writerEpoch: 0 }).writerEpoch, 2)
+    assert.throws(() => claimWriter(second.input), error => isStructuredError(error) && error.code === 'AUTH_REQUIRED')
+    assert.throws(() => revokeTrustedDevice(first.id, first.id), error => isStructuredError(error) && error.code === 'INVALID_INPUT')
+  })
   it('issues a one-time bind token, claims once, and retries the same claim without a second epoch', () => {
     setup()
     const identity = ensureCatalogIdentity({ serverId: randomUUID() })

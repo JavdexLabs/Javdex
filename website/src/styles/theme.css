@@ -1,0 +1,75 @@
+:root {
+  --sl-color-accent-low: #12243f;
+  --sl-color-accent: #6e9de3;
+  --sl-color-accent-high: #c9defd;
+  --sl-color-white: #edf0f5;
+  --sl-color-gray-1: #d9dfe8;
+  --sl-color-gray-2: #b4bfce;
+  --sl-color-gray-3: #7e8a9c;
+  --sl-color-gray-4: #4d5766;
+  --sl-color-gray-5: #2b323c;
+  --sl-color-gray-6: #1b2028;
+  --sl-color-black: #13171d;
+  --sl-font: 'Inter', 'Segoe UI', 'Microsoft YaHei', system-ui, sans-serif;
+  --sl-content-width: 49rem;
+  --sl-sidebar-width: 17rem;
+  --sl-nav-height: 6.5rem;
+  --site-surface: var(--sl-color-bg);
+  --site-panel: var(--sl-color-bg-sidebar);
+  --site-text: var(--sl-color-text);
+  --site-muted: var(--sl-color-gray-3);
+  --site-border: var(--sl-color-gray-5);
+  --site-accent: var(--sl-color-text-accent);
+}
+:root[data-theme='light'] {
+  --sl-color-accent-low: #e8f0fc;
+  --sl-color-accent: #356abe;
+  --sl-color-accent-high: #234d8d;
+  --sl-color-white: #202a38;
+  --sl-color-gray-1: #3c485a;
+  --sl-color-gray-2: #566275;
+  --sl-color-gray-3: #627086;
+  --sl-color-gray-4: #a1acbc;
+  --sl-color-gray-5: #dce2eb;
+  --sl-color-gray-6: #f6f8fc;
+  --sl-color-gray-7: #fafbfd;
+  --sl-color-black: #fff;
+}
+html { scrollbar-gutter: stable; }
+a:focus-visible, button:focus-visible, summary:focus-visible { outline: 2px solid var(--site-accent); outline-offset: 4px; }
+.header-shell { display: flex; flex-direction: column; gap: .65rem; width: 100%; }
+.header-shell > :first-child { width: 100%; height: 2.6rem; }
+.header-shell img { height: 2.2rem; width: auto; }
+.top-nav { display: flex; align-items: center; gap: 1.6rem; font-size: .85rem; padding-inline: .2rem; }
+.top-nav a { text-decoration: none; color: var(--sl-color-gray-2); white-space: nowrap; }
+.top-nav a:hover, .top-nav a[aria-current] { color: var(--site-accent); }
+.mobile-theme { display: none; margin-inline-start: auto; }
+:root[data-theme='dark'] .download-platform img { filter: invert(1); }
+.version-notice { font-size: .85rem; border-inline-start: 3px solid var(--site-accent); padding: .65rem .9rem; margin-bottom: 1.3rem; background: var(--site-panel); border-radius: 0 .3rem .3rem 0; }
+.version-notice a { white-space: nowrap; }
+.version-notice a, .doc-breadcrumb a, .task-links a, .site-footer-links a { color: var(--site-accent); }
+.site-footer-links { display: flex; flex-wrap: wrap; gap: 1.2rem; margin-top: 2rem; font-size: .8rem; }
+.sl-markdown-content img { height: auto; border-radius: .5rem; border: 1px solid var(--site-border); }
+.sl-markdown-content table { font-size: .9rem; }
+.sl-markdown-content :is(pre, table) { scrollbar-gutter: stable; }
+.portal-lead { max-width: 42rem; font-size: 1.1rem; color: var(--sl-color-gray-2); line-height: 1.8; }
+.portal-paths { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; margin-block: 2rem; }
+.portal-path { display: flex; flex-direction: column; padding: 1.3rem; border: 1px solid var(--site-border); border-radius: .5rem; background: var(--site-panel); text-decoration: none; color: var(--site-text); }
+.portal-path:hover { border-color: var(--site-accent); }
+.portal-path span { font-size: .8rem; color: var(--site-accent); }
+.portal-path strong { font-size: 1.15rem; margin-block: .6rem; }
+.portal-path p { font-size: .9rem; margin: 0; line-height: 1.7; color: var(--sl-color-gray-2); }
+.task-links { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .6rem 2rem; }
+.task-links a { padding-block: .5rem; }
+.portal-about { margin-top: 2.5rem; }
+.doc-breadcrumb { display: flex; gap: .5rem; font-size: .8rem; margin-bottom: .75rem; color: var(--sl-color-gray-3); }
+.doc-breadcrumb a { text-decoration: none; }
+@media (max-width: 49.99rem) {
+  :root { --sl-nav-height: 6.6rem; }
+  .top-nav { gap: 1rem; font-size: .8rem; overflow-x: auto; padding-block: .2rem; }
+  .mobile-theme { display: block; }
+  .portal-paths, .task-links { grid-template-columns: 1fr; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}

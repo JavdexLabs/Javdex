@@ -137,17 +137,18 @@ export async function handleManageHttpRequest(
   response: ServerResponse,
   url: URL,
   manage: ManageHttpSurface | undefined,
-  originOk: boolean
+  originOk: boolean,
+  gateway?: { remoteAddress: string; isLoopback: false }
 ): Promise<boolean> {
   if (!url.pathname.startsWith(MANAGE_PREFIX)) return false
   if (!manage) throw new WebError(404, '页面不存在')
   if (request.headers.origin && !originOk) throw new WebError(403, '不允许跨站请求')
   const uploadMatch = UPLOAD_PATH.exec(url.pathname)
-  const remoteAddress = request.socket.remoteAddress ?? ''
+  const remoteAddress = gateway?.remoteAddress ?? request.socket.remoteAddress ?? ''
   const peer = {
     bearerSecret: bearerSecret(request),
     remoteAddress,
-    isLoopback: isLoopbackPeer(remoteAddress)
+    isLoopback: gateway ? false : isLoopbackPeer(remoteAddress)
   }
   const backupMatch = /^\/manage\/v1\/backups\/([0-9a-f-]{36})$/.exec(url.pathname)
   if (backupMatch) {

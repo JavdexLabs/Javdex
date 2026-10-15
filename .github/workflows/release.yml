@@ -67,10 +67,13 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Run tests
+      - name: Verify playback authorization on Windows
         # Native modules are prepared explicitly for the desktop runtime.
         # Root/workspace installs no longer trigger an Electron rebuild.
-        run: npm run setup:desktop && npm test
+        run: npm run setup:desktop && node scripts/run-electron-tests.mjs packages/library/src/catalog/catalogPlay.test.ts
+
+      - name: Run tests
+        run: npm test
         env:
           # The complete Windows suite can exceed five minutes on hosted runners.
           JAVDEX_TEST_TIMEOUT_MS: "900000"

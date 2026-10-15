@@ -39,7 +39,10 @@ for (const cause of ['missing', 'rootChanged', 'rootPermission', 'filePermission
     const mount = path.join(directory, 'media')
     fs.mkdirSync(mount)
     const root = addMediaLibraryRoot({ libraryId: 1, expectedRevision: 1, root: { path: mount } })
-    const file = path.join(mount, 'movie.mp4')
+    const fileMount = cause === 'filePermissionAlias' ? path.join(directory, 'media-alias') : mount
+    // Exercise real canonicalization, including Windows junction/native path handling.
+    if (cause === 'filePermissionAlias') fs.symlinkSync(mount, fileMount, process.platform === 'win32' ? 'junction' : 'dir')
+    const file = path.join(fileMount, 'movie.mp4')
     fs.writeFileSync(file, 'synthetic movie')
     const { videoId, fileId } = insertTestVideoWithFile(getDb(), { code: 'PLAY-001', filePath: file, rootId: root.id })
     const resource = getVideoResourceInLibrary(1, fileId)!
@@ -52,17 +55,9 @@ for (const cause of ['missing', 'rootChanged', 'rootPermission', 'filePermission
       fs.mkdirSync(mount)
       fs.writeFileSync(file, 'replacement must remain unauthorized')
     } else if (cause === 'filePermission' || cause === 'filePermissionAlias') {
-      if (cause === 'filePermissionAlias') {
-        const realpath = fs.realpathSync.native
-        // Native canonical paths may differ from the fixture spelling (e.g. on Windows).
-        // Use a valid alternate spelling on every OS to catch a lexical-only mock.
-        t.mock.method(fs.realpathSync, 'native', (value: fs.PathLike, ...args: unknown[]) => {
-          if (value === file) return `${mount}${path.sep}.${path.sep}movie.mp4`
-          return Reflect.apply(realpath, fs.realpathSync, [value, ...args])
-        })
-      }
       const access = fs.accessSync
       const readTarget = fs.realpathSync.native(file)
+      if (cause === 'filePermissionAlias') assert.notEqual(file, readTarget)
       t.mock.method(fs, 'accessSync', (...args: Parameters<typeof fs.accessSync>) => {
         if (args[0] === readTarget) {
           assert.equal(args[1], fs.constants.R_OK)

@@ -70,6 +70,17 @@ for (const [lineEnding, eol] of [['LF', '\n'], ['CRLF', '\r\n']]) {
     }
   })
 
+  test(`Windows permission regression runs before, not instead of, the complete suite (${lineEnding})`, () => {
+    const block = workflow.split('\n  test:\n')[1]?.split('\n  package:\n')[0]
+    assert.ok(block)
+    assert.match(block, /runs-on: windows-latest/)
+    const focused = block.indexOf('run: npm run setup:desktop && node scripts/run-electron-tests.mjs packages/library/src/catalog/catalogPlay.test.ts')
+    const complete = block.indexOf('run: npm test\n')
+    assert.ok(focused >= 0 && complete > focused)
+    assert.match(block, /JAVDEX_TEST_TIMEOUT_MS: "900000"/)
+    assert.match(workflow, /name: Package \$\{\{ matrix\.platform \}\}-\$\{\{ matrix\.arch \}\}\n\s+needs: test/)
+  })
+
   test(`verification-only runs cannot enter any publishing job (${lineEnding})`, () => {
     assert.match(workflow, /verify_only:\s+description:.*\n\s+required: false\n\s+default: false\n\s+type: boolean/)
     for (const name of ['server', 'server-manifest', 'release']) {

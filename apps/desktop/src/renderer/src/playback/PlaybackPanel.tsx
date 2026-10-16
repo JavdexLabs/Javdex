@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
 import { ChevronDown, Maximize, Minimize, Pause, Play, RotateCcw, RotateCw, Volume2, VolumeX, X, SlidersHorizontal, PanelTop } from 'lucide-react'
 import { Link, useNavigate } from 'react-router-dom'
-import type { PlaybackControl, PlaybackSnapshot, PlaybackObservation } from '@shared/desktop/playback'
+import type { PlaybackControl } from '@shared/desktop/playback'
 import { api } from '../api'
 import Button from '../components/Button'
 import IconButton from '../components/IconButton'
@@ -11,7 +11,8 @@ import { useToast } from '../components/Toast'
 import { InteractionLayerOwner, useInteractionLayer } from '../interaction/useInteractionLayer'
 import { interactionLayers } from '../interaction/interactionLayers'
 import { useOverlayHistory } from '../interaction/OverlayHistoryContext'
-import { createPlaybackHistory } from './playbackHistory'
+import type { OverlayTraversalResult } from '../interaction/overlayHistory'
+import { createPlaybackHistory, type PlaybackViewState } from './playbackHistory'
 import { playbackTrackLabel } from './playbackTrackLabel'
 import { playbackOcclusions } from './playbackOcclusion'
 import styles from './PlaybackPanel.module.css'
@@ -23,7 +24,8 @@ let viewportSequence = 0
 
 export default function PlaybackPanel(): JSX.Element | null {
   const navigate = useNavigate()
-  const [state, setState] = useState<PlaybackSnapshot | null>(null)
+  const [view, setView] = useState<PlaybackViewState>({ snapshot: null, activation: null })
+  const state = view.snapshot
   const [seekDraft, setSeekDraft] = useState<number | null>(null)
   const seekDraftRef = useRef<number | null>(null)
   const pendingSeekRef = useRef<{ sessionId: string; seconds: number } | null>(null)
@@ -46,7 +48,6 @@ export default function PlaybackPanel(): JSX.Element | null {
   const [sources, setSources] = useState<{ sessionId: string; items: Array<{ id: number; label: string }>; error: string | null } | null>(null)
   const [videoTitle, setVideoTitle] = useState<{ sessionId: string; label: string } | null>(null)
   const stateRef = useRef(state)
-  const [restoredView, setRestoredView] = useState(true)
   stateRef.current = state
   const root = useRef<HTMLDivElement>(null)
   const video = useRef<HTMLButtonElement>(null)
@@ -70,12 +71,14 @@ export default function PlaybackPanel(): JSX.Element | null {
     if (stateRef.current?.sessionId !== sessionId) return
     presentationHistory.closeForNavigation()
     // Overlay history.go is asynchronous and would otherwise undo the settings route.
-    await new Promise<void>(resolve => { history.afterTraversal(resolve) })
+    const result = await new Promise<OverlayTraversalResult>(resolve => { history.afterTraversal(resolve) })
+    if (result === 'failed') { toast.show('观看窗口收起失败，请重试跳转', 'error'); return }
+    if (result !== 'completed') return
     if (stateRef.current?.sessionId === sessionId) navigate({ pathname: settingsPath('models', 'usage'), hash: '#ai-subtitles' })
   }
   const layer = useInteractionLayer({
-    enabled: Boolean(state && state.presentation !== 'docked'), rootRef: root, modal: true, restoring: restoredView,
-    restorationKey: history, activationKey: state?.sessionId,
+    enabled: Boolean(state && state.presentation !== 'docked'), rootRef: root, modal: true, restoring: view.activation?.restoring ?? true,
+    restorationKey: history, activationKey: view.activation?.key,
     onDismiss: () => {
       if (stateRef.current?.phase === 'error') control({ kind: 'stop' })
       else if (options) presentationHistory.setOptions(false)
@@ -93,57 +96,8 @@ export default function PlaybackPanel(): JSX.Element | null {
   }, [layer])
   useEffect(() => {
     if (!api.playback) return
-    let disposed = false
-    let initialized = false
-    let snapshotFailed = false
-    let appliedRevision = -1
-    const notifications: PlaybackObservation[] = []
-    const observe = (value: PlaybackSnapshot | null, initial = false): void => {
-      const restored = presentationHistory.observe(value, initial)
-      if (restored !== undefined) setRestoredView(restored)
-      setState(value)
-    }
-    const initialize = (value: PlaybackObservation): void => {
-      observe(value.snapshot, true)
-      appliedRevision = value.revision
-      initialized = true
-      for (const notification of notifications) {
-        if (notification.revision <= appliedRevision) continue
-        observe(notification.snapshot)
-        appliedRevision = notification.revision
-      }
-      notifications.length = 0
-    }
-    const off = api.playback.onChanged((value, revision) => {
-      if (disposed) return
-      if (initialized) {
-        if (revision <= appliedRevision) return
-        observe(value)
-        appliedRevision = revision
-      }
-      else {
-        const previous = notifications.at(-1)
-        if (previous && revision <= previous.revision) return
-        // Compact clock updates, not explicit session/presentation transitions.
-        const notification = { snapshot: value, revision }
-        if (previous && previous.snapshot?.sessionId === value?.sessionId
-          && previous.snapshot?.presentation === value?.presentation && previous.snapshot?.phase === value?.phase) notifications[notifications.length - 1] = notification
-        else notifications.push(notification)
-        // Show the clock immediately, but wait for its baseline before writing history.
-        observe(value, true)
-        if (snapshotFailed) initialize(notification)
-      }
-    })
-    void api.playback.observation().then(value => {
-      if (disposed) return
-      initialize(value)
-    }, () => {
-      // A failed initial RPC cannot turn an existing session into a new open.
-      if (disposed) return
-      snapshotFailed = true
-      if (notifications.length) initialize(notifications[0])
-    })
-    return () => { disposed = true; stateRef.current = null; off(); presentationHistory.abandon() }
+    const disconnect = presentationHistory.connect(api.playback, setView)
+    return () => { stateRef.current = null; disconnect() }
   }, [presentationHistory])
   useEffect(() => {
     seekDraftRef.current = null; pendingSeekRef.current = null; setSeekDraft(null)

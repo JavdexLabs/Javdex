@@ -122,6 +122,13 @@ void focusNext(HWND current, bool backwards) {
         if (IsWindowEnabled(order[next])) { SetFocus(order[next]); break; }
     }
 }
+bool historyMouse(UINT message, WPARAM wparam) {
+    if (message != WM_XBUTTONDOWN && message != WM_XBUTTONUP && message != WM_XBUTTONDBLCLK) return false;
+    // DefWindowProc turns an unhandled release into WM_APPCOMMAND. Consume the
+    // complete click and dispatch only on release, before docking moves the surface.
+    if (message == WM_XBUTTONUP) queue(GET_XBUTTON_WPARAM(wparam) == XBUTTON1 ? "history-back" : "history-forward");
+    return true;
+}
 bool key(HWND window, UINT message, WPARAM code, LPARAM flags) {
     if (message != WM_KEYDOWN && message != WM_SYSKEYDOWN) return false;
     const bool alt = (GetKeyState(VK_MENU) & 0x8000) != 0;
@@ -164,6 +171,7 @@ bool key(HWND window, UINT message, WPARAM code, LPARAM flags) {
     return true;
 }
 LRESULT CALLBACK controlInput(HWND window, UINT message, WPARAM wparam, LPARAM lparam, UINT_PTR, DWORD_PTR) {
+    if (historyMouse(message, wparam)) return TRUE;
     if (key(window, message, wparam, lparam)) return 0;
     if ((message == WM_LBUTTONDOWN || message == WM_LBUTTONDBLCLK) && (window == seekSlider || window == volumeSlider)) {
         mouseSlider = window;
@@ -185,13 +193,13 @@ LRESULT CALLBACK controlInput(HWND window, UINT message, WPARAM wparam, LPARAM l
     }
     if (message == WM_GETDLGCODE) return DefSubclassProc(window, message, wparam, lparam) | DLGC_WANTTAB | DLGC_WANTARROWS;
     if (message == WM_SETFOCUS || message == WM_LBUTTONDOWN) interact();
-    if (message == WM_XBUTTONDOWN) { queue(GET_XBUTTON_WPARAM(wparam) == XBUTTON1 ? "history-back" : "history-forward"); return TRUE; }
     if (message == WM_NCDESTROY) RemoveWindowSubclass(window, controlInput, 1);
     return DefSubclassProc(window, message, wparam, lparam);
 }
 LRESULT CALLBACK surfaceInput(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
     // The hidden cleanup drawable never handles input or playback frames.
     if (window != video && window != controls) return DefWindowProcW(window, message, wparam, lparam);
+    if (historyMouse(message, wparam)) return TRUE;
     if (window == video && message == WM_MOUSEACTIVATE && presentation != "docked"
         && HIWORD(lparam) == WM_LBUTTONDOWN && GetForegroundWindow() != parent) {
         // Activate the Electron owner, but consume the click which brought it
@@ -201,7 +209,6 @@ LRESULT CALLBACK surfaceInput(HWND window, UINT message, WPARAM wparam, LPARAM l
     }
     if (window == video && key(window, message, wparam, lparam)) return 0;
     if (message == WM_GETDLGCODE && window == video) return DLGC_WANTTAB | DLGC_WANTARROWS;
-    if (message == WM_XBUTTONDOWN) { queue(GET_XBUTTON_WPARAM(wparam) == XBUTTON1 ? "history-back" : "history-forward"); return TRUE; }
     // Geometry/show calls can synthesize WM_MOUSEMOVE without physical motion.
     // The render loop samples the cursor, so these messages must not hold the
     // controls open forever while the viewport is reported periodically.

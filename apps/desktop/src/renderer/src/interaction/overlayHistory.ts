@@ -1,5 +1,6 @@
 export type OverlayHistoryKind = 'image-preview' | 'playback-expanded' | 'playback-fullscreen' | 'playback-options'
-export type OverlayCloseSource = 'history' | 'action' | 'route'
+export type OverlayCloseSource = 'history' | 'action' | 'route' | 'failure'
+export type OverlayTraversalResult = 'completed' | 'cancelled' | 'failed'
 export const OVERLAY_HISTORY_KEY = 'avOverlay'
 const OVERLAY_PARENTS_KEY = 'avOverlayParents'
 export const IMAGE_PREVIEW_HISTORY_KEY = 'avImagePreview'
@@ -9,7 +10,7 @@ export interface OverlayHistoryPort {
   push(state: Record<string, unknown>, url: string): void
   replace(state: Record<string, unknown>, url: string): void
   go(delta: number): void
-  later(callback: () => void): () => void
+  later(callback: () => void, milliseconds?: number): () => void
   token(): string
 }
 const kinds: OverlayHistoryKind[] = ['image-preview', 'playback-expanded', 'playback-fullscreen', 'playback-options']
@@ -54,12 +55,35 @@ interface Entry extends OverlayHistoryMarker {
   closing: boolean
   close?: (source: OverlayCloseSource) => void
 }
+interface Traversal { from: string; url: string; cancelFallback(): void; cancelDeadline(): void }
 
 /** One writer for temporary viewing layers. No React lifetime owns a traversal. */
 export function createOverlayHistory(port: OverlayHistoryPort) {
   let entries: Entry[] = []
-  let pending: { from: string; cancelFallback: () => void } | null = null
-  const settled = new Set<() => void>()
+  let pending: Traversal | null = null
+  let result: OverlayTraversalResult = 'completed'
+  const settled = new Set<(result: OverlayTraversalResult) => void>()
+  function clearTraversal(): void {
+    pending?.cancelFallback()
+    pending?.cancelDeadline()
+    pending = null
+  }
+  function failTraversal(traversal: Traversal): void {
+    if (pending !== traversal) return
+    clearTraversal()
+    result = 'failed'
+    const waiting = [...settled]
+    settled.clear()
+    // A failed history.go cannot be retried safely: the original may arrive late.
+    // Retire closed slots in place and cancel queued views, leaving the next
+    // explicit open free to reuse the vacant slot without an extra Back step.
+    const queued = entries.filter(entry => !entry.pushed)
+    entries = entries.filter(entry => entry.pushed)
+    for (const entry of entries) if (entry.closing) { entry.closing = false; entry.close = undefined }
+    for (const entry of queued.reverse()) finish(entry, 'failure')
+    flush()
+    for (const action of waiting) action('failed')
+  }
   function recordPositions(current: ReturnType<OverlayHistoryPort['read']>): void {
     let next: Entry | undefined
     for (const position of readHistoryTrail(current.state).reverse()) {
@@ -76,6 +100,19 @@ export function createOverlayHistory(port: OverlayHistoryPort) {
     entry.closing = true
     entry.close?.(source)
   }
+  function route(): void {
+    const removed = entries.filter(entry => entry.url !== port.read().url)
+    entries = entries.filter(entry => !removed.includes(entry))
+    for (const entry of removed.reverse()) finish(entry, 'route')
+    if (pending && pending.url !== port.read().url) {
+      clearTraversal()
+      result = 'cancelled'
+      const waiting = [...settled]
+      settled.clear()
+      flush()
+      for (const action of waiting) action('cancelled')
+    }
+  }
   function flush(): void {
     if (pending) return
     const pushed = entries.filter(entry => entry.pushed)
@@ -83,11 +120,24 @@ export function createOverlayHistory(port: OverlayHistoryPort) {
     if (top?.closing && readOverlayHistoryMarker(port.read().state)?.token === top.token) {
       let count = 0
       for (const entry of [...pushed].reverse()) { if (!entry.closing) break; count++ }
-      pending = { from: top.token, cancelFallback: () => {} }
-      pending.cancelFallback = port.later(() => {
-        if (pending && readOverlayHistoryMarker(port.read().state)?.token !== pending.from) pop(port.read().state)
-      })
-      port.go(-count)
+      const traversal: Traversal = { from: top.token, url: port.read().url, cancelFallback: () => {}, cancelDeadline: () => {} }
+      pending = traversal
+      result = 'completed'
+      const acknowledge = (): boolean => {
+        if (pending !== traversal) return true
+        const current = port.read()
+        if (current.url !== traversal.url) { route(); return true }
+        if (readOverlayHistoryMarker(current.state)?.token === traversal.from) return false
+        pop(current.state)
+        return true
+      }
+      traversal.cancelFallback = port.later(() => { acknowledge() })
+      traversal.cancelDeadline = port.later(() => {
+        if (!acknowledge()) failTraversal(traversal)
+      }, 2000)
+      try { port.go(-count) } catch {
+        failTraversal(traversal)
+      }
       return
     }
     entries = entries.filter(entry => !entry.closing)
@@ -110,9 +160,10 @@ export function createOverlayHistory(port: OverlayHistoryPort) {
         entry.pushed = true
       }
     }
+    const outcome = result
     for (const action of [...settled]) {
       if (pending) break
-      settled.delete(action); action()
+      settled.delete(action); action(outcome)
     }
   }
   function pop(state: unknown): void {
@@ -121,11 +172,12 @@ export function createOverlayHistory(port: OverlayHistoryPort) {
     // A fallback may already have settled this event and pushed the next layer.
     // Only the current cursor can acknowledge a traversal or close live layers.
     if (marker?.token !== cursor?.token || marker?.kind !== cursor?.kind) return
+    if (pending && pending.url !== port.read().url) { route(); return }
     if (pending) {
       if (marker?.token === pending.from) return
-      pending.cancelFallback()
-      pending = null
+      clearTraversal()
     }
+    result = 'completed'
     const pushed = entries.filter(entry => entry.pushed)
     const index = pushed.findIndex(entry => entry.token === marker?.token)
     const removed = pushed.slice(index + 1)
@@ -148,7 +200,7 @@ export function createOverlayHistory(port: OverlayHistoryPort) {
     open(kind: OverlayHistoryKind, close: NonNullable<Entry['close']>): string {
       const token = port.token()
       const current = port.read()
-      if (!pending) recordPositions(current)
+      if (!pending) { result = 'completed'; recordPositions(current) }
       entries.push({ token, kind, close, pushed: false, closing: false, url: current.url })
       // An old asynchronous back must settle before a new marker is pushed.
       flush()
@@ -184,9 +236,9 @@ export function createOverlayHistory(port: OverlayHistoryPort) {
     },
     pop,
     isTraversing: (): boolean => pending !== null,
-    afterTraversal(action: () => void): () => void {
+    afterTraversal(action: (result: OverlayTraversalResult) => void): () => void {
       if (pending) settled.add(action)
-      else action()
+      else action(result)
       return () => { settled.delete(action) }
     },
     /** Route/lifetime abandonment never navigates or invokes an obsolete callback. */
@@ -195,11 +247,7 @@ export function createOverlayHistory(port: OverlayHistoryPort) {
       if (entry?.pushed) entry.close = undefined
       else entries = entries.filter(entry => entry.token !== token)
     },
-    route(): void {
-      const removed = entries.filter(entry => entry.url !== port.read().url)
-      entries = entries.filter(entry => !removed.includes(entry))
-      for (const entry of removed.reverse()) finish(entry, 'route')
-    }
+    route
   }
 }
 export type OverlayHistory = ReturnType<typeof createOverlayHistory>

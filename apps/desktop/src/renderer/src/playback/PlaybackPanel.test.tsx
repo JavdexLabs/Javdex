@@ -383,6 +383,23 @@ test('a stale docking acknowledgement cannot navigate after playback session rep
   assert.equal(currentLocation, '/')
 })
 
+test('a rejected viewing traversal stays on detail and the next activation can navigate', async context => {
+  await mount(undefined, '/libraries/1/video/2')
+  await act(async () => changed({ ...snapshot(), presentation: 'docked' }))
+  await act(async () => changed(snapshot()))
+  const rejected = context.mock.method(history, 'go', () => { throw new Error('history unavailable') })
+  await options()
+  await act(async () => button('字幕模型设置').props.onClick())
+  assert.equal(currentLocation, '/libraries/1/video/2')
+  rejected.mock.restore()
+  await act(async () => changed({ ...snapshot(), presentation: 'docked' }))
+  await act(async () => changed(snapshot()))
+  await options()
+  assert.equal(button('字幕模型设置').props.disabled, false)
+  await act(async () => button('字幕模型设置').props.onClick())
+  assert.equal(currentLocation, '/settings/models/usage#ai-subtitles')
+})
+
 test('AI subtitle command results cannot overwrite newer subtitle events', async () => {
   aiState = { ...aiSnapshot(), supported: true, installed: true }
   let finish!: (value: AiSubtitleSnapshot) => void

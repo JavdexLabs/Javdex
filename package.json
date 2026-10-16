@@ -24,6 +24,7 @@
     "test:playback:fixtures": "node --test scripts/playback-pgs-fixture.test.mjs",
     "test:playback:build": "node --test scripts/playback-native-build.test.mjs scripts/playback-source-build.test.mjs scripts/release-metadata.test.mjs",
     "test:backup-smoke": "node --test scripts/backup-smoke-status.test.mjs",
+    "test:playback:navigation": "node scripts/playback-navigation-acceptance.mjs",
     "test:ui": "node scripts/test-ui.mjs",
     "test:ui:server-update": "node scripts/server-update-ui-check.mjs",
     "test:ui:matrix": "node scripts/css-module-migration.mjs",

@@ -22,7 +22,8 @@ test('keyboard, app commands and legacy OS swipes use one bounded navigation ent
   let destroyed = false, canBack = true, back = 0, forward = 0, prevented = 0
   window.isDestroyed = () => destroyed
   window.webContents = Object.assign(new EventEmitter(), { navigationHistory: {
-    canGoBack: () => canBack, canGoForward: () => true, goBack: () => back++, goForward: () => forward++
+    canGoToOffset: (offset: number) => offset === -1 ? canBack : offset === 1,
+    goToOffset: (offset: number) => { if (offset === -1) back++; else if (offset === 1) forward++; else assert.fail('must traverse one entry') }
   } })
   const target = window as unknown as BrowserWindow
   bindWindowNavigation(target, 'darwin'); bindWindowNavigation(target, 'darwin')
@@ -42,7 +43,7 @@ test('history entries respect earlier event vetoes and a foreground task across 
   let blocked = true, navigations = 0
   window.isDestroyed = () => false
   window.webContents = Object.assign(new EventEmitter(), { navigationHistory: {
-    canGoBack: () => true, canGoForward: () => true, goBack: () => navigations++, goForward: () => navigations++
+    canGoToOffset: () => true, goToOffset: () => navigations++
   } })
   const target = window as unknown as BrowserWindow
   bindWindowNavigation(target, 'darwin', () => !blocked)
@@ -60,4 +61,26 @@ test('history entries respect earlier event vetoes and a foreground task across 
   assert.equal(navigations, 0, 'an unrelated veto still applies after the task is no longer blocking')
   navigateWindowHistory(target, 'back')
   assert.equal(navigations, 1)
+})
+
+test('native re-expansion traverses a real entry even when Chromium UI Back would skip it', () => {
+  const offsets: number[] = []
+  let available = true
+  const window = {
+    isDestroyed: () => false,
+    webContents: { navigationHistory: {
+      canGoBack: () => false, canGoForward: () => false,
+      goBack: () => assert.fail('UI Back may skip the viewing entry'),
+      goForward: () => assert.fail('UI Forward may skip the viewing entry'),
+      canGoToOffset: (offset: number) => available && (offset === -1 || offset === 1),
+      goToOffset: (offset: number) => offsets.push(offset)
+    } }
+  }
+  navigateWindowHistory(window, 'back')
+  navigateWindowHistory(window, 'forward')
+  assert.deepEqual(offsets, [-1, 1])
+  available = false
+  navigateWindowHistory(window, 'back')
+  navigateWindowHistory(window, 'forward')
+  assert.deepEqual(offsets, [-1, 1], 'history boundaries still prevent navigation')
 })

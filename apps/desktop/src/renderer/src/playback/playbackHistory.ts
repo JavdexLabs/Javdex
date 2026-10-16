@@ -20,13 +20,14 @@ export function createPlaybackHistory(history: OverlayHistory, command: (id: str
     command(current.sessionId, current.phase === 'error' ? { kind: 'stop' } : { kind: 'presentation', value: 'docked' })
   }
   return {
-    observe(value: PlaybackSnapshot | null, initial = false): void {
+    /** true restores layer order, false is a new action, undefined retains the current order. */
+    observe(value: PlaybackSnapshot | null, initial = false): boolean | undefined {
       const previous = state
       state = value
       const transition = previous?.sessionId !== value?.sessionId || previous?.presentation !== value?.presentation || previous?.phase !== value?.phase && value?.phase === 'error'
       if (initial) {
         if (value && value.presentation !== 'docked' && !expanded) expanded = history.adopt('playback-expanded', closeViewing)
-        return
+        return true
       }
       if (!transition) return
       closeOptions()
@@ -34,8 +35,12 @@ export function createPlaybackHistory(history: OverlayHistory, command: (id: str
         if (expanded) history.close(expanded)
         return
       }
+      // The native clock can beat the initial snapshot RPC after a reload.
+      const restored = !expanded && previous === null ? history.adopt('playback-expanded', closeViewing) : null
+      if (restored) expanded = restored
       // Fullscreen and settings share one viewing entry; system Back always docks.
       if (!expanded) expanded = history.open('playback-expanded', closeViewing)
+      if (previous?.sessionId !== value.sessionId || previous?.presentation === 'docked') return Boolean(restored)
     },
     setOptions(value: boolean): void {
       if (!value) { closeOptions(); return }

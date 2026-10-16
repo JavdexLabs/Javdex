@@ -5,6 +5,8 @@ export interface InteractionLayer {
   root(): HTMLElement | null
   anchor?(): HTMLElement | null
   modal?: boolean
+  /** Restoring a view is not a new action that may supersede an existing overlay. */
+  restoreBelowExisting?: boolean
   dismiss?(): void
   blockShortcut?(event: KeyboardEvent): boolean
 }
@@ -34,7 +36,11 @@ export function createInteractionLayers() {
   }
   return {
     register(layer: InteractionLayer): () => void {
-      layers.push(layer)
+      if (layer.restoreBelowExisting) {
+        const children = layers.filter(child => isDescendant(child, layer))
+        for (const child of children) layers.splice(layers.indexOf(child), 1)
+        layers.unshift(layer, ...children)
+      } else layers.push(layer)
       return () => { const index = layers.indexOf(layer); if (index >= 0) layers.splice(index, 1) }
     },
     isTop(id: string): boolean { return top()?.id === id },

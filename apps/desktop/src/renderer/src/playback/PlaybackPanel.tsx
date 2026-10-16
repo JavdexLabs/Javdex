@@ -46,6 +46,7 @@ export default function PlaybackPanel(): JSX.Element | null {
   const [sources, setSources] = useState<{ sessionId: string; items: Array<{ id: number; label: string }>; error: string | null } | null>(null)
   const [videoTitle, setVideoTitle] = useState<{ sessionId: string; label: string } | null>(null)
   const stateRef = useRef(state)
+  const restoredView = useRef(false)
   stateRef.current = state
   const root = useRef<HTMLDivElement>(null)
   const video = useRef<HTMLButtonElement>(null)
@@ -73,7 +74,7 @@ export default function PlaybackPanel(): JSX.Element | null {
     if (stateRef.current?.sessionId === sessionId) navigate({ pathname: settingsPath('models', 'usage'), hash: '#ai-subtitles' })
   }
   const layer = useInteractionLayer({
-    enabled: Boolean(state && state.presentation !== 'docked'), rootRef: root, modal: true,
+    enabled: Boolean(state && state.presentation !== 'docked'), rootRef: root, modal: true, restoreBelowExisting: restoredView.current,
     onDismiss: () => {
       if (stateRef.current?.phase === 'error') control({ kind: 'stop' })
       else if (options) presentationHistory.setOptions(false)
@@ -93,8 +94,15 @@ export default function PlaybackPanel(): JSX.Element | null {
     if (!api.playback) return
     let disposed = false
     let revision = 0
-    const off = api.playback.onChanged(value => { revision++; presentationHistory.observe(value); setState(value) })
-    void api.playback.snapshot().then(value => { if (!disposed && revision === 0) { presentationHistory.observe(value, true); setState(value) } })
+    const off = api.playback.onChanged(value => {
+      revision++
+      const restored = presentationHistory.observe(value)
+      if (restored !== undefined) restoredView.current = restored
+      setState(value)
+    })
+    void api.playback.snapshot().then(value => {
+      if (!disposed && revision === 0) { restoredView.current = true; presentationHistory.observe(value, true); setState(value) }
+    })
     return () => { disposed = true; stateRef.current = null; off(); presentationHistory.abandon() }
   }, [presentationHistory])
   useEffect(() => {

@@ -1,6 +1,6 @@
 ---
 title: "服务端源码构建与进阶管理"
-description: "Javdex 0.9.0-beta.6 · 服务端源码构建与进阶管理"
+description: "Javdex 0.9.0-beta.7 · 服务端源码构建与进阶管理"
 ---
 
 从仓库根目录构建：

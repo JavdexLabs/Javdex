@@ -40,18 +40,37 @@ window.api = {
   },
   videos: { get: async () => ({ activeLibraryId: 1, resources: [{ id: 3, library_id: 1, video_id: 2, kind: 'local', display_name: 'Fixture' }] }) }
 }
-const [{ default: PlaybackPanel }, { ToastProvider }, { OverlayHistoryProvider }, { NavigationGuardProvider }] = await Promise.all([
+const [{ default: PlaybackPanel }, { ToastProvider }, { OverlayHistoryProvider }, { NavigationGuardProvider },
+  { ImagePreviewOverlayProvider, useHistoryBackedImagePreviewState }, { default: ImagePreviewLightbox }] = await Promise.all([
   import('../../apps/desktop/src/renderer/src/playback/PlaybackPanel'),
   import('../../apps/desktop/src/renderer/src/components/Toast'),
   import('../../apps/desktop/src/renderer/src/interaction/OverlayHistoryContext'),
-  import('../../apps/desktop/src/renderer/src/interaction/NavigationGuard')
+  import('../../apps/desktop/src/renderer/src/interaction/NavigationGuard'),
+  import('../../apps/desktop/src/renderer/src/components/ImagePreviewOverlayContext'),
+  import('../../apps/desktop/src/renderer/src/components/ImagePreviewLightbox')
 ])
+function ViewingFixture() {
+  const [generation, setGeneration] = React.useState(0)
+  const preview = useHistoryBackedImagePreviewState()
+  return <>
+    {/* Test-only controls model a nested viewing action and a panel rebuild;
+        they are not a claim that the normal modal permits background clicks. */}
+    {query.get('nested') === '1' && <aside data-interaction-preserve-surface="feedback" style={{ position: 'fixed', top: 8, right: 8, zIndex: 9999 }}>
+      <button onClick={preview.open}>模拟嵌套图片</button>
+      <button onClick={() => setGeneration(value => value + 1)}>重建播放面板</button>
+    </aside>}
+    <PlaybackPanel key={generation} />
+    {preview.isOpen && <ImagePreviewLightbox items={[{ id: 1, src: 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360"><rect width="640" height="360" fill="#777"/></svg>') }]}
+      index={0} onClose={preview.close} onIndexChange={() => {}}
+      labels={{ dialog: '合成图片预览', filmstrip: '合成图片', thumb: index => `图片${index + 1}` }} />}
+  </>
+}
 function Fixture() {
   const route = useLocation()
   const navigate = useNavigate()
   const [current, setCurrent] = React.useState(state)
   React.useEffect(() => { listeners.add(setCurrent); return () => listeners.delete(setCurrent) }, [])
-  return <ToastProvider><OverlayHistoryProvider><NavigationGuardProvider>
+  return <ToastProvider><OverlayHistoryProvider><ImagePreviewOverlayProvider><NavigationGuardProvider>
     <main style={{ padding: 32 }}>
       <h1>播放返回回归夹具</h1><p role="status">业务路由：{route.pathname}{route.search}</p>
       <p>播放呈现：{current?.presentation ?? 'stopped'}；已接收命令：{controls.map(command => command.kind === 'presentation' ? command.value : command.kind).join(', ') || 'none'}</p>
@@ -59,8 +78,8 @@ function Fixture() {
       <button onClick={() => publish(makeState())}>播放测试会话</button>
       <button onClick={() => navigate('/settings/models/usage')}>打开其他业务页</button>
     </main>
-    <PlaybackPanel />
-  </NavigationGuardProvider></OverlayHistoryProvider></ToastProvider>
+    <ViewingFixture />
+  </NavigationGuardProvider></ImagePreviewOverlayProvider></OverlayHistoryProvider></ToastProvider>
 }
 const router = createHashRouter([{ path: '*', element: <Fixture /> }])
 const root = createRoot(document.getElementById('root'))

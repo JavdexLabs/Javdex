@@ -130,6 +130,31 @@ for (const presentation of ['expanded', 'fullscreen'] as const) test(`system bac
   assert.deepEqual(external, [])
 })
 
+test('restoring the panel preserves an existing overlay through clock updates, but a new session remains an explicit action', async () => {
+  const removeImage = interactionLayers.register({ id: 'existing-image', modal: true, root: () => null })
+  try {
+    await mount()
+    assert.equal(interactionLayers.isTop('existing-image'), true)
+    await act(async () => changed({ ...snapshot(), position: 2 }))
+    assert.equal(interactionLayers.isTop('existing-image'), true, 'ordinary ticks cannot reorder the restored player')
+    await act(async () => changed(snapshot('new-session')))
+    assert.equal(interactionLayers.isTop('existing-image'), false, 'a newly committed session is not restoration')
+  } finally { removeImage() }
+})
+
+test('a surviving-session event before the initial RPC response restores ownership without stealing the image', async () => {
+  const originalSnapshot = fake.playback.snapshot
+  fake.playback.snapshot = () => new Promise(() => {})
+  history.state = { avOverlay: { kind: 'image-preview', token: 'image' }, avOverlayParents: [{ kind: 'playback-expanded', token: 'player' }] }
+  const removeImage = interactionLayers.register({ id: 'existing-image', modal: true, root: () => null })
+  try {
+    await mount()
+    await act(async () => changed(snapshot()))
+    assert.equal(interactionLayers.isTop('existing-image'), true)
+    assert.equal((history.state as { avOverlay: { token: string } }).avOverlay.token, 'image')
+  } finally { fake.playback.snapshot = originalSnapshot; removeImage() }
+})
+
 test('remounting the playback panel releases the old history callback and docks the current session', async context => {
   await mount()
   await act(async () => changed({ ...snapshot(), presentation: 'docked' }))

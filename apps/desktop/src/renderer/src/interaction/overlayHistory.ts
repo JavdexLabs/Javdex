@@ -1,6 +1,7 @@
 export type OverlayHistoryKind = 'image-preview' | 'playback-expanded' | 'playback-fullscreen' | 'playback-options'
 export type OverlayCloseSource = 'history' | 'action' | 'route'
 export const OVERLAY_HISTORY_KEY = 'avOverlay'
+const OVERLAY_PARENTS_KEY = 'avOverlayParents'
 export const IMAGE_PREVIEW_HISTORY_KEY = 'avImagePreview'
 export interface OverlayHistoryMarker { token: string; kind: OverlayHistoryKind }
 export interface OverlayHistoryPort {
@@ -21,12 +22,28 @@ export function readOverlayHistoryMarker(state: unknown): OverlayHistoryMarker |
   return typeof marker.token === 'string' && kinds.includes(marker.kind as OverlayHistoryKind)
     ? { token: marker.token, kind: marker.kind as OverlayHistoryKind } : null
 }
-export function withOverlayHistoryMarker(state: unknown, marker: OverlayHistoryMarker): Record<string, unknown> {
+function readHistoryTrail(state: unknown): OverlayHistoryMarker[] {
+  const current = readOverlayHistoryMarker(state)
+  if (!current) return []
+  const parents = (state as Record<string, unknown>)[OVERLAY_PARENTS_KEY]
+  if (!Array.isArray(parents) || parents.length > 64) return [current]
+  const trail: OverlayHistoryMarker[] = []
+  const tokens = new Set([current.token])
+  for (const value of parents) {
+    const marker = readOverlayHistoryMarker({ [OVERLAY_HISTORY_KEY]: value })
+    if (!marker || tokens.has(marker.token)) return [current]
+    tokens.add(marker.token); trail.push(marker)
+  }
+  return [...trail, current]
+}
+export function withOverlayHistoryMarker(state: unknown, marker: OverlayHistoryMarker, parents: OverlayHistoryMarker[] = []): Record<string, unknown> {
   const next = { ...(state && typeof state === 'object' ? state : {}) } as Record<string, unknown>
   delete next[OVERLAY_HISTORY_KEY]
   delete next[IMAGE_PREVIEW_HISTORY_KEY]
+  delete next[OVERLAY_PARENTS_KEY]
   const value = { kind: marker.kind, token: marker.token }
   next[OVERLAY_HISTORY_KEY] = value
+  if (parents.length) next[OVERLAY_PARENTS_KEY] = parents.map(({ kind, token }) => ({ kind, token }))
   // Keep the existing image marker readable without carrying it into unrelated layers.
   if (marker.kind === 'image-preview') next[IMAGE_PREVIEW_HISTORY_KEY] = value
   return next
@@ -35,18 +52,20 @@ interface Entry extends OverlayHistoryMarker {
   url: string
   pushed: boolean
   closing: boolean
-  close(source: OverlayCloseSource): void
+  close?: (source: OverlayCloseSource) => void
 }
 
 /** One writer for temporary viewing layers. No React lifetime owns a traversal. */
 export function createOverlayHistory(port: OverlayHistoryPort) {
-  let entries: Entry[] = []
+  const initial = port.read()
+  // Reload restores only anonymous positions, never callbacks or viewing content.
+  let entries: Entry[] = readHistoryTrail(initial.state).map(marker => ({ ...marker, url: initial.url, pushed: true, closing: false }))
   let pending: { from: string; cancelFallback: () => void } | null = null
   const settled = new Set<() => void>()
   function finish(entry: Entry, source: OverlayCloseSource): void {
     if (entry.closing) return
     entry.closing = true
-    entry.close(source)
+    entry.close?.(source)
   }
   function flush(): void {
     if (pending) return
@@ -71,11 +90,14 @@ export function createOverlayHistory(port: OverlayHistoryPort) {
         finish(entry, 'route')
       } else {
         const marker = readOverlayHistoryMarker(current.state)
-        const state = withOverlayHistoryMarker(current.state, entry)
+        const occupied = marker && entries.some(value => value.pushed && value.close && value.token === marker.token && value.url === current.url)
+        const parents = readHistoryTrail(current.state)
         // Forward may revisit a consumed viewing entry. Reuse that empty slot
         // instead of stacking a second placeholder above the business route.
-        if (marker && !entries.some(value => value.pushed && value.token === marker.token && value.url === current.url)) port.replace(state, current.url)
-        else port.push(state, current.url)
+        if (marker && !occupied) {
+          entries = entries.filter(value => value.token !== marker.token)
+          port.replace(withOverlayHistoryMarker(current.state, entry, parents.slice(0, -1)), current.url)
+        } else port.push(withOverlayHistoryMarker(current.state, entry, parents), current.url)
         entry.pushed = true
       }
     }
@@ -97,21 +119,36 @@ export function createOverlayHistory(port: OverlayHistoryPort) {
     const removed = pushed.slice(index + 1)
     entries = entries.filter(entry => !removed.includes(entry))
     for (const entry of removed.reverse()) finish(entry, 'history')
+    // A reload may leave empty child positions above the restored visible view.
+    // Consume those positions and that view as one user Back, never on mount.
+    const exposed = pushed[index]
+    if (removed.length && removed.every(entry => !entry.close) && exposed?.close && !exposed.closing) {
+      finish(exposed, 'history')
+      for (let parent = index - 1; parent >= 0 && !pushed[parent].close; parent--) pushed[parent].closing = true
+    }
     flush()
   }
   return {
-    open(kind: OverlayHistoryKind, close: Entry['close']): string {
+    open(kind: OverlayHistoryKind, close: NonNullable<Entry['close']>): string {
       const token = port.token()
       entries.push({ token, kind, close, pushed: false, closing: false, url: port.read().url })
       // An old asynchronous back must settle before a new marker is pushed.
       flush()
       return token
     },
-    /** Restore an existing viewing entry after renderer reload; never push or traverse. */
-    adopt(kind: OverlayHistoryKind, close: Entry['close']): string | null {
+    /** Reclaim a recorded position, including a parent beneath another view. */
+    adopt(kind: OverlayHistoryKind, close: NonNullable<Entry['close']>): string | null {
       const current = port.read()
       const marker = readOverlayHistoryMarker(current.state)
-      if (!marker || marker.kind !== kind || pending || entries.some(entry => entry.token === marker.token)) return null
+      if (!marker || pending) return null
+      const cursor = entries.findIndex(entry => entry.token === marker.token && entry.url === current.url)
+      const recorded = entries.slice(0, cursor + 1).reverse().find(entry => entry.kind === kind && entry.url === current.url)
+      if (recorded) {
+        if (recorded.close || recorded.closing) return null
+        recorded.close = close
+        return recorded.token
+      }
+      if (marker.kind !== kind) return null
       entries.push({ ...marker, close, url: current.url, pushed: true, closing: false })
       return marker.token
     },
@@ -130,7 +167,11 @@ export function createOverlayHistory(port: OverlayHistoryPort) {
       return () => { settled.delete(action) }
     },
     /** Route/lifetime abandonment never navigates or invokes an obsolete callback. */
-    abandon(token: string): void { entries = entries.filter(entry => entry.token !== token) },
+    abandon(token: string): void {
+      const entry = entries.find(entry => entry.token === token)
+      if (entry?.pushed) entry.close = undefined
+      else entries = entries.filter(entry => entry.token !== token)
+    },
     route(): void {
       const removed = entries.filter(entry => entry.url !== port.read().url)
       entries = entries.filter(entry => !removed.includes(entry))

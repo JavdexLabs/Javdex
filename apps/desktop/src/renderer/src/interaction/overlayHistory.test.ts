@@ -211,3 +211,38 @@ test('adoption cannot reclaim a marker while its close traversal is in flight', 
   assert.equal(f.history.isTraversing(), false)
   assert.deepEqual(f.closes, ['playback-expanded:action'])
 })
+
+test('nested history serializes anonymous positions, not callbacks or viewing data', () => {
+  const f = fixture()
+  f.open('playback-expanded'); f.open('image-preview')
+  const state = structuredClone(f.state()) as Record<string, unknown>
+  assert.deepEqual(state.avOverlayParents, [{ kind: 'playback-expanded', token: '1' }])
+  assert.deepEqual((state.avOverlay as object), { kind: 'image-preview', token: '2' })
+  const restored = createOverlayHistory({ read: () => ({ state, url: '#/detail' }),
+    push: () => assert.fail('restoration cannot push'), replace: () => assert.fail('restoration cannot replace'),
+    go: () => assert.fail('restoration cannot traverse'), later: () => () => {}, token: () => 'unused' })
+  assert.equal(restored.adopt('playback-expanded', () => {}), '1')
+  assert.equal(restored.adopt('playback-expanded', () => assert.fail('live owner must not be replaced')), null)
+})
+test('invalid or duplicated parent trails cannot create restorable viewing positions', () => {
+  for (const parents of [[{ kind: 'unknown', token: 'parent' }], [{ kind: 'playback-expanded', token: 'top' }],
+    Array.from({ length: 65 }, (_, index) => ({ kind: 'playback-expanded', token: String(index) }))]) {
+    const state = { avOverlay: { kind: 'image-preview', token: 'top' }, avOverlayParents: parents }
+    const history = createOverlayHistory({ read: () => ({ state, url: '#/detail' }), push: () => {}, replace: () => {},
+      go: () => assert.fail('invalid metadata cannot navigate'), later: () => () => {}, token: () => 'unused' })
+    assert.equal(history.adopt('playback-expanded', () => assert.fail('invalid parent cannot own a callback')), null)
+  }
+})
+test('nested adoption never steals a live lower owner and abandoned queued entries never open', () => {
+  const f = fixture()
+  f.open('playback-expanded'); f.open('image-preview')
+  assert.equal(f.history.adopt('playback-expanded', () => assert.fail('live lower owner cannot be replaced')), null)
+  f.pop(); f.pop()
+  assert.deepEqual(f.closes, ['image-preview:history', 'playback-expanded:history'])
+  const closing = f.open('image-preview')
+  f.history.close(closing)
+  const queued = f.open('playback-expanded')
+  f.history.abandon(queued)
+  f.pop()
+  assert.equal(readOverlayHistoryMarker(f.state()), null)
+})

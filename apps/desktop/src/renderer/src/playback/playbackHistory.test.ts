@@ -8,16 +8,18 @@ function fixture() {
   const stack: unknown[] = [{ idx: 4, key: 'detail', usr: { from: 'library' } }]
   let index = 0, serial = 0
   const goes: number[] = [], commands: Array<{ id: string; value: PlaybackControl }> = [], options: boolean[] = []
-  const history = createOverlayHistory({
+  const port: Parameters<typeof createOverlayHistory>[0] = {
     read: () => ({ state: stack[index], url: '#/detail' }),
     push: state => { stack.splice(++index); stack.push(state) }, replace: state => { stack[index] = state }, go: delta => { goes.push(delta) },
     later: () => () => {}, token: () => String(++serial)
-  })
+  }
+  const history = createOverlayHistory(port)
   const playback = createPlaybackHistory(history, (id, value) => commands.push({ id, value }), value => options.push(value))
   const state = (presentation: PlaybackSnapshot['presentation'] = 'expanded', phase: PlaybackSnapshot['phase'] = 'playing', sessionId = 'one') =>
     ({ presentation, phase, sessionId } as PlaybackSnapshot)
-  const pop = (delta = -1) => { index += delta; history.pop(stack[index]) }
-  return { playback, history, state, pop, commands, goes, options, marker: () => readOverlayHistoryMarker(stack[index]), length: () => stack.length }
+  const move = (delta = -1) => { index += delta; return stack[index] }
+  const pop = (delta = -1) => { history.pop(move(delta)) }
+  return { playback, history, port, state, move, pop, commands, goes, options, marker: () => readOverlayHistoryMarker(stack[index]), length: () => stack.length }
 }
 test('acknowledged docking consumes the viewing entry before navigation without replaying transport commands', () => {
   const f = fixture()
@@ -98,6 +100,42 @@ test('a restored active session reclaims its existing viewing entry without addi
   f.pop()
   assert.deepEqual(f.commands, [{ id: 'one', value: { kind: 'presentation', value: 'docked' } }])
   assert.deepEqual(f.goes, [])
+})
+for (const reload of [false, true]) for (const initial of [true, false]) test(`nested playback restoration across ${reload ? 'renderer reload' : 'panel remount'} when ${initial ? 'snapshot' : 'changed event'} arrives first`, () => {
+  const f = fixture()
+  f.playback.observe(f.state())
+  let imageCloses = 0
+  f.history.open('image-preview', () => { imageCloses++ })
+  f.playback.abandon()
+  const history = reload ? createOverlayHistory(f.port) : f.history
+  const commands: unknown[] = []
+  const restored = createPlaybackHistory(history, (id, value) => commands.push({ id, value }), () => {})
+  restored.observe(f.state(), initial)
+  restored.observe(f.state('fullscreen'))
+  assert.equal(f.length(), 3, 'restoring and changing presentation cannot insert playback above the image')
+  assert.equal(f.marker()?.kind, 'image-preview')
+  history.pop(f.move())
+  assert.equal(imageCloses, reload ? 0 : 1, 'reload must not revive the obsolete image callback')
+  if (reload) {
+    assert.deepEqual(commands, [{ id: 'one', value: { kind: 'presentation', value: 'docked' } }], 'the image UI did not survive reload: Back must dock without an empty step')
+    restored.observe(f.state('docked'))
+  } else assert.deepEqual(commands, [], 'closing a live image must preserve expanded playback')
+  history.pop(f.move())
+  assert.deepEqual(commands, [{ id: 'one', value: { kind: 'presentation', value: 'docked' } }])
+  assert.deepEqual(f.commands, [], 'the old playback owner must remain abandoned')
+  assert.deepEqual(f.goes, reload ? [-1] : [], 'only empty same-route history positions may be drained after reload')
+})
+test('navigation after restoring a nested player consumes the parent and image without stale commands', () => {
+  const f = fixture()
+  f.playback.observe(f.state())
+  f.history.open('image-preview', () => {})
+  f.playback.abandon()
+  const restored = createPlaybackHistory(f.history, () => assert.fail('docking was already acknowledged'), () => {})
+  restored.observe(f.state(), true)
+  restored.closeForNavigation()
+  assert.deepEqual(f.goes, [-2])
+  f.pop(-2)
+  assert.equal(f.marker(), null)
 })
 test('explicit fullscreen docking or stop consumes all owned layers without another business back', () => {
   for (const next of [null, 'docked'] as const) {

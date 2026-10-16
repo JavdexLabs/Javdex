@@ -1,6 +1,6 @@
 ---
 title: "遇到问题"
-description: "Javdex 0.9.0-beta.6 · 遇到问题"
+description: "Javdex 0.9.0-beta.7 · 遇到问题"
 ---
 
 | 现象 | 先检查 |

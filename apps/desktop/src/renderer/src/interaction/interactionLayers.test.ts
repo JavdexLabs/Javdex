@@ -56,3 +56,18 @@ test('task shortcut policy remains active through an owned detail layer but not 
   stack.register({ id: 'unrelated', root: () => null })
   assert.equal(stack.blocksShortcut(escape({ key: 'r', ctrlKey: true })), false)
 })
+
+test('a restored viewing branch cannot take keys from an existing overlay, while a new action still can', () => {
+  const stack = createInteractionLayers()
+  const calls: string[] = []
+  const removeImage = stack.register({ id: 'image', modal: true, root: () => null, dismiss: () => calls.push('image') })
+  stack.register({ id: 'player-menu', parentId: 'player', root: () => null, dismiss: () => calls.push('menu') })
+  stack.register({ id: 'player', modal: true, restoreBelowExisting: true, root: () => null, dismiss: () => calls.push('player') })
+  assert.equal(stack.isActiveModal('image'), true)
+  stack.handleKey(escape())
+  assert.deepEqual(calls, ['image'])
+  removeImage()
+  assert.equal(stack.isTop('player-menu'), true, 'restored descendants still belong to their parent')
+  stack.register({ id: 'new-action', modal: true, root: () => null })
+  assert.equal(stack.isTop('new-action'), true)
+})

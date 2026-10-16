@@ -76,7 +76,7 @@ npm run packaging:list
 7. 检查数据库迁移、设置兼容和插件格式变化是否有升级说明。
 8. 核对发布正文提供与本次源码提交对应的 Compose 示例、JSON 配置和部署说明链接；不将示例或公钥作为附件。所有发布都需通过 Ed25519 签名配置检查，私钥和 key ID 缺失时不得上传镜像；镜像内置公钥必须与生成升级包的签名配置一致。
 
-当前发布目标为 `0.9.0-beta.6` / `v0.9.0-beta.6`，使用 `prerelease=true`、`verify_only=false`；进度见 [Beta.6 发布审计](reviews/v0.9.0-beta.6-release-audit.md)，用户说明见 [Beta.6 发布说明](../.github/release-notes/v0.9.0-beta.6.md)。本页无后缀版本为正式发布示例，不表示正式版已发布。正式版准备记录另见 [历史准备检查](reviews/v0.9.0-readiness.md)。
+当前发布目标为 `0.9.0-beta.7` / `v0.9.0-beta.7`，使用 `prerelease=true`、`verify_only=false`；进度见 [Beta.7 发布审计](reviews/v0.9.0-beta.7-release-audit.md)，用户说明见 [Beta.7 发布说明](../.github/release-notes/v0.9.0-beta.7.md)。本页无后缀版本为正式发布示例，不表示正式版已发布。正式版准备记录另见 [历史准备检查](reviews/v0.9.0-readiness.md)。
 
 发布提交建议使用：
 

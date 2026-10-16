@@ -1,6 +1,6 @@
 ---
 title: "本地模型：下载与切换"
-description: "Javdex 0.9.0-beta.6 · 本地模型管理"
+description: "Javdex 0.9.0-beta.7 · 本地模型管理"
 sidebar:
   label: 本地模型管理
 ---

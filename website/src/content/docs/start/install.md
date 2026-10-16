@@ -1,11 +1,11 @@
 ---
 title: "安装与更新"
-description: "Javdex 0.9.0-beta.6 · 安装与更新"
+description: "Javdex 0.9.0-beta.7 · 安装与更新"
 ---
 
 在“设置 → 关于”检查更新，再前往实际已发布的正式 Release 下载。下载入口跟随最新正式版，不跟随源码中的待发布版本号。
 
-本文档适用于 **0.9.0-beta.6 预发布**。测试该版本请手动前往[Beta.6 Release](https://github.com/JavdexLabs/Javdex/releases/tag/v0.9.0-beta.6)，以页面实际附件为准；默认正式下载仍为 0.8.0。先完整备份，桌面与服务端须同版，不能将 schema 21 直接交给旧版打开。
+本文档适用于 **0.9.0-beta.7 预发布**。测试该版本请手动前往[Beta.7 Release](https://github.com/JavdexLabs/Javdex/releases/tag/v0.9.0-beta.7)，以页面实际附件为准；默认正式下载仍为 0.8.0。先完整备份，桌面与服务端须同版，不能将 schema 21 直接交给旧版打开。
 
 在 [官网](https://javdexlabs.github.io/Javdex/) 或 [GitHub Releases](https://github.com/JavdexLabs/Javdex/releases/latest) 选择对应系统和架构的安装包。
 

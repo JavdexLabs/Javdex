@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
 import { ChevronDown, Maximize, Minimize, Pause, Play, RotateCcw, RotateCw, Volume2, VolumeX, X, SlidersHorizontal, PanelTop } from 'lucide-react'
 import { Link, useNavigate } from 'react-router-dom'
-import type { PlaybackControl, PlaybackSnapshot } from '@shared/desktop/playback'
+import type { PlaybackControl, PlaybackSnapshot, PlaybackObservation } from '@shared/desktop/playback'
 import { api } from '../api'
 import Button from '../components/Button'
 import IconButton from '../components/IconButton'
@@ -96,33 +96,45 @@ export default function PlaybackPanel(): JSX.Element | null {
     let disposed = false
     let initialized = false
     let snapshotFailed = false
-    const notifications: Array<PlaybackSnapshot | null> = []
+    let appliedRevision = -1
+    const notifications: PlaybackObservation[] = []
     const observe = (value: PlaybackSnapshot | null, initial = false): void => {
       const restored = presentationHistory.observe(value, initial)
       if (restored !== undefined) setRestoredView(restored)
       setState(value)
     }
-    const initialize = (value: PlaybackSnapshot | null): void => {
-      observe(value, true)
+    const initialize = (value: PlaybackObservation): void => {
+      observe(value.snapshot, true)
+      appliedRevision = value.revision
       initialized = true
-      for (const notification of notifications) observe(notification)
+      for (const notification of notifications) {
+        if (notification.revision <= appliedRevision) continue
+        observe(notification.snapshot)
+        appliedRevision = notification.revision
+      }
       notifications.length = 0
     }
-    const off = api.playback.onChanged(value => {
+    const off = api.playback.onChanged((value, revision) => {
       if (disposed) return
-      if (initialized) observe(value)
+      if (initialized) {
+        if (revision <= appliedRevision) return
+        observe(value)
+        appliedRevision = revision
+      }
       else {
         const previous = notifications.at(-1)
+        if (previous && revision <= previous.revision) return
         // Compact clock updates, not explicit session/presentation transitions.
-        if (notifications.length && previous?.sessionId === value?.sessionId
-          && previous?.presentation === value?.presentation && previous?.phase === value?.phase) notifications[notifications.length - 1] = value
-        else notifications.push(value)
+        const notification = { snapshot: value, revision }
+        if (previous && previous.snapshot?.sessionId === value?.sessionId
+          && previous.snapshot?.presentation === value?.presentation && previous.snapshot?.phase === value?.phase) notifications[notifications.length - 1] = notification
+        else notifications.push(notification)
         // Show the clock immediately, but wait for its baseline before writing history.
         observe(value, true)
-        if (snapshotFailed) initialize(value)
+        if (snapshotFailed) initialize(notification)
       }
     })
-    void api.playback.snapshot().then(value => {
+    void api.playback.observation().then(value => {
       if (disposed) return
       initialize(value)
     }, () => {

@@ -21,6 +21,23 @@ function fixture() {
   const pop = (delta = -1) => { history.pop(move(delta)) }
   return { playback, history, port, state, move, pop, commands, goes, options, marker: () => readOverlayHistoryMarker(stack[index]), length: () => stack.length }
 }
+for (const reload of [false, true]) test(`an image opened before playback adoption preserves its anonymous parent (${reload ? 'reload' : 'remount'})`, () => {
+  const f = fixture()
+  f.playback.observe(f.state())
+  f.playback.abandon()
+  const history = reload ? createOverlayHistory(f.port) : f.history
+  let imageCloses = 0
+  history.open('image-preview', () => { imageCloses++ })
+  const commands: unknown[] = []
+  const restored = createPlaybackHistory(history, (id, value) => commands.push({ id, value }), () => {})
+  restored.observe(f.state(), true)
+  assert.equal(f.length(), 3, 'opening an unrelated kind must preserve the surviving playback position')
+  history.pop(f.move())
+  assert.equal(imageCloses, 1)
+  assert.deepEqual(commands, [])
+  history.pop(f.move())
+  assert.deepEqual(commands, [{ id: 'one', value: { kind: 'presentation', value: 'docked' } }])
+})
 test('acknowledged docking consumes the viewing entry before navigation without replaying transport commands', () => {
   const f = fixture()
   f.playback.observe(f.state()); f.playback.observe(f.state('fullscreen')); f.playback.setOptions(true)

@@ -103,7 +103,7 @@ export function createOverlayHistory(port: OverlayHistoryPort) {
         const parents = readHistoryTrail(current.state)
         // Forward may revisit a consumed viewing entry. Reuse that empty slot
         // instead of stacking a second placeholder above the business route.
-        if (marker && !occupied) {
+        if (marker?.kind === entry.kind && !occupied) {
           entries = entries.filter(value => value.token !== marker.token)
           port.replace(withOverlayHistoryMarker(current.state, entry, parents.slice(0, -1)), current.url)
         } else port.push(withOverlayHistoryMarker(current.state, entry, parents), current.url)

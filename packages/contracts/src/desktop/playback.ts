@@ -88,4 +88,6 @@ export interface PlaybackSnapshot {
     droppedFrames: number | null
   }
 }
+/** Main-process publication order, including stopped/null states and replacement sessions. */
+export interface PlaybackObservation { revision: number; snapshot: PlaybackSnapshot | null }
 export interface PlaybackAvailability { available: boolean; reason: string | null }

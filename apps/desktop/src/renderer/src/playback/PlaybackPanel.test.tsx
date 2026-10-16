@@ -3,7 +3,7 @@ import { afterEach, test } from 'node:test'
 import React from 'react'
 import { MemoryRouter, useLocation } from 'react-router-dom'
 import TestRenderer, { act } from 'react-test-renderer'
-import type { PlaybackSnapshot, PlaybackTarget, PlaybackControl, PlaybackViewport } from '@shared/desktop/playback'
+import type { PlaybackSnapshot, PlaybackTarget, PlaybackControl, PlaybackViewport, PlaybackObservation } from '@shared/desktop/playback'
 import type { AiSubtitleSnapshot } from '@shared/desktop/aiSubtitles'
 import type { LocalModelSnapshot } from '@shared/desktop/localModels'
 import type { ScopedVideoDetail } from '@shared/catalogTypes'
@@ -29,6 +29,7 @@ function detail(ids = [3, 4]): ScopedVideoDetail {
   ] } as ScopedVideoDetail
 }
 let changed: (value: PlaybackSnapshot | null) => void = () => {}
+let playbackRevision = 0
 const opened: PlaybackTarget[] = []
 const external: unknown[][] = []
 const controls: Array<{ id: string; command: PlaybackControl }> = []
@@ -64,7 +65,11 @@ const fake = {
     onAiSubtitleChanged: (listener: typeof aiChanged) => { aiChanged = listener; return () => { aiChanged = () => {} } },
     aiSubtitleCommand: () => aiCommand(),
     snapshot: async () => snapshot(),
-    onChanged: (listener: typeof changed) => { changed = listener; return () => { changed = () => {} } },
+    observation: async () => { const revision = playbackRevision; return { revision, snapshot: await fake.playback.snapshot() } },
+    onChanged: (listener: (value: PlaybackSnapshot | null, revision: number) => void) => {
+      changed = value => listener(value, ++playbackRevision)
+      return () => { changed = () => {} }
+    },
     open: async (value: PlaybackTarget) => { opened.push(value); return open() },
     control: async (id: string, command: PlaybackControl) => { controls.push({ id, command }); await sendControl(id, command) },
     viewport: async (value: PlaybackViewport) => { viewports.push(value) }
@@ -113,6 +118,7 @@ afterEach(async () => {
   getDetail = async () => detail(); open = openExternal = async () => ({ ok: true }); history.state = null
   aiState = aiSnapshot(); aiCommand = async () => aiState
   sendControl = async () => {}; currentLocation = ''
+  playbackRevision = 0
 })
 
 for (const presentation of ['expanded', 'fullscreen'] as const) test(`system back docks ${presentation} playback with settings open and retains the detail route`, async () => {
@@ -167,6 +173,52 @@ test('a surviving-session event before the initial RPC response restores ownersh
     assert.equal(interactionLayers.isTop('existing-image'), true)
     assert.equal((history.state as { avOverlay: { token: string } }).avOverlay.token, 'image')
   } finally { fake.playback.snapshot = originalSnapshot; removeImage() }
+})
+test('a fresh snapshot does not replay its older presentation changes as new history actions', async context => {
+  let resolve!: (value: PlaybackObservation) => void
+  context.mock.method(fake.playback, 'observation', () => new Promise<PlaybackObservation>(done => { resolve = done }))
+  history.state = { avOverlay: { kind: 'playback-expanded', token: 'surviving-player' } }
+  let traversals = 0
+  context.mock.method(history, 'go', () => { traversals++ })
+  await mount()
+  await act(async () => changed({ ...snapshot(), presentation: 'docked', presentationRevision: 2 }))
+  const latest = { ...snapshot(), presentationRevision: 3 }
+  await act(async () => changed(latest))
+  assert.equal(traversals, 0)
+  await act(async () => resolve({ snapshot: latest, revision: playbackRevision }))
+  assert.equal(traversals, 0, 'an up-to-date initial snapshot cannot replay an obsolete dock and traverse history')
+  assert.equal((history.state as { avOverlay: { token: string } }).avOverlay.token, 'surviving-player')
+  assert.deepEqual(controls, [])
+})
+for (const stopped of [false, true]) test(`initial observation orders replacement/null state across sessions (stopped: ${stopped})`, async context => {
+  let resolve!: (value: PlaybackObservation) => void
+  let emit!: (value: PlaybackSnapshot | null, revision: number) => void
+  context.mock.method(fake.playback, 'observation', () => new Promise<PlaybackObservation>(done => { resolve = done }))
+  context.mock.method(fake.playback, 'onChanged', (listener: typeof emit) => { emit = listener; return () => {} })
+  history.state = { avOverlay: { kind: 'playback-expanded', token: 'surviving-player' } }
+  let traversals = 0
+  const originalGo = history.go.bind(history)
+  context.mock.method(history, 'go', () => { traversals++; originalGo() })
+  await mount()
+  await act(async () => emit(snapshot('old'), 1))
+  await act(async () => emit(null, 2))
+  await act(async () => resolve({ snapshot: stopped ? null : snapshot('replacement'), revision: 3 }))
+  await act(async () => emit(snapshot('old'), 1))
+  assert.equal(traversals, 0, 'obsolete events and initial state cannot traverse on mount')
+  await act(async () => history.go())
+  assert.deepEqual(controls, stopped ? [] : [{ id: 'replacement', command: { kind: 'presentation', value: 'docked' } }])
+})
+test('a state published after the captured RPC baseline is retained even with the same presentation revision', async context => {
+  let resolve!: (value: PlaybackObservation) => void
+  let emit!: (value: PlaybackSnapshot | null, revision: number) => void
+  context.mock.method(fake.playback, 'observation', () => new Promise<PlaybackObservation>(done => { resolve = done }))
+  context.mock.method(fake.playback, 'onChanged', (listener: typeof emit) => { emit = listener; return () => {} })
+  history.state = { avOverlay: { kind: 'playback-expanded', token: 'surviving-player' } }
+  await mount()
+  await act(async () => emit({ ...snapshot(), phase: 'error', error: 'synthetic decoder stopped' }, 2))
+  await act(async () => resolve({ snapshot: snapshot(), revision: 1 }))
+  await act(async () => history.go())
+  assert.deepEqual(controls, [{ id: 'first', command: { kind: 'stop' } }])
 })
 test('a surviving playing event before the initial snapshot cannot invent a viewing entry', async context => {
   let resolve!: (value: PlaybackSnapshot | null) => void

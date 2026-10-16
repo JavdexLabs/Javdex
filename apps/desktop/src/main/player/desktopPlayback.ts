@@ -62,6 +62,7 @@ export function registerBuiltinPlayback(backend: CatalogBackend, getWindow: () =
     window.on('minimize', onMinimized)
     window.webContents.once('render-process-gone', onClosed)
   }
+  let observationRevision = 0
   const session = createPlaybackSession({
     native, ...resolver,
     readVolume: volume.read,
@@ -75,9 +76,10 @@ export function registerBuiltinPlayback(backend: CatalogBackend, getWindow: () =
       clear: source => progress.clearConfirmed(source.resumeKey)
     },
     changed: state => {
+      observationRevision++
       if (!state) void volume.flush()
       const window = getWindow()
-      if (window && !window.isDestroyed()) appEventAdapter.send(window.webContents, IPC.PLAYBACK_CHANGED, state)
+      if (window && !window.isDestroyed()) appEventAdapter.send(window.webContents, IPC.PLAYBACK_CHANGED, { revision: observationRevision, snapshot: state })
     },
     presentation: value => {
       const window = getWindow()
@@ -175,7 +177,7 @@ export function registerBuiltinPlayback(backend: CatalogBackend, getWindow: () =
     return aiSubtitles.close()
   }
   appCommandAdapter.register(IPC.PLAYBACK_AVAILABILITY, builtinPlaybackAvailability)
-  appCommandAdapter.register(IPC.PLAYBACK_SNAPSHOT, () => session.snapshot())
+  appCommandAdapter.register(IPC.PLAYBACK_SNAPSHOT, () => ({ revision: observationRevision, snapshot: session.snapshot() }))
   appCommandAdapter.register(IPC.PLAYBACK_AI_SUBTITLE_SNAPSHOT, aiSubtitles.snapshot)
   appCommandAdapter.register(IPC.PLAYBACK_AI_SUBTITLE_COMMAND, aiSubtitles.command)
   const open = async (target: PlaybackTarget): Promise<PlayResult> => {

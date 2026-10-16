@@ -862,7 +862,8 @@ const api = {
   playback: {
     availability: () => invokeApp(IPC.PLAYBACK_AVAILABILITY),
     open: (target: import('@shared/desktop/playback').PlaybackTarget) => invokeApp(IPC.PLAYBACK_OPEN, target),
-    snapshot: () => invokeApp(IPC.PLAYBACK_SNAPSHOT),
+    snapshot: async () => (await invokeApp(IPC.PLAYBACK_SNAPSHOT)).snapshot,
+    observation: () => invokeApp(IPC.PLAYBACK_SNAPSHOT),
     control: (sessionId: string, command: import('@shared/desktop/playback').PlaybackControl) => invokeApp(IPC.PLAYBACK_CONTROL, sessionId, command),
     viewport: (viewport: import('@shared/desktop/playback').PlaybackViewport) => invokeApp(IPC.PLAYBACK_VIEWPORT, viewport),
     subtitle: (sessionId: string) => invokeApp(IPC.PLAYBACK_SUBTITLE, sessionId),
@@ -870,7 +871,8 @@ const api = {
     aiSubtitleCommand: (sessionId: string, command: import('@shared/desktop/aiSubtitles').AiSubtitleCommand) => invokeApp(IPC.PLAYBACK_AI_SUBTITLE_COMMAND, sessionId, command),
     onAiSubtitleChanged: (cb: (state: import('@shared/desktop/aiSubtitles').AiSubtitleSnapshot) => void) => onAppEvent(IPC.PLAYBACK_AI_SUBTITLE_CHANGED, cb),
     clearProgress: (input: import('@shared/desktop/playback').PlaybackClearProgress) => invokeApp(IPC.PLAYBACK_CLEAR_PROGRESS, input),
-    onChanged: (cb: (state: import('@shared/desktop/playback').PlaybackSnapshot | null) => void) => onAppEvent(IPC.PLAYBACK_CHANGED, cb)
+    onChanged: (cb: (state: import('@shared/desktop/playback').PlaybackSnapshot | null, revision: number) => void) =>
+      onAppEvent(IPC.PLAYBACK_CHANGED, value => cb(value.snapshot, value.revision))
   },
   player: {
     play: (libraryId: number, videoId: number) =>

@@ -8,6 +8,7 @@ import path from 'node:path'
 import { createRequire } from 'node:module'
 import { setTimeout as delay } from 'node:timers/promises'
 import { smokeConnection } from './server-smoke-connection.ts'
+import { readBackupSmokeResponse, waitForBackupPhase } from './backup-smoke-status.mjs'
 
 // Uses only a uniquely named test container/volume. Never touches the user's local server.
 const name = `javdex-backup-smoke-${randomUUID()}`
@@ -45,9 +46,7 @@ async function post(operation, input, authorization = secret, mutation = false) 
       'X-Javdex-App-Version': version, ...(authorization ? { Authorization: `Bearer ${authorization}` } : {}) },
     body: JSON.stringify({ ...(mutation ? { operationId: randomUUID(), writerEpoch: identity.writerEpoch, expectedVersions: {} } : {}), ...(identity ? { serverId: identity.serverId, catalogId: identity.catalogId } : {}), input })
   })
-  const result = await response.json()
-  assert.equal(response.status, 200, JSON.stringify(result))
-  return result
+  return readBackupSmokeResponse(response)
 }
 async function healthy() {
   for (let i = 0; i < 80; i++) {
@@ -59,15 +58,7 @@ async function healthy() {
   assert.fail('isolated server did not become ready')
 }
 async function wait(id, phase) {
-  for (let i = 0; i < 200; i++) {
-    let job
-    try { job = (await post('backup.control', { action: 'status', id })).jobs[0] }
-    catch (error) { if (!(error instanceof TypeError)) throw error; await delay(100); continue }
-    if (job.phase === phase) return job
-    assert.ok(!['failed', 'recoveryRequired'].includes(job.phase), job.error)
-    await delay(50)
-  }
-  assert.fail(`timeout: ${phase}`)
+  return waitForBackupPhase(post, id, phase)
 }
 try {
   docker('run', '-d', '--name', name, '-p', `127.0.0.1:${port}:8096`, '-v', `${volume}:/data`,

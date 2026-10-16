@@ -12,25 +12,30 @@ export function createPlaybackHistory(history: OverlayHistory, command: (id: str
     options = false
     optionsChanged(false)
   }
+  function closeViewing(): void {
+    expanded = null
+    closeOptions()
+    const current = state
+    if (closingForNavigation || !current || current.presentation === 'docked') return
+    command(current.sessionId, current.phase === 'error' ? { kind: 'stop' } : { kind: 'presentation', value: 'docked' })
+  }
   return {
     observe(value: PlaybackSnapshot | null, initial = false): void {
       const previous = state
       state = value
       const transition = previous?.sessionId !== value?.sessionId || previous?.presentation !== value?.presentation || previous?.phase !== value?.phase && value?.phase === 'error'
-      if (!transition || initial) return
+      if (initial) {
+        if (value && value.presentation !== 'docked' && !expanded) expanded = history.adopt('playback-expanded', closeViewing)
+        return
+      }
+      if (!transition) return
       closeOptions()
       if (!value || value.presentation === 'docked') {
         if (expanded) history.close(expanded)
         return
       }
       // Fullscreen and settings share one viewing entry; system Back always docks.
-      if (!expanded) expanded = history.open('playback-expanded', () => {
-        expanded = null
-        closeOptions()
-        const current = state
-        if (closingForNavigation || !current || current.presentation === 'docked') return
-        command(current.sessionId, current.phase === 'error' ? { kind: 'stop' } : { kind: 'presentation', value: 'docked' })
-      })
+      if (!expanded) expanded = history.open('playback-expanded', closeViewing)
     },
     setOptions(value: boolean): void {
       if (!value) { closeOptions(); return }
@@ -49,7 +54,8 @@ export function createPlaybackHistory(history: OverlayHistory, command: (id: str
     /** Effect cleanup can release ownership, but never back/push or control a session. */
     abandon(): void {
       if (expanded) history.abandon(expanded)
-      options = false; expanded = null
+      closeOptions()
+      expanded = null; state = null
     }
   }
 }

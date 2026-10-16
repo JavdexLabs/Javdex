@@ -95,7 +95,7 @@ export default function PlaybackPanel(): JSX.Element | null {
     let revision = 0
     const off = api.playback.onChanged(value => { revision++; presentationHistory.observe(value); setState(value) })
     void api.playback.snapshot().then(value => { if (!disposed && revision === 0) { presentationHistory.observe(value, true); setState(value) } })
-    return () => { disposed = true; stateRef.current = null; off() }
+    return () => { disposed = true; stateRef.current = null; off(); presentationHistory.abandon() }
   }, [presentationHistory])
   useEffect(() => {
     seekDraftRef.current = null; pendingSeekRef.current = null; setSeekDraft(null)

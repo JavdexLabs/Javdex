@@ -41,6 +41,20 @@ test('seed is installed once; persistent active release survives a rebuilt image
     assert.equal(store.current(), original)
   } finally { fs.rmSync(root, { recursive: true, force: true }) }
 })
+test('published program descriptors remain readable without inventing an environment version', async () => {
+  const { root, config } = await fixture()
+  try {
+    const file = path.join(config.seedDir, 'release.json')
+    const legacy = JSON.parse(fs.readFileSync(file, 'utf8'))
+    delete legacy.environmentVersion
+    fs.writeFileSync(file, JSON.stringify(legacy))
+    const store = new ReleaseStore(config)
+    await store.bootstrap()
+    assert.equal(store.descriptor(store.directory(store.current()!)).environmentVersion, undefined)
+    await store.verifyInstalled(store.current()!)
+    assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), legacy)
+  } finally { fs.rmSync(root, { recursive: true, force: true }) }
+})
 test('complete release archive is verified and staged without switching the running version', async () => {
   const { root, config } = await fixture()
   try {

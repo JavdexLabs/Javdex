@@ -1,6 +1,6 @@
 # 服务端实现与合同
 
-核对日期：2026-10-16，目标为 `0.9.0-beta.5` 预发布（资料库 schema 21、桌面模型管理文档版本 4）。本页集中维护当前架构、功能接线及合同导航，不表示 Release 已发布或最终 CI 已通过；部署步骤见 [操作说明](SERVER_MODE.md)，功能边界见 [当前状态](SERVER_MODE_NEXT_STEPS.md)，发布与验证状态见 [Beta.5 发布审计](reviews/v0.9.0-beta.5-release-audit.md)。
+核对日期：2026-10-16，目标为 `0.9.0-beta.6` 预发布（资料库 schema 21、桌面模型管理文档版本 4）。本页集中维护当前架构、功能接线及合同导航，不表示 Release 已发布或最终 CI 已通过；部署步骤见 [操作说明](SERVER_MODE.md)，功能边界见 [当前状态](SERVER_MODE_NEXT_STEPS.md)，发布与验证状态见 [Beta.6 发布审计](reviews/v0.9.0-beta.6-release-audit.md)。
 
 0.9.0 的维护改动包括影片来源分页及生命周期预览／提交结果运行时校验，以及桌面/服务端共用 `videoQueryService`；既有输入、授权、事务与本地/远程路径策略继续有效。单容器托管更新采用独立协议，不扩大普通管理接口的跨版本兼容范围。
 
@@ -21,6 +21,7 @@
 | 模型配置 | [modelManagementTypes.ts](../packages/contracts/src/modelManagementTypes.ts) 的 `MODEL_MANAGEMENT_SCHEMA_VERSION = 4`；属于桌面配置，不是服务端 schema，也不包含在资料库备份中 |
 | 普通业务会话 | 桌面与当前服务端业务/网页包同源码版本；不匹配时不打开本机权威库、不自动回退连接 |
 | 独立更新协议 | 协议 1，`node22-bookworm-v1`，Linux amd64/arm64；可跨业务版本使用；与业务共用统一 HTTPS 入口，按可信设备授权 |
+| 镜像环境门禁 | 镜像管理器公开只读 `GET /runtime/v1/info`；当前 `environmentVersion = 1`，须与客户端及签名升级清单严格相等；不以业务版本或镜像标签推断环境兼容 |
 | 业务更新附件 | 每架构一个 `Javdex-server-<version>-linux-<arch>.javdex-update`；签名约束迁移来源/目标、构建、平台、运行环境、大小、摘要及期限，信任根来自管理器而非上传包 |
 | 版本选择 | 在线读取当前客户端版本的 Release tag（含预发布）；离线、准备和安装须匹配同一版本。SemVer 只接受更高版本，同版本重装与降级拒绝，正式 0.8.0 的来源 schema 必须为 19 |
 
@@ -160,6 +161,41 @@ IPC 去向以 inventory 及其覆盖检查为准。兼容入口不要求一对�
 更新与业务共用 HTTPS 根地址及证书固定配对，使用独立协议，凭据保存在桌面主进程安全存储，与业务连接和资料库身份绑定；可跨业务应用版本调用。renderer 只发用户操作，不持有已保存的更新凭据或任意上传路径。安装须人工确认；待验证业务仅开放健康检查，持久提交前核对真实 worker、应用/schema 和资料库身份，提交后只继续激活，不恢复旧数据。实现入口是 [updateManager.ts](../apps/server/src/updater/updateManager.ts)、[processDeployment.ts](../apps/server/src/updater/processDeployment.ts)、[updateGuard.ts](../apps/server/src/updateGuard.ts) 和 [桌面更新服务](../apps/desktop/src/main/desktop/serverUpdateService.ts)。操作与两层更新边界见 [服务端更新](SERVER_UPDATE.md)，验证边界见 [当前状态](SERVER_MODE_NEXT_STEPS.md#验证入口与证据边界)。
 
 安装前检查维护任务、程序暂存空间、配置和资料库身份；停止整个业务进程组后再次核对维护状态与资料库身份。升级不遍历或复制资料库/图片，不创建、覆盖或轮换升级备份；重要资料应先用与当前服务端版本一致的客户端通过现有备份功能保存。持久 `current.json` 决定上传偏移和提交阶段；安装未开始且原部署未变时可继续运行原服务，安装/验证失败或中断进入 `recoveryRequired` 并阻止后续升级，提交后只继续激活。成功后保留当前/上一版程序，未知或损坏记录不自动清理。签名、期限、架构、运行环境、闭包/原生依赖及 schema 检查在正式和预发布中同样有效。不兼容旧管理器。
+
+### 运行环境兼容门禁
+
+本节为 Beta.6 实现的合同，不追溯改变已公开的 Beta.1–5 镜像或升级包；旧镜像采用本能力须更换基础镜像。镜像内管理器拥有 `GET /runtime/v1/info`，实现见 [environmentHttp.ts](../apps/server/src/updater/environmentHttp.ts)；它不经可变业务进程转发、不读取程序卷发行描述来推断环境。常量 `SERVER_ENVIRONMENT_VERSION = 1` 与 `SERVER_RUNTIME_ID = node22-bookworm-v1` 定义在 [serverUpdateTypes.ts](../packages/contracts/src/serverUpdateTypes.ts)，兼容状态及相等断言见 [serverEnvironment.ts](../packages/contracts/src/serverEnvironment.ts)。业务更新不能提升镜像实际环境版本。
+
+查询无需配对、设备凭据或业务 AppVersion；客户端不发送这些信息，仍执行既有 HTTPS 信任、来源与重定向限制。返回 `Cache-Control: no-store`，成功响应仅包含公开的粗粒度镜像元数据，不包含业务版本、目录、资料库身份、设备信息或凭据：
+
+```json
+{
+  "format": 1,
+  "environmentVersion": 1,
+  "runtimeId": "node22-bookworm-v1",
+  "platform": "linux/amd64"
+}
+```
+
+`environmentVersion` 是正安全整数的兼容编号，不是应用 SemVer、镜像标签或 Docker Engine 版本。只有管理器协议、运行库／ABI 或系统依赖变化需要更换镜像才能兼容新业务包时才提升该编号；普通业务发布保持编号不变。`platform` 仅为 `linux/amd64` 或 `linux/arm64`。客户端按以下规则处理实际查询结果，不以业务版本一致跳过检查：
+
+| 结果 | 状态与升级处理 |
+|---|---|
+| 环境版本等于本版要求，运行库兼容 | `compatible`，继续原有业务版本、授权、架构及安装校验；相等不代表允许同版本重装 |
+| 已确认的 Javdex 地址 GET 返回 404／405，或有效环境版本低于本版要求 | `imageRequired`，禁用在线和离线升级，提示“需要升级服务端Docker镜像” |
+| 有效环境版本高于本版要求 | `clientRequired`，禁用两个升级入口，提示升级客户端，不建议降级镜像 |
+| 超时、连接／证书错误、401／403、503 或其他异常状态 | `unavailable`，暂禁两个入口，保留原因及重新检测，不判定镜像过旧 |
+| 响应格式／字段无效，或相等版本下运行库不兼容 | `unavailable`，暂禁两个入口，提示核对镜像、客户端及代理配置 |
+
+404／405 在尚无 Javdex 握手证据的未知地址上只表示 `unavailable`，不能把错误站点认作旧镜像；有效的新环境响应本身无需业务握手或配对。
+
+TLS 网关在业务 bootstrap 及恢复前开始监听。业务初始化失败时不关闭网关，环境查询仍可返回镜像元数据；不可用的业务／更新请求保持 503 维护响应，不伪装为服务已就绪。环境不匹配不额外阻断 `status` 或已提交任务恢复；授权、身份、维护状态与人工恢复规则仍生效，不取消或回退已经执行的事务。
+
+新发行描述和官方签名升级清单均由共享常量写入 `environmentVersion`，签名前须拒绝缺失或不等于当前构建要求的发行描述。客户端提前限制在线检查、离线导入、准备及安装；服务端验证签名后再次要求签名清单、镜像实际环境和本版要求严格相等，不能相信任意客户端要求值，也不能通过直接调用或上传文件绕过。业务目标仍等于客户端版本且高于当前服务端；原有 Ed25519 信任根、期限、runtime、架构、schema、归档完整字节及原生闭包约束保留。
+
+`releaseDescriptorSchema` 对旧程序卷的 `environmentVersion` 保留可选读取，仅为已安装程序启动与已提交日志恢复提供兼容，不补造或改写旧环境声明。新 `updateManifestSchema` 的环境版本必填；读取旧已安装发行或已提交任务日志，不代表接受无环境声明、旧传输格式或未签名的新更新。此边界不自更新管理器、不恢复旧管理器在线兼容路径。
+
+镜像维护须由管理员自行选择已发布固定版本并重建容器；只拉取镜像或重启旧容器不应用新镜像。保留 `/data`、`/program`、图片卷及部署配置，不强制操作 Docker、不删除卷、不自动降级。镜像与 Docker Engine 是不同对象；备份继续由管理员手动完成，不创建升级专用快照或自动资料回退。
 
 ## 已接线的功能补齐（C1–C7）
 

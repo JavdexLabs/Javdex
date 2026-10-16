@@ -6,6 +6,7 @@ import fs from 'node:fs'
 import type { VerifyServerCertificate } from './pinnedFetch'
 import { readUpdateBundle, verifyBundleArchive } from './updateBundle'
 import { updaterPairingSchema, signedUpdateSchema, updateManifestSchema, serverUpgradeVersionSchema, type UpdaterPairing, type ServerUpdateSnapshot, type SignedServerUpdate } from '@shared/serverUpdateTypes'
+import { assertServerEnvironmentVersion } from '@shared/serverEnvironment'
 
 /** Upload only the inner archive; journal offsets exclude the transport header. */
 export async function uploadServerUpdateBundle(client: Pick<ServerUpdateClient, 'import' | 'upload'>, fd: number, targetVersion: string): Promise<ServerUpdateSnapshot> {
@@ -13,6 +14,7 @@ export async function uploadServerUpdateBundle(client: Pick<ServerUpdateClient, 
   const bundle = readUpdateBundle(fd)
   const signed = signedUpdateSchema.parse(bundle.signed)
   const manifest = updateManifestSchema.parse(JSON.parse(signed.payload))
+  assertServerEnvironmentVersion(manifest.environmentVersion)
   if (manifest.version !== targetVersion) throw new Error(`升级包版本必须与此客户端 ${targetVersion} 一致`)
   if (bundle.archiveBytes !== manifest.archive.bytes) throw new Error('所选升级包大小与签名清单不一致')
   await verifyBundleArchive(fd, bundle.archiveOffset, bundle.archiveBytes, manifest.archive.sha256)

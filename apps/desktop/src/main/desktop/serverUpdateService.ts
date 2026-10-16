@@ -5,6 +5,8 @@ import { hostname } from 'node:os'
 import { app, safeStorage, dialog } from 'electron'
 import { readTestUserDataPath } from '@shared/appIdentity'
 import { ServerUpdateClient, uploadServerUpdateBundle } from '@http/updateClient'
+import { queryServerEnvironment } from '@http/serverEnvironmentClient'
+import { SERVER_ENVIRONMENT_VERSION, type ServerEnvironmentSnapshot } from '@shared/serverEnvironment'
 import { updaterPairingSchema, type ServerUpdateCommand, type ServerUpdateSnapshot } from '@shared/serverUpdateTypes'
 import { createPinnedFetch } from '@http/pinnedFetch'
 import { createWriterCredentialStore } from './writerCredentialStore'
@@ -17,7 +19,8 @@ import type { IpcContext } from '../ipc/shared'
 
 const empty: ServerUpdateSnapshot = { protocolVersion: 1, paired: false, serverId: null, catalogId: null, currentVersion: null, platform: null, targetVersion: null, job: null }
 
-export function createServerUpdateService(backend: CatalogBackend, ctx: IpcContext, settings: DesktopSettingsStore): (command: ServerUpdateCommand) => Promise<ServerUpdateSnapshot> {
+export function createServerUpdateService(backend: CatalogBackend, ctx: IpcContext, settings: DesktopSettingsStore,
+  options: { queryEnvironment?: typeof queryServerEnvironment } = {}): (command: ServerUpdateCommand) => Promise<ServerUpdateSnapshot> {
   const root = readTestUserDataPath() ?? app.getPath('userData')
   const file = path.join(root, 'server-update-secrets.bin')
   const connectionStore = createServerConnectionStore(root)
@@ -31,6 +34,22 @@ export function createServerUpdateService(backend: CatalogBackend, ctx: IpcConte
   }
   let transferBusy = false
   let connecting = false
+  const inspectEnvironment = async (): Promise<ServerEnvironmentSnapshot> => {
+    const session = backend.session()
+    const unavailable = (message: string): ServerEnvironmentSnapshot => ({ state: 'unavailable', currentVersion: null,
+      requiredVersion: SERVER_ENVIRONMENT_VERSION, runtimeId: null, platform: null, message })
+    if (session.mode !== 'remote' || !session.remoteBaseUrl) return unavailable('请先选择远程资料库')
+    assertRemoteBaseUrl(session.remoteBaseUrl)
+    const result = await (options.queryEnvironment ?? queryServerEnvironment)(session.remoteBaseUrl, createServerCertificateTrust(root, session.remoteBaseUrl))
+    const current = backend.session()
+    if (current.mode !== session.mode || current.remoteBaseUrl !== session.remoteBaseUrl || current.serverId !== session.serverId || current.catalogId !== session.catalogId || current.generation !== session.generation) {
+      return unavailable('资料库连接已变化，请重新检测运行环境')
+    }
+    if (result.state === 'imageRequired' && result.currentVersion === null && !session.serverId && !session.appVersion) {
+      return unavailable('尚未确认此地址是Javdex服务端，请检查连接地址后重新检测')
+    }
+    return result
+  }
   const load = (): ServerUpdateClient | null => {
     const saved = connectionStore.read()
     if (!saved) return null
@@ -53,6 +72,12 @@ export function createServerUpdateService(backend: CatalogBackend, ctx: IpcConte
   }
   return async command => {
     if (connecting) throw new Error('服务端配对正在处理')
+    if (command.action === 'environment') {
+      const environment = await inspectEnvironment()
+      const session = backend.session()
+      return { ...empty, ...connectionStatus(), serverId: session.serverId ?? null, catalogId: session.catalogId ?? null,
+        currentVersion: session.appVersion ?? null, environment }
+    }
     if (command.action === 'connectionStatus') return connectionStatus()
     if (command.action === 'forgetConnection') {
       if (transferBusy) throw new Error('更新包正在传输，请完成后取消配对')
@@ -119,6 +144,12 @@ export function createServerUpdateService(backend: CatalogBackend, ctx: IpcConte
         return { ...empty, paired: true, serverId: paired.serverId, catalogId: paired.catalogId,
           connection: { remoteBaseUrl, serverId: paired.serverId, catalogId: paired.catalogId }, connectionRestartRequired }
       } finally { connecting = false; await transport.close() }
+    }
+    // Never open a file picker, download bytes or send an update command based
+    // only on a renderer's cached success. Read the actual image again first.
+    if (command.action !== 'status') {
+      const environment = await inspectEnvironment()
+      if (environment.state !== 'compatible') throw new Error(environment.message ?? '无法确认服务端运行环境，请重新检测')
     }
     const client = load()
     if (!client) {

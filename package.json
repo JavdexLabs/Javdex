@@ -1,6 +1,6 @@
 {
   "name": "Javdex",
-  "version": "0.9.0-beta.5",
+  "version": "0.9.0-beta.6",
   "description": "Javdex — local JAV library manager",
   "main": "./out/main/index.js",
   "author": "Javdex",
@@ -74,7 +74,7 @@
     "server:build": "npm run web:build && node scripts/server-build.mjs && node scripts/check-server-production-closure.mjs",
     "server:updater:build": "node scripts/updater-build.mjs",
     "server:updater:smoke": "node --require ./scripts/register-test-paths.cjs --import tsx scripts/server-updater-smoke.ts",
-    "server:updater:test": "node --require ./scripts/register-test-paths.cjs --import tsx --test apps/server/src/updater/*.test.ts apps/server/src/updateGuard.test.ts packages/http/src/updateClient.test.ts packages/http/src/updateBundle.test.ts packages/http/src/pinnedFetch.test.ts scripts/server-release-package.test.mjs scripts/server-update-release.test.mjs",
+    "server:updater:test": "node --require ./scripts/register-test-paths.cjs --import tsx --test apps/server/src/updater/*.test.ts apps/server/src/updateGuard.test.ts packages/http/src/updateClient.test.ts packages/http/src/updateBundle.test.ts packages/http/src/pinnedFetch.test.ts packages/http/src/serverEnvironmentClient.test.ts packages/contracts/src/serverEnvironment.test.ts scripts/server-release-package.test.mjs scripts/server-update-release.test.mjs",
     "server:test": "npm run check:server-boundaries && node scripts/server-test.mjs",
     "server:smoke": "node --import tsx scripts/server-smoke.mjs",
     "server:smoke:agent": "node scripts/run-electron-tests.mjs apps/desktop/src/main/services/agentMetadata/agentMetadataDocker.smoke.ts",

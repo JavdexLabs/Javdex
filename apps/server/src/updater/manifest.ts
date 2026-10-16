@@ -2,6 +2,7 @@ import { createHash, createPublicKey, verify } from 'node:crypto'
 import semver from 'semver'
 import { signedUpdateSchema, updateManifestSchema, type ServerUpdateManifest } from '@shared/serverUpdateTypes'
 import type { DeploymentRelease } from './deployment'
+import { assertServerEnvironmentVersion } from '@shared/serverEnvironment'
 
 export function verifyUpdateManifest(value: unknown, keys: Record<string, string>, now = Date.now()): ServerUpdateManifest {
   const signed = signedUpdateSchema.parse(value)
@@ -13,10 +14,13 @@ export function verifyUpdateManifest(value: unknown, keys: Record<string, string
   }
   const manifest = updateManifestSchema.parse(JSON.parse(signed.payload))
   if (Date.parse(manifest.expiresAt) <= now) throw new Error('更新清单已过期，请获取新的官方更新包')
+  assertServerEnvironmentVersion(manifest.environmentVersion)
   return manifest
 }
 
 export function checkUpdateTarget(manifest: DeploymentRelease, current: { version: string; schema: number; platform: string; runtime?: string }): void {
+  if (manifest.environmentVersion === undefined) throw new Error('发行包未声明运行环境版本，请获取匹配的官方升级包')
+  assertServerEnvironmentVersion(manifest.environmentVersion)
   if (current.version === '0.8.0' && current.schema !== 19) throw new Error('0.8.0 正式库应为 schema 19；旧开发快照不支持自动升级')
   if (semver.valid(current.version) !== current.version || semver.valid(manifest.version) !== manifest.version || !semver.gt(manifest.version, current.version)) throw new Error('只能安装比当前版本更新的版本')
   if (current.platform !== manifest.platform) throw new Error('更新包架构与服务器不一致')

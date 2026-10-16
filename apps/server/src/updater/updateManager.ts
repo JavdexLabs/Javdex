@@ -10,7 +10,10 @@ import { checkUpdateTarget, verifyUpdateManifest } from './manifest'
 import { readJsonIfExists, syncDirectory, writeJsonAtomic } from './files'
 
 const imageReleaseSchema = updateManifestSchema.pick({ version: true, build: true, platform: true, runtime: true, targetSchema: true, sourceSchemas: true })
-  .extend({ archive: updateManifestSchema.shape.archive.pick({ sha256: true }) }).strict()
+  .extend({ archive: updateManifestSchema.shape.archive.pick({ sha256: true }), environmentVersion: updateManifestSchema.shape.environmentVersion.optional() }).strict()
+// After commit, recovery only activates the already selected release. Do not
+// re-admit historical signed bundles through the new installation contract.
+const committedManifestSchema = updateManifestSchema.extend({ environmentVersion: updateManifestSchema.shape.environmentVersion.optional() })
 const jobSchema = z.object({
   id: z.uuid(), version: z.string(), phase: z.enum([...UPDATE_PHASES, 'backup', 'restoring', 'restored']),
   receivedBytes: z.number().int().nonnegative(), totalBytes: z.number().int().positive(), updatedAt: z.iso.datetime(), message: z.string().nullable(),
@@ -203,6 +206,7 @@ export class ServerUpdateManager {
   async upload(id: string, offset: number, request: AsyncIterable<Buffer>): Promise<ServerUpdateSnapshot> {
     if (this.controlBusy || this.busy || !this.job || this.job.id !== id || this.job.phase !== 'preparing' || !this.job.offline) throw new Error('上传任务不可用')
     if (offset !== this.job.receivedBytes) throw new Error('上传偏移不一致，请查询任务后续传')
+    verifyUpdateManifest(this.job.signed, this.keys)
     this.busy = true
     const file = path.join(this.jobDir(), 'release.tar.gz')
     let fd: number | undefined
@@ -328,7 +332,7 @@ export class ServerUpdateManager {
     this.busy = true
     try {
       if (this.job.phase === 'activating' && this.job.deployment) {
-        await this.deployment.activate(this.job.id, this.job.image ?? updateManifestSchema.parse(JSON.parse(this.job.signed!.payload)), this.job.deployment)
+        await this.deployment.activate(this.job.id, this.job.image ?? committedManifestSchema.parse(JSON.parse(this.job.signed!.payload)), this.job.deployment)
         this.identity = await this.deployment.inspect()
         this.save('complete')
       } else if (this.job.deployment) await this.handleFailure(this.job.deployment, new Error('升级管理器重启，安装被中断'))

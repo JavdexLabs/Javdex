@@ -2,11 +2,12 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { discoverUpgrade } from './upgradeDiscovery'
 import { serverUpdateCommandSchema, type ServerUpdateManifest } from '@shared/serverUpdateTypes'
+import { SERVER_ENVIRONMENT_VERSION } from '@shared/serverEnvironment'
 
 const version = '0.9.0-beta.4'
 const url = `https://github.com/JavdexLabs/Javdex/releases/download/v${version}/Javdex-server-${version}-linux-amd64.javdex-update`
 const release = { tag_name: `v${version}`, draft: false, prerelease: true, assets: [{ name: `Javdex-server-${version}-linux-amd64.javdex-update`, browser_download_url: url }] }
-const manifest: ServerUpdateManifest = { format: 1, version, build: 'a'.repeat(40), expiresAt: '2099-01-01T00:00:00.000Z', platform: 'linux/amd64', sourceSchemas: [21], targetSchema: 21, minUpdaterProtocol: 1, runtime: 'node22-bookworm-v1', archive: { url, bytes: 123, unpackedBytes: 456, sha256: 'b'.repeat(64) } }
+const manifest: ServerUpdateManifest = { format: 1, version, build: 'a'.repeat(40), expiresAt: '2099-01-01T00:00:00.000Z', platform: 'linux/amd64', sourceSchemas: [21], targetSchema: 21, minUpdaterProtocol: 1, runtime: 'node22-bookworm-v1', environmentVersion: SERVER_ENVIRONMENT_VERSION, archive: { url, bytes: 123, unpackedBytes: 456, sha256: 'b'.repeat(64) } }
 const signed = { keyId: 'test', payload: JSON.stringify(manifest), signature: 'signature-is-verified-by-manager' }
 
 test('recovery commands require a target and reject the removed upgrade-backup option', () => {

@@ -75,6 +75,7 @@ const fake = {
 const history = {
   state: null as unknown,
   pushState(state: unknown) { this.state = state },
+  replaceState(state: unknown) { this.state = state },
   go() { this.state = null; queueMicrotask(() => window.dispatchEvent(Object.assign(new Event('popstate'), { state: null }))) }
 }
 Object.defineProperty(globalThis, 'React', { configurable: true, value: React })
@@ -127,6 +128,19 @@ for (const presentation of ['expanded', 'fullscreen'] as const) test(`system bac
   assert.equal(renderer!.root.findByProps({ 'aria-label': '内置播放器' }).props.role, 'region')
   assert.deepEqual(opened, [])
   assert.deepEqual(external, [])
+})
+
+test('remounting the playback panel releases the old history callback and docks the current session', async context => {
+  await mount()
+  await act(async () => changed({ ...snapshot(), presentation: 'docked' }))
+  await act(async () => changed(snapshot()))
+  const marker = history.state
+  context.mock.method(fake.playback, 'snapshot', async () => snapshot('replacement'))
+  const Panel = (await import('./PlaybackPanel')).default
+  await act(async () => renderer!.update(<MemoryRouter><LocationProbe /><OverlayHistoryProvider><Panel key="replacement" /></OverlayHistoryProvider></MemoryRouter>))
+  assert.equal(history.state, marker, 'lifecycle cleanup must not navigate or create a new viewing entry')
+  await act(async () => history.go())
+  assert.deepEqual(controls, [{ id: 'replacement', command: { kind: 'presentation', value: 'docked' } }])
 })
 
 for (const presentation of ['expanded', 'fullscreen'] as const) test(`Escape retains layered dismissal in ${presentation} playback`, async () => {

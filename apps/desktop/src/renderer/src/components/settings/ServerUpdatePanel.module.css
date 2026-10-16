@@ -1,4 +1,5 @@
 .card {
+  container: server-update / inline-size;
   min-width: 0;
 }
 
@@ -44,6 +45,58 @@
 
 .arrow {
   color: var(--text-muted);
+}
+
+.environment {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--form-field-gap) var(--form-section-gap);
+  margin: 0;
+  padding-top: var(--form-field-gap);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.environmentValue {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: var(--form-field-gap);
+  color: var(--text-secondary);
+}
+
+.environmentValue[data-separated] {
+  padding-left: var(--form-section-gap);
+  border-left: 1px solid var(--border-subtle);
+}
+
+.environmentRevision {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--settings-fw-strong, 700);
+}
+
+.environmentActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--form-label-gap);
+}
+
+.environmentAction {
+  gap: var(--form-label-gap);
+}
+
+.guideSteps {
+  display: grid;
+  gap: var(--form-field-gap);
+  margin: 0 0 var(--form-section-gap);
+  padding-left: var(--form-section-gap);
+}
+
+.guideModal {
+  height: min(28rem, calc(100vh - var(--modal-viewport-inset)));
 }
 
 .entries, .ready, .progress, .footer, .technical {
@@ -164,7 +217,16 @@
   }
 }
 
-@container settings-workspace (max-width: 540px) {
+@container server-update (max-width: 540px) {
+  .environment {
+    flex-direction: column;
+  }
+
+  .environmentValue[data-separated] {
+    padding-left: 0;
+    border-left: 0;
+  }
+
   .entries {
     grid-template-columns: minmax(0, 1fr);
   }

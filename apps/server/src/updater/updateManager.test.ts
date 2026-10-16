@@ -10,6 +10,7 @@ import { verifyUpdateManifest, checkUpdateTarget, sha256 } from './manifest'
 import { ServerUpdateManager } from './updateManager'
 import { updateBundlePrefix } from '@http/updateBundle'
 import { uploadServerUpdateBundle } from '@http/updateClient'
+import { SERVER_ENVIRONMENT_VERSION, ServerEnvironmentMismatchError } from '@shared/serverEnvironment'
 
 const directories: string[] = []
 afterEach(() => { for (const directory of directories.splice(0)) fs.rmSync(directory, { recursive: true, force: true }) })
@@ -18,7 +19,7 @@ const trusted = { release: keys.publicKey.export({ type: 'spki', format: 'pem' }
 const archive = Buffer.from('independent known update archive bytes')
 const target: ServerUpdateManifest = {
   format: 1, version: '0.8.1', build: 'a'.repeat(40), expiresAt: '2099-01-01T00:00:00.000Z', platform: 'linux/amd64',
-  sourceSchemas: [19], targetSchema: 20, minUpdaterProtocol: 1, runtime: 'node22-bookworm-v1',
+  sourceSchemas: [19], targetSchema: 20, minUpdaterProtocol: 1, runtime: 'node22-bookworm-v1', environmentVersion: SERVER_ENVIRONMENT_VERSION,
   archive: { url: 'https://github.com/JavdexLabs/Javdex/releases/download/v0.8.1/Javdex-server.tar.gz', bytes: archive.length, unpackedBytes: archive.length, sha256: sha256(archive) }
 }
 function signed(manifest = target): SignedServerUpdate {
@@ -46,7 +47,35 @@ function fixture(): { dir: string; deployment: FixtureDeployment; manager: Serve
   return { dir, deployment, manager: new ServerUpdateManager(dir, trusted, deployment) }
 }
 const image: DeploymentRelease = { version: target.version, build: target.build, platform: target.platform,
-  runtime: target.runtime, sourceSchemas: target.sourceSchemas, targetSchema: target.targetSchema, archive: { sha256: target.archive.sha256 } }
+  runtime: target.runtime, environmentVersion: target.environmentVersion, sourceSchemas: target.sourceSchemas, targetSchema: target.targetSchema, archive: { sha256: target.archive.sha256 } }
+
+test('signed updates reject a different image environment before download, upload or stopping business', async () => {
+  const f = fixture()
+  const incompatible = signed({ ...target, environmentVersion: SERVER_ENVIRONMENT_VERSION + 1 })
+  const mismatch = (error: unknown): boolean => error instanceof ServerEnvironmentMismatchError && error.currentEnvironmentVersion === SERVER_ENVIRONMENT_VERSION
+  await assert.rejects(f.manager.setTarget(incompatible), mismatch)
+  await assert.rejects(f.manager.beginOffline(incompatible), mismatch)
+  assert.deepEqual(f.deployment.events, [])
+  assert.equal((await f.manager.status()).job, null)
+})
+
+test('historical committed activation remains recoverable but the old signed payload cannot start a new update', async () => {
+  const f = fixture()
+  const legacy = { ...target } as Partial<ServerUpdateManifest>
+  delete legacy.environmentVersion
+  const payload = JSON.stringify(legacy)
+  const oldSigned = { keyId: 'release', payload, signature: sign(null, Buffer.from(payload), keys.privateKey).toString('base64') }
+  const id = randomUUID()
+  fs.mkdirSync(path.join(f.dir, 'jobs', id))
+  fs.writeFileSync(path.join(f.dir, 'current.json'), JSON.stringify({ id, version: target.version, phase: 'activating',
+    receivedBytes: archive.length, totalBytes: archive.length, updatedAt: new Date().toISOString(), message: null,
+    signed: oldSigned, offline: false, deployment: f.deployment.current }))
+  const restarted = new ServerUpdateManager(f.dir, trusted, f.deployment)
+  await restarted.recover()
+  assert.equal((await restarted.status(false)).job?.phase, 'complete')
+  assert.deepEqual(f.deployment.events, ['activate'])
+  await assert.rejects(restarted.setTarget(oldSigned), /environmentVersion/)
+})
 
 for (const phase of ['restored', 'backup', 'restoring']) test(`published updater journal ${phase} preserves the program volume on manager replacement`, async () => {
   const f = fixture()

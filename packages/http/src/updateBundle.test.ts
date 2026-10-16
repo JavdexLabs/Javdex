@@ -8,6 +8,7 @@ import { test } from 'node:test'
 import { updateBundlePrefix, readUpdateBundle, writeUpdateBundle, verifyBundleArchive, openUpdateBundleStream, fetchUpdateBundleManifest } from './updateBundle'
 import { uploadServerUpdateBundle } from './updateClient'
 import type { SignedServerUpdate, ServerUpdateSnapshot } from '@shared/serverUpdateTypes'
+import { SERVER_ENVIRONMENT_VERSION } from '@shared/serverEnvironment'
 
 const archive = Buffer.from('unchanged compressed program archive fixture')
 const signed: SignedServerUpdate = { keyId: 'test', signature: 'fixture-not-a-signature', payload: JSON.stringify({ archive: {
@@ -87,7 +88,7 @@ test('large offline file uploads bounded inner chunks and rejects stalled progre
   const bytes = Buffer.alloc(8 * 1024 ** 2 + 3, 42)
   const selected: SignedServerUpdate = { keyId: 'test', signature: 'fixture', payload: JSON.stringify({
     format: 1, version: '0.9.0', build: 'a'.repeat(40), expiresAt: '2099-01-01T00:00:00.000Z',
-    platform: 'linux/amd64', sourceSchemas: [20], targetSchema: 20, minUpdaterProtocol: 1, runtime: 'node22-bookworm-v1',
+    platform: 'linux/amd64', sourceSchemas: [20], targetSchema: 20, minUpdaterProtocol: 1, runtime: 'node22-bookworm-v1', environmentVersion: SERVER_ENVIRONMENT_VERSION,
     archive: { url: 'https://github.com/JavdexLabs/Javdex/releases/download/v0.9.0/fixture.javdex-update',
       bytes: bytes.length, unpackedBytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') }
   }) }

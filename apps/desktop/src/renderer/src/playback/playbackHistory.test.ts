@@ -10,7 +10,7 @@ function fixture() {
   const goes: number[] = [], commands: Array<{ id: string; value: PlaybackControl }> = [], options: boolean[] = []
   const history = createOverlayHistory({
     read: () => ({ state: stack[index], url: '#/detail' }),
-    push: state => { stack.splice(++index); stack.push(state) }, go: delta => { goes.push(delta) },
+    push: state => { stack.splice(++index); stack.push(state) }, replace: state => { stack[index] = state }, go: delta => { goes.push(delta) },
     later: () => () => {}, token: () => String(++serial)
   })
   const playback = createPlaybackHistory(history, (id, value) => commands.push({ id, value }), value => options.push(value))
@@ -87,6 +87,17 @@ test('normal updates and mount snapshot never write history; a late old tick can
   f.pop(); f.playback.observe(f.state())
   assert.equal(f.marker(), null)
   assert.equal(f.length(), 2, 'no new marker between back and the committed presentation response')
+})
+
+test('a restored active session reclaims its existing viewing entry without adding history', () => {
+  const f = fixture()
+  const token = f.history.open('playback-expanded', () => assert.fail('the previous renderer no longer owns this viewing entry'))
+  f.history.abandon(token)
+  f.playback.observe(f.state('fullscreen'), true)
+  assert.equal(f.length(), 2, 'restoring ownership must not push another viewing entry')
+  f.pop()
+  assert.deepEqual(f.commands, [{ id: 'one', value: { kind: 'presentation', value: 'docked' } }])
+  assert.deepEqual(f.goes, [])
 })
 test('explicit fullscreen docking or stop consumes all owned layers without another business back', () => {
   for (const next of [null, 'docked'] as const) {

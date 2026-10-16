@@ -1,14 +1,14 @@
 ---
 title: "Docker Compose 部署"
-description: "Javdex 0.9.0-beta.5 · Docker Compose 部署"
+description: "Javdex 0.9.0-beta.6 · Docker Compose 部署"
 ---
 
-发布流程为 `ghcr.io/javdexlabs/javdex-server` 生成 Linux amd64 和 arm64 镜像，Docker 自动选择架构。部署只需要 Docker 与 Compose 插件，无需安装 Node.js、npm 或编译源码。以下以预发布固定版本 `0.9.0-beta.5` 为例，以[Beta.5 Release](https://github.com/JavdexLabs/Javdex/releases/tag/v0.9.0-beta.5)的实际发布状态为准，不使用滚动标签。新程序卷从镜像初始化业务；已有程序卷在镜像业务版本更高时自动升级，相同或更旧时保留当前业务，因此基础镜像标签不能代替实际业务版本检查。
+发布流程为 `ghcr.io/javdexlabs/javdex-server` 生成 Linux amd64 和 arm64 镜像，Docker 自动选择架构。部署只需要 Docker 与 Compose 插件，无需安装 Node.js、npm 或编译源码。以下以预发布固定版本 `0.9.0-beta.6` 为例，以[Beta.6 Release](https://github.com/JavdexLabs/Javdex/releases/tag/v0.9.0-beta.6)的实际发布状态为准，不使用滚动标签。新程序卷从镜像初始化业务；已有程序卷在镜像业务版本更高时自动升级，相同或更旧时保留当前业务，因此基础镜像标签不能代替实际业务版本检查。
 
 1. 确认目标 Release 可用后，从其发布说明中的对应源码版本链接保存 `deploy/docker-compose.example.yml` 和 `deploy/javdex-server.example.json`，放在同一个目录（保留文件名）。它们不是 Release 附件；不要混用其他分支的示例。在该目录创建 `.env`，填写基础镜像版本号（不含 `v`）；首次部署应与桌面安装包一致：
 
    ```dotenv
-   JAVDEX_VERSION=0.9.0-beta.5
+   JAVDEX_VERSION=0.9.0-beta.6
    ```
 
 2. 编辑 [Compose 示例](https://github.com/JavdexLabs/Javdex/blob/main/deploy/docker-compose.example.yml) 和 [服务配置](https://github.com/JavdexLabs/Javdex/blob/main/deploy/javdex-server.example.json)：

@@ -7,6 +7,7 @@ import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, sig
 import semver from 'semver'
 import { packageRelease } from './server-release-package.mjs'
 import { writeUpdateBundle } from '../packages/http/src/updateBundle.ts'
+import { SERVER_ENVIRONMENT_VERSION } from '../packages/contracts/src/serverUpdateTypes.ts'
 
 function validateVersion(version) {
   if (typeof version !== 'string' || version.length > 128 || version.includes('+') || semver.valid(version) !== version) throw new Error('Unsupported server release version')
@@ -43,6 +44,7 @@ export function releaseSigning(version, env = process.env) {
 export function signedReleaseManifest(packaged, signer, now = Date.now()) {
   const { descriptor } = packaged
   const { version, build, targetSchema: schema, platform, runtime } = descriptor
+  if (descriptor.environmentVersion !== SERVER_ENVIRONMENT_VERSION) throw new Error('Server release environment version does not match this source')
   validateVersion(version)
   if (!/^linux\/(amd64|arm64)$/.test(platform) || !Number.isSafeInteger(schema) || schema < 19) throw new Error('Invalid server release platform or schema')
   const arch = platform.split('/')[1]
@@ -50,7 +52,7 @@ export function signedReleaseManifest(packaged, signer, now = Date.now()) {
   const manifest = {
     format: 1, version, build, expiresAt: new Date(now + 365 * 86400_000).toISOString(),
     platform, sourceSchemas: Array.from({ length: schema - 18 }, (_, i) => i + 19),
-    targetSchema: schema, minUpdaterProtocol: 1, runtime,
+    targetSchema: schema, minUpdaterProtocol: 1, runtime, environmentVersion: SERVER_ENVIRONMENT_VERSION,
     archive: { url: `https://github.com/JavdexLabs/Javdex/releases/download/v${version}/${archiveName}`, bytes: packaged.bytes, unpackedBytes: packaged.unpackedBytes, sha256: packaged.sha256 }
   }
   const payload = JSON.stringify(manifest)

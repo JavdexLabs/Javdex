@@ -6,6 +6,7 @@ export interface OverlayHistoryMarker { token: string; kind: OverlayHistoryKind 
 export interface OverlayHistoryPort {
   read(): { state: unknown; url: string }
   push(state: Record<string, unknown>, url: string): void
+  replace(state: Record<string, unknown>, url: string): void
   go(delta: number): void
   later(callback: () => void): () => void
   token(): string
@@ -69,7 +70,12 @@ export function createOverlayHistory(port: OverlayHistoryPort) {
         entries = entries.filter(value => value !== entry)
         finish(entry, 'route')
       } else {
-        port.push(withOverlayHistoryMarker(current.state, entry), current.url)
+        const marker = readOverlayHistoryMarker(current.state)
+        const state = withOverlayHistoryMarker(current.state, entry)
+        // Forward may revisit a consumed viewing entry. Reuse that empty slot
+        // instead of stacking a second placeholder above the business route.
+        if (marker && !entries.some(value => value.pushed && value.token === marker.token && value.url === current.url)) port.replace(state, current.url)
+        else port.push(state, current.url)
         entry.pushed = true
       }
     }
@@ -100,6 +106,14 @@ export function createOverlayHistory(port: OverlayHistoryPort) {
       // An old asynchronous back must settle before a new marker is pushed.
       flush()
       return token
+    },
+    /** Restore an existing viewing entry after renderer reload; never push or traverse. */
+    adopt(kind: OverlayHistoryKind, close: Entry['close']): string | null {
+      const current = port.read()
+      const marker = readOverlayHistoryMarker(current.state)
+      if (!marker || marker.kind !== kind || pending || entries.some(entry => entry.token === marker.token)) return null
+      entries.push({ ...marker, close, url: current.url, pushed: true, closing: false })
+      return marker.token
     },
     close(token: string): void {
       const index = entries.findIndex(entry => entry.token === token)

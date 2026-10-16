@@ -1,6 +1,6 @@
 ---
 title: "NFO 兼容性"
-description: "Javdex 0.9.0-beta.5 · NFO 兼容性"
+description: "Javdex 0.9.0-beta.6 · NFO 兼容性"
 ---
 
 本文记录 Javdex 一次性 NFO 导出的公开 profile、固定验证基线和已知边界。导出入口位于“设置 → 存储与导出 → 导出影片资料”；它生成当前资料的旁路文件快照，不建立同步关系。操作步骤见 [使用指南](/Javdex/guide/nfo/)。

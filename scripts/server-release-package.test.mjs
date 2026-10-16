@@ -14,6 +14,7 @@ import { build, transform } from 'esbuild'
 import { t } from 'tar'
 import { describeRelease, packageRelease } from './server-release-package.mjs'
 import { isServerReleasePath } from '../packages/contracts/src/serverUpdateTypes.ts'
+import { SERVER_ENVIRONMENT_VERSION } from '../packages/contracts/src/serverEnvironment.ts'
 import httpServer from '../packages/http/src/server.ts'
 import { requestBusiness } from '../apps/server/src/updater/businessHttp.ts'
 import updateClient from '../packages/http/src/updateClient.ts'
@@ -166,8 +167,13 @@ test('publisher archives a complete exact closure, dereferences internal links a
     fs.symlinkSync('test-data', path.join(source, 'node_modules/lib/alias'))
     const archive = path.join(temporary, 'release.tar.gz')
     const result = await packageRelease(source, archive, 'linux/amd64')
-    const names = []; let bytes = 0
-    await t({ file: archive, strict: true, onReadEntry: entry => { names.push(entry.path); bytes += entry.size; assert.equal(entry.type, 'File') } })
+    const names = [], descriptorChunks = []; let bytes = 0
+    await t({ file: archive, strict: true, onReadEntry: entry => {
+      names.push(entry.path); bytes += entry.size; assert.equal(entry.type, 'File')
+      if (entry.path === 'release.json') entry.on('data', chunk => descriptorChunks.push(chunk))
+    } })
+    assert.equal(result.descriptor.environmentVersion, SERVER_ENVIRONMENT_VERSION)
+    assert.deepEqual(JSON.parse(Buffer.concat(descriptorChunks).toString('utf8')), result.descriptor)
     assert.equal(bytes, result.unpackedBytes)
     assert.deepEqual(names.sort(), [...Object.keys(result.descriptor.files), 'release.json'].sort())
     assert.equal(names.some(name => name.includes('.bin')), false)
@@ -205,7 +211,9 @@ test('container publisher runs from its standalone bundle without source TS or n
       banner: { js: "import { createRequire as __createRequire } from 'node:module'; const require = __createRequire(import.meta.url);" } })
     const metadata = spawnSync(process.execPath, [publisher, 'metadata', source, 'linux/amd64'], { cwd: root, encoding: 'utf8' })
     assert.equal(metadata.status, 0, metadata.stderr)
-    assert.equal(JSON.parse(fs.readFileSync(path.join(source, 'release.json'), 'utf8')).version, '0.8.1')
+    const descriptor = JSON.parse(fs.readFileSync(path.join(source, 'release.json'), 'utf8'))
+    assert.equal(descriptor.version, '0.8.1')
+    assert.equal(descriptor.environmentVersion, SERVER_ENVIRONMENT_VERSION)
     const archive = path.join(root, 'release.tar.gz')
     const packaged = spawnSync(process.execPath, [publisher, 'archive', source, archive], { cwd: root, encoding: 'utf8' })
     assert.equal(packaged.status, 0, packaged.stderr)

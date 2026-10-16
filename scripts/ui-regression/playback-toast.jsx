@@ -21,6 +21,7 @@ window.api = {
   },
   playback: {
     snapshot: async () => snapshot,
+    observation: async () => ({ snapshot, revision: 0 }),
     onChanged: () => () => {},
     aiSubtitleSnapshot: async () => null,
     onAiSubtitleChanged: () => () => {},

@@ -1,0 +1,27 @@
+{
+  "main": "5d226bb9629abbce52f2393eb80fefa0ab3545de",
+  "pullRequest": "https://github.com/JavdexLabs/Javdex/pull/118",
+  "mergedAt": "2026-10-16T14:35:35Z",
+  "pagesRun": "https://github.com/JavdexLabs/Javdex/actions/runs/38917017236",
+  "pagesRunHead": "5d226bb9629abbce52f2393eb80fefa0ab3545de",
+  "pagesDeployedAt": "2026-10-16T14:36:33Z",
+  "verifiedPages": "https://javdexlabs.github.io/Javdex/",
+  "checkedAt": "2026-10-16T14:40:34.194Z",
+  "contentVersion": "0.9.0-beta.7",
+  "stableVersion": "v0.8.0",
+  "defaultDownloads": [
+    "https://github.com/JavdexLabs/Javdex/releases/download/v0.8.0/Javdex-Setup-0.8.0-x64.exe",
+    "https://github.com/JavdexLabs/Javdex/releases/download/v0.8.0/Javdex-Setup-0.8.0-x64.zip",
+    "https://github.com/JavdexLabs/Javdex/releases/download/v0.8.0/Javdex-0.8.0-arm64.dmg",
+    "https://github.com/JavdexLabs/Javdex/releases/download/v0.8.0/Javdex-0.8.0-x64.dmg",
+    "https://github.com/JavdexLabs/Javdex/releases/download/v0.8.0/Javdex-0.8.0-x86_64.AppImage",
+    "https://github.com/JavdexLabs/Javdex/releases/download/v0.8.0/Javdex-0.8.0-amd64.deb"
+  ],
+  "releaseJsonSha256": "385bdb9a8a86fccad61ce469bb417f6b5401ce4cdbeb8189201ab44cccc6f9ae",
+  "pages": ["/", "/download/", "/start/connection/", "/server/pairing/", "/developers/server/", "/server/recovery/", "/server/update/"],
+  "starlight": true,
+  "searchMarkup": true,
+  "sitemap": true,
+  "softwareArtifactAcceptance": "cancelled_by_user_before_start",
+  "softwareArtifactDownloadsPerformed": false
+}

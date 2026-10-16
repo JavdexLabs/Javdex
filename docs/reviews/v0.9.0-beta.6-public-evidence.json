@@ -1,0 +1,255 @@
+{
+  "format": 1,
+  "version": "0.9.0-beta.6",
+  "programSource": "cacba6449f533ff4b43127728774f6d304a2cd1a",
+  "releaseRun": 38867034106,
+  "publishedAt": "2026-10-16T08:05:37Z",
+  "verifiedAt": "2026-10-16T08:19:06.454Z",
+  "ciJobs": {
+    "windowsTests": 116862182989,
+    "windowsPackage": 116869866071,
+    "macArm64Package": 116869866067,
+    "macX64Package": 116869866208,
+    "linuxPackage": 116869866173,
+    "aggregateSources": 116873598800,
+    "serverArm64": 116874026941,
+    "serverAmd64": 116874027073,
+    "imageManifest": 116875463791,
+    "githubRelease": 116875563841
+  },
+  "evidence": [
+    {
+      "verifiedAsset": "Javdex-0.9.0-beta.6-amd64.deb",
+      "bytes": 143678616,
+      "sha256": "30b1105a50035508beb5c79dc1132ec9caac7d635afc8fbf3d8581cbe9e3e641",
+      "anonymous": true
+    },
+    {
+      "verifiedAsset": "Javdex-0.9.0-beta.6-arm64.dmg",
+      "bytes": 182741239,
+      "sha256": "6fbda201d93525304e9d8173f3fd666d8f188072164671d85544336c5a52934e",
+      "anonymous": true
+    },
+    {
+      "verifiedAsset": "Javdex-0.9.0-beta.6-x64.dmg",
+      "bytes": 190297132,
+      "sha256": "3e6b62da6066288d8ee24088846183ac82f7c687b81f5e8f299be9af4c3bb8c9",
+      "anonymous": true
+    },
+    {
+      "verifiedAsset": "Javdex-Playback-Sources-0.9.0-beta.6.tar.gz",
+      "bytes": 113796682,
+      "sha256": "ffc37a119bc34b9747e4e4e120cacd161a133cf26e5d68c85ecf5d8ab4594684",
+      "anonymous": true
+    },
+    {
+      "verifiedAsset": "Javdex-server-0.9.0-beta.6-linux-amd64.javdex-update",
+      "bytes": 24840357,
+      "sha256": "e699fb50de50d883d151ba088e563a9ce50e3361c44895c568402a39ed76430e",
+      "anonymous": true
+    },
+    {
+      "verifiedAsset": "Javdex-0.9.0-beta.6-x86_64.AppImage",
+      "bytes": 180909765,
+      "sha256": "556abea6294ae09f52a3cfff627611fcdb2630ccb872b9cc0efa4d0f8cf3c881",
+      "anonymous": true
+    },
+    {
+      "verifiedAsset": "Javdex-server-0.9.0-beta.6-linux-arm64.javdex-update",
+      "bytes": 25098687,
+      "sha256": "06b3dfd2abf8b012ab5569e96f4d9207b8a8b509a4b84177b07d2243f4cdff61",
+      "anonymous": true
+    },
+    {
+      "verifiedCiImageBinding": "0.9.0-beta.6",
+      "checkedAt": "2026-10-16T08:13:18.209Z",
+      "run": "38867034106",
+      "source": "cacba6449f533ff4b43127728774f6d304a2cd1a",
+      "index": "sha256:29c4f484c09675a85e98b9ce135908438020881f1652a8bb6f9c640e2be3f887",
+      "images": [
+        {
+          "arch": "amd64",
+          "digest": "sha256:f75149851d469f13e28712f1fd685e5087c924d9cdaaa61e80f204575525b33a",
+          "configDigest": "sha256:a989d90bccd389606d906540f9d2c6cc9310de8919205ecbc8a83d89e436d622",
+          "ciReceiptMatched": true
+        },
+        {
+          "arch": "arm64",
+          "digest": "sha256:e04aa164fe8b73736a87e620c686cc178096b1c4f394a26bf7232470ea0b0f95",
+          "configDigest": "sha256:3ce740812ca70806ab8d0fd078429d40fcafa48ef7be127423adde6ab3af6ef2",
+          "ciReceiptMatched": true
+        }
+      ],
+      "anonymous": true
+    },
+    {
+      "verifiedAsset": "Javdex-Setup-0.9.0-beta.6-x64.zip",
+      "bytes": 189273919,
+      "sha256": "07f8001aa039c901d6b0fa86de960ef87de34bcbb5aeecc2a7ff647ab4121d16",
+      "anonymous": true
+    },
+    {
+      "verifiedAsset": "SHA256SUMS.txt",
+      "bytes": 936,
+      "sha256": "81512c3892ecabbf6e7c316c666a711505030c2cdefea38c1f7d74927670b310",
+      "anonymous": true
+    },
+    {
+      "verifiedAsset": "Javdex-Setup-0.9.0-beta.6-x64.exe",
+      "bytes": 139606501,
+      "sha256": "5feec31b27600124e3972bed9dd76cd812a4836c29be1098f13f372738840816",
+      "anonymous": true
+    },
+    {
+      "verifiedClosure": "amd64",
+      "version": "0.9.0-beta.6",
+      "build": "cacba6449f533ff4b43127728774f6d304a2cd1a",
+      "schema": 21,
+      "environmentVersion": 1,
+      "files": 268,
+      "unpackedBytes": 62532253,
+      "nativeFiles": [
+        "node_modules/@img/sharp-linux-x64/lib/sharp-linux-x64-0.35.4.node",
+        "node_modules/better-sqlite3/prebuilds/linux-x64.node"
+      ],
+      "archiveOffset": 740,
+      "archiveBytes": 24839617,
+      "archiveSha256": "e6f3a217a2d31c657a56b9d44599e32ea3a3d95aec0cfda8b00b1535d63d2034",
+      "signature": true
+    },
+    {
+      "verifiedClosure": "arm64",
+      "version": "0.9.0-beta.6",
+      "build": "cacba6449f533ff4b43127728774f6d304a2cd1a",
+      "schema": 21,
+      "environmentVersion": 1,
+      "files": 268,
+      "unpackedBytes": 62284972,
+      "nativeFiles": [
+        "node_modules/@img/sharp-linux-arm64/lib/sharp-linux-arm64-0.35.4.node",
+        "node_modules/better-sqlite3/prebuilds/linux-arm64.node"
+      ],
+      "archiveOffset": 740,
+      "archiveBytes": 25097947,
+      "archiveSha256": "af4b1c3d429ed53ddce950f63768052d585f5f7a4f27cd56123ff2fe883b296d",
+      "signature": true
+    },
+    {
+      "verifiedSources": "windows-x64",
+      "materials": 21,
+      "sourcePins": 15,
+      "installers": [
+        {
+          "fileName": "Javdex-Setup-0.9.0-beta.6-x64.exe",
+          "sha256": "5feec31b27600124e3972bed9dd76cd812a4836c29be1098f13f372738840816"
+        },
+        {
+          "fileName": "Javdex-Setup-0.9.0-beta.6-x64.zip",
+          "sha256": "07f8001aa039c901d6b0fa86de960ef87de34bcbb5aeecc2a7ff647ab4121d16"
+        }
+      ],
+      "nativeSdk": {
+        "electronVersion": "43.4.1",
+        "nodeVersion": "24.18.1"
+      },
+      "restored": true,
+      "originalBundle": {
+        "fileName": "Javdex-Playback-Sources-0.9.0-beta.6-win32-x64-c3b4232c32a9-add6bb4d.tar.gz",
+        "sha256": "81e663dd6b4a4674325698f692c3f8668aa975978e694191ca674fce05a0ee2a",
+        "inputInventorySha256": "c3b4232c32a9647254882e96bd3901230c0508cc3b7f2eb5b88ee7072076dbab",
+        "packagingToolsSha256": "add6bb4ddc1ae296275fa8e89345e8a49a60fdcaeebf4ce928d95739deee001b"
+      }
+    },
+    {
+      "verifiedSources": "macos-x64",
+      "materials": 21,
+      "sourcePins": 14,
+      "installers": [
+        {
+          "fileName": "Javdex-0.9.0-beta.6-x64.dmg",
+          "sha256": "3e6b62da6066288d8ee24088846183ac82f7c687b81f5e8f299be9af4c3bb8c9"
+        }
+      ],
+      "nativeSdk": {
+        "electronVersion": "43.4.1",
+        "nodeVersion": "24.18.1"
+      },
+      "restored": true,
+      "originalBundle": {
+        "fileName": "Javdex-Playback-Sources-0.9.0-beta.6-darwin-x64-56bb9aa3da6e-063c9903.tar.gz",
+        "sha256": "32ef991d75dfb528f6e407d213d676bc58b7e6ab91bb3ee4dd89abc32ad13f84",
+        "inputInventorySha256": "56bb9aa3da6e662a021481f92638a0f89f3c583332061a70d52546d9328e9e67",
+        "packagingToolsSha256": "063c9903c325ca90f76a00c315d57b06724ef7c46b4f6fdb289b8c72759b5898"
+      }
+    },
+    {
+      "verifiedSources": "macos-arm64",
+      "materials": 21,
+      "sourcePins": 14,
+      "installers": [
+        {
+          "fileName": "Javdex-0.9.0-beta.6-arm64.dmg",
+          "sha256": "6fbda201d93525304e9d8173f3fd666d8f188072164671d85544336c5a52934e"
+        }
+      ],
+      "nativeSdk": {
+        "electronVersion": "43.4.1",
+        "nodeVersion": "24.18.1"
+      },
+      "restored": true,
+      "originalBundle": {
+        "fileName": "Javdex-Playback-Sources-0.9.0-beta.6-darwin-arm64-3e18f68d3b0c-063c9903.tar.gz",
+        "sha256": "5ae22a209378c3881b8a70288360e135c4395e87110f333438a0c3e3714ca0de",
+        "inputInventorySha256": "3e18f68d3b0c4c389f600a00a0b4ab0931d8d1b2e6888cb69d79ca2c690bd301",
+        "packagingToolsSha256": "063c9903c325ca90f76a00c315d57b06724ef7c46b4f6fdb289b8c72759b5898"
+      }
+    },
+    {
+      "verifiedSources": "linux-x64",
+      "materials": 21,
+      "sourcePins": 15,
+      "installers": [
+        {
+          "fileName": "Javdex-0.9.0-beta.6-amd64.deb",
+          "sha256": "30b1105a50035508beb5c79dc1132ec9caac7d635afc8fbf3d8581cbe9e3e641"
+        },
+        {
+          "fileName": "Javdex-0.9.0-beta.6-x86_64.AppImage",
+          "sha256": "556abea6294ae09f52a3cfff627611fcdb2630ccb872b9cc0efa4d0f8cf3c881"
+        }
+      ],
+      "nativeSdk": {
+        "electronVersion": "43.4.1",
+        "nodeVersion": "24.18.1"
+      },
+      "restored": true,
+      "originalBundle": {
+        "fileName": "Javdex-Playback-Sources-0.9.0-beta.6-linux-x64-df7df4c2a470-063c9903.tar.gz",
+        "sha256": "410d04a2789df0b45d2fa429a41865e7c311f7052e88bf1a2ca34578172414ee",
+        "inputInventorySha256": "df7df4c2a470bd691dadce8df40dd320997c65bc30a528da7e49675bce2b8b8f",
+        "packagingToolsSha256": "063c9903c325ca90f76a00c315d57b06724ef7c46b4f6fdb289b8c72759b5898"
+      }
+    },
+    {
+      "verifiedImage": "amd64",
+      "digest": "sha256:f75149851d469f13e28712f1fd685e5087c924d9cdaaa61e80f204575525b33a",
+      "managerEntrypoint": true
+    },
+    {
+      "verifiedImage": "arm64",
+      "digest": "sha256:e04aa164fe8b73736a87e620c686cc178096b1c4f394a26bf7232470ea0b0f95",
+      "managerEntrypoint": true
+    },
+    {
+      "verifiedRelease": "https://github.com/JavdexLabs/Javdex/releases/tag/v0.9.0-beta.6",
+      "publishedAt": "2026-10-16T08:05:37Z",
+      "assets": 10,
+      "checksums": 9,
+      "build": "cacba6449f533ff4b43127728774f6d304a2cd1a",
+      "index": "sha256:29c4f484c09675a85e98b9ce135908438020881f1652a8bb6f9c640e2be3f887",
+      "keySha256": "4afe77ca1f32135bcff8449631f38674bab697c86b1347dde9e777be8aa9f689",
+      "stableUnchanged": true,
+      "latestImage": 404
+    }
+  ]
+}

@@ -9,6 +9,7 @@ function fixture() {
   const history = createOverlayHistory({
     read: () => stack[index],
     push: (state, url) => { stack.splice(++index); stack.push({ state, url }) },
+    replace: (state, url) => { stack[index] = { state, url } },
     go: delta => { goes.push(delta) },
     later: callback => { timers.push(callback); return () => {} },
     token: () => String(++serial)
@@ -21,6 +22,10 @@ function fixture() {
   }
   return { history, stack, goes, closes, timers, open, move, pop, route, state: () => stack[index].state }
 }
+test('creating an idle coordinator does not read or mutate browser history', () => {
+  createOverlayHistory({ read: () => assert.fail('unused viewing history must remain lazy'), push: () => assert.fail(),
+    replace: () => assert.fail(), go: () => assert.fail(), later: () => assert.fail(), token: () => assert.fail() })
+})
 test('nested viewing layers retain router state and system back closes only the top without a second back', () => {
   const f = fixture()
   f.open('playback-expanded'); f.open('playback-fullscreen')
@@ -150,4 +155,98 @@ test('business route changes abandon viewing layers without going back or reopen
   assert.equal(f.closes.length, 2, 'a stale historical marker cannot resurrect its view')
   f.pop(1)
   assert.equal(f.closes.length, 2)
+})
+
+for (const kind of ['playback-expanded', 'image-preview'] as const) test(`reopening ${kind} after Forward does not leave an empty Back step`, () => {
+  const f = fixture()
+  const retired = f.open(kind)
+  f.pop()
+  f.pop(1)
+  assert.equal(readOverlayHistoryMarker(f.state())?.token, retired)
+  const current = f.open(kind)
+  assert.equal(readOverlayHistoryMarker(f.state())?.token, current)
+  assert.equal((f.state() as { key: string }).key, 'detail')
+  assert.equal((f.state() as { idx: number }).idx, 2)
+  assert.deepEqual((f.state() as { usr: unknown }).usr, { from: 'library' })
+  f.pop()
+  assert.equal(readOverlayHistoryMarker(f.state()), null, 'Back should return to the business entry, not a retired playback placeholder')
+  assert.deepEqual(f.closes, [`${kind}:history`, `${kind}:history`])
+  assert.deepEqual(f.goes, [], 'system Back must not trigger a second traversal')
+})
+
+test('adopting an abandoned current marker restores only its callback without writing router history', () => {
+  const f = fixture()
+  const token = f.open('playback-expanded')
+  f.history.abandon(token)
+  const state = f.state()
+  const closes: string[] = []
+  assert.equal(f.history.adopt('playback-expanded', source => closes.push(source)), token)
+  assert.equal(f.state(), state)
+  assert.equal(f.stack.length, 2)
+  assert.deepEqual(f.goes, [])
+  f.pop()
+  assert.deepEqual(closes, ['history'])
+  assert.deepEqual(f.closes, [], 'the abandoned callback must never run')
+})
+
+test('adoption cannot invent a marker, steal another kind or replace a live callback', () => {
+  const f = fixture()
+  const obsolete = () => assert.fail('adoption must not take ownership')
+  assert.equal(f.history.adopt('playback-expanded', obsolete), null)
+  f.open('image-preview')
+  const state = f.state()
+  assert.equal(f.history.adopt('playback-expanded', obsolete), null)
+  assert.equal(f.history.adopt('image-preview', obsolete), null)
+  assert.equal(f.state(), state)
+  assert.equal(f.stack.length, 2)
+  assert.deepEqual(f.goes, [])
+  f.pop()
+  assert.deepEqual(f.closes, ['image-preview:history'])
+})
+
+test('adoption cannot reclaim a marker while its close traversal is in flight', () => {
+  const f = fixture()
+  const token = f.open('playback-expanded')
+  f.history.close(token)
+  f.history.abandon(token)
+  assert.equal(f.history.adopt('playback-expanded', () => assert.fail('closing layer cannot be restored')), null)
+  assert.deepEqual(f.goes, [-1])
+  f.pop()
+  assert.equal(f.history.isTraversing(), false)
+  assert.deepEqual(f.closes, ['playback-expanded:action'])
+})
+
+test('nested history serializes anonymous positions, not callbacks or viewing data', () => {
+  const f = fixture()
+  f.open('playback-expanded'); f.open('image-preview')
+  const state = structuredClone(f.state()) as Record<string, unknown>
+  assert.deepEqual(state.avOverlayParents, [{ kind: 'playback-expanded', token: '1' }])
+  assert.deepEqual((state.avOverlay as object), { kind: 'image-preview', token: '2' })
+  const restored = createOverlayHistory({ read: () => ({ state, url: '#/detail' }),
+    push: () => assert.fail('restoration cannot push'), replace: () => assert.fail('restoration cannot replace'),
+    go: () => assert.fail('restoration cannot traverse'), later: () => () => {}, token: () => 'unused' })
+  assert.equal(restored.adopt('playback-expanded', () => {}), '1')
+  assert.equal(restored.adopt('playback-expanded', () => assert.fail('live owner must not be replaced')), null)
+})
+test('invalid or duplicated parent trails cannot create restorable viewing positions', () => {
+  for (const parents of [[{ kind: 'unknown', token: 'parent' }], [{ kind: 'playback-expanded', token: 'top' }],
+    Array.from({ length: 65 }, (_, index) => ({ kind: 'playback-expanded', token: String(index) }))]) {
+    const state = { avOverlay: { kind: 'image-preview', token: 'top' }, avOverlayParents: parents }
+    const history = createOverlayHistory({ read: () => ({ state, url: '#/detail' }), push: () => {}, replace: () => {},
+      go: () => assert.fail('invalid metadata cannot navigate'), later: () => () => {}, token: () => 'unused' })
+    assert.equal(history.adopt('playback-expanded', () => assert.fail('invalid parent cannot own a callback')), null)
+  }
+})
+test('nested adoption never steals a live lower owner and abandoned queued entries never open', () => {
+  const f = fixture()
+  f.open('playback-expanded'); f.open('image-preview')
+  assert.equal(f.history.adopt('playback-expanded', () => assert.fail('live lower owner cannot be replaced')), null)
+  f.pop(); f.pop()
+  assert.deepEqual(f.closes, ['image-preview:history', 'playback-expanded:history'])
+  const closing = f.open('image-preview')
+  f.history.close(closing)
+  const queued = f.open('playback-expanded')
+  f.history.abandon(queued)
+  f.pop()
+  assert.equal(readOverlayHistoryMarker(f.state()), null)
 })

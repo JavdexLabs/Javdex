@@ -3,7 +3,7 @@ import path from 'node:path'
 import os from 'node:os'
 import { createHash } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
-import { isServerReleasePath, releaseDescriptorSchema, SERVER_RELEASE_REQUIRED_FILES, SERVER_RUNTIME_ID } from '../packages/contracts/src/serverUpdateTypes.ts'
+import { isServerReleasePath, releaseDescriptorSchema, SERVER_RELEASE_REQUIRED_FILES, SERVER_RUNTIME_ID, SERVER_ENVIRONMENT_VERSION } from '../packages/contracts/src/serverUpdateTypes.ts'
 
 const inside = (file, root) => { const relative = path.relative(root, file); return relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative) }
 async function hash(file) {
@@ -36,7 +36,7 @@ export async function describeRelease(directory, platform) {
   }
   await walk(directory)
   for (const name of SERVER_RELEASE_REQUIRED_FILES) if (!files[name]) throw new Error(`Incomplete production closure: ${name}`)
-  return releaseDescriptorSchema.parse({ format: 1, version: product.version, build: build.build, platform, runtime: SERVER_RUNTIME_ID, targetSchema: build.targetSchema, files })
+  return releaseDescriptorSchema.parse({ format: 1, version: product.version, build: build.build, platform, runtime: SERVER_RUNTIME_ID, environmentVersion: SERVER_ENVIRONMENT_VERSION, targetSchema: build.targetSchema, files })
 }
 export async function packageRelease(directory, archive, platform) {
   const descriptor = await describeRelease(directory, platform)

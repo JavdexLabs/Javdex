@@ -1,12 +1,14 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { createHash, randomUUID } from 'node:crypto'
+import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import fs from 'node:fs'
 import net from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
 import { test } from 'node:test'
 import sharp from 'sharp'
+import { createPinnedFetch } from '@http/pinnedFetch'
+import { updaterPairingSchema } from '@shared/serverUpdateTypes'
 import { mediaAssetStore } from '@library/mediaAssetStore'
 import { openDesktopWorkStore } from '../../desktop/workStore'
 import { createRemoteCatalogBackend } from '../../backends/remote/remoteCatalogBackend'
@@ -17,7 +19,7 @@ import type { CatalogBackend } from '../../application/catalogBackend'
 function docker(...args: string[]): string {
   const result = spawnSync('docker', args, { encoding: 'utf8' })
   assert.equal(result.status, 0, result.stderr || result.stdout || `docker ${args[0]} failed`)
-  return result.stdout.trim()
+  return (args[0] === 'logs' ? result.stdout + result.stderr : result.stdout).trim()
 }
 
 async function freePort(): Promise<number> {
@@ -36,7 +38,7 @@ void test('desktop Agent draft transfers to the production Docker server and sur
   process.env.JAVDEX_TEST_USER_DATA = userData
   const name = `javdex-agent-h1-${randomUUID()}`
   const port = await freePort()
-  const baseUrl = `http://127.0.0.1:${port}`
+  const baseUrl = `https://127.0.0.1:${port}`
   const configPath = path.join(root, 'server.json')
   fs.writeFileSync(configPath, JSON.stringify({
     listenHost: '0.0.0.0', port, accessHosts: ['127.0.0.1'],
@@ -46,38 +48,61 @@ void test('desktop Agent draft transfers to the production Docker server and sur
   const password = 'agent Docker acceptance password'
   const version = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'package.json'), 'utf8')).version as string
   let secret: string | null = null
+  let certificateSha256: string | undefined
+  let serverId: string | undefined
+  const connection = createPinnedFetch(baseUrl, undefined, { verifyCertificate: async fingerprint => {
+    if (certificateSha256 && certificateSha256 !== fingerprint) throw new Error('Isolated Agent smoke certificate changed')
+    certificateSha256 = fingerprint
+  } })
   const credentials = {
     isAvailable: async () => true,
     readWriterSecret: async () => secret,
     writeWriterSecret: async (_catalogId: string, value: string) => { secret = value },
     deleteWriterSecret: async () => { secret = null }
   }
-  const createBackend = () => createRemoteCatalogBackend({ baseUrl, appVersion: version, credentials, userDataPath: userData })
+  const createBackend = () => createRemoteCatalogBackend({ baseUrl, appVersion: version, credentials, userDataPath: userData,
+    certificateSha256, deviceIdentity: serverId && secret ? { serverId, secret } : undefined })
   const workPath = path.join(userData, 'desktop-work.db')
   let work = openDesktopWorkStore(workPath)
   configureDesktopDraftStore(work.database())
   let backend: CatalogBackend | null = null
   let started = false
-  try {
-    docker('image', 'inspect', 'javdex-server:smoke')
-    docker('create', '--name', name, '-p', `${port}:${port}`, '-e', `JAVDEX_WEB_PASSWORD=${password}`,
-      'javdex-server:smoke', 'start', '--config', '/app/agent-smoke.json')
-    started = true
-    docker('cp', configPath, `${name}:/app/agent-smoke.json`)
-    docker('start', name)
+  const waitReady = async (): Promise<void> => {
     let ready = false
     for (let attempt = 0; attempt < 100; attempt += 1) {
-      if (await fetch(`${baseUrl}/live`).then(response => response.ok).catch(() => false)) {
+      if (await connection.fetch(`${baseUrl}/ready`, { signal: AbortSignal.timeout(1000) }).then(response => response.ok).catch(() => false)) {
         ready = true
         break
       }
       await new Promise(resolve => setTimeout(resolve, 100))
     }
-    assert.ok(ready, `Docker server failed to start: ${docker('logs', name)}`)
-    const token = JSON.parse(docker('exec', name, 'node', 'index.js', 'bind', '--config', '/app/agent-smoke.json')).oneTimeToken as string
+    assert.ok(ready, `Docker server failed to start: ${docker('logs', '--tail', '40', name)}`)
+  }
+  try {
+    const containerImage = process.env.JAVDEX_AGENT_SMOKE_IMAGE || 'javdex-server:smoke'
+    docker('image', 'inspect', containerImage)
+    docker('create', '--name', name, '-p', `127.0.0.1:${port}:${port}`, '-e', `JAVDEX_WEB_PASSWORD=${password}`,
+      '-e', `JAVDEX_PUBLIC_URL=${baseUrl}`, containerImage, 'start', '--config', '/app/agent-smoke.json')
+    started = true
+    docker('cp', configPath, `${name}:/app/agent-smoke.json`)
+    docker('start', name)
+    await waitReady()
+    const token = docker('exec', name, 'node', '/opt/javdex-manager/index.js', 'token', '--config', '/app/agent-smoke.json')
+    assert.match(token, /^[a-f0-9]{64}$/)
+    const deviceSecret = randomBytes(32).toString('hex')
+    const response = await connection.fetch(`${baseUrl}/connect/v1/claim`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(15_000),
+      body: JSON.stringify({ code: token, claimId: randomUUID(), secretDigest: createHash('sha256').update(deviceSecret).digest('hex'),
+        name: 'Isolated Agent smoke', appVersion: version })
+    })
+    assert.equal(response.status, 200)
+    const paired = updaterPairingSchema.parse({ ...await response.json() as object, token: deviceSecret })
+    assert.equal(paired.url, baseUrl)
+    assert.equal(paired.certificateSha256, certificateSha256)
+    serverId = paired.serverId
+    secret = paired.token
     backend = createBackend()
-    const claimed = await backend.claimWriter({ kind: 'initialBind', oneTimeToken: token })
-    assert.equal(claimed.status, 'consumed')
+    await backend.reconnect()
     assert.equal(backend.session().state, 'available')
 
     const imported = await backend.videos.importResource({
@@ -168,21 +193,18 @@ void test('desktop Agent draft transfers to the production Docker server and sur
     const receipt = await backend.tasks.getOperation({ operationId: firstOperation })
     assert.equal(receipt?.status, 'applied')
 
-    const login = await fetch(`${baseUrl}/api/login`, { method: 'POST',
+    const login = await connection.fetch(`${baseUrl}/api/login`, { method: 'POST',
       headers: { Origin: baseUrl, 'Content-Type': 'application/json', 'X-Javdex-Client': 'web' },
       body: JSON.stringify({ username: 'viewer', password, remember: true }) })
     assert.equal(login.status, 200)
     const cookie = login.headers.get('set-cookie')?.split(';')[0] ?? ''
-    const cover = await fetch(`${baseUrl}/api/videos/${target.id}/images/cover`, { headers: { Cookie: cookie } })
+    const cover = await connection.fetch(`${baseUrl}/api/videos/${target.id}/images/cover`, { headers: { Cookie: cookie } })
     assert.equal(cover.status, 200)
     const image = await sharp(Buffer.from(await cover.arrayBuffer())).metadata()
     assert.deepEqual([image.width, image.height], [32, 24])
 
     docker('restart', name)
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      if (await fetch(`${baseUrl}/live`).then(response => response.ok).catch(() => false)) break
-      await new Promise(resolve => setTimeout(resolve, 100))
-    }
+    await waitReady()
     await backend.reconnect()
     assert.equal(backend.session().state, 'available')
     const afterServerRestart = await backend.queries.getVideo({ scope: { kind: 'all' }, videoId: target.id }) as
@@ -220,6 +242,7 @@ void test('desktop Agent draft transfers to the production Docker server and sur
     console.log('PASS: H1 Docker desktop draft preview, image transfer, restart, lost-response retry, discard')
   } finally {
     await backend?.dispose()
+    await connection.close()
     clearDesktopDraftStore()
     work.close()
     if (started) docker('rm', '-fv', name)

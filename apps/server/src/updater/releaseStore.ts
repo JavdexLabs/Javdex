@@ -9,6 +9,7 @@ import { isServerReleasePath, releaseDescriptorSchema, SERVER_RELEASE_REQUIRED_F
 import type { UpdaterConfig } from './config'
 import { readJsonIfExists, writeJsonAtomic } from './files'
 import type { DeploymentRelease } from './deployment'
+import { assertServerEnvironmentVersion } from '@shared/serverEnvironment'
 
 const run = promisify(execFile)
 export { isServerReleasePath as releasePath } from '@shared/serverUpdateTypes'
@@ -79,7 +80,7 @@ export class ReleaseStore {
   }
   async verify(directory: string, manifest?: DeploymentRelease): Promise<ServerReleaseDescriptor> {
     const descriptor = this.descriptor(directory)
-    if (manifest && (descriptor.version !== manifest.version || descriptor.build !== manifest.build || descriptor.targetSchema !== manifest.targetSchema || descriptor.platform !== manifest.platform || descriptor.runtime !== manifest.runtime)) throw new Error('发行内容与签名清单不一致')
+    if (manifest && (descriptor.version !== manifest.version || descriptor.build !== manifest.build || descriptor.targetSchema !== manifest.targetSchema || descriptor.platform !== manifest.platform || descriptor.runtime !== manifest.runtime || descriptor.environmentVersion !== manifest.environmentVersion)) throw new Error('发行内容与签名清单不一致')
     const found = new Set<string>()
     const walk = async (folder: string): Promise<void> => {
       for (const entry of await fs.promises.readdir(folder, { withFileTypes: true })) {
@@ -130,7 +131,7 @@ export class ReleaseStore {
     // Same supported schema range as the official single-file release builder.
     if (descriptor.targetSchema < 19) throw new Error('镜像不支持当前升级协议')
     return { release: { version: descriptor.version, build: descriptor.build, platform: descriptor.platform,
-      runtime: descriptor.runtime, targetSchema: descriptor.targetSchema,
+      runtime: descriptor.runtime, environmentVersion: descriptor.environmentVersion, targetSchema: descriptor.targetSchema,
       sourceSchemas: Array.from({ length: descriptor.targetSchema - 18 }, (_, i) => i + 19),
       archive: { sha256: fingerprint } },
     bytes: Object.values(descriptor.files).reduce((sum, file) => sum + file.bytes, fs.statSync(path.join(this.config.seedDir, 'release.json')).size) }
@@ -165,6 +166,7 @@ export class ReleaseStore {
     return id
   }
   async prepare(manifest: ServerUpdateManifest, archive: string): Promise<void> {
+    assertServerEnvironmentVersion(manifest.environmentVersion)
     if (manifest.platform !== this.platform || manifest.runtime !== SERVER_RUNTIME_ID) throw new Error('请升级匹配的容器运行环境')
     if (fs.statSync(archive).size !== manifest.archive.bytes || await fileHash(archive) !== manifest.archive.sha256) throw new Error('发行包校验失败')
     const destination = this.directory(releaseId(manifest))

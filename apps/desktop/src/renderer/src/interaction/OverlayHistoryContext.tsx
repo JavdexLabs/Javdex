@@ -7,6 +7,7 @@ export function OverlayHistoryProvider({ children }: { children: ReactNode }): J
   if (!history.current) history.current = createOverlayHistory({
     read: () => ({ state: window.history.state, url: window.location.href }),
     push: (state, url) => window.history.pushState(state, '', url),
+    replace: (state, url) => window.history.replaceState(state, '', url),
     go: delta => window.history.go(delta),
     later: callback => { const timer = window.setTimeout(callback, 300); return () => window.clearTimeout(timer) },
     token: () => globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`

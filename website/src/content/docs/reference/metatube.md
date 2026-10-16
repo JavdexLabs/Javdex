@@ -1,6 +1,6 @@
 ---
 title: "MetaTube 配置"
-description: "Javdex 0.9.0-beta.5 · MetaTube 配置"
+description: "Javdex 0.9.0-beta.7 · MetaTube 配置"
 ---
 
 MetaTube 是 Javdex 内置的可选影片刮削来源，用于连接你自行部署的 `metatube-server`。Javdex 不提供公共服务地址，也不随安装包分发或启动 MetaTube 服务端、数据库和服务进程。

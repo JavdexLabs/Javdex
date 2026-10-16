@@ -14,6 +14,7 @@ import { build, transform } from 'esbuild'
 import { t } from 'tar'
 import { describeRelease, packageRelease } from './server-release-package.mjs'
 import { isServerReleasePath } from '../packages/contracts/src/serverUpdateTypes.ts'
+import { SERVER_ENVIRONMENT_VERSION } from '../packages/contracts/src/serverEnvironment.ts'
 import httpServer from '../packages/http/src/server.ts'
 import { requestBusiness } from '../apps/server/src/updater/businessHttp.ts'
 import updateClient from '../packages/http/src/updateClient.ts'
@@ -76,6 +77,54 @@ test('smoke status waiting is bounded and never retries certificate, identity or
   const unavailable = new Error('无法连接更新助手')
   await assert.rejects(waitForUpdateStatus(async () => { calls++; throw unavailable }, { timeoutMs: 30, intervalMs: 10 }), error => error === unavailable)
   assert.ok(calls > 1 && calls < 20)
+  for (const [statusCode, code] of [[401, 'BUSINESS_NOT_READY'], [503, 'UNKNOWN'], [409, undefined]]) {
+    let attempts = 0
+    const error = new updateClient.ServerUpdateRequestError('服务端正在启动或需要人工核对，请查看容器日志', statusCode, code)
+    await assert.rejects(waitForUpdateStatus(async () => { attempts++; throw error }), failure => failure === error)
+    assert.equal(attempts, 1, 'only the explicit 503 readiness response is retryable')
+  }
+  const denied = new updateClient.ServerUpdateRequestError('无法连接更新助手', 401, 'UNAUTHORIZED')
+  let deniedCalls = 0
+  await assert.rejects(waitForUpdateStatus(async () => { deniedCalls++; throw denied }, { timeoutMs: 30, intervalMs: 10 }), failure => failure === denied)
+  assert.equal(deniedCalls, 1, 'a transport-like message must not make HTTP authorization failures retryable')
+  let startingCalls = 0
+  const starting = new updateClient.ServerUpdateRequestError('服务端正在启动或需要人工核对，请查看容器日志', 503, 'BUSINESS_NOT_READY')
+  await assert.rejects(waitForUpdateStatus(async () => { startingCalls++; throw starting }, { timeoutMs: 30, intervalMs: 10 }), error => error === starting)
+  assert.ok(startingCalls > 1 && startingCalls < 20, 'a permanently unavailable manager still fails within the original deadline')
+})
+
+test('smoke waits through the early gateway until the recovered maintenance status is available', { timeout: 5000 }, async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-smoke-startup-'))
+  const key = path.join(root, 'key.pem'), cert = path.join(root, 'cert.pem')
+  execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-sha256', '-nodes', '-days', '1', '-subj', '/CN=isolated-smoke', '-keyout', key, '-out', cert], { stdio: 'ignore' })
+  const token = 'c'.repeat(64), serverId = randomUUID(), catalogId = randomUUID()
+  let requests = 0
+  const server = https.createServer({ key: fs.readFileSync(key), cert: fs.readFileSync(cert) }, (incoming, response) => {
+    requests++
+    assert.equal(incoming.url, '/update/v1/control')
+    assert.equal(incoming.headers.authorization, `Bearer ${token}`)
+    incoming.resume()
+    response.setHeader('Content-Type', 'application/json')
+    if (requests === 1) {
+      response.writeHead(503)
+      response.end(JSON.stringify({ code: 'BUSINESS_NOT_READY', error: '服务端正在启动或需要人工核对，请查看容器日志' }))
+      return
+    }
+    response.end(JSON.stringify({ protocolVersion: 1, paired: true, serverId, catalogId,
+      currentVersion: '0.9.0-alpha.1', job: { phase: 'recoveryRequired' } }))
+  })
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  const client = new updateClient.ServerUpdateClient({ protocolVersion: 1, url: `https://127.0.0.1:${server.address().port}/`, token, serverId, catalogId,
+    certificateSha256: createHash('sha256').update(new X509Certificate(fs.readFileSync(cert)).raw).digest('hex') })
+  try {
+    const status = await waitForUpdateStatus(() => client.control('status'), { timeoutMs: 1000, intervalMs: 10 })
+    assert.equal(status.job?.phase, 'recoveryRequired')
+    assert.equal(requests, 2, 'only the read-only status request is retried')
+  } finally {
+    server.closeAllConnections()
+    await new Promise(resolve => server.close(resolve))
+    fs.rmSync(root, { recursive: true, force: true })
+  }
 })
 
 function replayBusinessUidProbe(businessUid, extraBusiness = false) {
@@ -166,8 +215,13 @@ test('publisher archives a complete exact closure, dereferences internal links a
     fs.symlinkSync('test-data', path.join(source, 'node_modules/lib/alias'))
     const archive = path.join(temporary, 'release.tar.gz')
     const result = await packageRelease(source, archive, 'linux/amd64')
-    const names = []; let bytes = 0
-    await t({ file: archive, strict: true, onReadEntry: entry => { names.push(entry.path); bytes += entry.size; assert.equal(entry.type, 'File') } })
+    const names = [], descriptorChunks = []; let bytes = 0
+    await t({ file: archive, strict: true, onReadEntry: entry => {
+      names.push(entry.path); bytes += entry.size; assert.equal(entry.type, 'File')
+      if (entry.path === 'release.json') entry.on('data', chunk => descriptorChunks.push(chunk))
+    } })
+    assert.equal(result.descriptor.environmentVersion, SERVER_ENVIRONMENT_VERSION)
+    assert.deepEqual(JSON.parse(Buffer.concat(descriptorChunks).toString('utf8')), result.descriptor)
     assert.equal(bytes, result.unpackedBytes)
     assert.deepEqual(names.sort(), [...Object.keys(result.descriptor.files), 'release.json'].sort())
     assert.equal(names.some(name => name.includes('.bin')), false)
@@ -205,7 +259,9 @@ test('container publisher runs from its standalone bundle without source TS or n
       banner: { js: "import { createRequire as __createRequire } from 'node:module'; const require = __createRequire(import.meta.url);" } })
     const metadata = spawnSync(process.execPath, [publisher, 'metadata', source, 'linux/amd64'], { cwd: root, encoding: 'utf8' })
     assert.equal(metadata.status, 0, metadata.stderr)
-    assert.equal(JSON.parse(fs.readFileSync(path.join(source, 'release.json'), 'utf8')).version, '0.8.1')
+    const descriptor = JSON.parse(fs.readFileSync(path.join(source, 'release.json'), 'utf8'))
+    assert.equal(descriptor.version, '0.8.1')
+    assert.equal(descriptor.environmentVersion, SERVER_ENVIRONMENT_VERSION)
     const archive = path.join(root, 'release.tar.gz')
     const packaged = spawnSync(process.execPath, [publisher, 'archive', source, archive], { cwd: root, encoding: 'utf8' })
     assert.equal(packaged.status, 0, packaged.stderr)

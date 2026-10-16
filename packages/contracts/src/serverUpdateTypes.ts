@@ -3,6 +3,8 @@ import { z } from 'zod'
 export const SERVER_UPDATE_PROTOCOL = 1
 export const trustedDevicesSchema = z.array(z.object({ id: z.uuid(), name: z.string().min(1).max(80), createdAt: z.string(), current: z.boolean() }).strict())
 export const SERVER_RUNTIME_ID = 'node22-bookworm-v1'
+/** Compatibility contract, independent of the application or image build tag. */
+export const SERVER_ENVIRONMENT_VERSION = 1
 export const SERVER_RELEASE_REQUIRED_FILES = ['index.js', 'webCatalogWorker.js', 'web/index.html', 'package.json', 'LICENSE', 'NOTICE', 'node_modules/better-sqlite3/package.json', 'node_modules/sharp/package.json'] as const
 export function isServerReleasePath(value: string): boolean {
   return value.length > 0 && value.length <= 1024 && !value.includes('\\') && !/[:\x00-\x1f]/.test(value) &&
@@ -18,6 +20,8 @@ export const releaseDescriptorSchema = z.object({
   format: z.literal(1), version: releaseVersion,
   build: z.string().regex(/^[a-f0-9]{40}$/), platform,
   runtime: z.literal(SERVER_RUNTIME_ID), targetSchema: z.number().int().positive(),
+  /** Published program-volume descriptors predate environment discovery. */
+  environmentVersion: z.number().int().positive().safe().optional(),
   files: z.record(z.string(), z.object({ bytes: z.number().int().nonnegative(), sha256: hash }).strict())
     .refine(files => Object.keys(files).length > 0 && Object.keys(files).length <= 20000)
 }).strict()
@@ -31,6 +35,7 @@ export const updateManifestSchema = z.object({
   sourceSchemas: z.array(z.number().int().positive()).min(1),
   targetSchema: z.number().int().positive(),
   minUpdaterProtocol: z.literal(1), runtime: z.literal(SERVER_RUNTIME_ID),
+  environmentVersion: z.number().int().positive().safe(),
   archive: z.object({
     url: z.url().refine(value => {
       const url = new URL(value)
@@ -90,6 +95,8 @@ export interface ServerUpdateSnapshot {
   connection?: ServerConnectionSummary | null
   /** Local connection credentials changed since this desktop process started. */
   connectionRestartRequired?: boolean
+  /** Image-manager compatibility, independent of the mutable business version. */
+  environment?: import('./serverEnvironment').ServerEnvironmentSnapshot
 }
 export interface ServerConnectionSummary {
   remoteBaseUrl: string
@@ -98,6 +105,7 @@ export interface ServerConnectionSummary {
 }
 export const serverUpdateCommandSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('status') }).strict(),
+  z.object({ action: z.literal('environment') }).strict(),
   z.object({ action: z.literal('connectionStatus') }).strict(),
   z.object({ action: z.literal('forgetConnection') }).strict(),
   z.object({ action: z.literal('connect'), remoteBaseUrl: updaterPairingSchema.shape.url, oneTimeToken: z.string().regex(/^[a-f0-9]{64}$/) }).strict(),

@@ -175,6 +175,11 @@ static void *getProcAddress(void *, const char *name) {
 }
 
 @implementation JavdexMpvView
+- (void)didEnterFullScreen:(NSNotification *)notification {
+    // The fullscreen style bit is set before AppKit finishes its responder
+    // handoff. Reclaim once after that handoff, not on every render tick.
+    if (notification.object == self.window && presentation == "fullscreen") focusFullscreen = true;
+}
 - (BOOL)isOpaque { return YES; }
 - (BOOL)acceptsFirstResponder { return YES; }
 - (BOOL)isAccessibilityElement { return presentation == "fullscreen"; }
@@ -281,6 +286,7 @@ static void updateBounds(napi_env env, napi_value bounds) {
 }
 static void destroyPlayer() {
     if (!playerView) return;
+    [[NSNotificationCenter defaultCenter] removeObserver:playerView];
     playerView->closed = YES;
     [[playerView openGLContext] makeCurrentContext];
     playback.shutdown();
@@ -319,6 +325,8 @@ static napi_value create(napi_env env, napi_callback_info info) {
     playerView = [[JavdexMpvView alloc] initWithFrame:NSMakeRect(0, 0, 640, 360) pixelFormat:format];
     [playerView setWantsBestResolutionOpenGLSurface:YES];
     [host addSubview:playerView positioned:NSWindowAbove relativeTo:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:playerView selector:@selector(didEnterFullScreen:)
+        name:NSWindowDidEnterFullScreenNotification object:host.window];
     try {
         updateBounds(env, args[1]);
         [[playerView openGLContext] makeCurrentContext];

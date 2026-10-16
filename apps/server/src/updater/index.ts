@@ -23,6 +23,8 @@ import { requestBusiness } from './businessHttp'
 import { connectionClaimSchema } from '@shared/serverUpdateTypes'
 import { authorizeDeviceUpdate } from './deviceAuthorization'
 import { businessProcessCommand } from './businessProcess'
+import { serveServerEnvironment } from './environmentHttp'
+import { ServerEnvironmentMismatchError } from '@shared/serverEnvironment'
 
 const controlSchema = z.discriminatedUnion('action', [
   z.object({ protocolVersion: z.literal(1), action: z.literal('status') }).strict(),
@@ -91,22 +93,19 @@ async function main(): Promise<void> {
     execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:3072', '-sha256', '-nodes', '-days', '3650', '-subj', '/CN=JavdexUpdater', '-keyout', privateFile, '-out', certificateFile], { stdio: 'ignore' })
     fs.chmodSync(privateFile, 0o600)
   }
-  await releases.bootstrap()
-  clearStaleManagedMarker(config)
-  const manager = new ServerUpdateManager(config.stateDir, config.releaseKeys, deployment)
+  let manager: ServerUpdateManager | undefined
+  let startupFailed = false
   const serverRef: { current?: ReturnType<typeof createServer> } = {}
   let closing = false
   const stop = (): void => {
     if (closing) return
     closing = true
     serverRef.current?.close(); serverRef.current?.closeAllConnections()
-    void Promise.all([manager.shutdown(), supervisor.shutdown()]).catch(() => { process.exitCode = 1 })
+    void Promise.all([manager?.shutdown(), supervisor.shutdown()]).catch(() => { process.exitCode = 1 })
   }
-  cleanup = async () => { serverRef.current?.close(); serverRef.current?.closeAllConnections(); await Promise.all([manager.shutdown(), supervisor.shutdown()]) }
+  cleanup = async () => { serverRef.current?.close(); serverRef.current?.closeAllConnections(); await Promise.all([manager?.shutdown(), supervisor.shutdown()]) }
   process.on('SIGTERM', stop)
   process.on('SIGINT', stop)
-  await manager.recover()
-  if (closing) return
   let commandBusy = true
   const handle = async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
     const reply = (status: number, value: unknown): void => {
@@ -116,6 +115,9 @@ async function main(): Promise<void> {
     }
     const url = new URL(request.url ?? '/', 'https://updater.invalid')
     if (!gatewayRequestAllowed(request, config.gateway.origin)) { reply(403, { error: '访问地址或来源无效' }); return }
+    if (serveServerEnvironment(request, response)) return
+    if (url.pathname.startsWith('/runtime/')) { reply(404, { error: '运行环境接口不存在' }); return }
+    if (!manager || startupFailed) { reply(503, { code: 'BUSINESS_NOT_READY', error: '服务端正在启动或需要人工核对，请查看容器日志' }); return }
     if (!url.pathname.startsWith('/update/') && !url.pathname.startsWith('/connect/')) {
       proxyBusiness(request, response, config.serverUrl, config.healthHost, config.gateway)
       return
@@ -169,7 +171,11 @@ async function main(): Promise<void> {
         else if (input.action === 'prepare') reply(200, await manager.prepare(input.targetVersion))
         else reply(200, await manager.install(input.jobId, input.targetVersion))
       } finally { commandBusy = false }
-    } catch (error) { reply(409, { error: error instanceof Error ? error.message : '更新请求失败' }) }
+    } catch (error) {
+      reply(409, { error: error instanceof Error ? error.message : '更新请求失败', ...(error instanceof ServerEnvironmentMismatchError ? {
+        code: error.code, currentEnvironmentVersion: error.currentEnvironmentVersion, requiredEnvironmentVersion: error.requiredEnvironmentVersion
+      } : {}) })
+    }
   }
   const server = createServer({ key: fs.readFileSync(privateFile), cert: fs.readFileSync(certificateFile), minVersion: 'TLSv1.2' }, (request, response) => {
     void handle(request, response).catch(() => { if (!response.destroyed && !response.writableEnded) { response.writeHead(500); response.end() } })
@@ -180,6 +186,13 @@ async function main(): Promise<void> {
   await new Promise<void>((resolve, reject) => { server!.once('error', reject); server!.listen(config.port, config.listenHost, resolve) })
   process.stdout.write(`Javdex 容器内管理进程正在监听 ${config.listenHost}:${config.port}\n`)
   try {
+    // Keep discovery reachable even when old business code or persistent state
+    // cannot start. It must not require opening the catalog or pairing first.
+    await releases.bootstrap()
+    if (closing) return
+    clearStaleManagedMarker(config)
+    manager = new ServerUpdateManager(config.stateDir, config.releaseKeys, deployment)
+    await manager.recover()
     if (!closing && !manager.recoveryRequired) {
       const image = releases.imageRelease()
       const current = releases.descriptor(releases.directory(releases.current()!))
@@ -191,6 +204,11 @@ async function main(): Promise<void> {
       }
     }
     if (!closing && !manager.recoveryRequired) await deployment.startCurrent()
+  } catch (error) {
+    startupFailed = true
+    process.exitCode = 1
+    await supervisor.shutdown().catch(() => {})
+    process.stderr.write(`服务端启动未完成，保持维护状态并保留运行环境查询；请人工核对。原因：${error instanceof Error ? error.message : '启动失败'}\n`)
   } finally { commandBusy = false }
 }
 

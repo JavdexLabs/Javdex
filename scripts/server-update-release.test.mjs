@@ -9,6 +9,7 @@ import { packageRelease } from './server-release-package.mjs'
 import { keyDirectoryOutsideRepository, releaseSigning, signedReleaseManifest } from './server-update-release.mjs'
 import { verifyUpdateManifest } from '../apps/server/src/updater/manifest.ts'
 import { readUpdateBundle, writeUpdateBundle, verifyBundleArchive } from '../packages/http/src/updateBundle.ts'
+import { SERVER_ENVIRONMENT_VERSION } from '../packages/contracts/src/serverEnvironment.ts'
 
 const keys = generateKeyPairSync('ed25519') // Ephemeral test key, never a release credential.
 const env = {
@@ -83,9 +84,12 @@ for (const platform of ['linux/amd64', 'linux/arm64']) test(`beta ${platform} ar
     const signer = releaseSigning(version, env)
     const signed = signedReleaseManifest(packaged, signer, 0)
     assert.ok(verify(null, Buffer.from(signed.payload), keys.publicKey, Buffer.from(signed.signature, 'base64')))
+    assert.equal(packaged.descriptor.environmentVersion, SERVER_ENVIRONMENT_VERSION)
+    assert.equal(JSON.parse(signed.payload).environmentVersion, SERVER_ENVIRONMENT_VERSION)
     const manifest = verifyUpdateManifest(signed, { test: signer.publicKey }, 0)
     assert.equal(manifest.version, version)
     assert.equal(manifest.platform, platform)
+    assert.equal(manifest.environmentVersion, SERVER_ENVIRONMENT_VERSION)
     assert.equal(manifest.archive.bytes, fs.statSync(archive).size)
     assert.equal(manifest.archive.unpackedBytes, packaged.unpackedBytes)
     assert.equal(manifest.archive.sha256, createHash('sha256').update(fs.readFileSync(archive)).digest('hex'))
@@ -105,6 +109,14 @@ for (const platform of ['linux/amd64', 'linux/arm64']) test(`beta ${platform} ar
     assert.equal(manifest.targetSchema, 20)
     assert.equal(manifest.runtime, 'node22-bookworm-v1')
     assert.equal(verify(null, Buffer.from(signed.payload.replace(version, '0.9.0-beta.2')), keys.publicKey, Buffer.from(signed.signature, 'base64')), false)
+    const tampered = JSON.stringify({ ...JSON.parse(signed.payload), environmentVersion: SERVER_ENVIRONMENT_VERSION + 1 })
+    assert.equal(verify(null, Buffer.from(tampered), keys.publicKey, Buffer.from(signed.signature, 'base64')), false)
+    const neverSign = { keyId: signer.keyId, get privateKey() { assert.fail('incompatible descriptors must be rejected before signing') } }
+    for (const environmentVersion of [undefined, null, 0, -1, SERVER_ENVIRONMENT_VERSION + 1, SERVER_ENVIRONMENT_VERSION + 0.5, String(SERVER_ENVIRONMENT_VERSION)]) {
+      const incompatible = { ...packaged, descriptor: { ...packaged.descriptor, environmentVersion } }
+      if (environmentVersion === undefined) delete incompatible.descriptor.environmentVersion
+      assert.throws(() => signedReleaseManifest(incompatible, neverSign, 0), /environment version/)
+    }
     assert.equal(Object.keys(packaged.descriptor.files).some(file => file.includes('private.pem')), false)
   } finally { fs.rmSync(root, { recursive: true, force: true }) }
 })

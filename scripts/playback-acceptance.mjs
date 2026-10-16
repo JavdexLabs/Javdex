@@ -362,8 +362,18 @@ try {
   await detailPlay.click()
   const focusSession = await waitForState(page, state => state?.phase === 'playing' && state.position > 0.5, 'detail playback trigger')
   await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].focus())
+  // isFullScreen/styleMask can become true before AppKit finishes replacing the
+  // responder. Checking native focus before this event misses that late reset.
+  const enteredFullscreen = application.evaluate(({ BrowserWindow }) => new Promise((resolve, reject) => {
+    const window = BrowserWindow.getAllWindows()[0]
+    const finished = () => { clearTimeout(timer); resolve(true) }
+    const timer = setTimeout(() => { window.off('enter-full-screen', finished); reject(new Error('Fullscreen transition did not finish')) }, 5000)
+    window.once('enter-full-screen', finished)
+  })).then(() => null, error => error)
   await page.getByRole('button', { name: '全屏', exact: true }).click()
   await waitForState(page, state => state?.presentation === 'fullscreen', 'detail fullscreen')
+  const transitionFailure = await enteredFullscreen
+  if (transitionFailure) throw transitionFailure
   const focusDeadline = Date.now() + 5000
   while (!await application.evaluate(({ app }) => {
     const require = process.getBuiltinModule('module').createRequire(app.getAppPath() + '/package.json')
@@ -394,19 +404,27 @@ try {
   await page.evaluate(id => window.api.playback.control(id, { kind: 'pause', paused: true }), historyId)
   await waitForState(page, state => state?.phase === 'paused', 'history pause')
   const historyPosition = (await page.evaluate(() => window.api.playback.snapshot())).position
+  const expandedMarker = await page.evaluate(() => window.history.state?.avOverlay)
   await clickChrome('播放设置')
-  await page.waitForFunction(() => window.history.state?.avOverlay?.kind === 'playback-options')
+  assert.deepEqual(await page.evaluate(() => window.history.state?.avOverlay), expandedMarker, 'settings share the viewing marker')
   await page.evaluate(() => window.history.back())
   await page.getByRole('complementary', { name: '播放设置', exact: true }).waitFor({ state: 'hidden' })
-  assert.equal(await page.evaluate(() => window.history.state?.avOverlay?.kind), 'playback-expanded')
+  await waitForState(page, state => state?.presentation === 'docked', 'back docks playback with settings open')
+  assert.equal(await page.evaluate(() => window.location.hash), detailRoute)
+  await page.getByRole('button', { name: '恢复展开', exact: true }).click()
+  await waitForState(page, state => state?.presentation === 'expanded', 'restore for fullscreen history')
+  const fullscreenMarker = await page.evaluate(() => window.history.state?.avOverlay)
   await page.getByRole('button', { name: '全屏', exact: true }).click()
   await waitForState(page, state => state?.presentation === 'fullscreen', 'history fullscreen')
   await page.waitForTimeout(1500)
-  await page.waitForFunction(() => window.history.state?.avOverlay?.kind === 'playback-fullscreen')
+  assert.deepEqual(await page.evaluate(() => window.history.state?.avOverlay), fullscreenMarker, 'fullscreen shares the viewing marker')
   await page.evaluate(() => window.history.back())
-  await waitForState(page, state => state?.presentation === 'expanded', 'back exits fullscreen first')
+  await waitForState(page, state => state?.presentation === 'docked', 'one back docks fullscreen playback')
   await page.waitForTimeout(1500)
   assert.equal(await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isFullScreen()), false)
+  await page.getByRole('button', { name: '恢复展开', exact: true }).click()
+  await waitForState(page, state => state?.presentation === 'expanded', 'restore for expanded history')
+  const retiredToken = await page.evaluate(() => window.history.state?.avOverlay?.token)
   await page.evaluate(() => window.history.back())
   await waitForState(page, state => state?.presentation === 'docked', 'back collapses expanded playback')
   assert.equal(await page.evaluate(() => window.location.hash), detailRoute, 'viewing back must not leave the movie detail')
@@ -419,6 +437,15 @@ try {
     const require = process.getBuiltinModule('module').createRequire(app.getAppPath() + '/package.json')
     return require(app.isPackaged ? process.resourcesPath + '/native-playback/playback.node' : app.getAppPath() + '/out/native-playback/playback.node').inspect().loadedFiles
   }), 1)
+  await page.evaluate(() => window.history.forward())
+  await page.waitForFunction(token => window.history.state?.avOverlay?.token === token, retiredToken)
+  assert.equal((await page.evaluate(() => window.api.playback.snapshot())).presentation, 'docked', 'Forward never resurrects a consumed view')
+  await page.getByRole('button', { name: '恢复展开', exact: true }).click()
+  await page.waitForFunction(token => window.history.state?.avOverlay?.kind === 'playback-expanded'
+    && window.history.state.avOverlay.token !== token, retiredToken)
+  await page.evaluate(() => window.history.back())
+  await waitForState(page, state => state?.presentation === 'docked', 'back after reopening a retired viewing slot')
+  assert.equal(await page.evaluate(() => window.history.state?.avOverlay), undefined, 'no empty viewing step is left behind')
   // Docked playback must not consume an ordinary page back.
   await page.evaluate(() => window.history.back())
   await page.waitForFunction(() => window.location.hash === '#/libraries/1')
@@ -426,11 +453,20 @@ try {
   await page.getByRole('button', { name: /^PLAYBACK-1 未刮削/ }).click()
   await page.getByRole('button', { name: '恢复展开', exact: true }).click()
   await page.waitForFunction(() => window.history.state?.avOverlay?.kind === 'playback-expanded')
+  await page.reload()
+  await page.getByRole('button', { name: '收起到底栏', exact: true }).waitFor({ state: 'visible' })
+  await page.evaluate(() => window.history.back())
+  await waitForState(page, state => state?.presentation === 'docked', 'reloaded renderer reclaims the live viewing marker')
+  assert.equal(await page.evaluate(() => window.location.hash), detailRoute)
+  assert.equal((await page.evaluate(() => window.api.playback.snapshot())).sessionId, historyId)
+  await page.getByRole('button', { name: '恢复展开', exact: true }).click()
+  await page.waitForFunction(() => window.history.state?.avOverlay?.kind === 'playback-expanded')
   await clickChrome('停止播放', true)
   await waitForState(page, state => state === null, 'history explicit stop')
   await page.waitForFunction(() => !window.history.state?.avOverlay)
   assert.equal(await page.evaluate(() => window.location.hash), detailRoute)
-  const historyChecks = { optionsBack: true, fullscreenBack: true, expandedBack: true, dockedPageBack: true, explicitStopConsumesMarker: true,
+  const historyChecks = { optionsBackDocks: true, fullscreenBackDocks: true, expandedBack: true, retiredViewingSlotReused: true,
+    rendererReloadReclaimsMarker: true, dockedPageBack: true, explicitStopConsumesMarker: true,
     samePausedSession: historyId, loadedFiles: 1 }
   // Reopen with recording off to preserve a live application for manual UI acceptance.
   assert.equal((await page.evaluate(target => window.api.player.play(target.libraryId, target.videoId), target)).ok, true)
@@ -439,7 +475,7 @@ try {
   const errorChecks = { controlledMessage: failed.error, retriedSameResource: true, nativeReleased: true }
   report = { status: 'partial acceptance passed', directory, initial, paused, adjustedSubtitles, subtitleClearance, hiddenControls, resumeChecks, errorChecks, focusChecks, historyChecks,
     platform: `${process.platform}/${process.arch}`,
-    checks: ['real application startup', 'default player.play / openResource routing', 'options query the scoped file source and expose external open during playback', 'device volume survives stop and decoder replacement', 'H264 decode and platform audio output (decoder recorded in initial state)', 'expanded/docked/fullscreen same session', 'pause and exact seek', 'exact time form validation', 'embedded SRT size/delay controls', fullscreenState.rendererFullscreenControls ? 'fullscreen video size stays fixed behind chrome and settings' : 'fullscreen subtitle/control separation', fullscreenState.rendererFullscreenControls ? 'auto-hide reveals the full frame without resizing' : 'auto-hide restores native viewport', 'default-off progress file absent', 'recording preference uses saved draft', 'paused resume preparation and continue/from-start choices', 'private EOF preserves old progress', 'global off stops recording immediately', 'cancel clear preserves progress', 'controlled format error', 'explicit retry rechecks same resource', 'error releases native decoder', 'native fullscreen focus and detail trigger restoration', 'real browser history closes options/fullscreen/expanded before page back', 'explicit stop consumes viewing marker'],
+    checks: ['real application startup', 'default player.play / openResource routing', 'options query the scoped file source and expose external open during playback', 'device volume survives stop and decoder replacement', 'H264 decode and platform audio output (decoder recorded in initial state)', 'expanded/docked/fullscreen same session', 'pause and exact seek', 'exact time form validation', 'embedded SRT size/delay controls', fullscreenState.rendererFullscreenControls ? 'fullscreen video size stays fixed behind chrome and settings' : 'fullscreen subtitle/control separation', fullscreenState.rendererFullscreenControls ? 'auto-hide reveals the full frame without resizing' : 'auto-hide restores native viewport', 'default-off progress file absent', 'recording preference uses saved draft', 'paused resume preparation and continue/from-start choices', 'private EOF preserves old progress', 'global off stops recording immediately', 'cancel clear preserves progress', 'controlled format error', 'explicit retry rechecks same resource', 'error releases native decoder', 'native fullscreen focus after animation and detail trigger restoration', 'one history back docks settings/fullscreen/expanded before page back', 'retired viewing slot reuse and reload ownership', 'explicit stop consumes viewing marker'],
     pending: ['native screen/mini-video frame inspection', 'fullscreen native control interaction', 'remote source', 'full feature/packaging acceptance'], errors }
   assert.deepEqual(errors, [])
   fs.writeFileSync(path.join(output, 'report.json'), JSON.stringify(report, null, 2))

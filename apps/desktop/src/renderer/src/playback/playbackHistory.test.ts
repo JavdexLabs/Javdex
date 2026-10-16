@@ -8,17 +8,36 @@ function fixture() {
   const stack: unknown[] = [{ idx: 4, key: 'detail', usr: { from: 'library' } }]
   let index = 0, serial = 0
   const goes: number[] = [], commands: Array<{ id: string; value: PlaybackControl }> = [], options: boolean[] = []
-  const history = createOverlayHistory({
+  const port: Parameters<typeof createOverlayHistory>[0] = {
     read: () => ({ state: stack[index], url: '#/detail' }),
-    push: state => { stack.splice(++index); stack.push(state) }, go: delta => { goes.push(delta) },
+    push: state => { stack.splice(++index); stack.push(state) }, replace: state => { stack[index] = state }, go: delta => { goes.push(delta) },
     later: () => () => {}, token: () => String(++serial)
-  })
+  }
+  const history = createOverlayHistory(port)
   const playback = createPlaybackHistory(history, (id, value) => commands.push({ id, value }), value => options.push(value))
   const state = (presentation: PlaybackSnapshot['presentation'] = 'expanded', phase: PlaybackSnapshot['phase'] = 'playing', sessionId = 'one') =>
     ({ presentation, phase, sessionId } as PlaybackSnapshot)
-  const pop = (delta = -1) => { index += delta; history.pop(stack[index]) }
-  return { playback, history, state, pop, commands, goes, options, marker: () => readOverlayHistoryMarker(stack[index]), length: () => stack.length }
+  const move = (delta = -1) => { index += delta; return stack[index] }
+  const pop = (delta = -1) => { history.pop(move(delta)) }
+  return { playback, history, port, state, move, pop, commands, goes, options, marker: () => readOverlayHistoryMarker(stack[index]), length: () => stack.length }
 }
+for (const reload of [false, true]) test(`an image opened before playback adoption preserves its anonymous parent (${reload ? 'reload' : 'remount'})`, () => {
+  const f = fixture()
+  f.playback.observe(f.state())
+  f.playback.abandon()
+  const history = reload ? createOverlayHistory(f.port) : f.history
+  let imageCloses = 0
+  history.open('image-preview', () => { imageCloses++ })
+  const commands: unknown[] = []
+  const restored = createPlaybackHistory(history, (id, value) => commands.push({ id, value }), () => {})
+  restored.observe(f.state(), true)
+  assert.equal(f.length(), 3, 'opening an unrelated kind must preserve the surviving playback position')
+  history.pop(f.move())
+  assert.equal(imageCloses, 1)
+  assert.deepEqual(commands, [])
+  history.pop(f.move())
+  assert.deepEqual(commands, [{ id: 'one', value: { kind: 'presentation', value: 'docked' } }])
+})
 test('acknowledged docking consumes the viewing entry before navigation without replaying transport commands', () => {
   const f = fixture()
   f.playback.observe(f.state()); f.playback.observe(f.state('fullscreen')); f.playback.setOptions(true)
@@ -88,6 +107,111 @@ test('normal updates and mount snapshot never write history; a late old tick can
   assert.equal(f.marker(), null)
   assert.equal(f.length(), 2, 'no new marker between back and the committed presentation response')
 })
+
+test('a restored active session reclaims its existing viewing entry without adding history', () => {
+  const f = fixture()
+  const token = f.history.open('playback-expanded', () => assert.fail('the previous renderer no longer owns this viewing entry'))
+  f.history.abandon(token)
+  f.playback.observe(f.state('fullscreen'), true)
+  assert.equal(f.length(), 2, 'restoring ownership must not push another viewing entry')
+  f.pop()
+  assert.deepEqual(f.commands, [{ id: 'one', value: { kind: 'presentation', value: 'docked' } }])
+  assert.deepEqual(f.goes, [])
+})
+for (const reload of [false, true]) for (const initial of [true, false]) test(`nested playback restoration across ${reload ? 'renderer reload' : 'panel remount'} when ${initial ? 'snapshot' : 'changed event'} arrives first`, () => {
+  const f = fixture()
+  f.playback.observe(f.state())
+  let imageCloses = 0
+  f.history.open('image-preview', () => { imageCloses++ })
+  f.playback.abandon()
+  const history = reload ? createOverlayHistory(f.port) : f.history
+  const commands: unknown[] = []
+  const restored = createPlaybackHistory(history, (id, value) => commands.push({ id, value }), () => {})
+  restored.observe(f.state(), initial)
+  restored.observe(f.state('fullscreen'))
+  assert.equal(f.length(), 3, 'restoring and changing presentation cannot insert playback above the image')
+  assert.equal(f.marker()?.kind, 'image-preview')
+  history.pop(f.move())
+  assert.equal(imageCloses, reload ? 0 : 1, 'reload must not revive the obsolete image callback')
+  if (reload) {
+    assert.deepEqual(commands, [{ id: 'one', value: { kind: 'presentation', value: 'docked' } }], 'the image UI did not survive reload: Back must dock without an empty step')
+    restored.observe(f.state('docked'))
+  } else assert.deepEqual(commands, [], 'closing a live image must preserve expanded playback')
+  history.pop(f.move())
+  assert.deepEqual(commands, [{ id: 'one', value: { kind: 'presentation', value: 'docked' } }])
+  assert.deepEqual(f.commands, [], 'the old playback owner must remain abandoned')
+  assert.deepEqual(f.goes, reload ? [-1] : [], 'only empty same-route history positions may be drained after reload')
+})
+test('navigation after restoring a nested player consumes the parent and image without stale commands', () => {
+  const f = fixture()
+  f.playback.observe(f.state())
+  f.history.open('image-preview', () => {})
+  f.playback.abandon()
+  const restored = createPlaybackHistory(f.history, () => assert.fail('docking was already acknowledged'), () => {})
+  restored.observe(f.state(), true)
+  restored.closeForNavigation()
+  assert.deepEqual(f.goes, [-2])
+  f.pop(-2)
+  assert.equal(f.marker(), null)
+})
+test('restoration during a child close reclaims the surviving parent and survives ordinary clock events', () => {
+  const f = fixture()
+  f.playback.observe(f.state())
+  const parent = f.marker()?.token
+  const image = f.history.open('image-preview', () => {})
+  f.history.close(image)
+  f.playback.abandon()
+  const commands: unknown[] = []
+  const restored = createPlaybackHistory(f.history, (id, value) => commands.push({ id, value }), () => {})
+  restored.observe(f.state(), true)
+  restored.observe(f.state('fullscreen'))
+  assert.equal(f.length(), 3)
+  f.pop()
+  restored.observe(f.state('fullscreen'))
+  assert.equal(f.marker()?.token, parent, 'restoration must not queue a replacement viewing entry')
+  f.pop()
+  assert.deepEqual(commands, [{ id: 'one', value: { kind: 'presentation', value: 'docked' } }])
+  assert.deepEqual(f.commands, [])
+  assert.deepEqual(f.goes, [-1])
+})
+test('abandoning a restoration during traversal never reclaims an obsolete callback', () => {
+  const f = fixture()
+  f.playback.observe(f.state())
+  f.history.close(f.history.open('image-preview', () => {}))
+  f.playback.abandon()
+  const obsolete = createPlaybackHistory(f.history, () => assert.fail('obsolete restoration'), () => {})
+  obsolete.observe(f.state(), true)
+  obsolete.abandon()
+  const current = createPlaybackHistory(f.history, (id, value) => f.commands.push({ id, value }), () => {})
+  current.observe(f.state(), true)
+  f.pop(); f.pop()
+  assert.deepEqual(f.commands, [{ id: 'one', value: { kind: 'presentation', value: 'docked' } }])
+})
+for (const forward of [false, true]) test(`anonymous image parents do not leave an empty Back after ${forward ? 'Forward and reopening' : 'renderer reload'}`, () => {
+  const f = fixture()
+  f.history.open('image-preview', () => assert.fail('image did not survive reload'))
+  f.playback.observe(f.state())
+  f.playback.abandon()
+  const history = createOverlayHistory(f.port)
+  const commands: unknown[] = []
+  const restored = createPlaybackHistory(history, (id, value) => commands.push({ id, value }), () => {})
+  restored.observe(f.state(), true)
+  history.pop(f.move())
+  assert.deepEqual(commands, [{ id: 'one', value: { kind: 'presentation', value: 'docked' } }])
+  assert.deepEqual(f.goes, [-1], 'consume the anonymous same-route parent in the same user action')
+  history.pop(f.move())
+  assert.equal(f.marker(), null)
+  if (forward) {
+    history.pop(f.move(2))
+    restored.observe(f.state('docked'))
+    restored.observe(f.state())
+    history.pop(f.move())
+    assert.deepEqual(f.goes, [-1, -1])
+    history.pop(f.move())
+    assert.equal(f.marker(), null)
+    assert.equal(commands.length, 2)
+  }
+})
 test('explicit fullscreen docking or stop consumes all owned layers without another business back', () => {
   for (const next of [null, 'docked'] as const) {
     const f = fixture()
@@ -105,6 +229,45 @@ test('switching resources reuses the viewing layer but a history close targets o
   assert.deepEqual(f.options, [true, false])
   f.pop()
   assert.deepEqual(f.commands, [{ id: 'two', value: { kind: 'presentation', value: 'docked' } }])
+})
+for (const remount of [false, true]) test(`a new session above an image aligns history with modal ownership (remount: ${remount})`, () => {
+  const f = fixture()
+  f.playback.observe(f.state())
+  let imageCloses = 0
+  f.history.open('image-preview', () => { imageCloses++ })
+  let current = f.playback
+  if (remount) {
+    current.abandon()
+    current = createPlaybackHistory(f.history, (id, value) => f.commands.push({ id, value }), () => {})
+    current.observe(f.state(), true)
+  }
+  current.observe(f.state('expanded', 'playing', 'two'))
+  assert.equal(f.marker()?.kind, 'playback-expanded', 'a new top modal must own the top history position')
+  f.pop()
+  assert.deepEqual(f.commands, [{ id: 'two', value: { kind: 'presentation', value: 'docked' } }])
+  assert.equal(imageCloses, 0, 'first Back docks the new top session, not its image parent')
+  current.observe(f.state('docked', 'playing', 'two'))
+  f.pop()
+  assert.equal(imageCloses, 1)
+  assert.deepEqual(f.goes, [-1], 'the abandoned old playback position is drained with the image')
+  f.pop()
+  assert.equal(f.marker(), null)
+})
+for (const baseline of [null, 'docked'] as const) test(`an inactive initial baseline releases an early restored token (${baseline})`, () => {
+  const f = fixture()
+  f.playback.observe(f.state())
+  let imageCloses = 0
+  f.history.open('image-preview', () => { imageCloses++ })
+  f.playback.abandon()
+  const current = createPlaybackHistory(f.history, (id, value) => f.commands.push({ id, value }), () => {})
+  current.observe(f.state('expanded', 'playing', 'two'), true)
+  current.observe(baseline ? f.state(baseline) : null, true)
+  assert.deepEqual(f.goes, [], 'an initial baseline cannot navigate or control a session')
+  current.observe(f.state('expanded', 'playing', 'two'))
+  assert.equal(f.marker()?.kind, 'playback-expanded', 'the explicit open after an inactive baseline must become the top history owner')
+  f.pop()
+  assert.deepEqual(f.commands, [{ id: 'two', value: { kind: 'presentation', value: 'docked' } }])
+  assert.equal(imageCloses, 0)
 })
 test('the error surface closes on back and clearing ownership does not control a session or navigate', () => {
   const f = fixture()

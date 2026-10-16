@@ -8,6 +8,7 @@ import { execFileSync } from 'node:child_process'
 import { ServerUpdateClient, uploadServerUpdateBundle } from '../packages/http/src/updateClient'
 import { writeUpdateBundle } from '../packages/http/src/updateBundle'
 import { updaterPairingSchema, type ServerReleaseDescriptor, type ServerUpdateManifest } from '../packages/contracts/src/serverUpdateTypes'
+import { SERVER_ENVIRONMENT_VERSION } from '../packages/contracts/src/serverEnvironment'
 import { requestBusiness } from '../apps/server/src/updater/businessHttp'
 import { waitForUpdateStatus } from './server-updater-smoke-wait'
 import { CURRENT_SCHEMA_VERSION } from '../packages/library/src/db/migrations'
@@ -85,6 +86,8 @@ async function main(): Promise<void> {
     const good = path.join(directory, 'good-release')
     fs.mkdirSync(good)
     docker(['cp', `${artifact}:/app/.`, good])
+    const imageDescriptor = JSON.parse(fs.readFileSync(path.join(good, 'release.json'), 'utf8')) as ServerReleaseDescriptor
+    assert.equal(imageDescriptor.environmentVersion, SERVER_ENVIRONMENT_VERSION, 'image metadata must declare the baked environment version')
     docker(['rm', artifact]); created.splice(created.indexOf(artifact), 1)
     // The published 0.8.0 image supplies real schema-19 data above. The managed
     // baseline uses this source's unified pairing APIs with a synthetic version;
@@ -101,6 +104,12 @@ async function main(): Promise<void> {
     docker(['run', '--detach', '--name', name, '--label', `javdex.update-test=${name}`, '--stop-timeout', '150', '-p', `127.0.0.1:${businessPort}:8096`, '-v', `${dataVolume}:/data`, '-v', `${programVolume}:/program`, '-v', `${configDir}:/config:ro`, '-v', `${seed}:/seed:ro`, '-e', 'JAVDEX_SERVER_SEED_DIR=/seed', '-e', 'JAVDEX_WEB_PASSWORD=isolated-smoke-password', '-e', 'JAVDEX_UPDATE_KEYS_FILE=/config/keys.json', '-e', `JAVDEX_PUBLIC_URL=${origin}`, image, 'start', '--config', '/config/server.json'])
     created.push(name)
     await waitReady()
+    // Query the image itself before a device grant or matching-version header.
+    const environment = await connection.fetch(new URL('/runtime/v1/info', origin))
+    assert.equal(environment.status, 200)
+    assert.equal(environment.headers.get('cache-control'), 'no-store')
+    assert.deepEqual(await environment.json(), { format: 1, environmentVersion: SERVER_ENVIRONMENT_VERSION,
+      runtimeId: 'node22-bookworm-v1', platform: `linux/${arch}` })
     const bundle = docker(['exec', name, 'node', '/opt/javdex-manager/index.js', 'token', '--config', '/config/server.json']).trim()
     const secret = randomBytes(32).toString('hex')
     const paired = await connection.claim(bundle, baselineVersion, secret)
@@ -115,8 +124,13 @@ async function main(): Promise<void> {
       const archive = path.join(directory, `${kind}.tar.gz`)
       execFileSync(process.execPath, ['scripts/server-release-package.mjs', 'archive', closure, archive], { stdio: 'inherit' })
       const payloadDescriptor = JSON.parse(dockerArchiveMetadata(archive, directory)) as ServerReleaseDescriptor
-      const manifest: ServerUpdateManifest = { format: 1, version: targetVersion, build: payloadDescriptor.build, expiresAt: new Date(Date.now() + 86400_000).toISOString(), platform: `linux/${arch}`, sourceSchemas: [CURRENT_SCHEMA_VERSION], targetSchema: CURRENT_SCHEMA_VERSION, minUpdaterProtocol: 1, runtime: 'node22-bookworm-v1', archive: { url: `https://github.com/JavdexLabs/Javdex/releases/download/v${targetVersion}/${kind}.javdex-update`, bytes: fs.statSync(archive).size, unpackedBytes: Object.values(payloadDescriptor.files).reduce((sum, value) => sum + value.bytes, Buffer.byteLength(JSON.stringify(payloadDescriptor)) + 1), sha256: fingerprint(archive) } }
+      assert.equal(payloadDescriptor.environmentVersion, SERVER_ENVIRONMENT_VERSION)
+      const manifest: ServerUpdateManifest = { format: 1, version: targetVersion, build: payloadDescriptor.build, expiresAt: new Date(Date.now() + 86400_000).toISOString(), platform: `linux/${arch}`, sourceSchemas: [CURRENT_SCHEMA_VERSION], targetSchema: CURRENT_SCHEMA_VERSION, minUpdaterProtocol: 1, runtime: 'node22-bookworm-v1', environmentVersion: SERVER_ENVIRONMENT_VERSION, archive: { url: `https://github.com/JavdexLabs/Javdex/releases/download/v${targetVersion}/${kind}.javdex-update`, bytes: fs.statSync(archive).size, unpackedBytes: Object.values(payloadDescriptor.files).reduce((sum, value) => sum + value.bytes, Buffer.byteLength(JSON.stringify(payloadDescriptor)) + 1), sha256: fingerprint(archive) } }
       const payload = JSON.stringify(manifest)
+      const incompatiblePayload = JSON.stringify({ ...manifest, environmentVersion: SERVER_ENVIRONMENT_VERSION + 1 })
+      await assert.rejects(client.import({ keyId: 'smoke', payload: incompatiblePayload,
+        signature: sign(null, Buffer.from(incompatiblePayload), keys.privateKey).toString('base64') }, targetVersion), /需要升级服务端Docker镜像/)
+      assert.equal((await client.control('status')).job, null, 'a signed incompatible environment cannot create a job or accept archive bytes')
       const bundle = path.join(directory, `${kind}.javdex-update`)
       await writeUpdateBundle(archive, bundle, { keyId: 'smoke', payload, signature: sign(null, Buffer.from(payload), keys.privateKey).toString('base64') })
       const fd = fs.openSync(bundle, 'r')
@@ -173,7 +187,8 @@ async function main(): Promise<void> {
         const archive = path.join(directory, `${kind}.tar.gz`)
         execFileSync(process.execPath, ['scripts/server-release-package.mjs', 'archive', closure, archive], { stdio: 'inherit' })
         const descriptor = JSON.parse(dockerArchiveMetadata(archive, directory)) as ServerReleaseDescriptor
-        const manifest: ServerUpdateManifest = { format: 1, version: targetVersion, build: descriptor.build, expiresAt: new Date(Date.now() + 86400_000).toISOString(), platform: `linux/${arch}`, sourceSchemas: [CURRENT_SCHEMA_VERSION], targetSchema: CURRENT_SCHEMA_VERSION, minUpdaterProtocol: 1, runtime: 'node22-bookworm-v1', archive: { url: `https://github.com/JavdexLabs/Javdex/releases/download/v${targetVersion}/${kind}.javdex-update`, bytes: fs.statSync(archive).size, unpackedBytes: Object.values(descriptor.files).reduce((sum, file) => sum + file.bytes, Buffer.byteLength(JSON.stringify(descriptor)) + 1), sha256: fingerprint(archive) } }
+        assert.equal(descriptor.environmentVersion, SERVER_ENVIRONMENT_VERSION)
+        const manifest: ServerUpdateManifest = { format: 1, version: targetVersion, build: descriptor.build, expiresAt: new Date(Date.now() + 86400_000).toISOString(), platform: `linux/${arch}`, sourceSchemas: [CURRENT_SCHEMA_VERSION], targetSchema: CURRENT_SCHEMA_VERSION, minUpdaterProtocol: 1, runtime: 'node22-bookworm-v1', environmentVersion: SERVER_ENVIRONMENT_VERSION, archive: { url: `https://github.com/JavdexLabs/Javdex/releases/download/v${targetVersion}/${kind}.javdex-update`, bytes: fs.statSync(archive).size, unpackedBytes: Object.values(descriptor.files).reduce((sum, file) => sum + file.bytes, Buffer.byteLength(JSON.stringify(descriptor)) + 1), sha256: fingerprint(archive) } }
         const payload = JSON.stringify(manifest)
         const file = path.join(directory, `${kind}.javdex-update`)
         await writeUpdateBundle(archive, file, { keyId: 'smoke', payload, signature: sign(null, Buffer.from(payload), keys.privateKey).toString('base64') })

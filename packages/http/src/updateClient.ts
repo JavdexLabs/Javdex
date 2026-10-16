@@ -6,6 +6,12 @@ import fs from 'node:fs'
 import type { VerifyServerCertificate } from './pinnedFetch'
 import { readUpdateBundle, verifyBundleArchive } from './updateBundle'
 import { updaterPairingSchema, signedUpdateSchema, updateManifestSchema, serverUpgradeVersionSchema, type UpdaterPairing, type ServerUpdateSnapshot, type SignedServerUpdate } from '@shared/serverUpdateTypes'
+import { assertServerEnvironmentVersion } from '@shared/serverEnvironment'
+
+/** Preserve HTTP failure identity without changing authentication or retry policy. */
+export class ServerUpdateRequestError extends Error {
+  constructor(message: string, readonly statusCode: number, readonly code?: string) { super(message) }
+}
 
 /** Upload only the inner archive; journal offsets exclude the transport header. */
 export async function uploadServerUpdateBundle(client: Pick<ServerUpdateClient, 'import' | 'upload'>, fd: number, targetVersion: string): Promise<ServerUpdateSnapshot> {
@@ -13,6 +19,7 @@ export async function uploadServerUpdateBundle(client: Pick<ServerUpdateClient, 
   const bundle = readUpdateBundle(fd)
   const signed = signedUpdateSchema.parse(bundle.signed)
   const manifest = updateManifestSchema.parse(JSON.parse(signed.payload))
+  assertServerEnvironmentVersion(manifest.environmentVersion)
   if (manifest.version !== targetVersion) throw new Error(`升级包版本必须与此客户端 ${targetVersion} 一致`)
   if (bundle.archiveBytes !== manifest.archive.bytes) throw new Error('所选升级包大小与签名清单不一致')
   await verifyBundleArchive(fd, bundle.archiveOffset, bundle.archiveBytes, manifest.archive.sha256)
@@ -81,8 +88,8 @@ export class ServerUpdateClient {
         response.once('error', () => reject(new Error('更新响应传输失败')))
         response.once('end', () => {
           try {
-            const parsed = JSON.parse(Buffer.concat(chunks).toString('utf8')) as ServerUpdateSnapshot & { error?: string }
-            if (response.statusCode !== 200) throw new Error(parsed.error ?? '更新请求失败')
+            const parsed = JSON.parse(Buffer.concat(chunks).toString('utf8')) as ServerUpdateSnapshot & { error?: string; code?: unknown }
+            if (response.statusCode !== 200) throw new ServerUpdateRequestError(parsed.error ?? '更新请求失败', response.statusCode ?? 0, typeof parsed.code === 'string' ? parsed.code : undefined)
             if (parsed.protocolVersion !== 1 || parsed.serverId !== this.pairing.serverId || parsed.catalogId !== this.pairing.catalogId) throw new Error('更新助手与已配对服务端身份不一致')
             resolve(parsed)
           } catch (error) { reject(error) }

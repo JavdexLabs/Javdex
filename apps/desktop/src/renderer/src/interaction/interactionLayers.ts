@@ -5,6 +5,9 @@ export interface InteractionLayer {
   root(): HTMLElement | null
   anchor?(): HTMLElement | null
   modal?: boolean
+  /** Restoring a view is not a new action that may supersede an existing overlay. */
+  restoring?: boolean
+  restorationKey?: object
   dismiss?(): void
   blockShortcut?(event: KeyboardEvent): boolean
 }
@@ -14,6 +17,9 @@ export const preservedInteractionSurfaceSelector = '[data-interaction-preserve-s
 
 export function createInteractionLayers() {
   const layers: InteractionLayer[] = []
+  const positions = new Map<InteractionLayer, number>()
+  const retiredPositions = new WeakMap<object, number>()
+  let sequence = 0
   const isDescendant = (layer: InteractionLayer, parent: InteractionLayer): boolean => {
     const seen = new Set<string>()
     let parentId = layer.parentId
@@ -34,8 +40,24 @@ export function createInteractionLayers() {
   }
   return {
     register(layer: InteractionLayer): () => void {
-      layers.push(layer)
-      return () => { const index = layers.indexOf(layer); if (index >= 0) layers.splice(index, 1) }
+      const position = layer.restoring
+        ? (layer.restorationKey && retiredPositions.get(layer.restorationKey)) ?? Math.min(0, ...positions.values()) - 1
+        : ++sequence
+      positions.set(layer, position)
+      if (layer.restoring) {
+        const children = layers.filter(child => isDescendant(child, layer))
+        for (const child of children) layers.splice(layers.indexOf(child), 1)
+        const next = layers.findIndex(item => positions.get(item)! > position)
+        const index = next < 0 ? layers.length : next
+        layers.splice(index, 0, layer, ...children)
+        const boundary = next < 0 ? sequence + 1 : positions.get(layers[index + children.length + 1])!
+        children.forEach((child, childIndex) => positions.set(child, position + (boundary - position) * (childIndex + 1) / (children.length + 1)))
+      } else layers.push(layer)
+      return () => {
+        if (layer.restorationKey) retiredPositions.set(layer.restorationKey, positions.get(layer)!)
+        positions.delete(layer)
+        const index = layers.indexOf(layer); if (index >= 0) layers.splice(index, 1)
+      }
     },
     isTop(id: string): boolean { return top()?.id === id },
     isActiveModal(id: string): boolean { return modal()?.id === id },

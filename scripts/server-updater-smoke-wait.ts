@@ -1,4 +1,5 @@
 import { setTimeout as delay } from 'node:timers/promises'
+import { ServerUpdateRequestError } from '../packages/http/src/updateClient'
 
 const reconnectErrors = new Set(['无法连接更新助手', '更新助手连接超时', '更新请求连接中断，请查询状态后重试'])
 
@@ -8,7 +9,11 @@ export async function waitForUpdateStatus<T>(query: () => Promise<T>, options: {
   let lastError: Error | undefined
   do {
     try { return await query() } catch (error) {
-      if (!(error instanceof Error) || !reconnectErrors.has(error.message)) throw error
+      if (!(error instanceof Error)) throw error
+      const retryable = error instanceof ServerUpdateRequestError
+        ? error.statusCode === 503 && error.code === 'BUSINESS_NOT_READY'
+        : reconnectErrors.has(error.message)
+      if (!retryable) throw error
       lastError = error
     }
     if (Date.now() >= deadline) break

@@ -94,6 +94,7 @@ export default function PlaybackPanel(): JSX.Element | null {
     if (!api.playback) return
     let disposed = false
     let initialized = false
+    let snapshotFailed = false
     let notification: { value: PlaybackSnapshot | null } | null = null
     const observe = (value: PlaybackSnapshot | null, initial = false): void => {
       const restored = presentationHistory.observe(value, initial)
@@ -107,6 +108,7 @@ export default function PlaybackPanel(): JSX.Element | null {
         notification = { value }
         // Show the clock immediately, but wait for its baseline before writing history.
         observe(value, true)
+        if (snapshotFailed) initialized = true
       }
     })
     void api.playback.snapshot().then(value => {
@@ -116,7 +118,9 @@ export default function PlaybackPanel(): JSX.Element | null {
       if (notification) observe(notification.value)
     }).catch(() => {
       // A failed initial RPC cannot turn an existing session into a new open.
-      initialized = true
+      if (disposed) return
+      snapshotFailed = true
+      initialized = notification !== null
     })
     return () => { disposed = true; stateRef.current = null; off(); presentationHistory.abandon() }
   }, [presentationHistory])

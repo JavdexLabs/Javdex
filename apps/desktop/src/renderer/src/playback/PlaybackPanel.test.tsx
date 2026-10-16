@@ -175,6 +175,20 @@ test('an early new session after an empty initial snapshot still creates one vie
   await act(async () => history.go())
   assert.deepEqual(controls, [{ id: 'new-session', command: { kind: 'presentation', value: 'docked' } }])
 })
+test('after a failed initial snapshot the first notification establishes a baseline without taking image ownership', async context => {
+  context.mock.method(fake.playback, 'snapshot', async () => { throw new Error('Initial snapshot unavailable') })
+  const removeImage = interactionLayers.register({ id: 'existing-image', modal: true, root: () => null })
+  try {
+    await mount()
+    await act(async () => changed(snapshot()))
+    await act(async () => changed({ ...snapshot(), position: 10 }))
+    assert.equal(history.state, null)
+    assert.equal(interactionLayers.isTop('existing-image'), true)
+    await act(async () => changed(snapshot('new-session')))
+    assert.equal((history.state as unknown as { avOverlay: { kind: string } }).avOverlay.kind, 'playback-expanded')
+    assert.equal(interactionLayers.isTop('existing-image'), false, 'a later explicit new session still opens normally')
+  } finally { removeImage() }
+})
 
 test('remounting the playback panel releases the old history callback and docks the current session', async context => {
   await mount()

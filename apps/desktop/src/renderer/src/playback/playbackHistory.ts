@@ -35,6 +35,10 @@ export function createPlaybackHistory(history: OverlayHistory, command: (id: str
         if (expanded) history.close(expanded)
         return
       }
+      if (expanded && previous && previous.sessionId !== value.sessionId) {
+        history.abandon(expanded)
+        expanded = null
+      }
       // The native clock can beat the initial snapshot RPC after a reload.
       const restored = !expanded && previous === null ? history.adopt('playback-expanded', closeViewing) : null
       if (restored) expanded = restored

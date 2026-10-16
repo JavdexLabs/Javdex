@@ -213,6 +213,29 @@ test('switching resources reuses the viewing layer but a history close targets o
   f.pop()
   assert.deepEqual(f.commands, [{ id: 'two', value: { kind: 'presentation', value: 'docked' } }])
 })
+for (const remount of [false, true]) test(`a new session above an image aligns history with modal ownership (remount: ${remount})`, () => {
+  const f = fixture()
+  f.playback.observe(f.state())
+  let imageCloses = 0
+  f.history.open('image-preview', () => { imageCloses++ })
+  let current = f.playback
+  if (remount) {
+    current.abandon()
+    current = createPlaybackHistory(f.history, (id, value) => f.commands.push({ id, value }), () => {})
+    current.observe(f.state(), true)
+  }
+  current.observe(f.state('expanded', 'playing', 'two'))
+  assert.equal(f.marker()?.kind, 'playback-expanded', 'a new top modal must own the top history position')
+  f.pop()
+  assert.deepEqual(f.commands, [{ id: 'two', value: { kind: 'presentation', value: 'docked' } }])
+  assert.equal(imageCloses, 0, 'first Back docks the new top session, not its image parent')
+  current.observe(f.state('docked', 'playing', 'two'))
+  f.pop()
+  assert.equal(imageCloses, 1)
+  assert.deepEqual(f.goes, [-1], 'the abandoned old playback position is drained with the image')
+  f.pop()
+  assert.equal(f.marker(), null)
+})
 test('the error surface closes on back and clearing ownership does not control a session or navigate', () => {
   const f = fixture()
   f.playback.observe(f.state('expanded', 'error')); f.pop()

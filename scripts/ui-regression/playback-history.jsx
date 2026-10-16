@@ -58,6 +58,7 @@ function ViewingFixture() {
     {query.get('nested') === '1' && <aside data-interaction-preserve-surface="feedback" style={{ position: 'fixed', top: 8, right: 8, zIndex: 9999 }}>
       <button onClick={preview.open}>模拟嵌套图片</button>
       <button onClick={() => publish(makeState())}>模拟展开播放</button>
+      <button onClick={() => publish({ ...makeState(), sessionId: crypto.randomUUID() })}>模拟新播放会话</button>
       <button onClick={() => setGeneration(value => value + 1)}>重建播放面板</button>
       <button onClick={() => { preview.close(); setGeneration(value => value + 1) }}>关闭图片并重建播放面板</button>
     </aside>}

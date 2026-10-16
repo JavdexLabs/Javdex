@@ -141,6 +141,20 @@ test('restoring the panel preserves an existing overlay through clock updates, b
     assert.equal(interactionLayers.isTop('existing-image'), false, 'a newly committed session is not restoration')
   } finally { removeImage() }
 })
+test('each consecutive explicit session aligns keyboard ownership with its top history position', async () => {
+  await mount()
+  await act(async () => changed(snapshot('second')))
+  let imageDismissals = 0
+  const removeImage = interactionLayers.register({ id: 'existing-image', modal: true, root: () => null, dismiss: () => { imageDismissals++ } })
+  try {
+    await act(async () => changed(snapshot('third')))
+    assert.equal((history.state as { avOverlay: { kind: string } }).avOverlay.kind, 'playback-expanded')
+    assert.equal(interactionLayers.isTop('existing-image'), false, 'false → false restoration flags must still activate a new session')
+    await act(async () => { window.dispatchEvent(Object.assign(new Event('keydown', { cancelable: true }), { key: 'Escape', isComposing: false })) })
+    assert.equal(imageDismissals, 0)
+    assert.deepEqual(controls, [{ id: 'third', command: { kind: 'presentation', value: 'docked' } }])
+  } finally { removeImage() }
+})
 
 test('a surviving-session event before the initial RPC response restores ownership without stealing the image', async () => {
   const originalSnapshot = fake.playback.snapshot
@@ -188,6 +202,21 @@ test('after a failed initial snapshot the first notification establishes a basel
     assert.equal((history.state as unknown as { avOverlay: { kind: string } }).avOverlay.kind, 'playback-expanded')
     assert.equal(interactionLayers.isTop('existing-image'), false, 'a later explicit new session still opens normally')
   } finally { removeImage() }
+})
+for (const replacement of [false, true]) test(`initial RPC failure preserves pending explicit viewing transitions (new session: ${replacement})`, async context => {
+  let reject!: (reason: Error) => void
+  context.mock.method(fake.playback, 'snapshot', () => new Promise<PlaybackSnapshot | null>((_resolve, fail) => { reject = fail }))
+  await mount()
+  await act(async () => changed(snapshot()))
+  if (!replacement) await act(async () => changed({ ...snapshot(), presentation: 'docked' }))
+  const latest = snapshot(replacement ? 'second' : 'first')
+  await act(async () => changed(latest))
+  assert.equal(history.state, null, 'pending initialization must not write viewing history')
+  await act(async () => reject(new Error('Initial snapshot unavailable')))
+  await act(async () => changed({ ...latest, position: 12 }))
+  assert.equal((history.state as unknown as { avOverlay?: { kind: string } })?.avOverlay?.kind, 'playback-expanded')
+  await act(async () => history.go())
+  assert.deepEqual(controls, [{ id: latest.sessionId, command: { kind: 'presentation', value: 'docked' } }])
 })
 
 test('remounting the playback panel releases the old history callback and docks the current session', async context => {

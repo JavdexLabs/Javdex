@@ -37,7 +37,7 @@ function syncBackground(): void {
 }
 
 export function useInteractionLayer({
-  enabled = true, rootRef, anchorRef, modal = false, restoring = false, restorationKey, onDismiss, blockShortcut
+  enabled = true, rootRef, anchorRef, modal = false, restoring = false, restorationKey, activationKey, onDismiss, blockShortcut
 }: {
   enabled?: boolean
   rootRef?: RefObject<HTMLElement | null>
@@ -45,6 +45,8 @@ export function useInteractionLayer({
   modal?: boolean
   restoring?: boolean
   restorationKey?: object
+  /** A new explicit activation must register even if its restoration mode is unchanged. */
+  activationKey?: string
   onDismiss?: () => void
   blockShortcut?: (event: KeyboardEvent) => boolean
 }) {
@@ -103,7 +105,7 @@ export function useInteractionLayer({
       if (typeof HTMLElement !== 'undefined') syncBackground()
       if (wasTop && restoreFocus && previousFocus?.isConnected && !previousFocus.matches(':disabled') && !previousFocus.closest('[inert]')) previousFocus.focus()
     }
-  }, [enabled, id, parentId, modal, restoring, restorationKey, rootRef, anchorRef])
+  }, [enabled, id, parentId, modal, restoring, restorationKey, activationKey, rootRef, anchorRef])
   return useMemo(() => ({
     id,
     owner: { id, depth },

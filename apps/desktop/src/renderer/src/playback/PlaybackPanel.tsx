@@ -74,7 +74,8 @@ export default function PlaybackPanel(): JSX.Element | null {
     if (stateRef.current?.sessionId === sessionId) navigate({ pathname: settingsPath('models', 'usage'), hash: '#ai-subtitles' })
   }
   const layer = useInteractionLayer({
-    enabled: Boolean(state && state.presentation !== 'docked'), rootRef: root, modal: true, restoring: restoredView, restorationKey: history,
+    enabled: Boolean(state && state.presentation !== 'docked'), rootRef: root, modal: true, restoring: restoredView,
+    restorationKey: history, activationKey: state?.sessionId,
     onDismiss: () => {
       if (stateRef.current?.phase === 'error') control({ kind: 'stop' })
       else if (options) presentationHistory.setOptions(false)
@@ -95,32 +96,40 @@ export default function PlaybackPanel(): JSX.Element | null {
     let disposed = false
     let initialized = false
     let snapshotFailed = false
-    let notification: { value: PlaybackSnapshot | null } | null = null
+    const notifications: Array<PlaybackSnapshot | null> = []
     const observe = (value: PlaybackSnapshot | null, initial = false): void => {
       const restored = presentationHistory.observe(value, initial)
       if (restored !== undefined) setRestoredView(restored)
       setState(value)
     }
+    const initialize = (value: PlaybackSnapshot | null): void => {
+      observe(value, true)
+      initialized = true
+      for (const notification of notifications) observe(notification)
+      notifications.length = 0
+    }
     const off = api.playback.onChanged(value => {
       if (disposed) return
       if (initialized) observe(value)
       else {
-        notification = { value }
+        const previous = notifications.at(-1)
+        // Compact clock updates, not explicit session/presentation transitions.
+        if (notifications.length && previous?.sessionId === value?.sessionId
+          && previous?.presentation === value?.presentation && previous?.phase === value?.phase) notifications[notifications.length - 1] = value
+        else notifications.push(value)
         // Show the clock immediately, but wait for its baseline before writing history.
         observe(value, true)
-        if (snapshotFailed) initialized = true
+        if (snapshotFailed) initialize(value)
       }
     })
     void api.playback.snapshot().then(value => {
       if (disposed) return
-      observe(value, true)
-      initialized = true
-      if (notification) observe(notification.value)
-    }).catch(() => {
+      initialize(value)
+    }, () => {
       // A failed initial RPC cannot turn an existing session into a new open.
       if (disposed) return
       snapshotFailed = true
-      initialized = notification !== null
+      if (notifications.length) initialize(notifications[0])
     })
     return () => { disposed = true; stateRef.current = null; off(); presentationHistory.abandon() }
   }, [presentationHistory])

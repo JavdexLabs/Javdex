@@ -22,6 +22,10 @@ function fixture() {
   }
   return { history, stack, goes, closes, timers, open, move, pop, route, state: () => stack[index].state }
 }
+test('creating an idle coordinator does not read or mutate browser history', () => {
+  createOverlayHistory({ read: () => assert.fail('unused viewing history must remain lazy'), push: () => assert.fail(),
+    replace: () => assert.fail(), go: () => assert.fail(), later: () => assert.fail(), token: () => assert.fail() })
+})
 test('nested viewing layers retain router state and system back closes only the top without a second back', () => {
   const f = fixture()
   f.open('playback-expanded'); f.open('playback-fullscreen')

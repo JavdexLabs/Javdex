@@ -57,7 +57,9 @@ function ViewingFixture() {
         they are not a claim that the normal modal permits background clicks. */}
     {query.get('nested') === '1' && <aside data-interaction-preserve-surface="feedback" style={{ position: 'fixed', top: 8, right: 8, zIndex: 9999 }}>
       <button onClick={preview.open}>模拟嵌套图片</button>
+      <button onClick={() => publish(makeState())}>模拟展开播放</button>
       <button onClick={() => setGeneration(value => value + 1)}>重建播放面板</button>
+      <button onClick={() => { preview.close(); setGeneration(value => value + 1) }}>关闭图片并重建播放面板</button>
     </aside>}
     <PlaybackPanel key={generation} />
     {preview.isOpen && <ImagePreviewLightbox items={[{ id: 1, src: 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360"><rect width="640" height="360" fill="#777"/></svg>') }]}

@@ -37,13 +37,14 @@ function syncBackground(): void {
 }
 
 export function useInteractionLayer({
-  enabled = true, rootRef, anchorRef, modal = false, restoreBelowExisting = false, onDismiss, blockShortcut
+  enabled = true, rootRef, anchorRef, modal = false, restoring = false, restorationKey, onDismiss, blockShortcut
 }: {
   enabled?: boolean
   rootRef?: RefObject<HTMLElement | null>
   anchorRef?: RefObject<HTMLElement | null>
   modal?: boolean
-  restoreBelowExisting?: boolean
+  restoring?: boolean
+  restorationKey?: object
   onDismiss?: () => void
   blockShortcut?: (event: KeyboardEvent) => boolean
 }) {
@@ -64,7 +65,7 @@ export function useInteractionLayer({
     // Positioning anchors may be non-focusable wrappers around the actual button.
     const previousFocus = anchor && anchor.tabIndex >= 0 ? anchor : returnFocus.current
     const layer: InteractionLayer = {
-      id, parentId, modal, restoreBelowExisting, root: () => rootRef?.current ?? null,
+      id, parentId, modal, restoring, restorationKey, root: () => rootRef?.current ?? null,
       anchor: () => anchorRef?.current ?? null,
       dismiss: () => current.current.onDismiss?.(),
       blockShortcut: event => Boolean(current.current.blockShortcut?.(event))
@@ -102,7 +103,7 @@ export function useInteractionLayer({
       if (typeof HTMLElement !== 'undefined') syncBackground()
       if (wasTop && restoreFocus && previousFocus?.isConnected && !previousFocus.matches(':disabled') && !previousFocus.closest('[inert]')) previousFocus.focus()
     }
-  }, [enabled, id, parentId, modal, restoreBelowExisting, rootRef, anchorRef])
+  }, [enabled, id, parentId, modal, restoring, restorationKey, rootRef, anchorRef])
   return useMemo(() => ({
     id,
     owner: { id, depth },

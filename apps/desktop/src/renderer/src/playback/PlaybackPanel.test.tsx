@@ -154,6 +154,27 @@ test('a surviving-session event before the initial RPC response restores ownersh
     assert.equal((history.state as { avOverlay: { token: string } }).avOverlay.token, 'image')
   } finally { fake.playback.snapshot = originalSnapshot; removeImage() }
 })
+test('a surviving playing event before the initial snapshot cannot invent a viewing entry', async context => {
+  let resolve!: (value: PlaybackSnapshot | null) => void
+  context.mock.method(fake.playback, 'snapshot', () => new Promise<PlaybackSnapshot | null>(done => { resolve = done }))
+  await mount()
+  await act(async () => changed({ ...snapshot(), position: 10 }))
+  assert.equal(history.state, null)
+  await act(async () => resolve(snapshot()))
+  assert.equal(history.state, null, 'the initial snapshot identifies the early notification as an existing session')
+  assert.deepEqual(controls, [])
+})
+test('an early new session after an empty initial snapshot still creates one viewing entry', async context => {
+  let resolve!: (value: PlaybackSnapshot | null) => void
+  context.mock.method(fake.playback, 'snapshot', () => new Promise<PlaybackSnapshot | null>(done => { resolve = done }))
+  await mount()
+  await act(async () => changed(snapshot('new-session')))
+  assert.equal(history.state, null, 'notifications wait for their initial baseline before changing history')
+  await act(async () => resolve(null))
+  assert.equal((history.state as unknown as { avOverlay: { kind: string } }).avOverlay.kind, 'playback-expanded')
+  await act(async () => history.go())
+  assert.deepEqual(controls, [{ id: 'new-session', command: { kind: 'presentation', value: 'docked' } }])
+})
 
 test('remounting the playback panel releases the old history callback and docks the current session', async context => {
   await mount()

@@ -57,11 +57,20 @@ interface Entry extends OverlayHistoryMarker {
 
 /** One writer for temporary viewing layers. No React lifetime owns a traversal. */
 export function createOverlayHistory(port: OverlayHistoryPort) {
-  const initial = port.read()
-  // Reload restores only anonymous positions, never callbacks or viewing content.
-  let entries: Entry[] = readHistoryTrail(initial.state).map(marker => ({ ...marker, url: initial.url, pushed: true, closing: false }))
+  let entries: Entry[] = []
   let pending: { from: string; cancelFallback: () => void } | null = null
   const settled = new Set<() => void>()
+  function recordPositions(current: ReturnType<OverlayHistoryPort['read']>): void {
+    let next: Entry | undefined
+    for (const position of readHistoryTrail(current.state).reverse()) {
+      let entry = entries.find(value => value.token === position.token && value.url === current.url)
+      if (!entry) {
+        entry = { ...position, url: current.url, pushed: true, closing: false }
+        entries.splice(next ? entries.indexOf(next) : entries.length, 0, entry)
+      }
+      next = entry
+    }
+  }
   function finish(entry: Entry, source: OverlayCloseSource): void {
     if (entry.closing) return
     entry.closing = true
@@ -101,7 +110,10 @@ export function createOverlayHistory(port: OverlayHistoryPort) {
         entry.pushed = true
       }
     }
-    if (!pending) for (const action of [...settled]) { settled.delete(action); action() }
+    for (const action of [...settled]) {
+      if (pending) break
+      settled.delete(action); action()
+    }
   }
   function pop(state: unknown): void {
     const marker = readOverlayHistoryMarker(state)
@@ -122,16 +134,22 @@ export function createOverlayHistory(port: OverlayHistoryPort) {
     // A reload may leave empty child positions above the restored visible view.
     // Consume those positions and that view as one user Back, never on mount.
     const exposed = pushed[index]
+    let emptyParent = index
     if (removed.length && removed.every(entry => !entry.close) && exposed?.close && !exposed.closing) {
       finish(exposed, 'history')
-      for (let parent = index - 1; parent >= 0 && !pushed[parent].close; parent--) pushed[parent].closing = true
+      emptyParent--
     }
+    // Reload and Forward may also leave an anonymous parent below the view.
+    // Drain it only after a real close, stopping at the next live owner.
+    if (removed.length) for (; emptyParent >= 0 && !pushed[emptyParent].close; emptyParent--) pushed[emptyParent].closing = true
     flush()
   }
   return {
     open(kind: OverlayHistoryKind, close: NonNullable<Entry['close']>): string {
       const token = port.token()
-      entries.push({ token, kind, close, pushed: false, closing: false, url: port.read().url })
+      const current = port.read()
+      if (!pending) recordPositions(current)
+      entries.push({ token, kind, close, pushed: false, closing: false, url: current.url })
       // An old asynchronous back must settle before a new marker is pushed.
       flush()
       return token
@@ -140,10 +158,15 @@ export function createOverlayHistory(port: OverlayHistoryPort) {
     adopt(kind: OverlayHistoryKind, close: NonNullable<Entry['close']>): string | null {
       const current = port.read()
       const marker = readOverlayHistoryMarker(current.state)
-      if (!marker || pending) return null
+      if (!marker) return null
+      // Read persisted positions only when restoring a view. Retain any live
+      // callbacks registered before the initial snapshot RPC completed.
+      recordPositions(current)
       const cursor = entries.findIndex(entry => entry.token === marker.token && entry.url === current.url)
       const recorded = entries.slice(0, cursor + 1).reverse().find(entry => entry.kind === kind && entry.url === current.url)
       if (recorded) {
+        // A closing child does not invalidate a surviving parent's ownership.
+        // The closing entry itself remains unavailable until its traversal settles.
         if (recorded.close || recorded.closing) return null
         recorded.close = close
         return recorded.token

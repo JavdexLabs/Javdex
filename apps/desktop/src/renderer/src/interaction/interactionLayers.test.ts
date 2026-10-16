@@ -62,7 +62,7 @@ test('a restored viewing branch cannot take keys from an existing overlay, while
   const calls: string[] = []
   const removeImage = stack.register({ id: 'image', modal: true, root: () => null, dismiss: () => calls.push('image') })
   stack.register({ id: 'player-menu', parentId: 'player', root: () => null, dismiss: () => calls.push('menu') })
-  stack.register({ id: 'player', modal: true, restoreBelowExisting: true, root: () => null, dismiss: () => calls.push('player') })
+  stack.register({ id: 'player', modal: true, restoring: true, root: () => null, dismiss: () => calls.push('player') })
   assert.equal(stack.isActiveModal('image'), true)
   stack.handleKey(escape())
   assert.deepEqual(calls, ['image'])
@@ -70,4 +70,29 @@ test('a restored viewing branch cannot take keys from an existing overlay, while
   assert.equal(stack.isTop('player-menu'), true, 'restored descendants still belong to their parent')
   stack.register({ id: 'new-action', modal: true, root: () => null })
   assert.equal(stack.isTop('new-action'), true)
+})
+for (const imageAbove of [false, true]) test(`remounting a player preserves its former order with an image ${imageAbove ? 'above' : 'below'}`, () => {
+  const stack = createInteractionLayers()
+  const key = {}
+  const calls: string[] = []
+  const image = () => stack.register({ id: 'image', modal: true, root: () => null, dismiss: () => calls.push('image') })
+  if (!imageAbove) image()
+  const remove = stack.register({ id: 'old-player', restorationKey: key, root: () => null })
+  if (imageAbove) image()
+  remove()
+  stack.register({ id: 'new-player', restorationKey: key, restoring: true, root: () => null, dismiss: () => calls.push('player') })
+  stack.handleKey(escape())
+  assert.deepEqual(calls, [imageAbove ? 'image' : 'player'])
+})
+for (const imageAbove of [false, true]) test(`restored child-before-parent registration retains the entire branch ${imageAbove ? 'below' : 'above'} an image`, () => {
+  const stack = createInteractionLayers()
+  const key = {}
+  const image = () => stack.register({ id: 'image', root: () => null })
+  if (!imageAbove) image()
+  const remove = stack.register({ id: 'old-player', restorationKey: key, root: () => null })
+  if (imageAbove) image()
+  remove()
+  stack.register({ id: 'menu', parentId: 'new-player', root: () => null })
+  stack.register({ id: 'new-player', restorationKey: key, restoring: true, root: () => null })
+  assert.equal(stack.isTop(imageAbove ? 'image' : 'menu'), true)
 })

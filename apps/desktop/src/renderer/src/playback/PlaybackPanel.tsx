@@ -46,7 +46,7 @@ export default function PlaybackPanel(): JSX.Element | null {
   const [sources, setSources] = useState<{ sessionId: string; items: Array<{ id: number; label: string }>; error: string | null } | null>(null)
   const [videoTitle, setVideoTitle] = useState<{ sessionId: string; label: string } | null>(null)
   const stateRef = useRef(state)
-  const restoredView = useRef(false)
+  const [restoredView, setRestoredView] = useState(true)
   stateRef.current = state
   const root = useRef<HTMLDivElement>(null)
   const video = useRef<HTMLButtonElement>(null)
@@ -74,7 +74,7 @@ export default function PlaybackPanel(): JSX.Element | null {
     if (stateRef.current?.sessionId === sessionId) navigate({ pathname: settingsPath('models', 'usage'), hash: '#ai-subtitles' })
   }
   const layer = useInteractionLayer({
-    enabled: Boolean(state && state.presentation !== 'docked'), rootRef: root, modal: true, restoreBelowExisting: restoredView.current,
+    enabled: Boolean(state && state.presentation !== 'docked'), rootRef: root, modal: true, restoring: restoredView, restorationKey: history,
     onDismiss: () => {
       if (stateRef.current?.phase === 'error') control({ kind: 'stop' })
       else if (options) presentationHistory.setOptions(false)
@@ -93,15 +93,30 @@ export default function PlaybackPanel(): JSX.Element | null {
   useEffect(() => {
     if (!api.playback) return
     let disposed = false
-    let revision = 0
-    const off = api.playback.onChanged(value => {
-      revision++
-      const restored = presentationHistory.observe(value)
-      if (restored !== undefined) restoredView.current = restored
+    let initialized = false
+    let notification: { value: PlaybackSnapshot | null } | null = null
+    const observe = (value: PlaybackSnapshot | null, initial = false): void => {
+      const restored = presentationHistory.observe(value, initial)
+      if (restored !== undefined) setRestoredView(restored)
       setState(value)
+    }
+    const off = api.playback.onChanged(value => {
+      if (disposed) return
+      if (initialized) observe(value)
+      else {
+        notification = { value }
+        // Show the clock immediately, but wait for its baseline before writing history.
+        observe(value, true)
+      }
     })
     void api.playback.snapshot().then(value => {
-      if (!disposed && revision === 0) { restoredView.current = true; presentationHistory.observe(value, true); setState(value) }
+      if (disposed) return
+      observe(value, true)
+      initialized = true
+      if (notification) observe(notification.value)
+    }).catch(() => {
+      // A failed initial RPC cannot turn an existing session into a new open.
+      initialized = true
     })
     return () => { disposed = true; stateRef.current = null; off(); presentationHistory.abandon() }
   }, [presentationHistory])

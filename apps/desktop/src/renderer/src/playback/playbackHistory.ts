@@ -5,6 +5,7 @@ import type { OverlayHistory } from '../interaction/overlayHistory'
 export function createPlaybackHistory(history: OverlayHistory, command: (id: string, value: PlaybackControl) => void, optionsChanged: (open: boolean) => void) {
   let state: PlaybackSnapshot | null = null
   let expanded: string | null = null
+  let receivedInitial = false
   let options = false
   let closingForNavigation = false
   function closeOptions(): void {
@@ -26,6 +27,11 @@ export function createPlaybackHistory(history: OverlayHistory, command: (id: str
       state = value
       const transition = previous?.sessionId !== value?.sessionId || previous?.presentation !== value?.presentation || previous?.phase !== value?.phase && value?.phase === 'error'
       if (initial) {
+        receivedInitial = true
+        if (expanded && (!value || value.presentation === 'docked')) {
+          history.abandon(expanded)
+          expanded = null
+        }
         if (value && value.presentation !== 'docked' && !expanded) expanded = history.adopt('playback-expanded', closeViewing)
         return true
       }
@@ -39,8 +45,8 @@ export function createPlaybackHistory(history: OverlayHistory, command: (id: str
         history.abandon(expanded)
         expanded = null
       }
-      // The native clock can beat the initial snapshot RPC after a reload.
-      const restored = !expanded && previous === null ? history.adopt('playback-expanded', closeViewing) : null
+      // Only an event without a mount baseline may be a surviving first clock.
+      const restored = !expanded && previous === null && !receivedInitial ? history.adopt('playback-expanded', closeViewing) : null
       if (restored) expanded = restored
       // Fullscreen and settings share one viewing entry; system Back always docks.
       if (!expanded) expanded = history.open('playback-expanded', closeViewing)
@@ -64,7 +70,7 @@ export function createPlaybackHistory(history: OverlayHistory, command: (id: str
     abandon(): void {
       if (expanded) history.abandon(expanded)
       closeOptions()
-      expanded = null; state = null
+      expanded = null; state = null; receivedInitial = false
     }
   }
 }

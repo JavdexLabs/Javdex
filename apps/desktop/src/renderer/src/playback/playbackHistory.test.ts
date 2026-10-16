@@ -236,6 +236,22 @@ for (const remount of [false, true]) test(`a new session above an image aligns h
   f.pop()
   assert.equal(f.marker(), null)
 })
+for (const baseline of [null, 'docked'] as const) test(`an inactive initial baseline releases an early restored token (${baseline})`, () => {
+  const f = fixture()
+  f.playback.observe(f.state())
+  let imageCloses = 0
+  f.history.open('image-preview', () => { imageCloses++ })
+  f.playback.abandon()
+  const current = createPlaybackHistory(f.history, (id, value) => f.commands.push({ id, value }), () => {})
+  current.observe(f.state('expanded', 'playing', 'two'), true)
+  current.observe(baseline ? f.state(baseline) : null, true)
+  assert.deepEqual(f.goes, [], 'an initial baseline cannot navigate or control a session')
+  current.observe(f.state('expanded', 'playing', 'two'))
+  assert.equal(f.marker()?.kind, 'playback-expanded', 'the explicit open after an inactive baseline must become the top history owner')
+  f.pop()
+  assert.deepEqual(f.commands, [{ id: 'two', value: { kind: 'presentation', value: 'docked' } }])
+  assert.equal(imageCloses, 0)
+})
 test('the error surface closes on back and clearing ownership does not control a session or navigate', () => {
   const f = fixture()
   f.playback.observe(f.state('expanded', 'error')); f.pop()

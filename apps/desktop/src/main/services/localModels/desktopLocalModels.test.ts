@@ -8,7 +8,6 @@ import { runInNewContext } from 'node:vm'
 import { setTimeout as delay } from 'node:timers/promises'
 import { test } from 'node:test'
 import { ModuleKind, ScriptTarget, transpileModule } from 'typescript'
-import { localAiDirectories } from './modelStorage'
 
 const requireDependency = createRequire(import.meta.url)
 const code = transpileModule(readFileSync(new URL('./desktopLocalModels.ts', import.meta.url), 'utf8'), {
@@ -68,23 +67,38 @@ test('startup preserves pre-existing 0.8.0 cloud translation without editing its
 
 test('failed model inventory is reported to the explicit reader without unhandled notification rejections', async t => {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'javdex-model-notification-')))
-  const models = path.join(localAiDirectories(root).store, 'models')
-  await fs.mkdir(path.dirname(models), { recursive: true })
-  await fs.writeFile(models, 'obstruction')
+  const inventoryFailure = new Error('模型库存读取失败（回归夹具）')
+  let inventoryCalls = 0
   const warnings: unknown[] = [], events: unknown[] = []
   const exports = {} as typeof import('./desktopLocalModels')
   runInNewContext(code, { exports, process,
     console: { warn: (message: unknown) => warnings.push(message) },
     require(name: string): unknown {
-      if (name === 'electron') return { app: { getPath: () => root, getAppPath: () => root, isPackaged: false }, BrowserWindow: { getAllWindows: () => [] } }
+      if (name === 'electron') return { app: { getPath: () => root, getAppPath: () => root, isPackaged: false },
+        BrowserWindow: { getAllWindows: () => [{ isDestroyed: () => false, webContents: {} }] } }
       if (name === '../../ipc/appContractAdapter') return { appEventAdapter: { send: (...args: unknown[]) => events.push(args) } }
+      if (name === './localModelManager') {
+        const actual = requireDependency(name) as typeof import('./localModelManager')
+        const { createAiRuntimeInstaller } = requireDependency('./runtimeInstaller') as typeof import('./runtimeInstaller')
+        return { createLocalModelManager: (directory: string, options: Parameters<typeof actual.createLocalModelManager>[1]) => {
+          assert.equal(directory, root)
+          return actual.createLocalModelManager(directory, { ...options, runtimeSupported: () => false, detectDevices: async () => [],
+            // An obstructed descendant may be ENOENT on Windows instead of ENOTDIR.
+            // Inject the inventory failure at its existing seam, not via OS errno.
+            installer: (...args: Parameters<typeof createAiRuntimeInstaller>) => ({ ...createAiRuntimeInstaller(...args),
+              assetsInstalled: async () => { inventoryCalls++; throw inventoryFailure }
+            })
+          })
+        } }
+      }
       return requireDependency(name)
     }
   }, { filename: 'desktopLocalModels.ts' })
   t.after(async () => { await exports.closeLocalModels(); await fs.rm(root, { recursive: true, force: true }) })
   const manager = exports.getLocalModels()
-  await assert.rejects(manager.snapshot(), /ENOTDIR|模型|目录/)
+  await assert.rejects(manager.snapshot(), cause => cause === inventoryFailure)
   await delay(20)
+  assert.equal(inventoryCalls, 1, 'the real manager must reach the failed inventory')
   assert.deepEqual(events, [], 'do not replace the renderer snapshot with invalid data')
   assert.equal(warnings.length, 1, 'coalesce the repeated initial notifications')
 })

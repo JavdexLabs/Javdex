@@ -9,7 +9,7 @@
 #include <limits>
 
 namespace {
-constexpr size_t maxMessage = 1024 * 1024;
+constexpr size_t maxMessage = 8 * 1024 * 1024 + 4096;
 uint32_t read32(const std::string &bytes, size_t offset) {
     if (offset + 4 > bytes.size()) throw std::runtime_error("Truncated playback command");
     const auto *p = reinterpret_cast<const unsigned char *>(bytes.data() + offset);
@@ -50,7 +50,13 @@ bool dispatch(const std::vector<std::string> &fields) {
     } else if (op == "bounds" && fields.size() == 6) bounds(rectangle(fields, 1));
     else if (op == "visible" && fields.size() == 2 && (fields[1] == "0" || fields[1] == "1")) setVisible(fields[1] == "1");
     else if (op == "presentation" && fields.size() == 2) setPresentation(fields[1]);
-    else if (op == "command" && fields.size() >= 2 && fields.size() <= 9) playback.command({fields.begin() + 1, fields.end()});
+    else if ((op == "command" || op == "generated-subtitle-command") && fields.size() >= 2 && fields.size() <= 9)
+        playback.command({fields.begin() + 1, fields.end()}, op == "generated-subtitle-command");
+    else if (op == "generated-subtitles" && fields.size() == 5 && (fields[3] == "0" || fields[3] == "1")) {
+        const double revision = finiteNumber(fields[4]);
+        if (revision < 1 || revision > 9007199254740991.0 || std::floor(revision) != revision) throw std::runtime_error("Invalid subtitle revision");
+        playback.generatedSubtitles(fields[1], fields[2], fields[3] == "1", static_cast<uint64_t>(revision));
+    }
     else if (op == "destroy" && fields.size() == 1) { destroyPlayer(); return false; }
     else throw std::runtime_error("Invalid playback operation");
     return true;

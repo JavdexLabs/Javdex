@@ -183,6 +183,7 @@ export const CATALOG_METHODS = {
     status: true,
     setEnabled: true,
     pairOpen: true,
+    pairClose: true,
     pairInspect: true,
     pairDecide: true,
     deviceRemove: true,

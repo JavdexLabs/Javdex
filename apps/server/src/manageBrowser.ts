@@ -19,6 +19,7 @@ export interface ManageBrowserSurface {
   status(): ManageBrowserStatus
   setEnabled(enabled: boolean): ManageBrowserStatus
   pairOpen(): ManageBrowserStatus
+  pairClose(): ManageBrowserStatus
   pairInspect(code: string): { name: string; expires: number; remember: boolean }
   pairDecide(code: string, approve: boolean): ManageBrowserStatus
   deviceRemove(id: string): ManageBrowserStatus

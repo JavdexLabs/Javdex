@@ -12,6 +12,13 @@ export interface NativePlaybackState {
   presentedFrames?: number
   loadedFiles?: number
   subtitleCommandErrors?: number
+  generatedSubtitleCommandErrors?: number
+  generatedSubtitleCommandsPending?: number
+  generatedSubtitleCommandReplies?: number
+  generatedSubtitleOverlayVersion?: number
+  generatedSubtitleRevision?: number
+  subtitleCommandsPending?: number
+  subtitleCommandReplies?: number
   error?: string
   errorKind?: 'format' | 'streams' | 'audio' | 'video' | 'load' | 'native'
   pause?: boolean
@@ -34,6 +41,8 @@ export interface NativePlaybackState {
   'current-ao'?: string
   'frame-drop-count'?: number
   'track-list'?: string
+  sid?: string
+  aid?: string
   'chapter-list'?: string
   actions?: Array<{ kind: 'toggle-pause' | 'toggle-mute' | 'expand' | 'dock' | 'fullscreen' | 'stop' | 'seek' | 'seek-relative' | 'volume' | 'volume-relative' | 'focus-forward' | 'focus-backward' | 'history-back' | 'history-forward' | 'escape'; value?: number }>
 }
@@ -46,12 +55,13 @@ export interface NativePlayback {
     occlusions?: PlaybackOcclusion[]): void
   render(): void
   addSubtitle(file: string): void
-  /** Main-owned generated files only; renderer cannot provide a path. */
-  updateGeneratedSubtitle?(file: string, select: boolean): void
-  removeGeneratedSubtitle?(file: string, restoreId: number | null): void
+  /** Main-owned ASS timeline and logical file identity; native display never reloads that file. */
+  updateGeneratedSubtitle?(file: string, select: boolean, signal: AbortSignal | undefined, document: string): void | Promise<void>
+  removeGeneratedSubtitle?(file: string, restoreId: number | null): void | Promise<void>
   generatedSubtitleSelected?(file: string): boolean
   selectedAudioStream?(): number | null
   /** Non-consuming optional-command counter; never drains playback input. */
   subtitleCommandErrors?(): number
+  generatedSubtitleCommandErrors?(): number
   destroy(): void
 }

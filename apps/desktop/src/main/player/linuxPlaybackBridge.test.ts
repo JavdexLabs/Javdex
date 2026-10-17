@@ -54,6 +54,8 @@ function dispatch(fields) {
     if (hanging) return;
     const stop = () => { emit({ alive: false, loadedFiles: 999999 }); process.exit(0); };
     if (mode === 'slow-destroy') setTimeout(stop, 80); else stop();
+  } else if (fields[0] === 'generated-subtitles') {
+    emit({ alive: true, generatedSubtitleOverlayVersion: 1, generatedSubtitleRevision: Number(fields[4]), generatedSubtitleCommandsPending: 0 });
   } else if (fields[0] === 'command') {
     switch (fields[1]) {
       case 'actions':
@@ -130,6 +132,9 @@ test('Linux protocol uses byte lengths and preserves special UTF-8 locators with
   assert.equal(encodePlaybackMessage(['x'.repeat(LIMIT - 8)]).length, LIMIT + 4)
   assert.throws(() => encodePlaybackMessage(['x'.repeat(LIMIT - 7)]), /过长/)
   assert.throws(() => encodePlaybackMessage(['字'.repeat(Math.ceil((LIMIT - 8) / 3))]), /过长/)
+  const timeline = ['generated-subtitles', 'update', '字幕\n'.repeat(180000), '1', '29']
+  assert.deepEqual(decode(encodePlaybackMessage(timeline)), timeline)
+  assert.throws(() => encodePlaybackMessage(['generated-subtitles', 'update', 'x'.repeat(8 * LIMIT + 4096), '1', '30']), /过长/)
 })
 
 test('Linux bridge validates backend and XID before starting a helper', linuxOnly, t => {
@@ -150,11 +155,17 @@ test('Linux bridge exchanges real pipe messages, caches state, drains actions an
   ])
   const locator = '/媒体 folder/a;$(touch ignored)\n"subtitle".mkv'
   f.bridge.command(['loadfile', locator, 'replace'])
+  f.bridge.command(['sub-reload', '7'], true)
+  f.bridge.generatedSubtitles('update', '字幕\nDialogue: example', true, 29)
+  await until(() => f.bridge.inspect(), state => state.generatedSubtitleRevision === 29, 'timeline was not acknowledged')
+  assert.deepEqual(f.entries().find(entry => entry.fields[0] === 'generated-subtitles')?.fields,
+    ['generated-subtitles', 'update', '字幕\nDialogue: example', '1', '29'])
   f.bridge.setBounds(bounds); f.bridge.setBounds(bounds)
   f.bridge.setVisible(true); f.bridge.setVisible(true)
   f.bridge.setPresentation('fullscreen'); f.bridge.setPresentation('fullscreen')
   await until(f.entries, entries => entries.some(entry => entry.fields[0] === 'presentation'), 'viewport messages did not arrive')
   assert.deepEqual(f.entries().find(entry => entry.fields[0] === 'command')?.fields, ['command', 'loadfile', locator, 'replace'])
+  assert.deepEqual(f.entries().find(entry => entry.fields[0] === 'generated-subtitle-command')?.fields, ['generated-subtitle-command', 'sub-reload', '7'])
   for (const kind of ['bounds', 'visible', 'presentation']) assert.equal(f.entries().filter(entry => entry.fields[0] === kind).length, 1)
   f.bridge.command(['actions'])
   const state = await until(() => f.bridge.state(), value => value['time-pos'] === 11, 'actions did not arrive')

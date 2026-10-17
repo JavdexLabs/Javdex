@@ -5,6 +5,10 @@ import type { ChildProcess, spawn, SpawnOptions } from 'node:child_process'
 import type { LocalTranslationModelId } from '@shared/desktop/localModels'
 import { createOfflineSubtitleInference } from './offlineInference'
 import { createAiRuntimeInstaller } from '../../services/localModels/runtimeInstaller'
+import fs from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
+import { LocalModelProcessFailure } from '../../services/localModels/processRunner'
 
 function fixture(model: LocalTranslationModelId, result: unknown = '中文译文', finishReason = 'stop') {
   const logs: Array<{ stage: string; value: unknown }> = []
@@ -32,6 +36,53 @@ function fixture(model: LocalTranslationModelId, result: unknown = '中文译文
     log: (stage, value) => logs.push({ stage, value }) })
   return { inference, launches, requests, logs, kills: () => kills }
 }
+
+test('recognition retries a failed GPU chunk once on CPU and retains CPU for later chunks', { skip: process.platform !== 'win32' }, async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'javdex-asr-gpu-'))
+  t.after(() => fs.rm(root, { recursive: true, force: true }))
+  const model = path.join(root, 'model.bin'); await fs.writeFile(model, 'fixture')
+  const launches: Array<{ executable: string; args: string[] }> = []
+  const inference = createOfflineSubtitleInference({ ...createAiRuntimeInstaller(root).paths(), kotoba: model, whisper: '/cpu-asr', ffmpeg: '/extract',
+    acceleration: { policy: { mode: 'auto' }, devices: [{ id: 'GPU-fixture', name: 'Fixture', backend: 'cuda', index: 0, memoryMiB: 16000 }], runtimes: { cuda: { whisper: '/gpu-asr' } } }
+  }, path.join(root, 'work'), { run: async (executable, args) => {
+    if (executable === '/extract') { await fs.writeFile(args.at(-1)!, 'wav'); return '' }
+    launches.push({ executable, args })
+    if (executable === '/gpu-asr') throw new LocalModelProcessFailure('whisper', 1, true)
+    assert.ok(args.includes('--no-gpu'))
+    const output = args[args.indexOf('-of') + 1]
+    await fs.writeFile(`${output}.json`, JSON.stringify({ transcription: [{ offsets: { from: 4000, to: 5000 }, text: 'こんにちは' }] }))
+    return ''
+  } })
+  try {
+    const signal = new AbortController().signal
+    assert.equal((await inference.recognize('/sample', 0, 0, 20, signal)).length, 1)
+    await inference.recognize('/sample', 0, 20, 40, signal)
+    assert.deepEqual(launches.map(value => value.executable), ['/gpu-asr', '/cpu-asr', '/cpu-asr'])
+    assert.deepEqual(await fs.readdir(path.join(root, 'work')), [])
+  } finally { await inference.close() }
+})
+
+test('recognition never retries corrupt models or user cancellation on CPU', { skip: process.platform !== 'win32' }, async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'javdex-asr-no-retry-'))
+  t.after(() => fs.rm(root, { recursive: true, force: true }))
+  const model = path.join(root, 'model.bin'); await fs.writeFile(model, 'fixture')
+  for (const cancel of [false, true]) {
+    const launches: string[] = [], controller = new AbortController()
+    const inference = createOfflineSubtitleInference({ ...createAiRuntimeInstaller(root).paths(), kotoba: model, whisper: '/cpu', ffmpeg: '/extract',
+      acceleration: { policy: { mode: 'auto' }, devices: [{ id: 'GPU-fixture', name: 'Fixture', backend: 'cuda', index: 0, memoryMiB: 16000 }], runtimes: { cuda: { whisper: '/gpu' } } }
+    }, path.join(root, 'work'), { run: async (executable, args) => {
+      if (executable === '/extract') { await fs.writeFile(args.at(-1)!, 'wav'); return '' }
+      launches.push(executable)
+      if (cancel) controller.abort()
+      throw new LocalModelProcessFailure('whisper', 1, cancel)
+    } })
+    try {
+      await assert.rejects(inference.recognize('/sample', 0, 0, 20, controller.signal))
+      assert.deepEqual(launches, ['/gpu'])
+      assert.deepEqual(await fs.readdir(path.join(root, 'work')), [])
+    } finally { await inference.close() }
+  }
+})
 
 for (const model of ['qwen3', 'hy-mt2-7b'] as const) {
   test(`${model} serializes owned offline text and subtitle requests with its own model policy`, async () => {

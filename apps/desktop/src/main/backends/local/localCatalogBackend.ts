@@ -1268,6 +1268,7 @@ export function createLocalCatalogBackend(
       'status',
       'setEnabled',
       'pairOpen',
+      'pairClose',
       'pairInspect',
       'pairDecide',
       'deviceRemove',

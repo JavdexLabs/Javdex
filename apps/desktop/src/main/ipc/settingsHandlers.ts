@@ -99,6 +99,12 @@ export function registerSettingsHandlers(ctx: IpcContext, backend: CatalogBacken
     }
     return webAccess.openPairing()
   })
+  appCommandAdapter.register(IPC.WEB_ACCESS_PAIR_CLOSE, async () => {
+    if (backend.mode === 'remote') {
+      return mapRemoteBrowserStatus(await backend.browser.pairClose({}, ipcMutation()))
+    }
+    return webAccess.closePairing()
+  })
   appCommandAdapter.register(IPC.WEB_ACCESS_PAIR_INSPECT, async (code) => {
     if (backend.mode === 'remote') {
       return backend.browser.pairInspect({ code })
@@ -293,10 +299,17 @@ export function registerSettingsHandlers(ctx: IpcContext, backend: CatalogBacken
   appCommandAdapter.register(IPC.LOCAL_MODELS_COMMAND, async command => {
     const models = getLocalModels(), window = ctx.getWindow()
     if (command.action === 'download') await models.download(command.model, command.variant)
+    else if (command.action === 'acceleration') await models.setAcceleration(command.policy, command.expectedRevision)
+    else if (command.action === 'detect-devices') await models.detectDevices()
+    else if (command.action === 'prepare-runtime') await models.prepareRuntime(command.group, command.target)
+    else if (command.action === 'delete-runtime') await models.removeRuntime(command.group, command.target)
+    else if (command.action === 'prepare-acceleration') await models.prepareAcceleration(command.model, command.variant)
     else if (command.action === 'copy-download-url') clipboard.writeText(await models.downloadUrl(command.model, command.variant))
     else if (command.action === 'import') {
-      const model = (await models.snapshot()).models.find(item => item.id === command.model)!
+      const snapshot = await models.snapshot()
+      const model = snapshot.models.find(item => item.id === command.model)!
       const variant = model.variants.find(item => item.id === (command.variant ?? model.selectedVariant))!
+      if (snapshot.supported && !variant.runtimeReady) throw new Error(`请先安装${command.model === 'kotoba' ? '语音' : '文本'}模型的基础运行环境；GPU 加速支持可选`)
       const options = { title: `导入 ${model.name} · ${variant.precision} · ${variant.publisher}`,
         properties: ['openFile'] as Array<'openFile'>,
         filters: [{ name: '模型文件', extensions: variant.format === 'GGUF' ? ['gguf'] : ['bin'] }, { name: '所有文件', extensions: ['*'] }] }
@@ -307,6 +320,11 @@ export function registerSettingsHandlers(ctx: IpcContext, backend: CatalogBacken
     else if (command.action === 'cancel-download') models.cancel()
     else if (command.action === 'clean-downloads') await models.cleanDownloads()
     else if (command.action === 'clear-cache') await models.clearCache()
+    else if (command.action === 'refresh-storage') await models.refreshStorage()
+    else if (command.action === 'open-location') {
+      const failure = await shell.openPath((await models.snapshot()).directory)
+      if (failure) throw new Error(failure)
+    }
     else if (command.action === 'translation') await models.setTranslation(command.mode)
     else if (command.action === 'download-source') await models.setDownloadSource(command.source)
     else if (command.action === 'translation-model') await models.selectTranslationModel(command.model)
@@ -314,10 +332,8 @@ export function registerSettingsHandlers(ctx: IpcContext, backend: CatalogBacken
     else if (command.action === 'delete') {
       const model = (await models.snapshot()).models.find(item => item.id === command.model)!
       const variant = model.variants.find(item => item.id === (command.variant ?? model.selectedVariant))!
-      const options = { type: 'question' as const, title: '删除本地模型', message: `删除“${model.name} · ${variant.precision} · ${variant.publisher}”？`,
-        detail: '其它精度、字幕缓存和影片资料会保留。需要时可以重新下载；若删除当前选择，不会自动切换模型。', buttons: ['取消', '删除'], defaultId: 0, cancelId: 0 }
-      const result = window ? await dialog.showMessageBox(window, options) : await dialog.showMessageBox(options)
-      if (result.response === 1) await models.remove(command.model, variant.id)
+      // The settings page confirms once; the manager retains identity, lease and dependency guards.
+      await models.remove(command.model, variant.id)
     } else if (command.action === 'export' || command.action === 'choose-location') {
       const variant = command.action === 'export' ? command.variant
         ?? (await models.snapshot()).models.find(item => item.id === command.model)!.selectedVariant : undefined

@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { WebAccess } from './webAccess'
-import { WebSessions } from './auth'
+import { WebPairing, WebSessions } from './auth'
 
 it('keeps the running service on staging failure and restores it after publish failure', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'web-save-'))
@@ -80,4 +80,25 @@ it('preserves remembered devices on runtime server errors, including failed stat
     assert.equal(sessions.check(token), true)
     assert.match(errors.at(-1)!, /保存失败/)
   } finally { mock.restoreAll(); await server.stop() }
+})
+
+it('closes pairing, invalidates pending and approved codes, and preserves authorized browsers', () => {
+  const access = new WebAccess(), pairing = new WebPairing(), sessions = new WebSessions()
+  const authorized = sessions.create(true, 'Existing browser')
+  Object.assign(access, { sessions, server: { pairing } })
+  access.openPairing()
+  const pending = pairing.create(false, 'Pending browser'), approved = pairing.create(true, 'Approved browser')
+  access.decidePair(approved.code, true)
+  const closed = access.closePairing()
+  assert.equal(closed.pairingUntil, 0)
+  assert.deepEqual(closed.pairingActivity, [])
+  assert.equal(closed.running, true)
+  assert.equal(sessions.check(authorized), true)
+  assert.throws(() => access.inspectPair(pending.code))
+  assert.throws(() => access.decidePair(approved.code, true))
+  assert.throws(() => pairing.poll(approved.secret))
+  assert.throws(() => pairing.create(false, 'New browser'))
+  access.openPairing()
+  assert.doesNotThrow(() => pairing.create(false, 'New browser'))
+  assert.throws(() => pairing.poll(pending.secret))
 })

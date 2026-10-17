@@ -102,7 +102,13 @@ Windows 本地使用内置播放时，先完成 `playback:native:build`，再运
 
 本地模型是独立底层能力，默认存储于 Windows 标准用户配置的 `%LOCALAPPDATA%/Javdex/local-ai`，其他平台及隔离配置使用 `<userData>/local-ai`，由 `main/services/localModels` 管理目录、文件、运行依赖及文本推理。该服务层不依赖播放器或字幕模块；AI 字幕通过注入的模型运行接口调用它，字幕缓存位于同级 `cache/ai-subtitles`，抽取音频和任务日志位于 `cache/local-ai/work/ai-subtitles`。普通文本翻译直接调用共用文本引擎，不创建字幕引擎或字幕工作目录。文件管理和各功能的用途绑定保持独立。权重路径为 `models/<family>/<publisher>/<revision>/<precision>/<upstream-filename>`，各精度附来源、哈希、大小与许可；引擎使用 `runtimes/<engine>/<version>/<platform-arch[-cpu]>`，不与模型家族版本绑在一起。`downloads/<sha256>` 保留续传数据七天，`staging/install-<uuid>` 与 `staging/import-<uuid>` 保留遗留文件一天；启动与下载前清理过期项，操作期间持有排他锁。迁移仅复制并逐文件校验模型、运行库、下载和存储标识，配置提交后清理原副本，保留无关文件；缓存不迁移。
 
-AI 服务设置分为功能、云端服务、本地模型三个页签。提供商模型的能力覆盖在模型详情内维护；本地文件按语音输入／文本输入分组。本地配置 `local-models.json` 作为 0.8.0 后的新增格式，从单一 v1 开始，保存目录、下载来源、各家族所选精度、修订及三个用途的独立绑定。`usage` 是用途的唯一事实来源，不再持久保存重复的 `translation`／`translationModel`，也不保留未发布 v1–v5 的兼容和自动重写。未知或损坏文档保持原文件并阻止推理，只允许用户显式保存有效用途设置来恢复；正常重启不改写修订，不重命名或重新下载权重。
+AI 服务设置分为功能、云端服务、本地模型三个页签。提供商模型的能力覆盖在模型详情内维护；本地文件按语音输入／文本输入分组。本地配置 `local-models.json` 初版 v1 保存目录、下载来源、各家族所选精度、修订及三个用途的独立绑定；v2 增加 `acceleration`（自动／仅 CPU／指定 GPU）。既有 v1 按自动模式读取，只有显式保存计算设备才升级为 v2；普通启动及其他 v1 操作不自动重写。`usage` 仍是用途的唯一事实来源，不保存重复的 `translation`／`translationModel`，不兼容其他未发布开发快照。未知或损坏文档保持原文件并阻止推理，只允许用户显式保存有效用途设置来恢复；正常重启不改写修订，不重命名或重新下载权重。
+
+共享组件目录由 `localModels/runtimeComponents.ts` 从固定资源清单派生，按语音／文本引擎与后端维护安装状态；模型权重仍按精确发布者、版本和精度标识。管理服务统一生成准备计划，下载精度包含 CPU 回退依赖与当前已识别后端；环境准备不携带权重。Vulkan 尚无设备枚举工具时标明检测未完成，显式准备时列出文本 Vulkan 探测组件。安装器的分阶段事件分别报告本次网络字节、校验、应用内置资源复制及复用，旧字幕宿主安装回调保持兼容。设备配置保存会重新读取组件与权重状态，再为当前选用精度自动排队短推理；此快照不写入新的配置格式。
+
+Windows x64 的 CUDA／Vulkan 资产见 `localModels/gpuManifest.ts`，CPU 目录保持原身份，GPU 工具分别保存于 `win32-x64-cuda`／`win32-x64-vulkan`；CUDA 翻译依赖另放 `win32-x64-cuda-dependencies`。通过模型页“准备或修复加速”安装，权重不重复下载。NVIDIA 使用 UUID 隔离 CUDA 设备，Vulkan 使用原生设备列表与 `uma: 0` 证据排除核显；所有探测有超时。每次任务冻结策略、设备和工具路径；主进程设备设置遵守租约和 revision。内置工具移除继承的 `LLAMA_*`、`GGML_*`、CUDA 可见设备和外部 loader／代理覆盖，只注入本次受控设备与依赖路径。翻译按原生层卸载日志、识别按原生 GPU backend 初始化日志报告实际后端；诊断有界保存在内存，不进入普通日志或 Renderer。已知 GPU 初始化／分配错误最多回退一次独立 CPU 工具；取消、配置和模型错误不触发重试。CUDA/Vulkan 对同名显卡共享保守显存预算，文本模型允许自动分层并预留至少 2 GiB，识别预算不足时使用 CPU。
+
+Windows Vulkan whisper 从同一固定 b5130 源码构建，`npm run ai-runtime:build -- --vulkan` 需要本机 Visual Studio C++ 工具。构建器 `scripts/windows-vulkan-runtime.mjs` 下载并校验固定 MSYS2 shaderc／SPIR-V／Vulkan 开发材料，仅在构建目录使用，不安装到系统；可通过 HTTPS 的 `JAVDEX_AI_BUILD_MIRROR` 指定包镜像，SHA-256 保持不变。静态构建关闭 CURL、CUDA、OpenMP、CPU 本机指令探测和 AVX，随工具附 Vulkan loader、头文件／引擎许可、来源与逐文件摘要。Windows 打包自动准备并校验这份 bundle，放在 asar 外的 `Resources/ai-runtime/win32-x64-vulkan`；普通开发启动仍可先用 CPU／下载 CUDA。构建临时目录保持短路径以避开 MSBuild MAX_PATH，跨磁盘产物先复制到目标同盘暂存、校验后再切换。macOS Metal 与 Linux 原有 CPU 路径保持。
 
 每个运行租约冻结精度与路径，字幕使用自己的两阶段绑定，文本引擎使用文本用途绑定。文件 snapshot 区分权重存在、完整运行依赖、平台支持、配置引用和运行租约；引用文件删除在主进程阻止。用途保存通过 revision 检查避免覆盖并发更改。文件页下载／导入只维护资源，不暗改用途；用途草稿跨三个模型页签保持挂载，离开该组仍有保存保护。
 

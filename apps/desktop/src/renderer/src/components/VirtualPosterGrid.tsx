@@ -3,7 +3,7 @@ import VirtualGridViewport from './VirtualGridViewport'
 import styles from './VirtualPosterGrid.module.css'
 import type { CatalogWindow } from '../query/useWindowedCatalog'
 import Button from './Button'
-import { forwardRef, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createContext, forwardRef, useContext, useLayoutEffect, useRef, useState } from 'react'
 import { FixedSizeGrid, type GridChildComponentProps } from 'react-window'
 import type { VideoCard } from '@shared/videoTypes'
 import Spinner from './Spinner'
@@ -53,6 +53,127 @@ interface VirtualPosterGridProps<TVideo extends VideoCard> {
   showLibraryBadges?: boolean
   /** Session-only key for scroll restoration (see listViewMemory). */
   scrollMemoryKey?: string
+}
+
+interface PosterGridData<TVideo extends VideoCard> extends VirtualPosterGridProps<TVideo> {
+  columnCount: number
+  columnWidth: number
+  widthRemainder: number
+  posterHeight: number
+  rowHeight: number
+  stride: number
+  cardAreaPadTop: number
+  pagePadX: number
+}
+
+const InnerHeightContext = createContext(0)
+// Changing either react-window component type remounts every visible card.
+const GridInner = forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(function GridInner(
+  { style, ...rest }, ref
+) {
+  const height = useContext(InnerHeightContext)
+  return <div ref={ref} {...rest} className={[styles.inner, rest.className].filter(Boolean).join(' ')}
+    style={{ ...style, height, width: undefined }} />
+})
+
+function PosterGridCell<TVideo extends VideoCard>({ columnIndex, rowIndex, style, data }: GridChildComponentProps<PosterGridData<TVideo>>): JSX.Element | null {
+  const { videos, catalogWindow, detailLibraryId, detailLibraryIds, selectedIds = new Set<number>(),
+    selectionMode, onToggleSelect, onEdit, builtinActions, onAddToPlaylist, onScrape,
+    onMarkScrapeSuccess, onDelete, deleteLabel, showLibraryBadges, loadingMore,
+    columnCount, columnWidth, widthRemainder, posterHeight, rowHeight, stride,
+    cardAreaPadTop, pagePadX } = data
+  const index = rowIndex * columnCount + columnIndex
+  const windowVideo = catalogWindow?.getItem(index)
+  if (catalogWindow && !windowVideo) {
+    if (index >= catalogWindow.total) return null
+    return <div style={{ ...style, top: Number(style.top) + cardAreaPadTop, left: pagePadX + columnIndex * stride, width: columnWidth }}>
+      {catalogWindow.error ? <Button size="sm" onClick={catalogWindow.retry}>加载失败，重试</Button> : <Spinner aria-label="正在加载影片" />}
+    </div>
+  }
+  if (!catalogWindow && index >= videos.length) {
+    if (loadingMore && columnIndex === 0 && index === videos.length) {
+      return (
+        <div
+          className={styles.cell}
+          style={{
+            ...style,
+            top: (style.top as number) + cardAreaPadTop,
+            left: pagePadX + columnIndex * stride,
+            width: columnWidth,
+            height: rowHeight,
+            paddingBottom: GAP
+          }}
+        >
+          <div className={styles.loading}>
+            <Spinner />
+          </div>
+        </div>
+      )
+    }
+    return null
+  }
+  const video = windowVideo ?? videos[index]
+  const cellWidth =
+    columnIndex === columnCount - 1 ? columnWidth + widthRemainder : columnWidth
+  return (
+    <div
+      className={styles.cell}
+      style={{
+        ...style,
+        top: (style.top as number) + cardAreaPadTop,
+        left: pagePadX + columnIndex * stride,
+        width: cellWidth,
+        height: rowHeight,
+        paddingBottom: GAP
+      }}
+    >
+      {showLibraryBadges && isScopedVideo(video) ? (
+        <ScopedPosterCard
+          video={video}
+          thumbHeight={posterHeight}
+          selected={selectedIds.has(video.id)}
+          selectionMode={selectionMode}
+          onToggleSelect={
+            onToggleSelect
+              ? (_selectedVideo, event) => onToggleSelect(video, index, event)
+              : undefined
+          }
+          onEdit={onEdit ? () => onEdit(video) : undefined}
+          builtinActions={builtinActions}
+          onAddToPlaylist={onAddToPlaylist ? () => onAddToPlaylist(video) : undefined}
+          onScrape={onScrape ? () => onScrape(video) : undefined}
+          onMarkScrapeSuccess={
+            onMarkScrapeSuccess ? () => onMarkScrapeSuccess(video) : undefined
+          }
+          onDelete={onDelete ? () => onDelete(video) : undefined}
+          deleteLabel={deleteLabel}
+        />
+      ) : (
+        <PosterCard
+          className={styles.card}
+          video={video}
+          detailLibraryId={detailLibraryIds?.get(video.id) ?? detailLibraryId}
+          thumbHeight={posterHeight}
+          selected={selectedIds.has(video.id)}
+          selectionMode={selectionMode}
+          onToggleSelect={
+            onToggleSelect
+              ? (_selectedVideo, event) => onToggleSelect(video, index, event)
+              : undefined
+          }
+          onEdit={onEdit ? () => onEdit(video) : undefined}
+          builtinActions={builtinActions}
+          onAddToPlaylist={onAddToPlaylist ? () => onAddToPlaylist(video) : undefined}
+          onScrape={onScrape ? () => onScrape(video) : undefined}
+          onMarkScrapeSuccess={
+            onMarkScrapeSuccess ? () => onMarkScrapeSuccess(video) : undefined
+          }
+          onDelete={onDelete ? () => onDelete(video) : undefined}
+          deleteLabel={deleteLabel}
+        />
+      )}
+    </div>
+  )
 }
 
 /**
@@ -124,24 +245,6 @@ export default function VirtualPosterGrid<TVideo extends VideoCard>({
   const gridHeight = layoutHeight
   const innerHeight = cardAreaPadTop + rowCount * rowHeight + cardAreaPadBottom
 
-  const innerElementType = useMemo(
-    () =>
-      forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(function GridInner(
-        { style, ...rest },
-        innerRef
-      ) {
-        // react-window's calculated width must not override the viewport width.
-        return (
-          <div
-            ref={innerRef}
-            {...rest}
-            className={[styles.inner, rest.className].filter(Boolean).join(' ')}
-            style={{ ...style, height: innerHeight, width: undefined }}
-          />
-        )
-      }),
-    [innerHeight]
-  )
 
   useLayoutEffect(() => {
     if (gridWidth > 0 && gridHeight > 0) {
@@ -173,99 +276,11 @@ export default function VirtualPosterGrid<TVideo extends VideoCard>({
     persistScroll(0, 0)
   }
 
-  const Cell = ({ columnIndex, rowIndex, style }: GridChildComponentProps): JSX.Element | null => {
-    const index = rowIndex * columnCount + columnIndex
-    const windowVideo = catalogWindow?.getItem(index)
-    if (catalogWindow && !windowVideo) {
-      if (index >= catalogWindow.total) return null
-      return <div style={{ ...style, top: Number(style.top) + cardAreaPadTop, left: pagePadX + columnIndex * stride, width: columnWidth }}>
-        {catalogWindow.error ? <Button size="sm" onClick={catalogWindow.retry}>加载失败，重试</Button> : <Spinner aria-label="正在加载影片" />}
-      </div>
-    }
-    if (!catalogWindow && index >= videos.length) {
-      if (loadingMore && columnIndex === 0 && index === videos.length) {
-        return (
-          <div
-            className={styles.cell}
-            style={{
-              ...style,
-              top: (style.top as number) + cardAreaPadTop,
-              left: pagePadX + columnIndex * stride,
-              width: columnWidth,
-              height: rowHeight,
-              paddingBottom: GAP
-            }}
-          >
-            <div className={styles.loading}>
-              <Spinner />
-            </div>
-          </div>
-        )
-      }
-      return null
-    }
-    const video = windowVideo ?? videos[index]
-    const cellWidth =
-      columnIndex === columnCount - 1 ? columnWidth + widthRemainder : columnWidth
-    return (
-      <div
-        className={styles.cell}
-        style={{
-          ...style,
-          top: (style.top as number) + cardAreaPadTop,
-          left: pagePadX + columnIndex * stride,
-          width: cellWidth,
-          height: rowHeight,
-          paddingBottom: GAP
-        }}
-      >
-        {showLibraryBadges && isScopedVideo(video) ? (
-          <ScopedPosterCard
-            video={video}
-            thumbHeight={posterHeight}
-            selected={selectedIds.has(video.id)}
-            selectionMode={selectionMode}
-            onToggleSelect={
-              onToggleSelect
-                ? (_selectedVideo, event) => onToggleSelect(video, index, event)
-                : undefined
-            }
-            onEdit={onEdit ? () => onEdit(video) : undefined}
-            builtinActions={builtinActions}
-            onAddToPlaylist={onAddToPlaylist ? () => onAddToPlaylist(video) : undefined}
-            onScrape={onScrape ? () => onScrape(video) : undefined}
-            onMarkScrapeSuccess={
-              onMarkScrapeSuccess ? () => onMarkScrapeSuccess(video) : undefined
-            }
-            onDelete={onDelete ? () => onDelete(video) : undefined}
-            deleteLabel={deleteLabel}
-          />
-        ) : (
-          <PosterCard
-            className={styles.card}
-            video={video}
-            detailLibraryId={detailLibraryIds?.get(video.id) ?? detailLibraryId}
-            thumbHeight={posterHeight}
-            selected={selectedIds.has(video.id)}
-            selectionMode={selectionMode}
-            onToggleSelect={
-              onToggleSelect
-                ? (_selectedVideo, event) => onToggleSelect(video, index, event)
-                : undefined
-            }
-            onEdit={onEdit ? () => onEdit(video) : undefined}
-            builtinActions={builtinActions}
-            onAddToPlaylist={onAddToPlaylist ? () => onAddToPlaylist(video) : undefined}
-            onScrape={onScrape ? () => onScrape(video) : undefined}
-            onMarkScrapeSuccess={
-              onMarkScrapeSuccess ? () => onMarkScrapeSuccess(video) : undefined
-            }
-            onDelete={onDelete ? () => onDelete(video) : undefined}
-            deleteLabel={deleteLabel}
-          />
-        )}
-      </div>
-    )
+  const cellData: PosterGridData<TVideo> = {
+    videos, catalogWindow, detailLibraryId, detailLibraryIds, selectedIds, selectionMode,
+    onToggleSelect, onEdit, builtinActions, onAddToPlaylist, onScrape, onMarkScrapeSuccess,
+    onDelete, deleteLabel, showLibraryBadges, loadingMore, columnCount, columnWidth,
+    widthRemainder, posterHeight, rowHeight, stride, cardAreaPadTop, pagePadX
   }
 
   const renderWidth = gridWidth > 0 ? gridWidth : lastSize.current.width
@@ -277,31 +292,39 @@ export default function VirtualPosterGrid<TVideo extends VideoCard>({
       className={styles.root}
     >
       {renderWidth > 0 && renderHeight > 0 && (
-        <FixedSizeGrid
-          ref={gridRef}
-          outerRef={outerRef}
-          outerElementType={VirtualGridViewport}
-          columnCount={columnCount}
-          columnWidth={stride}
-          rowCount={rowCount}
-          rowHeight={rowHeight}
-          width={renderWidth}
-          height={renderHeight}
-          innerElementType={innerElementType}
-          initialScrollTop={scrollTopRef.current}
-          onScroll={({ scrollTop }) => {
-            persistScroll(scrollTop)
-          }}
-          onItemsRendered={({ overscanRowStartIndex, overscanRowStopIndex }) => {
-            persistScroll(scrollTopRef.current, overscanRowStopIndex)
-            catalogWindow?.onVisibleRange(overscanRowStartIndex * columnCount, Math.min(renderedItemCount - 1, (overscanRowStopIndex + 1) * columnCount - 1))
-            if (!catalogWindow && hasMore && overscanRowStopIndex >= rowCount - 3) {
-              onLoadMore?.()
-            }
-          }}
-        >
-          {Cell}
-        </FixedSizeGrid>
+        <InnerHeightContext.Provider value={innerHeight}>
+          <FixedSizeGrid<PosterGridData<TVideo>>
+            ref={gridRef}
+            outerRef={outerRef}
+            outerElementType={VirtualGridViewport}
+            columnCount={columnCount}
+            columnWidth={stride}
+            rowCount={rowCount}
+            rowHeight={rowHeight}
+            width={renderWidth}
+            height={renderHeight}
+            innerElementType={GridInner}
+            itemData={cellData}
+            itemKey={({ columnIndex, rowIndex, data }) => {
+              const index = rowIndex * data.columnCount + columnIndex
+              const video = data.catalogWindow ? data.catalogWindow.getItem(index) : data.videos[index]
+              return video ? `video:${video.id}` : `placeholder:${index}`
+            }}
+            initialScrollTop={scrollTopRef.current}
+            onScroll={({ scrollTop }) => {
+              persistScroll(scrollTop)
+            }}
+            onItemsRendered={({ overscanRowStartIndex, overscanRowStopIndex }) => {
+              persistScroll(scrollTopRef.current, overscanRowStopIndex)
+              catalogWindow?.onVisibleRange(overscanRowStartIndex * columnCount, Math.min(renderedItemCount - 1, (overscanRowStopIndex + 1) * columnCount - 1))
+              if (!catalogWindow && hasMore && overscanRowStopIndex >= rowCount - 3) {
+                onLoadMore?.()
+              }
+            }}
+          >
+            {PosterGridCell}
+          </FixedSizeGrid>
+        </InnerHeightContext.Provider>
       )}
       <ScrollToTopButton visible={showScrollToTop} onClick={scrollToTop} />
     </ScrollRegion>

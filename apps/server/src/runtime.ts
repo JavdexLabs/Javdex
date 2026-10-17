@@ -91,6 +91,10 @@ function createBrowserSurface(
       http.pairing.open()
       return status()
     },
+    pairClose() {
+      http.pairing.clear()
+      return status()
+    },
     pairInspect(code) {
       return http.pairing.inspect(code)
     },

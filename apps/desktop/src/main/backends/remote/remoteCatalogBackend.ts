@@ -860,6 +860,7 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
       status: (input, ctx) => query('browser.status', input ?? {}, ctx?.signal),
       setEnabled: m('browser.setEnabled'),
       pairOpen: m('browser.pairOpen'),
+      pairClose: m('browser.pairClose'),
       pairInspect: q('browser.pairInspect'),
       pairDecide: m('browser.pairDecide'),
       deviceRemove: m('browser.deviceRemove'),

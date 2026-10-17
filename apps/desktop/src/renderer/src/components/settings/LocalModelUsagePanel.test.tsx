@@ -111,6 +111,7 @@ test('subtitle model draft survives targeted file navigation, remains independen
   await act(async () => download.props.onClick())
   assert.equal(router!.state.location.pathname, '/settings/models/local')
   assert.match(router!.state.location.search, /variant=hy-mt2-7b-q8_0/)
+  assert.match(router!.state.location.search, /usage=ai-subtitles/)
   assert.equal(renderer!.root.findAllByProps({ role: 'dialog' }).length, 0)
   await act(async () => { await router!.navigate('/settings/models/usage') })
   const save = subtitleSave()
@@ -118,6 +119,22 @@ test('subtitle model draft survives targeted file navigation, remains independen
   assert.deepEqual(commands, [{ action: 'usage', expectedRevision: 'r1', usage: {
     ...original.usage, subtitleTranslation: { model: 'hy-mt2-7b', variant: 'hy-mt2-7b-q8_0' }
   } }])
+})
+
+test('text translation file navigation preserves its draft and records the correct return section', async () => {
+  await mount()
+  await choose('文本翻译模型来源', 'local')
+  await choose('本地文本模型', 'hy-mt2-7b')
+  await choose('本地文本精度与发布者', 'hy-mt2-7b-q8_0')
+  const section = renderer!.root.findByProps({ id: 'text-translation' })
+  const download = section.findAllByType('button').find(item => renderedText(item) === '前往下载')!
+  await act(async () => download.props.onClick())
+  assert.match(router!.state.location.search, /usage=text-translation/)
+  assert.match(router!.state.location.search, /variant=hy-mt2-7b-q8_0/)
+  assert.deepEqual(commands, [])
+  await act(async () => { await router!.navigate('/settings/models/usage#text-translation') })
+  const Select = (await import('../SelectControl')).default
+  assert.equal(renderer!.root.findAllByType(Select).find(item => item.props['aria-label'] === '本地文本精度与发布者')!.props.value, 'hy-mt2-7b-q8_0')
 })
 test('leaving the model group still protects an unsaved local usage draft', async () => {
   await mount()

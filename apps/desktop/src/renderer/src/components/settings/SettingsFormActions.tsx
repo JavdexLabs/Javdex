@@ -1,6 +1,6 @@
 import { useContext, useEffect, useId, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { Check, ChevronDown, Circle, CircleAlert, Copy, Undo2 } from 'lucide-react'
+import { Check, ChevronDown, Circle, CircleAlert, Copy, LoaderCircle, Undo2 } from 'lucide-react'
 import Button from '../Button'
 import { UI_ICON_SM } from '../iconDefaults'
 import { SettingsSaveDetailsContext } from './SettingsSaveDetailsScope'
@@ -70,20 +70,23 @@ export default function SettingsFormActions({
   const toggle = (): void => setExpandedKey(open ? null : feedbackKey)
   const details = open ? <SaveDetails key={feedbackKey} id={detailId} error={error} conflict={conflict} /> : null
   const indicator = state === 'saved' ? <Check {...UI_ICON_SM} className={styles.indicator} data-state={state} aria-hidden /> : <Circle size={8} fill="currentColor" className={styles.indicator} data-state={state} aria-hidden />
+  const status = hasDetails
+    ? <button type="button" className={styles.status} data-state={state} title={label} aria-expanded={open} aria-controls={open ? detailId : undefined} onClick={toggle}>
+      {indicator}<span className={styles.statusText}>{label}</span><ChevronDown {...UI_ICON_SM} className={styles.chevron} data-open={open} aria-hidden />
+    </button>
+    : <span className={styles.status} data-state={state} title={label}>{saving ? <LoaderCircle {...UI_ICON_SM} className={styles.spinner} aria-hidden /> : indicator}<span className={styles.statusText}>{label}</span></span>
   return <div className={styles.root} data-placement={placement}>
     <div className={styles.actions}>
       {children}
       <div className={styles.toolbar} data-state={state} data-long-action={saveLabel.length > 2} role="group" aria-label="保存设置">
         <span className={styles.live} role={state === 'error' || state === 'conflict' ? 'alert' : 'status'}>{label}</span>
-        {hasDetails ? <button type="button" className={styles.status} title={label} aria-expanded={open} aria-controls={open ? detailId : undefined} onClick={toggle}>
-          {indicator}<span className={styles.statusText}>{label}</span><ChevronDown {...UI_ICON_SM} className={styles.chevron} data-open={open} aria-hidden />
-        </button> : <span className={styles.status} title={label}>{indicator}<span className={styles.statusText}>{label}</span></span>}
-        <span className={styles.divider} aria-hidden />
-        <Button size="sm" variant="ghost" className={styles.undo} aria-label="取消更改" title={conflict ? '撤销更改并读取最新配置' : '撤销更改'} disabled={(!dirty && !conflict) || saving || disabled} onClick={onCancel}><Undo2 {...UI_ICON_SM} aria-hidden /></Button>
-        <span className={styles.divider} aria-hidden />
-        <Button size="sm" className={styles.save} variant={!conflict && (dirty || error) ? 'primary' : 'default'} busy={saving}
+        {status}
+        <button type="button" className={styles.undo} aria-label="取消更改" title={conflict ? '撤销更改并读取最新配置' : '撤销更改'} disabled={(!dirty && !conflict) || saving || disabled} onClick={onCancel}><Undo2 {...UI_ICON_SM} aria-hidden /></button>
+        <button type="button" className={styles.save} data-state={state} aria-label={saving ? '保存中' : actionLabel} aria-busy={saving}
           disabled={conflict ? disabled || saving : !dirty || saving || disabled || saveDisabled}
-          aria-label={saving ? '保存中' : actionLabel} onClick={conflict ? () => setExpandedKey(feedbackKey) : onSave}>{actionLabel}</Button>
+          onClick={conflict ? () => setExpandedKey(feedbackKey) : onSave}>
+          {saving ? <LoaderCircle {...UI_ICON_SM} className={styles.spinner} aria-hidden /> : actionLabel}
+        </button>
       </div>
     </div>
     {placement === 'header' && host && details ? createPortal(details, host) : details}

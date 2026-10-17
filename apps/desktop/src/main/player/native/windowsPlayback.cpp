@@ -566,9 +566,11 @@ napi_value setPresentation(napi_env env, napi_callback_info info) {
     return undefined(env);
 }
 napi_value command(napi_env env, napi_callback_info info) {
-    size_t count = 1; napi_value args[1]; napi_get_cb_info(env, info, &count, args, nullptr, nullptr);
-    if (count != 1 || closing || !video) return fail(env, "No native playback session");
-    try { requireOwner(); playback.command(env, args[0]); } catch (const std::exception &error) { return fail(env, error.what()); }
+    size_t count = 2; napi_value args[2]; napi_get_cb_info(env, info, &count, args, nullptr, nullptr);
+    if (!count || closing || !video) return fail(env, "No native playback session");
+    bool generated = false;
+    if (count > 1 && napi_get_value_bool(env, args[1], &generated) != napi_ok) return fail(env, "Invalid subtitle command scope");
+    try { requireOwner(); playback.command(env, args[0], generated); } catch (const std::exception &error) { return fail(env, error.what()); }
     return undefined(env);
 }
 napi_value setRendererControls(napi_env env, napi_callback_info info) {
@@ -728,6 +730,10 @@ napi_value render(napi_env env, napi_callback_info) {
     } catch (const std::exception &error) { return fail(env, error.what()); }
     return undefined(env);
 }
+napi_value generatedSubtitles(napi_env env, napi_callback_info info) {
+    try { requireOwner(); playback.generatedSubtitles(env, info); } catch (const std::exception &error) { return fail(env, error.what()); }
+    return undefined(env);
+}
 napi_value destroy(napi_env env, napi_callback_info) {
     try { destroyPlayer(); } catch (const std::exception &error) { return fail(env, error.what()); }
     return undefined(env);
@@ -746,6 +752,7 @@ napi_value initialize(napi_env env, napi_value exports) {
         {"command", nullptr, command, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"state", nullptr, state, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"inspect", nullptr, inspect, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"generatedSubtitles", nullptr, generatedSubtitles, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"capture", nullptr, capture, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"render", nullptr, render, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"destroy", nullptr, destroy, nullptr, nullptr, nullptr, napi_default, nullptr}

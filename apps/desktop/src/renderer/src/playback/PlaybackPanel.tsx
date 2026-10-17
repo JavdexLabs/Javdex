@@ -17,6 +17,8 @@ import { playbackTrackLabel } from './playbackTrackLabel'
 import { playbackOcclusions } from './playbackOcclusion'
 import styles from './PlaybackPanel.module.css'
 import AiSubtitleSettings from './AiSubtitleSettings'
+import AiSubtitleToggle from './AiSubtitleToggle'
+import { useAiSubtitles } from './useAiSubtitles'
 import { settingsPath } from '../settings/settingsRoutes'
 import { mediaLibraryVideoDetailPath } from '../listView/mediaLibraryRoutes'
 
@@ -26,6 +28,7 @@ export default function PlaybackPanel(): JSX.Element | null {
   const navigate = useNavigate()
   const [view, setView] = useState<PlaybackViewState>({ snapshot: null, activation: null })
   const state = view.snapshot
+  const aiSubtitles = useAiSubtitles(state?.sessionId ?? null)
   const [seekDraft, setSeekDraft] = useState<number | null>(null)
   const seekDraftRef = useRef<number | null>(null)
   const pendingSeekRef = useRef<{ sessionId: string; seconds: number } | null>(null)
@@ -364,7 +367,7 @@ export default function PlaybackPanel(): JSX.Element | null {
           </SelectControl></label>}
           </div>
           <div className={styles.optionBody} role="tabpanel" id={`${settingsId}-subtitle`} aria-labelledby={`${settingsId}-subtitle-tab`} hidden={optionTab !== 'subtitle'}>
-          <AiSubtitleSettings playback={state} onOpenModels={openSubtitleModels} />
+          <AiSubtitleSettings playback={state} onOpenModels={openSubtitleModels} controller={aiSubtitles} />
           <label>字幕{trackSelect('sub')}</label>
           <Button size="sm" onClick={() => void api.playback.subtitle(state.sessionId).catch(error => toast.show((error as Error).message, 'error'))}>选择本机外挂字幕</Button>
           <label>字幕字号<SelectControl aria-label="字幕字号" value={state.subtitleSize ?? ''}
@@ -457,7 +460,7 @@ export default function PlaybackPanel(): JSX.Element | null {
               }} aria-valuetext={`${volume}%`} />
             <span className={styles.volumeValue}>{volume}%</span>
           </div>
-          {!docked && <><span className={styles.spacer} /><div className={styles.quickControls}>{speedSelect(true)}</div>
+          {!docked && <><span className={styles.spacer} /><AiSubtitleToggle key={`${state.sessionId}-${state.presentation}`} playback={state} controller={aiSubtitles} onOpenModels={openSubtitleModels} /><span className={styles.separator} /><div className={styles.quickControls}>{speedSelect(true)}</div>
             <span className={styles.separator} /><IconButton size="control" icon={<SlidersHorizontal size={18} />} label="播放设置" aria-expanded={options} aria-controls={settingsId} aria-pressed={options} onClick={() => presentationHistory.setOptions(!options)} /></>}
           <IconButton size="control" icon={docked ? <PanelTop size={18} /> : fullscreen ? <Minimize size={18} /> : <Maximize size={18} />}
             label={docked ? '恢复展开' : fullscreen ? '退出全屏' : '全屏'} disabled={waitingResume && !docked}

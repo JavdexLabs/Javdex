@@ -4,9 +4,9 @@ import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { test } from 'node:test'
-import { createAiRuntimeInstaller } from './runtimeInstaller'
+import { createAiRuntimeInstaller, type RuntimeInstallEvent } from './runtimeInstaller'
 import { LOCAL_MODEL_ASSETS, AI_MAC_BUNDLE_VERSION, aiRuntimeAssets, type AiRuntimeAsset } from './runtimeManifest'
-import { modelDownloadFile } from './modelStorage'
+import { modelDownloadFile, runtimeAssetDirectory } from './modelStorage'
 import { runtimeTar } from './runtimeArchiveFixtures'
 
 const contents = Buffer.from('model fixture data')
@@ -18,6 +18,57 @@ function asset(filename: string): AiRuntimeAsset {
 function assets(filename: string): AiRuntimeAsset[] {
   return LOCAL_MODEL_ASSETS.map(item => item.id === 'translation-model' ? asset(filename) : item)
 }
+
+test('removing a runtime deletes damaged files and archive resume data while preserving other backends and external paths', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'javdex-runtime-delete-'))
+  const target = { platform: 'win32', arch: 'x64' }
+  const entry = aiRuntimeAssets(target).find(item => item.id === 'translator')!
+  const destination = runtimeAssetDirectory(root, 'translator', target)
+  const other = runtimeAssetDirectory(root, 'translator', target, 'cuda')
+  const partial = modelDownloadFile(root, entry)
+  const external = path.join(root, 'external')
+  try {
+    const runtime = createAiRuntimeInstaller(root, undefined, [entry], { target })
+    assert.equal(await runtime.assetPresent('translator'), false)
+    await fs.mkdir(destination, { recursive: true }); await fs.writeFile(path.join(destination, 'damaged.dll'), 'broken')
+    await fs.mkdir(other, { recursive: true }); await fs.writeFile(path.join(other, 'keep.dll'), 'gpu')
+    await fs.mkdir(external); await fs.writeFile(path.join(external, 'keep'), 'outside')
+    await fs.mkdir(path.dirname(partial), { recursive: true }); await fs.writeFile(partial, 'partial archive')
+    assert.equal(await runtime.assetsInstalled(['translator']), false)
+    assert.equal(await runtime.assetPresent('translator'), true)
+    await runtime.removeAsset('translator')
+    assert.equal(await runtime.assetPresent('translator'), false)
+    assert.equal(await fs.readFile(path.join(other, 'keep.dll'), 'utf8'), 'gpu')
+    await fs.mkdir(destination, { recursive: true }); await fs.writeFile(path.join(destination, 'keep.dll'), 'cpu')
+    await fs.symlink(external, path.dirname(partial), process.platform === 'win32' ? 'junction' : 'dir')
+    await assert.rejects(runtime.removeAsset('translator'), /链接/)
+    assert.equal(await fs.readFile(path.join(destination, 'keep.dll'), 'utf8'), 'cpu')
+    assert.equal(await fs.readFile(path.join(external, 'keep'), 'utf8'), 'outside')
+  } finally { await fs.rm(root, { recursive: true, force: true }) }
+})
+test('preparation events report new network bytes separately from resumed and reused contents', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'javdex-model-events-'))
+  const entry = asset('events.gguf'), events: RuntimeInstallEvent[] = []
+  let requests = 0
+  try {
+    const runtime = createAiRuntimeInstaller(root, async () => {
+      requests++
+      return new Response(contents.subarray(5), { status: 206, headers: { 'content-range': `bytes 5-${contents.length - 1}/${contents.length}` } })
+    }, assets('events.gguf'))
+    await fs.mkdir(path.dirname(modelDownloadFile(root, entry)), { recursive: true })
+    await fs.writeFile(modelDownloadFile(root, entry), contents.subarray(0, 5))
+    await runtime.install(new AbortController().signal, () => {}, ['translation-model'], event => events.push(event))
+    assert.equal(events.at(-1)?.networkBytes, contents.length - 5)
+    assert.equal(events.at(-1)?.networkTotal, contents.length - 5)
+    assert.ok(events.some(event => event.phase === 'installing'))
+    events.length = 0
+    await runtime.install(new AbortController().signal, () => {}, ['translation-model'], event => events.push(event))
+    assert.equal(requests, 1)
+    assert.equal(events.at(-1)?.phase, 'reused')
+    assert.equal(events.at(-1)?.networkBytes, 0)
+    assert.equal(events.at(-1)?.networkTotal, 0)
+  } finally { await fs.rm(root, { recursive: true, force: true }) }
+})
 test('portable model installation verifies a resumed download and deleting one precision preserves other files and runtime tools', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'javdex-model-install-'))
   try {

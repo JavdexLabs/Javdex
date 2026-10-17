@@ -4,7 +4,7 @@ import React from 'react'
 import { MemoryRouter, useLocation } from 'react-router-dom'
 import TestRenderer, { act } from 'react-test-renderer'
 import type { PlaybackSnapshot, PlaybackTarget, PlaybackControl, PlaybackViewport, PlaybackObservation } from '@shared/desktop/playback'
-import type { AiSubtitleSnapshot } from '@shared/desktop/aiSubtitles'
+import type { AiSubtitleCommand, AiSubtitleSnapshot } from '@shared/desktop/aiSubtitles'
 import type { LocalModelSnapshot } from '@shared/desktop/localModels'
 import type { ScopedVideoDetail } from '@shared/catalogTypes'
 import type { ElectronApi } from '../../../preload/index'
@@ -46,11 +46,11 @@ let getDetail = async (): Promise<ScopedVideoDetail | null> => detail()
 let open = async () => ({ ok: true })
 let openExternal = async () => ({ ok: true })
 const aiSnapshot = (): AiSubtitleSnapshot => ({ sessionId: null, supported: false, installed: false, enabled: false,
-  phase: 'idle', activeStart: null, recognizedSeconds: 0, translatedSeconds: 0, duration: null,
+  phase: 'idle', activeStart: null, recognizedSeconds: 0, translatedSeconds: 0, recognizedUntil: null, translatedUntil: null, duration: null,
   display: 'bilingual', fontSize: 42, error: null })
 let aiState = aiSnapshot()
 let aiChanged: (value: AiSubtitleSnapshot) => void = () => {}
-let aiCommand = async (): Promise<AiSubtitleSnapshot> => aiState
+let aiCommand = async (_id?: string, _command?: AiSubtitleCommand): Promise<AiSubtitleSnapshot> => aiState
 const localModels = (): LocalModelSnapshot => ({
   revision: 'fixture', supported: false, directory: '/fixture/models', defaultDirectory: '/fixture/models', downloadSource: 'official',
   translation: 'app-default', translationModel: 'qwen3', models: [], operation: null, activeModel: null, activeVariant: null,
@@ -63,7 +63,7 @@ const fake = {
   playback: {
     aiSubtitleSnapshot: async () => aiState,
     onAiSubtitleChanged: (listener: typeof aiChanged) => { aiChanged = listener; return () => { aiChanged = () => {} } },
-    aiSubtitleCommand: () => aiCommand(),
+    aiSubtitleCommand: (id: string, command: AiSubtitleCommand) => aiCommand(id, command),
     snapshot: async () => snapshot(),
     observation: async () => { const revision = playbackRevision; return { revision, snapshot: await fake.playback.snapshot() } },
     onChanged: (listener: (value: PlaybackSnapshot | null, revision: number) => void) => {
@@ -413,6 +413,20 @@ test('AI subtitle command results cannot overwrite newer subtitle events', async
   assert.equal(display().props.disabled, false)
 })
 
+test('subtitle settings ignore late events from a replaced playback session', async () => {
+  aiState = { ...aiSnapshot(), supported: true, installed: true, sessionId: 'first', enabled: true, phase: 'ready' }
+  const AiSettings = (await import('./AiSubtitleSettings')).default
+  const component = (id: string) => <MemoryRouter><OverlayHistoryProvider><AiSettings playback={snapshot(id)} onOpenModels={async () => {}} /></OverlayHistoryProvider></MemoryRouter>
+  await act(async () => { renderer = TestRenderer.create(component('first')) })
+  await act(async () => renderer!.update(component('second')))
+  await act(async () => aiChanged({ ...aiState, sessionId: 'second', phase: 'preparing', error: null }))
+  assert.equal(button('停止 AI 字幕').props.disabled, false)
+  assert.equal(button('清除本片缓存').props.disabled, true)
+  await act(async () => aiChanged({ ...aiState, error: 'old session display error' }))
+  assert.equal(button('停止 AI 字幕').props.disabled, false)
+  assert.equal(renderer!.root.findAll(node => node.props.role === 'alert').some(node => renderedText(node).includes('old session')), false)
+})
+
 test('a replacement playback session releases AI subtitle busy state and rejects the previous result', async () => {
   aiState = { ...aiSnapshot(), supported: true, installed: true }
   let finish!: (value: AiSubtitleSnapshot) => void
@@ -421,7 +435,7 @@ test('a replacement playback session releases AI subtitle busy state and rejects
   const component = (id: string) => <MemoryRouter><OverlayHistoryProvider><AiSettings playback={snapshot(id)} onOpenModels={async () => {}} /></OverlayHistoryProvider></MemoryRouter>
   await act(async () => { renderer = TestRenderer.create(component('first')) })
   await act(async () => button('开启 AI 字幕').props.onClick())
-  assert.equal(button('开启 AI 字幕').props.disabled, true)
+  assert.equal(button('停止 AI 字幕').props.disabled, false, 'a pending start remains cancellable')
   await act(async () => renderer!.update(component('second')))
   assert.equal(button('开启 AI 字幕').props.disabled, false)
   await act(async () => finish({ ...aiState, display: 'japanese', enabled: true, sessionId: 'first' }))
@@ -856,4 +870,122 @@ test('Windows popup clipping keeps the remaining video visible and restores its 
   await act(async () => poll())
   assert.deepEqual(viewports.at(-1)!.occlusions, [])
   assert.deepEqual(controls, [])
+})
+
+function aiSwitch() { return renderer!.root.findByProps({ role: 'switch', 'aria-label': 'AI 字幕' }) }
+
+test('the unconfigured toolbar switch opens a guide without enabling or starting subtitles; Escape only closes the guide', async () => {
+  aiState = { ...aiSnapshot(), supported: true }
+  let commands = 0
+  aiCommand = async () => { commands++; return aiState }
+  await mount()
+  assert.equal(aiSwitch().props.checked, false)
+  await act(async () => aiSwitch().props.onChange())
+  assert.equal(aiSwitch().props.checked, false)
+  assert.equal(commands, 0)
+  assert.ok(button('前往配置'))
+  assert.equal(renderer!.root.findAll(node => node.props.role === 'dialog' && node.props['data-native-playback-occluder'] === true).length, 1)
+  await act(async () => { window.dispatchEvent(Object.assign(new Event('keydown', { cancelable: true }), { key: 'Escape', isComposing: false })) })
+  assert.equal(aiSwitch().props['aria-expanded'], false)
+  assert.deepEqual(controls, [])
+})
+
+test('toolbar guide uses stable model navigation after docking unmounts the toolbar', async () => {
+  aiState = { ...aiSnapshot(), supported: true }
+  await mount(undefined, '/libraries/1/video/2')
+  await act(async () => changed({ ...snapshot(), presentation: 'docked' }))
+  await act(async () => changed(snapshot()))
+  await act(async () => aiSwitch().props.onChange())
+  let finish!: () => void
+  sendControl = () => new Promise(resolve => { finish = resolve })
+  await act(async () => button('前往配置').props.onClick())
+  await act(async () => changed({ ...snapshot(), presentation: 'docked' }))
+  await act(async () => finish())
+  assert.equal(currentLocation, '/settings/models/usage#ai-subtitles')
+  assert.equal(aiState.enabled, false)
+})
+
+test('the toolbar and sidebar share start/stop state, and a late start acknowledgement cannot undo stop', async () => {
+  aiState = { ...aiSnapshot(), supported: true, installed: true }
+  const commands: string[] = []
+  let startDone!: (value: AiSubtitleSnapshot) => void
+  aiCommand = async (_id, command) => {
+    commands.push(command!.action)
+    if (command!.action === 'start') return new Promise(resolve => { startDone = resolve })
+    return aiState
+  }
+  await mount(); await options()
+  await act(async () => aiSwitch().props.onChange())
+  assert.equal(aiSwitch().props.checked, true)
+  assert.equal(aiSwitch().props.disabled, false)
+  assert.equal(button('停止 AI 字幕').props.disabled, false)
+  await act(async () => button('停止 AI 字幕').props.onClick())
+  assert.equal(aiSwitch().props.checked, false)
+  await act(async () => startDone({ ...aiState, sessionId: 'first', enabled: true, phase: 'preparing' }))
+  assert.equal(aiSwitch().props.checked, false)
+  assert.deepEqual(commands, ['start', 'stop'])
+  await act(async () => aiChanged({ ...aiState, sessionId: 'first', enabled: true, phase: 'ready' }))
+  assert.equal(aiSwitch().props.checked, true)
+})
+
+test('toolbar shows absolute recognition and translation endpoints, then contracts on stop', async () => {
+  aiState = { ...aiSnapshot(), sessionId: 'first', supported: true, installed: true, enabled: true,
+    phase: 'translating', recognizedSeconds: 30, translatedSeconds: 0, recognizedUntil: 1122, translatedUntil: 1116, duration: 4252 }
+  aiCommand = async () => ({ ...aiState, enabled: false, sessionId: null })
+  await mount()
+  const positions = () => renderer!.root.findAll(node => node.props.role === 'group' && node.props['aria-label'] === 'AI 字幕处理位置')
+  assert.match(renderedText(positions()[0]), /识别至00:18:42翻译至00:18:36/)
+  await act(async () => aiChanged({ ...aiState, phase: 'ready', recognizedUntil: 4252, translatedUntil: 4252,
+    recognizedSeconds: 4252, translatedSeconds: 4252 }))
+  assert.equal(aiSwitch().props.checked, true, 'completion keeps subtitles enabled')
+  assert.match(renderedText(positions()[0]), /识别至01:10:52翻译至01:10:52/)
+  await act(async () => aiSwitch().props.onChange())
+  assert.equal(aiSwitch().props.checked, false)
+  assert.equal(positions().length, 0)
+})
+
+test('toolbar command failure stays off and exposes a recoverable guide', async () => {
+  aiState = { ...aiSnapshot(), supported: true, installed: true }
+  aiCommand = async () => { throw new Error('Synthetic start failure') }
+  await mount()
+  await act(async () => aiSwitch().props.onChange())
+  assert.equal(aiSwitch().props.checked, false)
+  assert.ok(renderer!.root.findAll(node => node.props.role === 'alert').some(node => renderedText(node).includes('Synthetic start failure')))
+  assert.ok(button('前往配置'))
+})
+
+for (const presentation of ['expanded', 'fullscreen'] as const) test(`AI guide closes on session replacement in ${presentation}`, async () => {
+  aiState = { ...aiSnapshot(), supported: true }
+  await mount()
+  await act(async () => changed({ ...snapshot(), presentation, rendererFullscreenControls: true }))
+  await act(async () => aiSwitch().props.onChange())
+  assert.equal(aiSwitch().props['aria-expanded'], true)
+  await act(async () => changed({ ...snapshot('second'), presentation, rendererFullscreenControls: true }))
+  assert.equal(aiSwitch().props['aria-expanded'], false)
+  assert.equal(aiSwitch().props.checked, false)
+})
+
+
+test('a cancelled start rejection cannot reopen the toolbar error guide', async () => {
+  aiState = { ...aiSnapshot(), supported: true, installed: true }
+  let rejectStart!: (error: Error) => void
+  aiCommand = async (_id, command) => command!.action === 'start'
+    ? new Promise((_resolve, reject) => { rejectStart = reject }) : aiState
+  await mount()
+  await act(async () => aiSwitch().props.onChange())
+  await act(async () => aiSwitch().props.onChange())
+  await act(async () => rejectStart(new Error('cancelled old start')))
+  assert.equal(aiSwitch().props.checked, false)
+  assert.equal(aiSwitch().props['aria-expanded'], false)
+  assert.equal(renderer!.root.findAll(node => node.props.role === 'alert').length, 0)
+})
+
+test('sidebar display failure does not open an unrelated toolbar guide', async () => {
+  aiState = { ...aiSnapshot(), supported: true, installed: true }
+  aiCommand = async () => { throw new Error('Synthetic display failure') }
+  await mount(); await options()
+  const display = renderer!.root.findAllByType(Select).find(node => node.props['aria-label'] === 'AI 字幕显示')!
+  await act(async () => display.props.onChange({ target: { value: 'japanese' } }))
+  assert.equal(aiSwitch().props['aria-expanded'], false)
+  assert.ok(renderer!.root.findAll(node => node.props.role === 'alert').some(node => renderedText(node).includes('Synthetic display failure')))
 })

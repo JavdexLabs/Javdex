@@ -405,11 +405,13 @@ static napi_value setPresentation(napi_env env, napi_callback_info info) {
     return undefined(env);
 }
 static napi_value command(napi_env env, napi_callback_info info) {
-    size_t argc = 1; napi_value args[1];
+    size_t argc = 2; napi_value args[2];
     napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
     if (!playerView || playerView->closed) return fail(env, "No native playback session");
-    if (argc != 1) return fail(env, "Expected one command array");
-    try { playback.command(env, args[0]); } catch (const std::exception &error) { return fail(env, error.what()); }
+    if (!argc) return fail(env, "Expected a command array");
+    bool generated = false;
+    if (argc > 1 && napi_get_value_bool(env, args[1], &generated) != napi_ok) return fail(env, "Invalid subtitle command scope");
+    try { playback.command(env, args[0], generated); } catch (const std::exception &error) { return fail(env, error.what()); }
     return undefined(env);
 }
 static napi_value readState(napi_env env, bool consume) {
@@ -492,9 +494,14 @@ static napi_value render(napi_env env, napi_callback_info) {
     }
     return undefined(env);
 }
+static napi_value generatedSubtitles(napi_env env, napi_callback_info info) {
+    try { playback.generatedSubtitles(env, info); } catch (const std::exception &error) { return fail(env, error.what()); }
+    return undefined(env);
+}
 static napi_value destroy(napi_env env, napi_callback_info) { destroyPlayer(); return undefined(env); }
 static napi_value initialize(napi_env env, napi_value exports) {
     napi_property_descriptor methods[] = {
+        {"generatedSubtitles", nullptr, generatedSubtitles, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"create", nullptr, create, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"setBounds", nullptr, bounds, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"setVisible", nullptr, visible, nullptr, nullptr, nullptr, napi_default, nullptr},

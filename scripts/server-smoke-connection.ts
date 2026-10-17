@@ -9,6 +9,7 @@ export function smokeConnection(origin: string) {
     pin = fingerprint
   } })
   return {
+    get certificateSha256() { return pin },
     fetch: (url: string | URL, init: RequestInit = {}) => transport.fetch(url, { ...init, signal: init.signal ?? AbortSignal.timeout(15_000) }),
     async claim(oneTimeToken: string, appVersion: string, secret: string) {
       if (!/^[a-f0-9]{64}$/.test(oneTimeToken)) throw new Error('Invalid smoke token')

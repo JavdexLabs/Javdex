@@ -4,7 +4,7 @@
 
 本文面向从源码运行、修改或打包 Javdex 的开发者。安装和日常操作见使用指南。
 
-本文对应 0.9.0-beta.7，资料库使用 schema 21，模型管理文档使用格式 4；本版连接、播放器和升级流程调整不增加迁移。发布状态与验证边界见 [Beta.7 发布审计](reviews/v0.9.0-beta.7-release-audit.md)；[0.9.0 正式版准备](reviews/v0.9.0-readiness.md)保留为历史准备材料。本文描述源码与分发合同，不表示正式版已发布，也不把历史 CI 或本机测试当作本轮原生产物及 GUI 验收。
+本文对应 0.9.0 正式版准备，升级基线为已发布的 0.8.0。资料库使用 schema 21，模型管理文档使用格式 4；发布状态与验证边界见 [0.9.0 正式版准备](reviews/v0.9.0-readiness.md)。本文描述源码与分发合同，不表示正式版已发布，也不把历史 CI 或本机测试当作本轮原生产物及 GUI 验收。
 
 ## 环境与本地启动
 
@@ -26,7 +26,7 @@ npm run dev
 
 桌面本机“最近播放”不增加数据库表：`player/recentPlayback.ts` 在 Electron `userData/recent-playback.json` 中原子保存最多 1,000 个窄影片快照，同时限制 UTF-8 文件为 8 MiB，超出任一限制均从最旧记录开始淘汰，确保写入后仍可读取。按 mode／catalogId／serverId 的摘要隔离，不保存播放 URL、授权或资源路径。独立 `recentPlayback:*` IPC 读取／分页／移除／清空；桌面 `/playlists/0` 是虚拟入口，不能传给资料库清单接口。自动记录复用内置播放的真实启动信号与外部系统接受打开信号，晚到的资料读取不能跨资料库写入、覆盖较新播放或撤销已确认的清空／单条移除。资料库备份、服务器与 Web 不包含此数据。
 
-历史版本中，v0.6.2 使用 schema 15，v0.7.x 使用 schema 16，v0.8.0 使用 schema 19：17 引入 catalog 身份、写入凭据和操作回执；18 引入图片上传及关联实体版本保护；19 引入持久任务表。0.7.x 升级至 0.8.0 时执行 16 → 19，已有相同结构不重复升级。当前 0.9.0-beta.7 使用 **schema 21**；从旧版升级会继续执行至 21，具体迁移以 [migrations.ts](../packages/library/src/db/migrations.ts) 为准。
+历史版本中，v0.6.2 使用 schema 15，v0.7.x 使用 schema 16，v0.8.0 使用 schema 19：17 引入 catalog 身份、写入凭据和操作回执；18 引入图片上传及关联实体版本保护；19 引入持久任务表。0.7.x 升级至 0.8.0 时执行 16 → 19，已有相同结构不重复升级。当前 0.9.0 使用 **schema 21**；从旧版升级会继续执行至 21，具体迁移以 [migrations.ts](../packages/library/src/db/migrations.ts) 为准。
 
 已运行旧开发分支的数据库不属于已发布升级路径。旧不完整 schema 16 与开发 schema 17/18 会明确拒绝打开，保持数据和版本不变；使用匹配的开发构建或升级前备份处理，不要手动降低 `user_version`。合并迁移不会替用户改写已有开发数据库。正式 17 仍靠协议表结构识别，不能仅靠 `user_version = 17` 接受历史实验快照。
 
@@ -34,7 +34,7 @@ npm run dev
 
 ### 0.9.0：资料库升级至 schema 21
 
-以已发布 0.8.0（`004dc15d`，schema 19）为历史基线，评分与内置清单迁移仍为 schema 20；新增多可信设备授权独立使用 schema 21，保留已有管理凭据并调整其唯一约束、设备名称与新增设备令牌。19/20 均在一个事务内升级至当前结构，失败时结构、数据与 `user_version` 一起回滚。新库使用相同最终结构。版本号去掉预发布后缀本身不会触发额外迁移。
+以已发布 0.8.0（`v0.8.0` 对应源码 `8a819bd1`，schema 19）为历史基线，评分与内置清单迁移仍为 schema 20；新增多可信设备授权独立使用 schema 21，保留已有管理凭据并调整其唯一约束、设备名称与新增设备令牌。19/20 均在一个事务内升级至当前结构，失败时结构、数据与 `user_version` 一起回滚。新库使用相同最终结构。版本号去掉预发布后缀本身不会触发额外迁移。
 
 早期实验的 21（缺少设备结构）/22 以及结构不完整的 20 明确拒绝，不自动降级或猜测修复。保留匹配构建与升级前备份，不直接降低 `user_version`；开发备份也不会自动降版导入。
 
@@ -44,7 +44,7 @@ npm run dev
 
 ## 检查与构建
 
-托管服务端的业务命令统一经 `updater/businessProcess.ts` 降权：Linux root 管理器使用镜像内 util-linux `setpriv` 显式设置 UID、主 GID 和 `JAVDEX_SERVER_GROUPS`，空配置清空附加组，不继承管理器组。启动与令牌命令共用入口；`group_add` 不作为业务授权来源。`updater/businessProcess.test.ts` 在 Linux root + setpriv 环境以真实业务子进程检查附加组、目录遍历和文件读取；其他宿主明确跳过，不能把 Windows 测试通过当作权限回归通过。此改动位于管理器，发布需更换基础镜像；已发布 Beta.4 的兼容配置与排查命令见网站权限参考。
+托管服务端的业务命令统一经 `updater/businessProcess.ts` 降权：Linux root 管理器使用镜像内 util-linux `setpriv` 显式设置 UID、主 GID 和 `JAVDEX_SERVER_GROUPS`，空配置清空附加组，不继承管理器组。启动与令牌命令共用入口；`group_add` 不作为业务授权来源。`updater/businessProcess.test.ts` 在 Linux root + setpriv 环境以真实业务子进程检查附加组、目录遍历和文件读取；其他宿主明确跳过，不能把 Windows 测试通过当作权限回归通过。此配置由管理器实现，从 0.8.0 升级须更换包含它的 0.9.0 基础镜像，不能只上传业务升级包；配置与排查命令见网站权限参考。
 
 ```bash
 npm run typecheck       # 主进程与渲染端类型检查
@@ -131,7 +131,7 @@ Windows／Linux 及 macOS 翻译工具按需下载固定发布资产；安装校
 
 ### 内置播放运行库
 
-Windows 新版 adapter 通过 `rendererFullscreenControls` 能力统一使用 renderer 经典工具栏与播放设置，原生 child window 只负责画面、输入和帧提交；旧 adapter 保留原生全屏控件。全屏按指针所在的顶部／底部区域分别显示标题栏／控制栏，鼠标在画面中间移动或暂停不会唤出它们；打开播放设置时同时固定显示标题栏与控制栏，关闭后恢复分区触发；键盘焦点、拖动和子菜单所有权保持操作区域可见。原生指针由 Windows 客户区像素换算为 DIP，再按网页缩放倍率换算为 CSS 像素，不能用播放时钟更新或任意鼠标活动唤出控制栏。全屏视频始终占满窗口，标题栏、控制栏和设置使用覆盖布局，显隐不改变 drawable 尺寸；renderer 报告这些表面及菜单与视频的交叠矩形，Windows 用窗口区域裁剪让 HTML 控件可见，关闭覆盖层后恢复完整画面。此改动同时涉及 renderer 与 addon，开发调试需重建两者并完整退出、重启 Electron；仅刷新页面仍会保留已加载的旧 addon。
+Windows 与 Linux X11 adapter 通过 `rendererFullscreenControls` 能力统一使用 renderer 经典工具栏与播放设置，原生 child window 只负责画面、输入和帧提交；旧 Windows adapter 保留原生全屏控件。全屏按指针所在的顶部／底部区域分别显示标题栏／控制栏，鼠标在画面中间移动或暂停不会唤出它们；打开播放设置时同时固定显示标题栏与控制栏，关闭后恢复分区触发；键盘焦点、拖动和子菜单所有权保持操作区域可见。原生指针先由客户区像素换算为 DIP，再按网页缩放倍率换算为 CSS 像素，不能用播放时钟更新或任意鼠标活动唤出控制栏。全屏视频始终占满窗口，标题栏、控制栏和设置使用覆盖布局，显隐不改变 drawable 尺寸；renderer 报告这些表面及菜单与视频的交叠矩形，Windows 用窗口区域裁剪，Linux 用 X Shape 1.1 同时裁剪可见区域和输入区域，让 HTML 控件可见且可点击。Linux 保留圆角边缘，关闭覆盖层后恢复完整画面；视频区域的 Tab／Shift+Tab 将焦点交回共享面板。此改动同时涉及 renderer 与原生运行文件，开发调试需重建两者并完整退出、重启 Electron；仅刷新页面仍会保留旧原生实现。
 
 内置播放的设计与分阶段验收边界见 [实施计划](BUILTIN_PLAYBACK_DESIGN_PROPOSAL.md)，实际源码构建及发布证据见下文。`npm run playback:native:build` 只生成链接本机开发库的运行文件：macOS/Windows 为 addon，Linux 为独立 `playback-helper`；正式打包输入由 `npm run playback:runtime:build` 从固定源码构建。普通桌面打包明确排除 `out/native-playback`、`out/playback-acceptance`、`out/libmpv-prototype` 与 `out/playback-runtime`，审核后的运行库通过打包钩子复制到 Resources，不把构建目录、合成素材、截图或临时 Electron bundle 收入 `app.asar`。
 
@@ -143,7 +143,7 @@ Windows 正常桌面入口检测到 `out/native-playback/playback.node`（开发
 
 默认 Windows MSVC 构建直接编入已安装 `@electron/rebuild` 所依赖的 node-gyp 延迟加载钩子，并链接 `delayimp`、`/DELAYLOAD:node.exe`；仅链接 `node.lib` 不足以在 Electron 或改名后的应用可执行文件中加载。构建器解析依赖自身的钩子路径，不下载或修改上游文件，缺少钩子时停止。CMake 也支持 LLVM MinGW/CLANG64：使用 Ninja、显式指定匹配的 `clang++.exe` 与 libmpv 前缀、Electron headers/node.lib，编入仓库的 `windowsElectronDelayHook.cpp` 并使用 `--delayload=node.exe`。npm 开发构建命令仍默认 MSVC。两条路径均重定向到当前应用宿主；MinGW 路径已在实际改名的 ZIP/NSIS 应用中加载。MSVC 钩子许可见 [第三方说明](THIRD_PARTY_NOTICES.md#node-gyp-延迟加载钩子)，宿主要求见 [Electron 原生模块说明](https://www.electronjs.org/docs/latest/tutorial/using-native-node-modules#a-note-about-win_delay_load_hook)。
 
-Linux X11／XWayland adapter 与显式启动选项已加入，原生 Wayland 后续补齐。先退出应用，再以 `--javdex-x11`（或 Electron 的 `--ozone-platform=x11`）启动；未显式选择时内置播放不可用，不依据环境变量或 Buffer 宽度猜测 backend。冲突的 ozone 选项拒绝启动；缺少 `DISPLAY` / X server 时给出不可用原因，不自动回退外部播放器。当前提供命令行选择，尚未提供设置页启动开关；不切换系统桌面、不静默强制 X11。开发构建需要 CMake、C++17 编译器、make、pkg-config、X11/GLX/OpenGL/Xft 开发库及同架构 libmpv；设置 `JAVDEX_MPV_PREFIX`（系统前缀如 `/usr`），然后运行 `npm run playback:native:build`。库路径须由开发环境提供，构建器不复制 `.so` 或安装依赖。实际源码、隔离编译及未验收项见 [平台记录](BUILTIN_PLAYBACK_PLATFORM_ADAPTERS.md#10-本轮实施记录2026-10-03)。
+Linux X11／XWayland adapter 与显式启动选项已加入，原生 Wayland 后续补齐。先退出应用，再以 `--javdex-x11`（或 Electron 的 `--ozone-platform=x11`）启动；未显式选择时内置播放不可用，不依据环境变量或 Buffer 宽度猜测 backend。冲突的 ozone 选项拒绝启动；缺少 `DISPLAY` / X server 时给出不可用原因，不自动回退外部播放器。当前提供命令行选择，尚未提供设置页启动开关；不切换系统桌面、不静默强制 X11。开发构建需要 CMake、C++17 编译器、make、pkg-config、X11/Xext/GLX/OpenGL 开发库及同架构 libmpv；设置 `JAVDEX_MPV_PREFIX`（系统前缀如 `/usr`），然后运行 `npm run playback:native:build`。运行时要求 X Shape 1.1，不再绘制或链接 Xft 全屏工具栏。库路径须由开发环境提供，构建器不复制 `.so` 或安装依赖。实际源码、隔离编译及未验收项见 [平台记录](BUILTIN_PLAYBACK_PLATFORM_ADAPTERS.md#10-本轮实施记录2026-10-03)。
 
 Linux 的 `playback-helper` 在独立进程直接链接 libmpv，拥有 X11 child windows、GLX context 和播放器核心；子窗口仍嵌入原 Electron parent，不另开可见顶层播放窗口。Electron 通过私有继承管道传送带长度的命令字段并缓存返回状态，不经 shell 或监听端口。此边界用于隔离 Electron 全局导出的 FFmpeg／分配器符号；同进程的 `RTLD_DEEPBIND`、`dlmopen` 实验未通过真实播放／清理检查，未作为支持方案。独立进程不等于解码器沙箱，仍须验收异常退出、关闭／重开、输入焦点和媒体行为。
 
@@ -151,7 +151,11 @@ Linux 的 `playback-helper` 在独立进程直接链接 libmpv，拥有 X11 chil
 
 显示选择只读取启动参数，不将 Electron 在 ready 前返回的默认 `ozone-platform=x11` 当成用户选择。解析遵循最后一个 ozone 参数生效、`--` 终止选项的规则；ozone 值使用 `=`，例如 `--ozone-platform=x11`。`--javdex-x11` 与最终显式非 X11 选择冲突时拒绝启动，不静默覆盖。
 
-可选的 Linux 无 GUI 编译检查使用 `scripts/playback-linux-compile.Dockerfile`；需要本机已有可用 Docker，不能替代 GUI、GPU、音频或干净安装验收。用 `mktemp -d` 创建专用构建目录，只复制 `apps/desktop/src/main/player/native/` 为 `native/`、匹配 Electron 版本的 `include/node/` 为 `electron-headers/`，及 `scripts/playback-runtime.mjs`、`playback-runtime.test.mjs`、`packaging-runtime.mjs`、`playback-linux-helper-smoke.mjs` 为 `scripts/`，再将该 Dockerfile 复制到专用目录。不要把整个仓库、用户资料或凭据作为 context。镜像内安装 Debian 开发依赖、运行 C++ 回归及真实 ELF 搬移测试；`docker run --rm <构建镜像>` 仅验证 helper 加载、私有协议、EOF／destroy、无效 backend／句柄及无显示时的受控失败。此检查也由 Linux 开发构建调用，不创建 GL context，不播放素材。镜像中的系统 libmpv 没有来源闭包清单，检查必须拒绝将该 helper 单独作为正式运行库。
+可选的 Linux 无 GUI 编译检查使用 `scripts/playback-linux-compile.Dockerfile`；需要本机已有可用 Docker，不能替代 GUI、GPU、音频或干净安装验收。用 `mktemp -d` 创建空的专用构建目录，再运行 `node scripts/stage-playback-linux-context.mjs <匹配 Electron 版本的 include/node 绝对路径> <该空目录>`。入口只复制原生源码、指定 headers、Dockerfile，以及五个脚本：`playback-runtime.mjs`、`playback-linux-elf.test.mjs`、`playback-source-materials.mjs`、`packaging-runtime.mjs`、`playback-linux-helper-smoke.mjs`。非空目标拒绝覆盖，不把整个仓库、用户资料或凭据作为 context。
+
+构建该专用 context 后，用 `docker run --rm --init --network none <本轮开发镜像>` 执行默认 helper 烟测。必须保留 `--init`，避免 Node 成为 PID 1 后触发 helper 的孤儿进程保护；不为测试放宽生产保护。无显示烟测只检查加载、私有协议、EOF／销毁及预期失败，不创建 GL、播放媒体或验证辅助技术。
+
+对该目录运行 `docker build -t <本轮专用标签> <该目录>`。镜像内安装 Debian 开发依赖，运行 C++ 回归及独立的真实 ELF 搬移测试；该 Docker 检查要求 Linux ELF 测试实际运行，跳过不能代替成功。完整安装包／源码绑定测试仍在仓库根的 `test:packaging` 中执行，不塞入最小编译 context。随后 `docker run --rm --init --network none <本轮专用标签>` 仅验证 helper 加载、私有协议、EOF／destroy、无效 backend／句柄及无显示时的受控失败。此 helper 协议检查也由 Linux 开发构建调用，不创建 GL context，不播放素材。镜像中的系统 libmpv 没有来源闭包清单，检查必须拒绝将该 helper 单独作为正式运行库。
 
 经审核的运行库通过 `JAVDEX_PLAYBACK_RUNTIME_DIR` 显式指定矩阵目录，每个目标在 `<platform>-<arch>/` 下独立提供入口、依赖库及 `runtime.json`，例如 `darwin-arm64/`、`win32-x64/` 和 `linux-x64/`。macOS/Windows 的入口为 `playback.node`；Linux 必须为有执行权限的 `playback-helper`，不接受旧的同进程 `playback.node`。未指定时不加入运行库；已指定但目录、架构、版本或文件不匹配时停止打包，不静默生成缺少运行库的内置播放包。技术检查覆盖 macOS Mach-O、Windows PE 与 Linux ELF；Windows 本地 ZIP/NSIS 的合成媒体播放回归见 [Windows 验收记录](BUILTIN_PLAYBACK_WINDOWS_ACCEPTANCE.md)，四目标源码构建与最终安装产物的验证合同见下文。独立干净机器、可信分发签名、公证与 GUI／硬解等验收须按具体记录判断，不能由清单或命令选择测试推定。
 
@@ -163,7 +167,7 @@ Linux 的 `playback-helper` 在独立进程直接链接 libmpv，拥有 X11 chil
 
 `npm run playback:runtime:build` 从 [固定源码清单](../build/playback-sources.json) 构建正式打包输入，输出到 `out/playback-runtime/<platform>-<arch>`。下载前后的大小与 SHA-256 必须匹配；清单包含 libmpv、FFmpeg、字幕/字体、AV1、TLS 依赖及 libplacebo 的固定子模块，也锁定 Electron headers 的 Node 版本和许可来源。Meson 禁止自动下载或探测未声明的可选依赖，不复制 Homebrew／系统 FFmpeg。源码和配方变化后使用新空前缀；pkgconf 保留私有 `-I/-L`，避免从系统静态库解析 FFmpeg。工具安装在任务自己的 Python venv，不改本机系统 Python。
 
-当前清单固定 mpv 0.41.0、FFmpeg 9.0.2、Electron 43.4.1 和 Node SDK headers 24.18.1；其余来源、版本、字节数、摘要与工具版本以清单及 [构建配方](../scripts/playback-source-build.mjs) 为准。这套播放 FFmpeg 与本地 AI 使用的 FFmpeg 8.1.3 是独立构建，不能混用版本或许可说明。
+当前清单固定 mpv 0.41.0、FFmpeg 9.0.2、Electron 43.8.0 和 Node SDK headers 24.22.0；其余来源、版本、字节数、摘要与工具版本以清单及 [构建配方](../scripts/playback-source-build.mjs) 为准。这套播放 FFmpeg 与本地 AI 使用的 FFmpeg 8.1.3 是独立构建，不能混用版本或许可说明。
 
 当前配置将解码和字幕依赖静态链接进一个共享 libmpv，另构建 Javdex 原生 addon／Linux helper；所有内置 FFmpeg 解码器保留，支持本地及内置网络协议，HTTPS 分别使用 macOS SecureTransport、Windows Schannel、Linux 自建 OpenSSL。视频编码／采集不进入播放配置，保留 PNG/MJPEG 图像编码。libass 保留系统字体提供者、HarfBuzz、FriBidi 和 libunibreak。Lua 5.2.4 是 mpv 0.41 支持的版本，保留它是为了使现有核心能够显式关闭脚本、ytdl、OSC，而不是忽略缺失的必需初始化选项。构建仅保留软件用到的基础播放能力，不加入额外的蓝光/DVD 导航、SFTP/SRT 等可选依赖；不能宣称与任意开发库的可选功能全集一致。
 
@@ -207,7 +211,7 @@ Release 的 `playback-sources` 任务在四个平台打包门禁之后执行 `no
 | macOS arm64 | Apple Silicon `.dmg` | 只读挂载，匹配运行库及来源绑定，校验 app 签名 |
 | Linux x64 | `.deb`、`.AppImage` | 分别提取，匹配运行库及来源绑定 |
 
-文件名映射以 [playback-source-materials.mjs](../scripts/playback-source-materials.mjs) 为准。[历史源码与产物核验](reviews/v0.9.0-beta.3-release-audit.md) 记录 Release run `38601458029` 的四目标构建、包内加载与 PCM EOF、六个最终安装产物核验，以及公开总源码包四目标恢复和摘要核对。本轮 Beta.7 须对自身提交及产物执行 [Release 工作流](../.github/workflows/release.yml)，不能沿用历史摘要或把上述无显示门禁记为新增 GUI、硬解或干净机器验证；当前状态见 [Beta.7 发布审计](reviews/v0.9.0-beta.7-release-audit.md)。
+文件名映射以 [playback-source-materials.mjs](../scripts/playback-source-materials.mjs) 为准。[历史源码与产物核验](reviews/v0.9.0-beta.3-release-audit.md) 记录 Release run `38601458029` 的四目标构建、包内加载与 PCM EOF、六个最终安装产物核验，以及公开总源码包四目标恢复和摘要核对。0.9.0 正式版须对自身提交执行 [Release 工作流](../.github/workflows/release.yml)，不能沿用历史摘要或把无显示门禁记为新增 GUI、硬解或干净机器验证；当前状态见 [正式版准备](reviews/v0.9.0-readiness.md)。
 
 解开总包后，使用 Node.js 22+ 执行 `node restore.mjs windows-x64 <新目录路径>`（目标还包括 `macos-x64`、`macos-arm64`、`linux-x64`）；目标目录必须尚不存在。恢复工具先验证全部引用材料，再恢复原 `reviewed-runtime/`、`packaging-tools/` 和说明文件，保留文件模式。按平台 `build.json` 的工具链、补丁和配方重建；恢复工具不执行构建脚本。原单平台压缩包摘要记录来源，不能用来校验总包；总包摘要见 Release 的 SHA256SUMS。`SOURCE-ACCESS.txt` 同时说明公开总包与原 CI 绑定；分发安装包时须继续提供对应源码访问方式，不能仅提供未交付的文件名。普通用户无需下载源码包；系统 SDK、编译器和签名不由恢复工具提供。
 
@@ -229,7 +233,9 @@ RPATH/RUNPATH 只允许位于运行库内的 `$ORIGIN` 相对目录，RUNPATH �
 
 **摘要不是签名，清单不是许可合规或播放验收证明。** Javdex 采用 GPL-3.0-or-later，应用 `LICENSE`、`NOTICE`、workspace 元数据、锁文件及当前公开许可说明已同步；此前 MIT 声明保留在 `LICENSES/Javdex-MIT.txt`，既有版本不追溯改写。构建来源、选项、源码与二进制对应关系、全部间接依赖及分发义务仍需逐版本复核，第三方代码保留各自版权和许可。实际版本、许可材料与源码交付见 [第三方说明](THIRD_PARTY_NOTICES.md#内置播放运行库)。本机原生开发可使用 Homebrew／系统开发库，Linux 隔离编译检查可使用 Debian 开发库；Release 使用固定源码构建并交付配套总源码包。两条构建路径及历史验收范围须分别判断。
 
-部分 macOS/Windows 播放回归以隔离资料目录运行：先生成 `playback:native:build`、`desktop:build`（远程另需 `server:build`），再运行 `node scripts/playback-media-acceptance.mjs` 检查合成素材，或 `node scripts/playback-subtitle-acceptance.mjs` 定向检查复杂 ASS 与原创 PGS；可加 `--bitmap-only` 缩短图像字幕回归。`npm run test:playback:fixtures` 独立核对原创 PGS 字节/像素结构，不依赖 FFmpeg、GUI 或播放运行库，已纳入根 `npm test`。远程使用 `node scripts/playback-remote-acceptance.mjs --media-matrix`；追加 `--system-subtitle-picker` 时会等待真实系统选择器分别选择生成的 SRT/ASS，不适合无人值守 CI，也不 mock 文件选择器。具体文件、像素证据、失败诊断及未覆盖范围见 [字幕验收说明](BUILTIN_PLAYBACK_SUBTITLE_ACCEPTANCE.md) 与 [PGS 验收合同/结果](BUILTIN_PLAYBACK_BITMAP_ACCEPTANCE.md)。Windows 原生输入可运行 `node scripts/playback-windows-input-acceptance.mjs`，它准备隔离暂停素材并写入只读状态，仍需实际鼠标/键盘检查及解锁的桌面。Windows GUI 宿主还接受 `JAVDEX_PLAYBACK_ACCEPTANCE_EXECUTABLE` 指向实际解压/安装后的绝对 exe 路径；该子进程不带源码入口参数，使用空 cwd、Windows 系统 PATH 并移除开发 mpv prefix，诊断桥从包内 Resources 加载。仍不代表独立干净机器或发布验收。
+部分 macOS/Windows 播放回归以隔离资料目录运行：先生成 `playback:native:build`、`desktop:build`（远程另需 `server:build`），再运行 `node scripts/playback-media-acceptance.mjs` 检查合成素材，或 `node scripts/playback-subtitle-acceptance.mjs` 定向检查复杂 ASS 与原创 PGS；可加 `--bitmap-only` 缩短图像字幕回归。`npm run test:playback:fixtures` 独立核对原创 PGS 字节/像素结构，不依赖 FFmpeg、GUI 或播放运行库，已纳入根 `npm test`。远程使用 `npm run test:playback:remote -- --media-matrix`，该入口注册 TypeScript 及共享路径加载器；追加 `--system-subtitle-picker` 时会等待真实系统选择器分别选择生成的 SRT/ASS，不适合无人值守 CI，也不 mock 文件选择器。具体文件、像素证据、失败诊断及未覆盖范围见 [字幕验收说明](BUILTIN_PLAYBACK_SUBTITLE_ACCEPTANCE.md) 与 [PGS 验收合同/结果](BUILTIN_PLAYBACK_BITMAP_ACCEPTANCE.md)。Windows 原生输入可运行 `node scripts/playback-windows-input-acceptance.mjs`，它准备隔离暂停素材并写入只读状态，仍需实际鼠标/键盘检查及解锁的桌面。Windows GUI 宿主还接受 `JAVDEX_PLAYBACK_ACCEPTANCE_EXECUTABLE` 指向实际解压/安装后的绝对 exe 路径；该子进程不带源码入口参数，使用空 cwd、Windows 系统 PATH 并移除开发 mpv prefix，诊断桥从包内 Resources 加载。仍不代表独立干净机器或发布验收。
+
+`npm run test:playback:remote:connection` 是无媒体的开发启动检查：真实 Node 业务宿主经临时 HTTPS 网关完成统一配对，桌面 runtime 重开后复用原凭据且不打开本地资料库。它使用生产配对与代理实现，但不提供 Linux manager、环境查询或升级接口，不替代 Docker 更新检查、原生媒体或系统密钥存储 GUI 验收；PR 在 `server:build` 后执行。
 
 `node scripts/playback-close-acceptance.mjs` 检查播放中正常关闭主窗口：窗口确实销毁，进程退出前内核已释放，随后应用正常退出。不要把清理移到可能被否决的 `close` 事件；本机实测还发现该事件中拆除活跃原生视图会让窗口留存。Windows 为 `closed` 清理保留私有隐藏 drawable/context，实际接受关闭时内核仍存活，原窗口销毁后内核释放、零窗口正常退出已通过；不用独立可见播放窗口代替主窗口嵌入。
 

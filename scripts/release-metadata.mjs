@@ -1,5 +1,6 @@
 import fs from 'node:fs'
 import { pathToFileURL } from 'node:url'
+import { assertReleaseAvailable } from './release-publication.mjs'
 
 export function releaseMetadata(version, requestedTag, prerelease = false) {
   if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?$/.test(version)) {
@@ -18,6 +19,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const result = releaseMetadata(version, requested, process.env.RELEASE_PRERELEASE === 'true')
   if (!fs.existsSync(`.github/release-notes/${result.tag}.md`)) throw new Error('Missing release notes')
   const image = `ghcr.io/${process.env.GITHUB_REPOSITORY_OWNER.toLowerCase()}/javdex-server`
+  if (process.env.RELEASE_VERIFY_ONLY !== 'true') await assertReleaseAvailable({ ...result, image })
   fs.appendFileSync(process.env.GITHUB_OUTPUT, Object.entries({ ...result, image })
     .map(([key, value]) => `${key}=${value}\n`).join(''))
 }

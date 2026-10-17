@@ -17,7 +17,7 @@ uint32_t read32(const std::string &bytes, size_t offset) {
 }
 std::vector<std::string> decode(const std::string &bytes) {
     const auto count = read32(bytes, 0);
-    if (!count || count > 16) throw std::runtime_error("Invalid playback command fields");
+    if (!count || count > 257) throw std::runtime_error("Invalid playback command fields");
     std::vector<std::string> fields; size_t offset = 4;
     for (uint32_t i = 0; i < count; i++) {
         const auto length = read32(bytes, offset); offset += 4;
@@ -26,6 +26,7 @@ std::vector<std::string> decode(const std::string &bytes) {
         if (fields.back().find('\0') != std::string::npos) throw std::runtime_error("Invalid playback field");
     }
     if (offset != bytes.size()) throw std::runtime_error("Trailing playback command bytes");
+    if (fields.front() != "occlusions" && count > 16) throw std::runtime_error("Invalid playback command fields");
     return fields;
 }
 double finiteNumber(const std::string &text) {
@@ -48,6 +49,14 @@ bool dispatch(const std::vector<std::string> &fields) {
         if (length != fields[1].size() || !handle || handle > UINT32_MAX) throw std::runtime_error("Invalid X11 parent");
         create(static_cast<Window>(handle), rectangle(fields, 2));
     } else if (op == "bounds" && fields.size() == 6) bounds(rectangle(fields, 1));
+    else if (op == "renderer-controls" && fields.size() == 2 && (fields[1] == "0" || fields[1] == "1")) setRendererControls(fields[1] == "1");
+    else if (op == "occlusions" && fields.size() <= 257 && (fields.size() - 1) % 8 == 0) {
+        std::vector<x11::Occlusion> areas;
+        for (size_t offset = 1; offset < fields.size(); offset += 8)
+            areas.push_back({finiteNumber(fields[offset]), finiteNumber(fields[offset + 1]), finiteNumber(fields[offset + 2]), finiteNumber(fields[offset + 3]),
+                {finiteNumber(fields[offset + 4]), finiteNumber(fields[offset + 5]), finiteNumber(fields[offset + 6]), finiteNumber(fields[offset + 7])}});
+        setOcclusions(std::move(areas));
+    }
     else if (op == "visible" && fields.size() == 2 && (fields[1] == "0" || fields[1] == "1")) setVisible(fields[1] == "1");
     else if (op == "presentation" && fields.size() == 2) setPresentation(fields[1]);
     else if ((op == "command" || op == "generated-subtitle-command") && fields.size() >= 2 && fields.size() <= 9)

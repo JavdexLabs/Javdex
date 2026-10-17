@@ -1,17 +1,18 @@
 // X11/XWayland only: a child of the explicitly selected Electron X11 parent.
 // All calls on our Display/GL context are serialized on the helper owner thread;
 // no late XInitThreads, no shared Display handed to decoder threads, no Wayland
-// ID casting and no visible top-level playback window. AT-SPI remains unverified.
+// ID casting and no visible top-level playback window. Fullscreen chrome belongs
+// to the existing accessible renderer, exposed through visual and input cutouts.
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 #include <X11/XKBlib.h>
 #include <X11/keysym.h>
-#include <X11/Xft/Xft.h>
 #include <GL/glx.h>
 #include <GL/glxext.h>
 #define JAVDEX_STANDALONE_PLAYBACK
 #include "mpvCore.h"
 #include "x11Controls.h"
+#include "x11SurfaceClip.h"
 #include <chrono>
 #include <cstdio>
 #include <cstring>
@@ -20,31 +21,22 @@
 
 namespace {
 using namespace javdex;
-using x11::Control;
 MpvCore playback;
 Display *display = nullptr;
-Window parent = None, video = None, toolbar = None;
+Window parent = None, video = None;
 GLXWindow drawable = None;
 GLXPbuffer cleanupDrawable = None;
 GLXContext context = nullptr;
 Colormap colormap = None;
 XVisualInfo *visual = nullptr;
-XftDraw *textDraw = nullptr;
-XftFont *font = nullptr;
-XftColor textColor{};
-GC graphics = nullptr;
-unsigned long background = 0, foreground = 0;
 std::thread::id ownerThread;
 std::string presentation = "expanded";
 struct Bounds { double x = 0, y = 0, width = 1, height = 1, scale = 1; } requested;
-x11::Controls controls;
-bool visible = false, controlsVisible = false, closing = false, focusFullscreen = false, detectableRepeat = false;
-Control pressed = Control::Empty;
+std::vector<x11::Occlusion> occlusions;
+bool visible = false, closing = false, rendererControls = false, detectableRepeat = false;
 std::set<unsigned int> heldKeys;
-uint64_t lastInteraction = 0, singleClickAt = 0;
+uint64_t interactionSequence = 0, singleClickAt = 0;
 int clickX = 0, clickY = 0, lastPointerX = -1, lastPointerY = -1, pixelWidth = 1, pixelHeight = 1;
-double draggedFraction = 0;
-double fontScale = 0;
 uint64_t now() { return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count(); }
 void requireOwner() { if (ownerThread != std::this_thread::get_id()) throw std::runtime_error("X11 playback requires its window owner thread"); }
 
@@ -84,83 +76,29 @@ thread_local XErrors *XErrors::active = nullptr;
 std::atomic<XErrorHandler> XErrors::fallback{nullptr};
 void layout();
 void cancelInput() {
-    if (display && pressed != Control::Empty) XUngrabPointer(display, CurrentTime);
-    pressed = Control::Empty; singleClickAt = 0; heldKeys.clear();
+    singleClickAt = 0; heldKeys.clear();
 }
-void interact() { lastInteraction = now(); }
+void interact() { interactionSequence++; }
 void queue(const char *kind, double value = 0) { playback.queue(kind, value); interact(); }
-bool seekable() { return playback.number("seekable") && playback.number("duration") > 0; }
 void *getProcAddress(void *, const char *name) { return reinterpret_cast<void *>(glXGetProcAddressARB(reinterpret_cast<const GLubyte *>(name))); }
-void showControls(bool show) {
-    if (controlsVisible == show || !toolbar) return;
-    controlsVisible = show;
-    if (show) XMapRaised(display, toolbar); else XUnmapWindow(display, toolbar);
-    layout();
-}
-void focus(Control target) {
-    controls.focus = target;
-    XSetInputFocus(display, target == Control::Video ? video : toolbar, RevertToParent, CurrentTime);
-    interact();
-}
-void text(int x, int y, const char *label) {
-    if (font && textDraw) XftDrawStringUtf8(textDraw, &textColor, font, x, y, reinterpret_cast<const FcChar8 *>(label), static_cast<int>(std::strlen(label)));
-}
-void paintControls() {
-    if (!toolbar || !controlsVisible) return;
-    XClearWindow(display, toolbar);
-    XSetForeground(display, graphics, foreground);
-    const int baseline = x11::pixel(57, requested.scale);
-    for (auto control : {Control::Pause, Control::Dock, Control::Fullscreen, Control::Stop}) {
-        const auto &rect = controls.rect(control);
-        XDrawRectangle(display, toolbar, graphics, rect.x, rect.y, rect.width - 1, rect.height - 1);
-        if (controls.focus == control) XDrawRectangle(display, toolbar, graphics, rect.x + 2, rect.y + 2, std::max(0, rect.width - 5), std::max(0, rect.height - 5));
-        const char *label = control == Control::Pause ? playback.number("eof-reached") ? "从头重播" : playback.number("pause") ? "播放" : "暂停"
-            : control == Control::Dock ? "收起" : control == Control::Fullscreen ? "退出全屏" : "停止";
-        text(rect.x + x11::pixel(8, requested.scale), baseline, label);
-    }
-    for (auto control : {Control::Seek, Control::Volume}) {
-        const auto &rect = controls.rect(control);
-        const int y = rect.y + rect.height / 2;
-        XDrawLine(display, toolbar, graphics, rect.x, y, rect.x + rect.width - 1, y);
-        const double value = pressed == control ? draggedFraction : control == Control::Seek
-            ? playback.number("time-pos") / std::max(1.0, playback.number("duration")) : playback.number("volume") / 100;
-        const int x = rect.x + static_cast<int>(std::clamp(value, 0.0, 1.0) * (rect.width - 1));
-        XFillRectangle(display, toolbar, graphics, x - 2, y - 6, 4, 12);
-        if (controls.focus == control) XDrawRectangle(display, toolbar, graphics, rect.x, rect.y, rect.width - 1, rect.height - 1);
-    }
-    const int seconds = static_cast<int>(std::clamp(playback.number("time-pos"), 0.0, 359999.0));
-    char position[32]; std::snprintf(position, sizeof(position), "%02d:%02d:%02d", seconds / 3600, seconds / 60 % 60, seconds % 60);
-    text(x11::pixel(496, requested.scale), baseline, position);
-    XFlush(display);
+void clipOcclusions() {
+    if (!display || !video || closing) return;
+    auto shape = x11::surfaceRegion(pixelWidth, pixelHeight, x11::pixel(requested.x, requested.scale),
+        x11::pixel(requested.y, requested.scale), requested.scale, occlusions);
+    x11::applySurfaceRegion(display, video, shape.get());
 }
 void layout() {
     if (!parent || !video || closing) return;
     XWindowAttributes parentInfo{};
     if (!XGetWindowAttributes(display, parent, &parentInfo)) { closing = true; return; }
     const double scale = requested.scale;
-    int height = x11::pixel(requested.height, scale, 1, 65535);
+    const int height = x11::pixel(requested.height, scale, 1, 32767);
     const int x = x11::pixel(requested.x, scale), y = x11::pixel(requested.y, scale);
-    if (toolbar) {
-        const int margin = x11::pixel(20, scale, 0), barHeight = x11::pixel(76, scale, 1);
-        const int width = std::max(1, parentInfo.width - 2 * margin);
-        XMoveResizeWindow(display, toolbar, margin, std::max(0, parentInfo.height - barHeight - margin), width, barHeight);
-        controls.layout(width, scale);
-        if (presentation == "fullscreen" && controlsVisible) height = std::max(1, std::min(height, parentInfo.height - barHeight - margin - x11::pixel(8, scale) - y));
-        if (!font || fontScale != scale) {
-            if (font) XftFontClose(display, font);
-            // Xft does not perform Chromium-style per-glyph fallback. Require
-            // the Chinese control glyphs when matching the native UI font.
-            const auto pattern = std::string("sans:charset=4ece 5934 91cd 64ad 653e 6682 505c 6536 8d77 9000 51fa 5168 5c4f 6b62:pixelsize=") + std::to_string(13 * scale);
-            font = XftFontOpenName(display, XScreenNumberOfScreen(parentInfo.screen), pattern.c_str());
-            if (!font) throw std::runtime_error("Cannot create X11 playback control font");
-            fontScale = scale;
-        }
-    }
-    XMoveResizeWindow(display, video, x, y, x11::pixel(requested.width, scale, 1, 65535), height);
+    XMoveResizeWindow(display, video, x, y, x11::pixel(requested.width, scale, 1, 32767), height);
     if (visible) XRaiseWindow(display, video);
-    if (controlsVisible) XRaiseWindow(display, toolbar);
     XWindowAttributes actual{};
     if (XGetWindowAttributes(display, video, &actual)) { pixelWidth = actual.width; pixelHeight = actual.height; }
+    clipOcclusions();
 }
 bool draw(bool newFrame) {
     if (!display || !drawable || !context || closing || !playback.alive()) return false;
@@ -181,19 +119,11 @@ void key(XKeyEvent &event, bool repeat) {
     }
     if (event.state & (Mod1Mask | ControlMask | Mod4Mask)) return;
     if (code == XK_Tab || code == XK_ISO_Left_Tab) {
-        if (presentation == "fullscreen") { showControls(true); focus(controls.tab(shift || code == XK_ISO_Left_Tab, seekable())); }
-        else queue(shift ? "focus-backward" : "focus-forward");
+        queue(shift || code == XK_ISO_Left_Tab ? "focus-backward" : "focus-forward");
+        XSetInputFocus(display, parent, RevertToParent, CurrentTime);
         return;
     }
     if (code == XK_Escape) { if (!repeat) queue("escape"); return; }
-    if (event.window == toolbar) {
-        if (controls.focus == Control::Seek || controls.focus == Control::Volume) {
-            const bool negative = code == XK_Left || code == XK_Down, positive = code == XK_Right || code == XK_Up;
-            if ((negative || positive) && (controls.focus == Control::Volume || seekable()))
-                queue(controls.focus == Control::Seek ? "seek-relative" : "volume-relative", (negative ? -1 : 1) * (controls.focus == Control::Seek ? shift ? 30 : 5 : 1));
-        } else if (!repeat && (code == XK_space || code == XK_Return) && controls.activation()) queue(controls.activation());
-        return;
-    }
     if (code == XK_space && !repeat) queue("toggle-pause");
     else if ((code == XK_m || code == XK_M) && !repeat) queue("toggle-mute");
     else if ((code == XK_f || code == XK_F) && !repeat) queue("fullscreen");
@@ -204,15 +134,15 @@ void events() {
     for (int count = 0; count < 2048 && XPending(display); count++) {
         XEvent event{}; XNextEvent(display, &event);
         if (event.type == DestroyNotify && (event.xdestroywindow.window == parent || event.xdestroywindow.window == video)) {
-            closing = true; visible = controlsVisible = false; parent = video = toolbar = None; cancelInput(); break;
+            closing = true; visible = false; parent = video = None; cancelInput(); break;
         }
         if (event.type == ConfigureNotify && event.xconfigure.window == parent) layout();
         if (event.type == ConfigureNotify && event.xconfigure.window == video) { pixelWidth = event.xconfigure.width; pixelHeight = event.xconfigure.height; }
-        if (event.type == Expose) { if (event.xexpose.window == video) draw(false); else paintControls(); }
+        if (event.type == Expose && event.xexpose.window == video) draw(false);
         if (event.type == FocusOut) {
             Window focused; int revert; XGetInputFocus(display, &focused, &revert);
             heldKeys.clear();
-            if (focused != video && focused != toolbar) { cancelInput(); controls.focus = Control::Video; }
+            if (focused != video) cancelInput();
         }
         if (event.type == KeyPress) key(event.xkey, !heldKeys.insert(event.xkey.keycode).second);
         if (event.type == KeyRelease) {
@@ -224,40 +154,17 @@ void events() {
         }
         if (event.type == MotionNotify) {
             interact();
-            if (pressed == Control::Seek || pressed == Control::Volume) draggedFraction = x11::fraction(controls.rect(pressed), event.xmotion.x);
         }
         if (event.type == ButtonPress) {
             interact(); auto &button = event.xbutton;
             if (button.button == 8 || button.button == 9) { queue(button.button == 8 ? "history-back" : "history-forward"); continue; }
             if (button.button != Button1) continue;
-            if (button.window == video && presentation == "fullscreen" && !controlsVisible) {
-                // The click may precede the render tick which reveals controls.
-                // Dispatch it in toolbar coordinates, not as a video pause.
-                int x = 0, y = 0; Window child = None;
-                const bool translated = XTranslateCoordinates(display, video, toolbar, button.x, button.y, &x, &y, &child);
-                showControls(true);
-                if (translated && controls.bounds.contains(x, y)) {
-                    singleClickAt = 0; button.window = toolbar; button.x = x; button.y = y;
-                }
-            }
-            if (button.window == toolbar) {
-                pressed = controls.hit(button.x, button.y);
-                if (pressed == Control::Seek && !seekable()) { pressed = Control::Empty; continue; }
-                if (pressed == Control::Empty) continue;
-                focus(pressed); singleClickAt = 0;
-                draggedFraction = x11::fraction(controls.rect(pressed), button.x);
-                if (XGrabPointer(display, toolbar, False, ButtonReleaseMask | PointerMotionMask, GrabModeAsync, GrabModeAsync, None, None, button.time) != GrabSuccess) pressed = Control::Empty;
-            } else if (button.window == video) {
-                focus(Control::Video);
+            if (button.window == video) {
+                XSetInputFocus(display, video, RevertToParent, CurrentTime);
                 if (presentation == "docked") { singleClickAt = 0; queue("expand"); }
                 else if (singleClickAt && now() - singleClickAt <= 300 && std::abs(button.x - clickX) < 6 * requested.scale && std::abs(button.y - clickY) < 6 * requested.scale) { singleClickAt = 0; queue("fullscreen"); }
                 else { singleClickAt = now(); clickX = button.x; clickY = button.y; }
             }
-        }
-        if (event.type == ButtonRelease && event.xbutton.button == Button1 && pressed != Control::Empty) {
-            const auto control = pressed; pressed = Control::Empty; XUngrabPointer(display, event.xbutton.time);
-            if (control == Control::Seek || control == Control::Volume) queue(control == Control::Seek ? "seek" : "volume", x11::fraction(controls.rect(control), event.xbutton.x) * (control == Control::Seek ? playback.number("duration") : 100));
-            else if (controls.hit(event.xbutton.x, event.xbutton.y) == control && controls.activation()) queue(controls.activation());
         }
     }
 }
@@ -267,16 +174,11 @@ void destroyPlayer() {
     {
         XErrors errors(display); cancelInput();
         if (video) XUnmapWindow(display, video);
-        if (toolbar) XUnmapWindow(display, toolbar);
         XSync(display, False);
         if (context && !glXMakeContextCurrent(display, cleanupDrawable, cleanupDrawable, context)) throw std::runtime_error("Cannot make X11 cleanup context current");
         playback.shutdown();
         glXMakeContextCurrent(display, None, None, nullptr);
-        if (textDraw) XftDrawDestroy(textDraw);
-        if (font) XftFontClose(display, font);
-        if (graphics) XFreeGC(display, graphics);
         if (drawable) glXDestroyWindow(display, drawable);
-        if (toolbar) XDestroyWindow(display, toolbar);
         if (video) XDestroyWindow(display, video);
         if (context) glXDestroyContext(display, context);
         if (cleanupDrawable) glXDestroyPbuffer(display, cleanupDrawable);
@@ -284,9 +186,9 @@ void destroyPlayer() {
         if (visual) XFree(visual);
     }
     XCloseDisplay(display); display = nullptr;
-    parent = video = toolbar = drawable = cleanupDrawable = colormap = None;
-    context = nullptr; visual = nullptr; textDraw = nullptr; font = nullptr; graphics = nullptr; fontScale = 0;
-    visible = controlsVisible = closing = focusFullscreen = false; controls.focus = Control::Video;
+    parent = video = drawable = cleanupDrawable = colormap = None;
+    context = nullptr; visual = nullptr;
+    visible = closing = rendererControls = false; occlusions.clear(); interactionSequence = 0;
     singleClickAt = 0; lastPointerX = lastPointerY = -1;
 }
 void updateBounds(const Bounds &rect) {
@@ -302,7 +204,11 @@ void create(Window handle, const Bounds &rect) {
         XErrors errors(display);
         XWindowAttributes parentInfo{};
         if (!XGetWindowAttributes(display, handle, &parentInfo) || parentInfo.c_class != InputOutput) throw std::runtime_error("Expected an existing X11 parent window");
-        parent = handle; presentation = "expanded"; controls.focus = Control::Video;
+        parent = handle; presentation = "expanded";
+        int shapeEvent = 0, shapeError = 0, shapeMajor = 0, shapeMinor = 0;
+        if (!XShapeQueryExtension(display, &shapeEvent, &shapeError) || !XShapeQueryVersion(display, &shapeMajor, &shapeMinor)
+            || shapeMajor < 1 || (shapeMajor == 1 && shapeMinor < 1))
+            throw std::runtime_error("X11 Shape 1.1 is required for accessible playback controls");
         const int screen = XScreenNumberOfScreen(parentInfo.screen);
         int major = 0, minor = 0;
         if (!glXQueryVersion(display, &major, &minor) || major < 1 || (major == 1 && minor < 3)) throw std::runtime_error("GLX 1.3 is unavailable");
@@ -326,13 +232,8 @@ void create(Window handle, const Bounds &rect) {
         windowAttributes.background_pixel = 0; windowAttributes.event_mask = ExposureMask | StructureNotifyMask | KeyPressMask | KeyReleaseMask | FocusChangeMask | ButtonPressMask | ButtonReleaseMask | PointerMotionMask;
         video = XCreateWindow(display, parent, 0, 0, 1, 1, 0, visual->depth, InputOutput, visual->visual,
             CWColormap | CWBorderPixel | CWBackPixel | CWEventMask, &windowAttributes);
-        const unsigned long opaque = visual->depth == 32 ? 0xff000000UL : 0;
-        background = visual->visual->red_mask | visual->visual->green_mask | visual->visual->blue_mask | opaque; foreground = opaque;
-        windowAttributes.background_pixel = background;
-        toolbar = XCreateWindow(display, parent, 0, 0, 1, 1, 0, visual->depth, InputOutput, visual->visual,
-            CWColormap | CWBorderPixel | CWBackPixel | CWEventMask, &windowAttributes);
-        if (!video || !toolbar) throw std::runtime_error("Cannot create X11 playback children");
-        XStoreName(display, video, "Javdex video"); XStoreName(display, toolbar, "Javdex fullscreen controls");
+        if (!video) throw std::runtime_error("Cannot create X11 playback child");
+        XStoreName(display, video, "Javdex video");
         XSelectInput(display, parent, StructureNotifyMask);
         Bool supported = False; XkbSetDetectableAutoRepeat(display, True, &supported); detectableRepeat = supported;
         drawable = glXCreateWindow(display, config, video, nullptr);
@@ -343,10 +244,6 @@ void create(Window handle, const Bounds &rect) {
         context = modern(display, config, nullptr, True, contextAttributes);
         errors.check();
         if (!context || !glXMakeContextCurrent(display, drawable, drawable, context)) throw std::runtime_error("Cannot create X11 OpenGL 3.2 context");
-        graphics = XCreateGC(display, toolbar, 0, nullptr);
-        textDraw = XftDrawCreate(display, toolbar, visual->visual, colormap);
-        if (!graphics || !textDraw) throw std::runtime_error("Cannot create X11 control drawing resources");
-        textColor.pixel = foreground; textColor.color = {0, 0, 0, 65535};
         const auto *rendererName = reinterpret_cast<const char *>(glGetString(GL_RENDERER));
         const bool softwareRendering = x11::softwareRenderer(rendererName);
         updateBounds(rect); playback.initialize(getProcAddress, nullptr, softwareRendering); interact();
@@ -361,6 +258,22 @@ void create(Window handle, const Bounds &rect) {
 void bounds(const Bounds &rect) {
     if (display && !closing) { requireOwner(); XErrors errors(display); events(); updateBounds(rect); errors.check(); }
 }
+void setRendererControls(bool value) {
+    if (!display || closing) throw std::runtime_error("No X11 playback surface");
+    requireOwner(); XErrors errors(display); rendererControls = value;
+    Window focused = None; int revert; XGetInputFocus(display, &focused, &revert);
+    if (value && focused == video) XSetInputFocus(display, parent, RevertToParent, CurrentTime);
+    errors.check();
+}
+void setOcclusions(std::vector<x11::Occlusion> value) {
+    if (!display || closing) throw std::runtime_error("No X11 playback surface");
+    requireOwner(); XErrors errors(display);
+    // Validate and allocate the complete replacement before changing the live surface.
+    auto shape = x11::surfaceRegion(pixelWidth, pixelHeight, x11::pixel(requested.x, requested.scale),
+        x11::pixel(requested.y, requested.scale), requested.scale, value);
+    x11::applySurfaceRegion(display, video, shape.get()); errors.check();
+    occlusions = std::move(value);
+}
 void setVisible(bool value) {
         if (display && !closing) {
             requireOwner(); XErrors errors(display); events();
@@ -368,8 +281,8 @@ void setVisible(bool value) {
             visible = value;
             if (value) XMapRaised(display, video); else {
                 Window focused; int revert; XGetInputFocus(display, &focused, &revert);
-                cancelInput(); XUnmapWindow(display, video); showControls(false);
-                if (focused == video || focused == toolbar) XSetInputFocus(display, parent, RevertToParent, CurrentTime);
+                cancelInput(); XUnmapWindow(display, video);
+                if (focused == video) XSetInputFocus(display, parent, RevertToParent, CurrentTime);
             }
             errors.check();
         }
@@ -379,22 +292,49 @@ void setPresentation(const std::string &next) {
             requireOwner();
             if (next != "expanded" && next != "docked" && next != "fullscreen") throw std::runtime_error("Invalid playback presentation");
             if (next == presentation) return;
-            XErrors errors(display); cancelInput(); presentation = next; focusFullscreen = next == "fullscreen"; interact();
+            XErrors errors(display); cancelInput(); presentation = next; interact();
             if (next != "fullscreen") {
                 Window focused; int revert; XGetInputFocus(display, &focused, &revert);
-                controls.focus = Control::Video;
-                if (focused == video || focused == toolbar) XSetInputFocus(display, parent, RevertToParent, CurrentTime);
+                if (focused == video) XSetInputFocus(display, parent, RevertToParent, CurrentTime);
             }
-            showControls(next == "fullscreen" && visible); layout(); errors.check();
+            layout(); errors.check();
         }
+}
+bool parentHasFocus(Window focused) {
+    // A different app's focused child may disappear after XGetInputFocus.
+    // Deliver earlier owned-surface errors to their outer trap first, then
+    // tolerate only failures of this foreign ancestry observation.
+    XSync(display, False);
+    XErrors focusObservation(display);
+    for (int depth = 0; depth < 32 && focused != None && focused != PointerRoot; depth++) {
+        if (focused == parent) return true;
+        Window root = None, ancestor = None, *children = nullptr; unsigned int count = 0;
+        const bool queried = XQueryTree(display, focused, &root, &ancestor, &children, &count);
+        if (children) XFree(children);
+        if (!queried || ancestor == focused) return false;
+        focused = ancestor;
+    }
+    return false;
 }
 std::string state() {
     if (display) { requireOwner(); { XErrors errors(display); events(); } if (closing) destroyPlayer(); }
     auto result = playback.stateJson();
     if (playback.alive()) {
+        XErrors errors(display);
         result.pop_back();
+        Window focused = None; int revert; XGetInputFocus(display, &focused, &revert);
         result += ",\"pixelWidth\":" + std::to_string(pixelWidth) + ",\"pixelHeight\":" + std::to_string(pixelHeight)
-            + ",\"backend\":\"x11-glx\",\"fullscreenControlsVisible\":" + (controlsVisible ? "true" : "false") + '}';
+            + ",\"backend\":\"x11-glx\",\"rendererFullscreenControls\":" + (rendererControls ? "true" : "false")
+            + ",\"nativeVideoFocused\":" + (focused == video ? "true" : "false")
+            + ",\"interactionSequence\":" + std::to_string(interactionSequence);
+        if (presentation == "fullscreen") {
+            Window root, child; int rootX, rootY, x, y; unsigned int mask;
+            const bool pointer = XQueryPointer(display, parent, &root, &child, &rootX, &rootY, &x, &y, &mask);
+            XWindowAttributes info{}; XGetWindowAttributes(display, parent, &info);
+            result += ",\"fullscreenPointerY\":" + std::to_string(pointer && parentHasFocus(focused) && x >= 0 && x < info.width && y >= 0 && y < info.height ? y / requested.scale : -1);
+        }
+        result += '}';
+        errors.check();
     }
     return result;
 }
@@ -407,10 +347,6 @@ void render() {
             Window root, child; int rootX, rootY, x, y; unsigned int mask;
             const bool pointer = XQueryPointer(display, parent, &root, &child, &rootX, &rootY, &x, &y, &mask);
             if (pointer && (x != lastPointerX || y != lastPointerY)) { lastPointerX = x; lastPointerY = y; interact(); }
-            Window focused; int revert; XGetInputFocus(display, &focused, &revert);
-            if (focusFullscreen && (focused == parent || focused == video || focused == toolbar)) { focus(Control::Video); focusFullscreen = false; }
-            showControls(playback.number("pause") || pressed != Control::Empty || focused == toolbar || (pointer && child == toolbar) || timestamp - lastInteraction <= 3000);
-            paintControls();
         }
         if (!glXMakeContextCurrent(display, drawable, drawable, context)) throw std::runtime_error("Cannot make X11 playback context current");
         if (playback.updateRequested() && !draw(true)) throw std::runtime_error("X11 frame rendering failed");

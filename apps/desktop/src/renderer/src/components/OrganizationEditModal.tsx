@@ -51,6 +51,7 @@ export default function OrganizationEditModal({
       title={isEditing ? '编辑机构资料' : `新增${FACET_LABEL[role]}`}
 
       size="lg"
+      layout="form"
       busy={saving}
       confirmText="保存"
       confirmDisabled={saving || !draft.mainName.trim()}

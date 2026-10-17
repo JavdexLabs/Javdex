@@ -7,6 +7,7 @@ import { setTimeout as delay } from 'node:timers/promises'
 import type { BrowserWindow } from 'electron'
 import { ModuleKind, ScriptTarget, transpileModule } from 'typescript'
 import type { NativePlaybackState } from './nativePlayback'
+import type { PlaybackOcclusion, PlaybackSnapshot } from '@shared/desktop/playback'
 
 // Exercise the production wrapper with isolated import adapters, without loading
 // Electron or a native binary, changing process.platform, or adding a production seam.
@@ -20,6 +21,8 @@ function fixture(platform: 'darwin' | 'win32' | 'linux') {
   const commands: string[][] = []
   let actions: NonNullable<NativePlaybackState['actions']> = []
   let created = false
+  let rendererControls = false
+  const viewports: unknown[] = [], occlusions: PlaybackOcclusion[][] = []
   let pending = 0, replies = 0, errors = 2, generatedErrors = 0, held = false
   let generatedPending = 0, generatedReplies = 0
   let overlayRevision = 0
@@ -33,7 +36,7 @@ function fixture(platform: 'darwin' | 'win32' | 'linux') {
     { id: 3, type: 'sub', selected: false },
     { id: 7, type: 'sub', selected: true, 'external-filename': subtitleFile }
   ]
-  const snapshot = (): NativePlaybackState => ({ alive: created, subtitleCommandErrors: errors,
+  const snapshot = (): NativePlaybackState => ({ alive: created, rendererFullscreenControls: rendererControls, subtitleCommandErrors: errors,
     generatedSubtitleCommandErrors: generatedErrors,
     generatedSubtitleCommandsPending: generatedPending, generatedSubtitleCommandReplies: generatedReplies,
     generatedSubtitleOverlayVersion: 1, generatedSubtitleRevision: overlayRevision,
@@ -49,7 +52,11 @@ function fixture(platform: 'darwin' | 'win32' | 'linux') {
   }
   const bridge = {
     create() { created = true },
-    setRendererControls() {},
+    setRendererControls(value: boolean) { rendererControls = value },
+    setBounds(bounds: unknown) { viewports.push(bounds) },
+    setVisible() {},
+    setPresentation() {},
+    setOcclusions(rects: PlaybackOcclusion[]) { occlusions.push(rects) },
     command(args: string[], generated = false) {
       commands.push([...args])
       if (args[0].startsWith('sub-') || args[0] === 'set' && ['sid', 'sub-delay', 'sub-font-size'].includes(args[1])) {
@@ -103,13 +110,26 @@ function fixture(platform: 'darwin' | 'win32' | 'linux') {
   const native = moduleExports.createLibmpvPlayback(() => window)
   native.create()
   assert.equal(created, true, 'the real wrapper must load the fixture bridge')
-  return { native, commands, overlays, queue: (pending: typeof actions): void => { actions.push(...pending) },
+  return { native, commands, overlays, viewports, occlusions, queue: (pending: typeof actions): void => { actions.push(...pending) },
     hold: (): void => { held = true },
     observeSelection: (sub: string, audio = aid): void => { sid = sub; aid = audio },
     freeze: (): void => { frozen = snapshot() }, thaw: (): void => { frozen = null },
     complete: (failed = false): void => { const value = waiting.shift(); assert.ok(value); complete(value.args, value.generated, failed) },
     release: (): void => { held = false; for (const value of waiting.splice(0)) complete(value.args, value.generated) } }
 }
+
+test('Linux and Windows enable the shared accessible fullscreen controls and pass popup cutouts', t => {
+  for (const platform of ['linux', 'win32'] as const) {
+    const f = fixture(platform)
+    t.after(() => f.native.destroy())
+    assert.equal(f.native.read().rendererFullscreenControls, true, `${platform} must enable the existing renderer controls`)
+    const area: PlaybackOcclusion = { x: 20, y: 25, width: 180, height: 90, radii: [8, 8, 0, 0] }
+    f.native.viewport({ x: 10, y: 12, width: 640, height: 360 }, true,
+      { presentation: 'fullscreen' } as PlaybackSnapshot, [area])
+    assert.deepEqual(JSON.parse(JSON.stringify(f.occlusions)), [[area]], 'the native surface must expose renderer popup geometry')
+    assert.deepEqual(JSON.parse(JSON.stringify(f.viewports)), [{ x: 10, y: 12, width: 640, height: 360, scale: 1 }])
+  }
+})
 
 const timeline = 'generated timeline fixture'
 for (const platform of ['darwin', 'win32', 'linux'] as const) {

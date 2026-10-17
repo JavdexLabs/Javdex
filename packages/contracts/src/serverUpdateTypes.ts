@@ -58,7 +58,9 @@ export const updaterPairingSchema = z.object({
     return url.protocol === 'https:' && !url.username && !url.password && url.pathname === '/' && !url.search && !url.hash
   }),
   certificateSha256: hash,
-  token: z.string().regex(/^[a-f0-9]{64}$/),
+  // Unified credentials include the 32-byte base64url secrets issued by 0.8.0.
+  // One-time enrollment codes below remain 64-character hexadecimal values.
+  token: z.string().regex(/^(?:[a-f0-9]{64}|[A-Za-z0-9_-]{43})$/),
   serverId: z.uuid(),
   catalogId: z.uuid()
 }).strict()

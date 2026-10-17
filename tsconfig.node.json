@@ -6,6 +6,12 @@
     "apps/desktop/src/preload/**/*",
     "packages/contracts/src/**/*",
     "vite.web.config.ts",
+    "scripts/playback-linux-surface-smoke.ts",
+    "scripts/playback-remote-server.ts",
+    "scripts/playback-remote-connection-smoke.mts",
+    "scripts/playback-remote-runtime-check.test.ts",
+    "scripts/server-updater-smoke-legacy.ts",
+    "scripts/server-updater-smoke-legacy.test.mts",
     "packages/library/src/**/*",
     "packages/http/src/**/*",
     "apps/server/src/**/*"

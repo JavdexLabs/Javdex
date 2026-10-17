@@ -1,5 +1,5 @@
 // Browser QA uses synthetic catalog data only; never opens the user's database.
-// Run after web:build: node --import tsx scripts/web-smoke.mjs
+// Run after web:build: node --require ./scripts/register-test-paths.cjs --import tsx scripts/web-smoke.mjs
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
@@ -19,6 +19,7 @@ const names = ['午后影院', '山间来信', '沿海公路', '雨中的城市'
 const artworks = ['cinemaCover', 'forestCover', 'seaCover', 'rainCover', 'cityCover', 'blueCover']
 const videos = Array.from({ length: 48 }, (_, i) => ({ id: i + 1, code: `DEMO-${String(i + 1).padStart(3, '0')}`, title: `${names[i % names.length]} · 演示影片 ${i + 1}`, cover: `/api/videos/${i + 1}/images/cover`, releaseDate: '2026-09-01', duration: 5400, rating: 4 }))
 const catalog = {
+  home: () => ({ discovery: videos.slice(0, 12), recent: videos.slice(12, 24) }),
   collections: () => ({ libraries: [{ id: 1, name: '家庭影院', count: 48 }, { id: 2, name: '周末收藏', count: 24 }], playlists: [{ id: 1, name: '想看的影片', count: 12 }] }),
   browse: query => {
     const page = Number(query.get('page') || 1)
@@ -39,7 +40,7 @@ try {
     const errors = []
     page.on('pageerror', error => errors.push(error.message))
     page.on('console', message => { if (message.type() === 'error' && /Content Security Policy|Refused to/.test(message.text())) errors.push(message.text()) })
-    await page.goto(`http://127.0.0.1:${port}`)
+    await page.goto(`http://127.0.0.1:${port}/#/browse?sort=recent`)
     server.pairing.open()
     await page.getByPlaceholder('例如：客厅电视').fill(name)
     await page.getByRole('checkbox', { name: '记住此设备', exact: true }).check()
@@ -49,31 +50,37 @@ try {
     await page.screenshot({ path: path.join(output, `${name}-pair.png`), fullPage: true })
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), `${name}: pairing horizontal overflow`)
     server.pairing.decide(code, true)
-    await page.locator('[data-web-video-card]').first().waitFor()
-    await page.locator('.poster img').evaluateAll(images => images.forEach(image => { image.loading = 'eager' }))
-    await page.waitForFunction(() => [...document.querySelectorAll('.poster img')].every(image => image.complete && image.naturalWidth > 0))
-    await page.locator('.poster img').evaluateAll(images => Promise.all(images.map(image => image.decode())))
+    const cards = page.locator('[data-browse-results] [data-web-video-card]')
+    await cards.first().waitFor()
+    const images = cards.locator('img')
+    assert.ok(await images.count() > 0, `${name}: the fixture must contain actual cover images`)
+    await images.evaluateAll(images => images.forEach(image => { image.loading = 'eager' }))
+    await page.waitForFunction(() => {
+      const images = [...document.querySelectorAll('[data-browse-results] [data-web-video-card] img')]
+      return images.length > 0 && images.every(image => image.complete && image.naturalWidth > 0)
+    })
+    await images.evaluateAll(images => Promise.all(images.map(image => image.decode())))
     await page.waitForLoadState('networkidle')
     await page.screenshot({ path: path.join(output, `${name}-browse.png`), fullPage: false })
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), `${name}: horizontal overflow`)
-    const columns = await page.locator('.video-grid').evaluate(el => getComputedStyle(el).gridTemplateColumns.split(' ').length)
+    const columns = await page.getByLabel('影片列表', { exact: true }).filter({ visible: true }).evaluate(el => getComputedStyle(el).gridTemplateColumns.split(' ').length)
     assert.ok(columns >= (name === 'phone' ? 2 : name === 'tablet' ? 3 : 5), `${name}: insufficient responsive columns ${columns}`)
     await page.getByLabel('搜索番号、片名或演员').fill('DEMO-001')
     await page.getByRole('button', { name: '搜索', exact: true }).click()
-    await page.waitForFunction(() => document.querySelectorAll('[data-web-video-card]').length === 1)
-    await page.locator('[data-web-video-card]').first().click()
+    await page.waitForFunction(() => document.querySelectorAll('[data-browse-results] [data-web-video-card]').length === 1)
+    await cards.first().click()
     await page.getByRole('heading', { name: '选择播放资源' }).waitFor()
     await page.getByRole('button', { name: /演示视频 · MP4/ }).click()
     await page.locator('video').waitFor()
-    await page.waitForFunction(() => { const video = document.querySelector('video'); return video && video.readyState >= 2 && video.currentTime > 0 }, { timeout: 15000 })
+    await page.waitForFunction(() => { const video = document.querySelector('video'); return video && video.readyState >= 2 && video.currentTime > 0 }, undefined, { timeout: 15000 })
     assert.ok(await page.locator('video').evaluate(video => video.videoWidth === 640))
     await page.screenshot({ path: path.join(output, `${name}-player.png`), fullPage: true })
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), `${name}: player horizontal overflow`)
     await page.getByRole('button', { name: '返回浏览' }).click()
-    assert.equal(await page.locator('[data-web-video-card]').count(), 1)
+    assert.equal(await cards.count(), 1)
     assert.ok(page.url().includes('q=DEMO-001'))
     await page.reload()
-    await page.locator('[data-web-video-card]').first().waitFor()
+    await cards.first().waitFor()
     await page.getByRole('button', { name: /退出登录/ }).click()
     await page.getByRole('button', { name: '获取配对码', exact: true }).waitFor()
     assert.equal((await context.request.get(`http://127.0.0.1:${port}/api/videos`)).status(), 401)
@@ -81,7 +88,7 @@ try {
     await page.getByLabel('访问账号', { exact: true }).fill('viewer')
     await page.getByLabel('访问密码', { exact: true }).fill('web smoke password')
     await page.getByRole('button', { name: '进入媒体库' }).click()
-    await page.locator('[data-web-video-card]').first().waitFor()
+    await cards.first().waitFor()
     assert.deepEqual(errors, [])
     console.log(`${name}: ${width}×${height}, ${columns} columns; pairing/password/search/detail/native playback/return/reload/logout PASS`)
     await context.close()

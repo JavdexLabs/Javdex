@@ -1080,8 +1080,9 @@
             <p>
               在设置的“关于”页面检查版本，再下载并安装已发布的正式版；本页下载版本始终取自实际最新正式 Release，发布准备状态见
               <a href="https://github.com/JavdexLabs/Javdex/blob/main/README.md">项目说明</a>。
-              从 0.8.0 升级到 0.9.0 前，退出桌面、停止服务并完整备份数据、图片和配置。数据库 schema 19 → 20、模型管理 schema 3 → 4 会自动升级；回退须恢复升级前备份，不要用旧版打开新数据。桌面与服务端须同为 0.9.0。旧服务端首次采用须更新基础镜像并增加 /program 卷，后续可配对后在线更新或上传单个 .javdex-update 文件；安装会中断访问。平台与升级前提见
-              <a href="https://github.com/JavdexLabs/Javdex/blob/main/.github/release-notes/v0.9.0.md">0.9.0 发布说明</a>。
+              从 0.8.0 升级前，请完全退出桌面、正常停止服务，并按
+              <a href="/Javdex/releases/upgrade/">0.9.0 升级指南</a>
+              完成完整备份、数据升级及桌面与服务端的同步更新。安装会中断访问；需要回退时应恢复升级前备份，不要用旧版打开新版数据。
             </p>
           </details>
         </div>

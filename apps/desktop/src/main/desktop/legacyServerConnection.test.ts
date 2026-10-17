@@ -15,13 +15,15 @@ import { createLegacyServerConnection, legacyHttpsOrigin } from './legacyServerC
 import { createServerUpdateService } from './serverUpdateService'
 import type { IpcContext } from '../ipc/shared'
 import { getDb } from '@library/db/database'
+import { generateSecret } from '@library/catalog/catalogSecrets'
 import { ServerUpdateClient } from '@http/updateClient'
 
-const version = '0.9.0-beta.7'
+const version = '0.9.0'
 const serverId = '11111111-1111-4111-8111-111111111111'
 const catalogId = '22222222-2222-4222-8222-222222222222'
 const claimId = '33333333-3333-4333-8333-333333333333'
-const secret = 'a'.repeat(64)
+// Published 0.8.0 writes 32 random bytes as base64url, not a hex pairing secret.
+const secret = generateSecret()
 const hello = (appVersion = version, id = catalogId) => ({ protocolVersion: 1, appVersion, schemaVersion: appVersion === '0.8.0' ? 19 : 21,
   identity: { serverId, catalogId: id }, writerEpoch: 1, ready: 'ready' as const,
   capabilities: { encryptedAssets: false as const, transcoding: false as const, arbitraryUrlProxy: false as const,

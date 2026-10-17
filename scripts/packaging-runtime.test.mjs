@@ -231,6 +231,8 @@ test('desktop packages exclude playback acceptance fixtures and development nati
   for (const file of [
     'out/playback-acceptance/media-matrix/hevc-main10.mkv',
     'out/playback-acceptance/Javdex Playback Acceptance.app/Contents/MacOS/Electron',
+    'out/playback-acceptance/Javdex Playback Acceptance-43.8.0.app/Contents/MacOS/Electron',
+    'out/linux-renderer-check/debug-linux-surface.cjs',
     'out/libmpv-prototype/playback.node',
     'out/libmpv-prototype/smoke-report.json',
     'out/native-playback/playback.node',

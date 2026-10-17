@@ -7,7 +7,7 @@ import { localAiDirectories } from './modelStorage'
 import { measureFiles, measureLocalStorage } from './storageUsage'
 
 test('storage counts actual file sizes, classifies VAD as runtime and ignores links', async () => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'javdex-storage-usage-'))
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'javdex-storage-usage-')))
   const locations = localAiDirectories(root)
   try {
     for (const [directory, size] of [[path.join(locations.store, 'models', 'weights'), 11], [path.join(locations.store, 'models', 'vad'), 7],

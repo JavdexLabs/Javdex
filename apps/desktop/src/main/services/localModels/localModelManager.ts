@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises'
 import { importModelFile } from './importModelFile'
-import { createReadStream } from 'node:fs'
+import { createReadStream, existsSync } from 'node:fs'
 import { createHash, randomUUID } from 'node:crypto'
 import path from 'node:path'
 import { z } from 'zod'
@@ -57,6 +57,8 @@ async function files(directory: string): Promise<string[]> {
   }))).flat()
 }
 export function createLocalModelManager(userData: string, options: {
+  /** Startup choice captured before another service creates fresh cloud settings; saved local usage still wins. */
+  initialTextTranslationMode?: LocalTranslationMode
   installer?: typeof createAiRuntimeInstaller
   inference?: (paths: Parameters<typeof createLocalTextInference>[0]) => TextEngine
   runtimeSupported?: typeof localModelRuntimeSupported
@@ -71,6 +73,10 @@ export function createLocalModelManager(userData: string, options: {
   let downloadSource: LocalModelDownloadSource = 'official'
   let selected = { ...DEFAULT_LOCAL_MODEL_VARIANTS }
   let usage = defaultUsage(selected)
+  // 0.8.0's translation used the application model and had no local-model file.
+  // Desktop captures this before cloud bootstrap; direct compositions use their existing profile.
+  usage.textTranslation.mode = options.initialTextTranslationMode
+    ?? (existsSync(path.join(userData, 'ai-configuration.json')) ? 'app-default' : 'local')
   let translation: LocalTranslationMode = usage.textTranslation.mode
   let translationModel: LocalTranslationModelId = usage.subtitleTranslation.model
   let revision: string = randomUUID()
@@ -264,7 +270,11 @@ export function createLocalModelManager(userData: string, options: {
       usage = config.usage
       translation = usage.textTranslation.mode; translationModel = usage.subtitleTranslation.model
     } catch (cause) {
-      if ((cause as NodeJS.ErrnoException).code !== 'ENOENT') {
+      if ((cause as NodeJS.ErrnoException).code === 'ENOENT') {
+        // Persist the initial choice once: a fresh profile must not change its
+        // default on the next launch just because cloud settings now exist.
+        await save()
+      } else {
         configInvalid = true; error = '本地模型用途配置无法读取，请重新保存用途设置后重试'
       }
     }

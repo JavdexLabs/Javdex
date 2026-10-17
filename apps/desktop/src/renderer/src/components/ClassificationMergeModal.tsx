@@ -101,6 +101,7 @@ export default function ClassificationMergeModal<
       title={title}
       hint={hint}
       size="md"
+      layout="form"
       className={styles.modal}
       confirmText={merging ? '合并中…' : '确认合并'}
       confirmDisabled={!input}

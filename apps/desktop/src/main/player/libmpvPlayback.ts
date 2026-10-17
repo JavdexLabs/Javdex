@@ -119,7 +119,7 @@ export function createLibmpvPlayback(getWindow: () => BrowserWindow | null): Nat
         bridge.create(window.getNativeWindowHandle(), { x: 0, y: 0, width: 1, height: 1,
           scale: screen.getDisplayMatching(window.getBounds()).scaleFactor }, { backend: 'x11' })
       } else bridge.create(window.getNativeWindowHandle(), { x: 0, y: 0, width: 1, height: 1 })
-      if (process.platform === 'win32') bridge.setRendererControls?.(true)
+      if (['win32', 'linux'].includes(process.platform)) bridge.setRendererControls?.(true)
       generatedRepliesExpected = 0
       overlayRevision = 0; generated = null
       alive = true

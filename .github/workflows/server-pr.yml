@@ -52,6 +52,8 @@ jobs:
           JAVDEX_TEST_TIMEOUT_MS: "900000"
       - run: npm run desktop:build
       - run: npm run server:build
+      - name: Verify unified HTTPS playback connection and desktop runtime restart
+        run: npm run test:playback:remote:connection
       - run: docker build -t javdex-server:smoke .
       - run: npm run server:smoke:agent
       - name: Verify backup and restore with isolated Docker data

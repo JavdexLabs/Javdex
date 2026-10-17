@@ -22,7 +22,6 @@ const empty: ServerUpdateSnapshot = { protocolVersion: 1, paired: false, serverI
 export function createServerUpdateService(backend: CatalogBackend, ctx: IpcContext, settings: DesktopSettingsStore,
   options: { queryEnvironment?: typeof queryServerEnvironment } = {}): (command: ServerUpdateCommand) => Promise<ServerUpdateSnapshot> {
   const root = readTestUserDataPath() ?? app.getPath('userData')
-  const file = path.join(root, 'server-update-secrets.bin')
   const connectionStore = createServerConnectionStore(root)
   let connectionRestartRequired = false
   const connectionStatus = (): ServerUpdateSnapshot => {
@@ -61,9 +60,7 @@ export function createServerUpdateService(backend: CatalogBackend, ctx: IpcConte
     const session = backend.session()
     if (saved.credentialKind === 'device' && session.state === 'available' && session.serverId === paired.serverId && session.catalogId && paired.catalogId !== session.catalogId && session.remoteBaseUrl === saved.remoteBaseUrl) {
       paired.catalogId = session.catalogId
-      const temporary = `${file}.tmp`
-      fs.writeFileSync(temporary, safeStorage.encryptString(JSON.stringify({ ...saved, pairing: paired })), { mode: 0o600 })
-      fs.renameSync(temporary, file)
+      connectionStore.write(paired)
     }
     if (session.mode !== 'remote' || session.remoteBaseUrl !== saved.remoteBaseUrl || (session.serverId && paired.serverId !== session.serverId) || (session.catalogId && paired.catalogId !== session.catalogId)) throw new Error('已保存的连接不属于当前服务端，请核对资料库连接')
     return new ServerUpdateClient(paired, createServerCertificateTrust(root, paired.url))
@@ -141,7 +138,7 @@ export function createServerUpdateService(backend: CatalogBackend, ctx: IpcConte
         const paired = updaterPairingSchema.parse({ ...result, token: pending.secret })
         if (paired.certificateSha256 !== certificateSha256 || new URL(paired.url).origin !== remoteBaseUrl) throw new Error('服务端连接身份不一致')
         await createWriterCredentialStore({ userDataPath: root }).writeWriterSecret(paired.catalogId, pending.secret)
-        saveSecret(file, { pairing: paired, remoteBaseUrl, credentialKind: 'device' })
+        connectionStore.write(paired)
         await settings.write({ mode: 'remote', remoteBaseUrl })
         fs.unlinkSync(pendingFile)
         connectionRestartRequired = true

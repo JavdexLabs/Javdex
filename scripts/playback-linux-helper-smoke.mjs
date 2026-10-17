@@ -4,6 +4,7 @@ import { spawnSync } from 'node:child_process'
 import path from 'node:path'
 
 if (process.platform !== 'linux') throw new Error('Linux playback helper smoke requires Linux')
+assert.notEqual(process.pid, 1, 'Run this container fixture with --init; the helper rejects an orphaned PID-1 parent')
 const executable = process.argv[2]
 assert.ok(executable, 'Pass the built playback-helper executable')
 const environment = { ...process.env }
@@ -38,6 +39,7 @@ for (const fields of [
   const states = run(message(fields), 1)
   assert.ok(states.some(state => state.alive === false && state.errorKind === 'native' && typeof state.error === 'string'))
 }
-const oversized = Buffer.alloc(4); oversized.writeUInt32LE(1024 * 1024 + 1)
+// The helper reserves 8 MiB + framing for generated subtitle timelines, not the ordinary 1 MiB command limit.
+const oversized = Buffer.alloc(4); oversized.writeUInt32LE(8 * 1024 * 1024 + 4096 + 1)
 assert.ok(run(oversized, 1).some(state => state.alive === false && state.errorKind === 'native'))
 console.log('Linux helper load, private protocol, EOF/destroy and no-display failures passed; no GL, media, GUI or audio was exercised.')

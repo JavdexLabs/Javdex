@@ -11,7 +11,7 @@ import { modelDownloadFile } from './modelStorage'
 import { localModelVariant } from './modelCatalog'
 
 test('cleanup refreshes partial-file inventory, resume bytes and storage before returning', async () => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'javdex-cleanup-inventory-'))
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'javdex-cleanup-inventory-')))
   const manager = createLocalModelManager(root, { runtimeSupported: () => true, detectDevices: async () => [] })
   try {
     const state = await manager.snapshot(), variant = localModelVariant('qwen3')
@@ -455,7 +455,10 @@ test('new configuration starts with exact defaults and invalid variant identitie
     await assert.rejects(f.manager.acquireSubtitleRuntime(), /未安装/)
     assert.equal(opened.length, 0)
     assert.deepEqual(f.downloadUrls, [])
-    await assert.rejects(fs.access(path.join(f.root, 'local-models.json')), { code: 'ENOENT' })
+    const saved = JSON.parse(await fs.readFile(path.join(f.root, 'local-models.json'), 'utf8'))
+    assert.equal(saved.version, 1)
+    assert.deepEqual(saved.usage, initial.usage)
+    assert.equal(saved.revision, initial.revision)
     const restarted = createLocalModelManager(f.root, { installer: f.installer, detectDevices: async () => [] })
     try {
       const state = await restarted.snapshot()

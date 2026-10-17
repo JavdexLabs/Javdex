@@ -2,6 +2,13 @@ import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
 import path from 'node:path'
 import type Database from 'better-sqlite3'
+import { updaterPairingSchema } from '@shared/serverUpdateTypes'
+
+export function readDeviceUpdateBearer(authorization: string | undefined): string | undefined {
+  if (!authorization?.startsWith('Bearer ')) return undefined
+  const parsed = updaterPairingSchema.shape.token.safeParse(authorization.slice(7))
+  return parsed.success ? parsed.data : undefined
+}
 
 /** Read authoritative device state even while business is stopped for an update.
  * Open per check: a restore can atomically replace the database inode.

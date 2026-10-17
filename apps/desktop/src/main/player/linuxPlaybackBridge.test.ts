@@ -128,6 +128,8 @@ test('Linux protocol uses byte lengths and preserves special UTF-8 locators with
   assert.deepEqual(decode(encodePlaybackMessage(Array(16).fill(''))), Array(16).fill(''))
   assert.throws(() => encodePlaybackMessage([]), /无效/)
   assert.throws(() => encodePlaybackMessage(Array(17).fill('')), /无效/)
+  assert.deepEqual(decode(encodePlaybackMessage(['occlusions', ...Array(256).fill('0')])), ['occlusions', ...Array(256).fill('0')])
+  assert.throws(() => encodePlaybackMessage(['occlusions', ...Array(257).fill('0')]), /无效/)
   assert.throws(() => encodePlaybackMessage(['command', 'nul\0byte']), /无效/)
   assert.equal(encodePlaybackMessage(['x'.repeat(LIMIT - 8)]).length, LIMIT + 4)
   assert.throws(() => encodePlaybackMessage(['x'.repeat(LIMIT - 7)]), /过长/)
@@ -187,6 +189,24 @@ test('Linux bridge ignores late output and exit from an old helper during reopen
   assert.equal(f.bridge.state().loadedFiles, second)
   f.bridge.setBounds(bounds); f.bridge.setVisible(true); f.bridge.setPresentation('fullscreen')
   await until(f.entries, entries => entries.some(entry => entry.pid === second && entry.fields[0] === 'presentation'), 'new helper did not receive viewport')
+})
+
+test('Linux bridge sends shared renderer mode and bounded rounded popup cutouts without duplicate messages', linuxOnly, async t => {
+  const f = fixture(t)
+  await f.start()
+  f.bridge.setRendererControls(true); f.bridge.setRendererControls(true)
+  const rects = [{ x: 12, y: -8, width: 90, height: 50, radii: [4, 6, 8, 10] as [number, number, number, number] }]
+  f.bridge.setOcclusions(rects); f.bridge.setOcclusions(rects)
+  await until(f.entries, entries => entries.some(entry => entry.fields[0] === 'occlusions'), 'popup cutout message did not arrive')
+  assert.deepEqual(f.entries().filter(entry => entry.fields[0] === 'renderer-controls').map(entry => entry.fields), [['renderer-controls', '1']])
+  assert.deepEqual(f.entries().filter(entry => entry.fields[0] === 'occlusions').map(entry => entry.fields),
+    [['occlusions', '12', '-8', '90', '50', '4', '6', '8', '10']])
+  f.bridge.setOcclusions(Array(32).fill(rects[0])); f.bridge.setOcclusions([])
+  await until(f.entries, entries => entries.filter(entry => entry.fields[0] === 'occlusions').length === 3, 'maximum cutouts and clear did not arrive')
+  assert.equal(f.entries().filter(entry => entry.fields[0] === 'occlusions')[1].fields.length, 257)
+  assert.deepEqual(f.entries().at(-1)?.fields, ['occlusions'])
+  assert.throws(() => f.bridge.setOcclusions(Array(33).fill(rects[0])), /过多/)
+  assert.throws(() => f.bridge.setOcclusions([{ ...rects[0], x: Number.NaN }]), /无效/)
 })
 
 test('Linux helper failure is controlled and a subsequent create clears it', linuxOnly, async t => {

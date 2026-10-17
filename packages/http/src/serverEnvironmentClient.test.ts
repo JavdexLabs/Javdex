@@ -12,7 +12,7 @@ import { promisify } from 'node:util'
 import { build } from 'esbuild'
 import { queryServerEnvironment } from './serverEnvironmentClient'
 import { SERVER_ENVIRONMENT_VERSION } from '@shared/serverEnvironment'
-import { listenFetchServer } from '../../../scripts/test-http'
+import { listenFetchServer, startFetchServer } from '../../../scripts/test-http'
 
 const environment = { format: 1, environmentVersion: SERVER_ENVIRONMENT_VERSION, runtimeId: 'node22-bookworm-v1', platform: 'linux/amd64' }
 
@@ -51,6 +51,30 @@ test('HTTP fixtures stay Fetch-compatible with a low OS dynamic range and an occ
     assert.ok(ports.length >= 2, 'retry a real EADDRINUSE bind failure')
     assert.equal(await (await fetch(origin)).text(), 'fixture reached')
   } finally { await close(server); await close(occupied) }
+})
+
+test('wrapped HTTP fixture retries are bounded and do not hide non-bind failures', async () => {
+  let attempts = 0
+  const ports: number[] = []
+  const port = await startFetchServer(async selected => {
+    ports.push(selected)
+    const code = ['EADDRINUSE', 'EACCES'][attempts++]
+    if (code) throw Object.assign(new Error(code), { code })
+    return selected
+  })
+  assert.equal(attempts, 3)
+  assert.equal(port, ports.at(-1))
+  assert.ok(ports.every(value => Number.isInteger(value) && value >= 49152 && value <= 65535))
+  const fatal = Object.assign(new Error('fixture setup failed'), { code: 'EINVAL' })
+  attempts = 0
+  await assert.rejects(startFetchServer(async () => { attempts++; throw fatal }), error => error === fatal)
+  assert.equal(attempts, 1)
+  attempts = 0
+  await assert.rejects(startFetchServer(async () => {
+    attempts++
+    throw Object.assign(new Error('occupied'), { code: 'EADDRINUSE' })
+  }), /32 attempts/)
+  assert.equal(attempts, 32)
 })
 
 test('environment query is public, uncached and compatible only for the required environment', async () => {

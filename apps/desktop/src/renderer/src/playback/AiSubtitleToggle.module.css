@@ -135,6 +135,7 @@
   margin: var(--form-label-gap) 0 0;
   line-height: 1.6;
   overflow-wrap: anywhere;
+  user-select: text;
 }
 
 .description {

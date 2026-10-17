@@ -21,7 +21,7 @@ import { gatewayRequestAllowed, gatewayRouteAllowed, proxyBusiness } from './gat
 import { ConnectionPairing } from './connectionPairing'
 import { requestBusiness } from './businessHttp'
 import { connectionClaimSchema } from '@shared/serverUpdateTypes'
-import { authorizeDeviceUpdate } from './deviceAuthorization'
+import { authorizeDeviceUpdate, readDeviceUpdateBearer } from './deviceAuthorization'
 import { businessProcessCommand } from './businessProcess'
 import { serveServerEnvironment } from './environmentHttp'
 import { ServerEnvironmentMismatchError } from '@shared/serverEnvironment'
@@ -145,7 +145,7 @@ async function main(): Promise<void> {
       } catch (error) { reply(409, { error: error instanceof Error ? error.message : '配对失败' }) }
       return
     }
-    const bearer = request.headers.authorization?.match(/^Bearer ([a-f0-9]{64})$/)?.[1]
+    const bearer = readDeviceUpdateBearer(request.headers.authorization)
     const authorized = bearer && authorizeDeviceUpdate(releases.directory(releases.current()!), config.dataDir, bearer)
     if (request.headers.origin || !authorized) { reply(401, { error: '更新授权无效' }); return }
     try {

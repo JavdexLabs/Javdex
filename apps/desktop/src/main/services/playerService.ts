@@ -29,7 +29,7 @@ interface PlayerServiceDependencies {
   readPlayerPath?: () => Promise<string | null>
   readPlayerPreference?: () => Promise<'builtin' | 'external'>
   openBuiltin?: (target: PlaybackTarget) => Promise<PlayResult>
-  externalStarted?: (videoId: number) => Promise<void>
+  externalStarted?: (videoId: number, current: () => boolean) => Promise<void>
   spawnPlayer?: (program: string, args: string[]) => Promise<PlayResult>
 }
 
@@ -84,6 +84,12 @@ export function createPlayerService(
     dependencies.showItemInFolder ?? ((filePath) => shell.showItemInFolder(filePath))
   const spawnPlayer = dependencies.spawnPlayer ?? spawnPlayerProgram
   const catalog = dependencies.catalog
+  const catalogKey = (): string => JSON.stringify([catalog?.mode, catalog?.identity, catalog?.generation])
+  const captureOwner = (): (() => boolean) => {
+    const key = catalogKey()
+    return () => key === catalogKey()
+  }
+  const staleResult = (): PlayResult => ({ ok: false, error: '资料库已更换，请重新打开影片' })
 
   function requireActiveMediaLibrary(libraryId: number): PlayResult | null {
     const library = readMediaLibrary(libraryId)
@@ -94,12 +100,13 @@ export function createPlayerService(
     return null
   }
 
-  async function openLocalOrExternal(resource: VideoResource): Promise<PlayResult> {
+  async function openLocalOrExternal(resource: VideoResource, current: () => boolean): Promise<PlayResult> {
     if (resource.kind === 'local') {
       if (!fileExists(resource.locator)) {
         return { ok: false, fileMissing: true, error: '文件不存在' }
       }
       const playerPath = await dependencies.readPlayerPath?.()
+      if (!current()) return staleResult()
       if (playerPath) return spawnPlayer(playerPath, [resource.locator])
       const error = await openPath(resource.locator)
       return error ? { ok: false, error } : { ok: true }
@@ -112,17 +119,20 @@ export function createPlayerService(
     }
   }
 
-  async function openPreferred(resource: VideoResource, libraryId: number, videoId: number, player?: 'external'): Promise<PlayResult> {
+  async function openPreferred(resource: VideoResource, libraryId: number, videoId: number, current: () => boolean, player?: 'external'): Promise<PlayResult> {
+    if (!current()) return staleResult()
     if (resource.library_id !== libraryId || resource.video_id !== videoId) return { ok: false, error: '资源不属于所选影片或媒体库' }
     if (resource.kind === 'local' && player !== 'external' && await dependencies.readPlayerPreference?.() === 'builtin') {
       // The native owner revalidates the target and obtains any remote grant itself.
       // An opening window is not evidence of actual playback and must not mark watch-later as played.
+      if (!current()) return staleResult()
       return dependencies.openBuiltin?.({ libraryId, videoId, resourceId: resource.id })
         ?? { ok: false, error: '内置播放不可用，请显式选择外部播放' }
     }
-    const result = catalog?.mode === 'remote' ? await openRemoteResource(libraryId, videoId, resource) : await openLocalOrExternal(resource)
-    if (result.ok) {
-      try { await dependencies.externalStarted?.(videoId) }
+    if (!current()) return staleResult()
+    const result = catalog?.mode === 'remote' ? await openRemoteResource(libraryId, videoId, resource, current) : await openLocalOrExternal(resource, current)
+    if (result.ok && current()) {
+      try { await dependencies.externalStarted?.(videoId, current) }
       catch { console.warn('播放已开始，但未能从稍后观看移出影片') }
     }
     return result
@@ -131,7 +141,8 @@ export function createPlayerService(
   async function openRemoteResource(
     libraryId: number,
     videoId: number,
-    resource: VideoResource & { locatorRevision?: string }
+    resource: VideoResource & { locatorRevision?: string },
+    current: () => boolean
   ): Promise<PlayResult> {
     if (resource.kind === 'web' || resource.kind === 'magnet' || resource.kind === 'ed2k') {
       try {
@@ -143,6 +154,7 @@ export function createPlayerService(
     }
     if (resource.kind === 'direct') {
       const playerPath = (await dependencies.readPlayerPath?.()) ?? null
+      if (!current()) return staleResult()
       if (playerPath) return spawnPlayer(playerPath, [resource.locator])
       try {
         await openExternal(resource.locator)
@@ -152,6 +164,7 @@ export function createPlayerService(
       }
     }
     const playerPath = (await dependencies.readPlayerPath?.()) ?? null
+    if (!current()) return staleResult()
     if (!playerPath) {
       return { ok: false, error: '请在此电脑设置中指定播放器程序（例如 mpv）' }
     }
@@ -163,6 +176,7 @@ export function createPlayerService(
         resourceId: resource.id,
         locatorRevision: resource.locatorRevision ?? resourceLocatorRevision(resource)
       })) as PlayGrant
+      if (!current()) return staleResult()
       return spawnPlayer(playerPath, [grant.playbackHandle])
     } catch (error) {
       return playError(error, '无法签发播放凭据')
@@ -186,6 +200,7 @@ export function createPlayerService(
 
   return {
     async playVideo(libraryId, videoId): Promise<PlayResult> {
+      const current = captureOwner()
       if (catalog?.mode === 'remote') {
         try {
           const detail = (await catalog.queries.getVideo({
@@ -194,13 +209,14 @@ export function createPlayerService(
           })) as { resources?: Array<VideoResource & { locatorRevision?: string }> } | null
           const primary =
             detail?.resources?.find((resource) => resource.is_primary === 1) ?? detail?.resources?.[0]
+          if (!current()) return staleResult()
           if (!primary) return { ok: false, error: '影片没有可打开的资源' }
           const resource = ((await catalog.queries.getResource({
             libraryId,
             videoId,
             resourceId: primary.id
           })) ?? primary) as VideoResource & { locatorRevision?: string }
-          return openPreferred(resource, libraryId, videoId)
+          return openPreferred(resource, libraryId, videoId, current)
         } catch (error) {
           return playError(error, '无法读取远程影片资源')
         }
@@ -210,9 +226,10 @@ export function createPlayerService(
       if (!readVideo(videoId)) return { ok: false, error: '视频记录不存在' }
       const resource = readPrimaryResource(libraryId, videoId)
       if (!resource) return { ok: false, error: '影片没有可打开的资源' }
-      return openPreferred(resource, libraryId, videoId)
+      return openPreferred(resource, libraryId, videoId, current)
     },
     async openResource(libraryId, resourceId, videoId, player): Promise<PlayResult> {
+      const current = captureOwner()
       if (catalog?.mode === 'remote') {
         if (videoId == null) return { ok: false, error: '缺少影片编号' }
         try {
@@ -222,7 +239,7 @@ export function createPlayerService(
             resourceId
           })) as (VideoResource & { locatorRevision?: string }) | null
           if (!resource) return { ok: false, error: '资源记录不存在' }
-          return openPreferred(resource, libraryId, videoId, player)
+          return openPreferred(resource, libraryId, videoId, current, player)
         } catch (error) {
           return playError(error, '无法读取远程影片资源')
         }
@@ -231,7 +248,7 @@ export function createPlayerService(
       if (libraryError) return libraryError
       const resource = readResource(libraryId, resourceId)
       if (!resource) return { ok: false, error: '资源记录不存在' }
-      return openPreferred(resource, libraryId, videoId ?? resource.video_id, player)
+      return openPreferred(resource, libraryId, videoId ?? resource.video_id, current, player)
     },
     revealVideo(libraryId, videoId): PlayResult {
       if (catalog?.mode === 'remote') {

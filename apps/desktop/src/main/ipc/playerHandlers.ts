@@ -18,9 +18,10 @@ export function registerPlayerHandlers(
     readPlayerPath: async () => (await settings.read()).playerPath,
     readPlayerPreference: async () => (await settings.read()).playerPreference,
     openBuiltin,
-    externalStarted: async videoId => {
+    externalStarted: async (videoId, current) => {
+      if (!current()) return
       await recentStarted?.(videoId)
-      await removePlayedWatchLater(backend, videoId)
+      if (current()) await removePlayedWatchLater(backend, videoId, current)
     }
   })
   appCommandAdapter.register(IPC.PLAYER_PLAY, async (libraryId, videoId): Promise<PlayResult> =>

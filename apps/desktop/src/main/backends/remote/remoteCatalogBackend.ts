@@ -1,4 +1,5 @@
 import { createRemoteBackup } from './remoteBackup'
+import { readRemoteWriterSecret } from './remoteWriterSecret'
 import { catalogRemoteResult } from './catalogRemoteResults'
 import { parseManageInput } from '@shared/manage/parse'
 import type { CatalogOperationInput, CatalogWireInput } from '../../application/catalogOperationInputs'
@@ -211,8 +212,7 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
     let claimRequired = false
     try {
       const hello = await handshakeOnly(signal)
-      const storedSecret = await options.credentials.readWriterSecret(hello.identity.catalogId) ??
-        (options.deviceIdentity?.serverId === hello.identity.serverId ? options.deviceIdentity.secret : null)
+      const storedSecret = await readRemoteWriterSecret(options, hello)
       if (revision !== connectionRevision) throw structuredError('CONNECTION_UNAVAILABLE', '资料库连接已变化')
       secret = storedSecret
       if (!secret || hello.writerEpoch === 0) {

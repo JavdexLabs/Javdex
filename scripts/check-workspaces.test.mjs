@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 
 const script = fileURLToPath(new URL('./check-workspaces.mjs', import.meta.url))
-const directories = ['apps/desktop', 'apps/web', 'apps/server', 'packages/contracts', 'packages/ui', 'packages/library', 'packages/http']
+const directories = ['apps/desktop', 'apps/web', 'apps/server', 'packages/contracts', 'packages/ui', 'packages/library', 'packages/http', 'website']
 
 test('workspace check rejects stale versions, licenses and lock entries', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-workspace-check-'))
@@ -16,7 +16,7 @@ test('workspace check rejects stale versions, licenses and lock entries', () => 
   try {
     const version = '0.8.0-beta.2'
     const license = 'GPL-3.0-or-later'
-    const product = { version, license, scripts: {} }
+    const product = { version, license, scripts: {}, workspaces: ['apps/*', 'packages/*', 'website'] }
     const lock = { version, packages: { '': { version, license } } }
     write('package.json', product)
     for (const directory of directories) {
@@ -44,6 +44,30 @@ test('workspace check rejects stale versions, licenses and lock entries', () => 
     assert.match(staleRootLicense.stderr, /Lockfile root license must match/)
     lock.packages[''].license = license
     write('package-lock.json', lock)
+
+    const website = { ...lock.packages.website }
+    for (const [field, value, message] of [
+      ['version', '0.8.0', /website: version must match/],
+      ['license', 'MIT', /website: license must match/]
+    ]) {
+      write('website/package.json', { ...website, [field]: value })
+      const result = run()
+      assert.notEqual(result.status, 0)
+      assert.match(result.stderr, message)
+      write('website/package.json', website)
+    }
+    for (const [field, value, message] of [
+      ['version', '0.8.0', /website: lockfile version must match/],
+      ['license', 'MIT', /website: lockfile license must match/]
+    ]) {
+      lock.packages.website[field] = value
+      write('package-lock.json', lock)
+      const result = run()
+      assert.notEqual(result.status, 0)
+      assert.match(result.stderr, message)
+      lock.packages.website[field] = website[field]
+      write('package-lock.json', lock)
+    }
 
     write('apps/desktop/package.json', { ...desktop, license: 'MIT' })
     const staleWorkspaceLicense = run()

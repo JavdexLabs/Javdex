@@ -114,6 +114,8 @@ Windows x64 的 CUDA／Vulkan 资产见 `localModels/gpuManifest.ts`，CPU 目�
 
 Windows Vulkan whisper 从同一固定 b5130 源码构建，`npm run ai-runtime:build -- --vulkan` 需要本机 Visual Studio C++ 工具。构建器 `scripts/windows-vulkan-runtime.mjs` 下载并校验固定 MSYS2 shaderc／SPIR-V／Vulkan 开发材料，仅在构建目录使用，不安装到系统；可通过 HTTPS 的 `JAVDEX_AI_BUILD_MIRROR` 指定包镜像，SHA-256 保持不变。静态构建关闭 CURL、CUDA、OpenMP、CPU 本机指令探测和 AVX，随工具附 Vulkan loader、头文件／引擎许可、来源与逐文件摘要。Windows 打包自动准备并校验这份 bundle，放在 asar 外的 `Resources/ai-runtime/win32-x64-vulkan`；普通开发启动仍可先用 CPU／下载 CUDA。构建临时目录保持短路径以避开 MSBuild MAX_PATH，跨磁盘产物先复制到目标同盘暂存、校验后再切换。macOS Metal 与 Linux 原有 CPU 路径保持。
 
+此 Windows 构建入口需要 Node.js 22.15 或更新版本的内置 Zstandard 解码器。固定 `.pkg.tar.zst` 先完整解码到临时 tar，再交给 `tar.exe` 提取，避免系统 tar 的外部解压管道提前关闭；解码与提取错误仍会中止，临时 tar 在提取结束后删除，原固定输入和摘要不改。
+
 每个运行租约冻结精度与路径，字幕使用自己的两阶段绑定，文本引擎使用文本用途绑定。文件 snapshot 区分权重存在、完整运行依赖、平台支持、配置引用和运行租约；引用文件删除在主进程阻止。用途保存通过 revision 检查避免覆盖并发更改。文件页下载／导入只维护资源，不暗改用途；用途草稿跨三个模型页签保持挂载，离开该组仍有保存保护。
 
 本地识别／翻译与模型商店共用 [运行库安装器](../apps/desktop/src/main/services/localModels/runtimeInstaller.ts)：Windows x64 保留原目录与 ZIP；macOS、Linux 的 arm64／x64 工具在 `tools/<platform>-<arch>/` 隔离，权重目录和默认精度保持。macOS 最低 13.3；Linux 当前使用固定 Ubuntu 发布资产，需 glibc 2.38+、GCC 14 C++ 运行库及 xz-utils（例如已更新的 Ubuntu 24.04）。旧 glibc／musl 仍可管理权重，但不能推理；仅检查 CPU 架构不能代表 ABI 兼容。

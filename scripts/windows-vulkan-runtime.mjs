@@ -7,13 +7,14 @@ import { promisify } from 'node:util'
 import path from 'node:path'
 import os from 'node:os'
 import { fileURLToPath } from 'node:url'
+import zlib from 'node:zlib'
 
 const execute = promisify(execFile)
 const project = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const tools = JSON.parse(await fs.readFile(new URL('./windows-vulkan-build-tools.json', import.meta.url), 'utf8'))
 const source = JSON.parse(await fs.readFile(new URL('./ai-runtime-sources.json', import.meta.url), 'utf8')).whisper
 export const windowsVulkanBundleVersion = 'whisper-b5130-vulkan-v1'
-const fingerprint = createHash('sha256').update(JSON.stringify([source, tools])).update(windowsVulkanCommands.toString()).digest('hex')
+const fingerprint = createHash('sha256').update(JSON.stringify([source, tools])).update(windowsVulkanCommands.toString()).update(extractWindowsVulkanTool.toString()).digest('hex')
 const hashFile = async file => { const hash = createHash('sha256'); for await (const chunk of createReadStream(file)) hash.update(chunk); return hash.digest('hex') }
 const run = (command, args, cwd) => new Promise((resolve, reject) => {
   const child = spawn(command, args, { cwd, windowsHide: true, shell: false, stdio: 'inherit' })
@@ -28,6 +29,19 @@ export function windowsVulkanCommands(sourceRoot, build, sdk, generator) {
       `-DVulkan_INCLUDE_DIR=${path.join(sdk, 'include')}`, `-DVulkan_LIBRARY=${path.join(sdk, 'vulkan-1.lib')}`, `-DVulkan_GLSLC_EXECUTABLE=${path.join(sdk, 'bin/glslc.exe')}`],
     ['--build', build, '--config', 'Release', '--target', 'whisper-cli', '-j', '6']
   ]
+}
+export async function extractWindowsVulkanTool(archive, directory, root, execute = run) {
+  // Windows tar may delegate .zst to an external filter which exits 70 when tar
+  // closes its output pipe at the end marker before all zero padding is written.
+  // Decode the complete pinned input first; never ignore a decompressor error.
+  assert.equal(typeof zlib.zstdDecompressSync, 'function', 'Windows Vulkan builds require Node.js 22.15 or newer')
+  const bytes = await fs.readFile(archive)
+  assert.ok(bytes.length <= 64 * 1024 ** 2, 'Vulkan build input exceeds size limit')
+  const tar = zlib.zstdDecompressSync(bytes, { maxOutputLength: 512 * 1024 ** 2 })
+  const decoded = `${archive}.decoded-${randomUUID()}.tar`
+  await fs.writeFile(decoded, tar, { flag: 'wx' })
+  try { await execute('tar.exe', ['-xf', decoded, '-C', directory], root) }
+  finally { await fs.rm(decoded) }
 }
 export async function refreshWindowsVulkanInventory(directory, metadata = {}) {
   const filesRoot = path.join(directory, 'whisper')
@@ -85,7 +99,7 @@ export async function buildWindowsVulkanRuntime(root = project) {
   assert.equal(new URL(base).protocol, 'https:')
   for (const tool of tools) {
     const archive = await downloadPinned(tool, cache, base)
-    await run('tar.exe', ['-xf', archive, '-C', sdkRoot], root)
+    await extractWindowsVulkanTool(archive, sdkRoot, root)
   }
   const sdk = path.join(sdkRoot, 'ucrt64'), sourceTar = await downloadPinned(source, cache)
   await run('tar.exe', ['-xf', sourceTar, '--strip-components=1', '-C', work], root)

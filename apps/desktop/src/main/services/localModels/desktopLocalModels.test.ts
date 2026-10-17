@@ -8,6 +8,7 @@ import { runInNewContext } from 'node:vm'
 import { setTimeout as delay } from 'node:timers/promises'
 import { test } from 'node:test'
 import { ModuleKind, ScriptTarget, transpileModule } from 'typescript'
+import { localAiDirectories } from './modelStorage'
 
 const requireDependency = createRequire(import.meta.url)
 const code = transpileModule(readFileSync(new URL('./desktopLocalModels.ts', import.meta.url), 'utf8'), {
@@ -65,7 +66,7 @@ test('startup preserves pre-existing 0.8.0 cloud translation without editing its
   assert.equal(await desktop.getLocalModels().mode(), 'local', 'an explicitly saved local choice still overrides startup defaults')
 })
 
-test('failed model inventory is reported to the explicit reader without unhandled notification rejections', async t => {
+test('injected inventory failure is reported to the explicit reader without unhandled notification rejections', async t => {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'javdex-model-notification-')))
   const inventoryFailure = new Error('模型库存读取失败（回归夹具）')
   let inventoryCalls = 0
@@ -101,4 +102,15 @@ test('failed model inventory is reported to the explicit reader without unhandle
   assert.equal(inventoryCalls, 1, 'the real manager must reach the failed inventory')
   assert.deepEqual(events, [], 'do not replace the renderer snapshot with invalid data')
   assert.equal(warnings.length, 1, 'coalesce the repeated initial notifications')
+})
+
+test('a regular file obstructing the model directory rejects the explicit snapshot', async t => {
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'javdex-model-obstruction-')))
+  const models = path.join(localAiDirectories(root).store, 'models')
+  await fs.mkdir(path.dirname(models), { recursive: true })
+  await fs.writeFile(models, 'obstruction')
+  const desktop = startupModels(root)
+  t.after(async () => { await desktop.closeLocalModels(); await fs.rm(root, { recursive: true, force: true }) })
+  await assert.rejects(desktop.getLocalModels().snapshot(), /ENOTDIR|模型|目录/)
+  assert.equal(await fs.readFile(models, 'utf8'), 'obstruction', 'failed reads must preserve the obstructing file')
 })

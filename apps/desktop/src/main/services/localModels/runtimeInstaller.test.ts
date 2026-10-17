@@ -6,7 +6,7 @@ import path from 'node:path'
 import { test } from 'node:test'
 import { createAiRuntimeInstaller, type RuntimeInstallEvent } from './runtimeInstaller'
 import { LOCAL_MODEL_ASSETS, AI_MAC_BUNDLE_VERSION, aiRuntimeAssets, type AiRuntimeAsset } from './runtimeManifest'
-import { modelDownloadFile, runtimeAssetDirectory } from './modelStorage'
+import { modelAssetDirectory, modelDownloadFile, runtimeAssetDirectory } from './modelStorage'
 import { runtimeTar } from './runtimeArchiveFixtures'
 
 const contents = Buffer.from('model fixture data')
@@ -18,6 +18,48 @@ function asset(filename: string): AiRuntimeAsset {
 function assets(filename: string): AiRuntimeAsset[] {
   return LOCAL_MODEL_ASSETS.map(item => item.id === 'translation-model' ? asset(filename) : item)
 }
+
+test('inventory rejects file ancestors instead of treating their missing descendants as uninstalled', async t => {
+  const parent = await fs.mkdtemp(path.join(os.tmpdir(), 'javdex-inventory-ancestor-'))
+  const entry = asset('ancestor.gguf')
+  const originalLstat = fs.lstat
+  let obstruction = ''
+  const mocked = t.mock.method(fs, 'lstat', (async (...args: Parameters<typeof fs.lstat>) => {
+    try { return await originalLstat(...args) }
+    catch (cause) {
+      // Reproduce Windows' ENOENT for descendants of a regular file on any host.
+      if ((cause as NodeJS.ErrnoException).code === 'ENOTDIR' && String(args[0]).startsWith(`${obstruction}${path.sep}`)) {
+        throw Object.assign(new Error('Missing descendant of an obstructing file'), { code: 'ENOENT' })
+      }
+      throw cause
+    }
+  }) as typeof fs.lstat)
+  try {
+    const missing = path.join(parent, 'absent')
+    assert.equal(await createAiRuntimeInstaller(missing, undefined, assets('ancestor.gguf')).assetPresent('translation-model'), false)
+    await assert.rejects(fs.access(missing), { code: 'ENOENT' }, 'inventory must not create a missing store')
+    for (const branch of ['models', 'downloads'] as const) {
+      const sample = branch === 'models' ? modelAssetDirectory(parent, entry) : path.dirname(modelDownloadFile(parent, entry))
+      const parts = path.relative(parent, sample).split(path.sep)
+      for (let depth = 0; depth <= parts.length; depth++) {
+        const root = path.join(parent, `${branch}-${depth}`)
+        obstruction = path.join(root, ...parts.slice(0, depth))
+        await fs.mkdir(path.dirname(obstruction), { recursive: true })
+        await fs.writeFile(obstruction, 'preserved obstruction')
+        const runtime = createAiRuntimeInstaller(root, undefined, assets('ancestor.gguf'))
+        await assert.rejects(runtime.assetPresent('translation-model'), /模型目录/, `${branch} ancestor ${depth}`)
+        assert.equal(await fs.readFile(obstruction, 'utf8'), 'preserved obstruction')
+      }
+    }
+    const valid = path.join(parent, 'valid')
+    const directory = modelAssetDirectory(valid, entry)
+    await fs.mkdir(directory, { recursive: true })
+    const runtime = createAiRuntimeInstaller(valid, undefined, assets('ancestor.gguf'))
+    assert.equal(await runtime.assetPresent('translation-model'), false)
+    await fs.writeFile(path.join(directory, 'partial.gguf'), 'partial')
+    assert.equal(await runtime.assetPresent('translation-model'), true)
+  } finally { mocked.mock.restore(); await fs.rm(parent, { recursive: true, force: true }) }
+})
 
 test('removing a runtime deletes damaged files and archive resume data while preserving other backends and external paths', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'javdex-runtime-delete-'))

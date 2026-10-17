@@ -277,14 +277,27 @@ export function createAiRuntimeInstaller(root: string, download: typeof fetch = 
       emit('complete')
     }
   }
+  async function directoryPresent(location: string): Promise<boolean> {
+    const relative = path.relative(root, location)
+    if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) throw new Error('本地模型路径超出保存目录')
+    let current = root
+    // Windows can report ENOENT for a descendant of a regular file. Inspect
+    // each existing ancestor first; only a genuinely absent component is empty.
+    for (const part of ['', ...relative.split(path.sep).filter(Boolean)]) {
+      if (part) current = path.join(current, part)
+      const stat = await fs.lstat(current).catch(cause => { if (cause.code !== 'ENOENT') throw cause; return null })
+      if (!stat) return false
+      if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('模型目录包含不支持的链接或文件')
+    }
+    return true
+  }
   async function assetPresent(id: AiRuntimeAsset['id']): Promise<boolean> {
     const asset = assets.find(asset => asset.id === id)
     if (!asset && !bundled(id)) throw new Error('未知本地模型')
     const locations = [asset?.archive || bundled(id) ? toolDirectory(id) : assetDirectory(asset!)]
     if (asset && !bundled(id)) locations.push(modelDownloadDirectory(root, asset))
     for (const location of locations) {
-      const stat = await fs.lstat(location).catch(cause => { if (cause.code !== 'ENOENT') throw cause; return null })
-      if (stat && (!stat.isDirectory() || (await fs.readdir(location)).length > 0)) return true
+      if (await directoryPresent(location) && (await fs.readdir(location)).length > 0) return true
     }
     return false
   }

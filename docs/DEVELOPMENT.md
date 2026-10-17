@@ -60,6 +60,10 @@ npm start               # 预览生产构建
 
 `npm test` 会先运行架构边界、lint、CSS 架构和 UI 控件检查，再执行类型检查、打包运行时测试及 Electron 测试。Electron 测试自动发现 `apps/` 与 `packages/` 下的 `*.test.ts` / `*.test.tsx`，排除 `apps/server`。服务端测试单独运行 `npm run server:test`，发布元数据测试运行 `node --test scripts/release-metadata.test.mjs`；两者各有 CI 入口。测试具体入口见 [package.json](../package.json)。
 
+Fetch HTTP 测试夹具可使用 `scripts/test-http.ts` 的 `listenFetchServer`，在 49152–65535 范围内直接持有监听套接字，并对端口占用或系统保留端口重选。不要假定 `listen(0)` 总能获得 Fetch 允许的端口：宿主动态范围可能包含 4045、6000 等禁用端口，请求会在发出前以 `bad port` 失败。HTTP／GC 回归还要求请求确实到达服务端、GC 确实执行以及超时后对端连接关闭；不能仅以调用返回为通过。
+
+`npm run server:updater:test` 包含真实目录 fsync 与 Linux 进程组检查，应在 Linux 宿主或 Linux 容器中运行。Windows 的目录 fsync 会返回 `EPERM`，不能通过忽略持久化错误替代 Linux 验证；HTTP、协议隔离及 Renderer 用例可另在 Windows 验证。
+
 `test:ui` 是独立的真实浏览器交互回归，不由 `npm test` 隐式启动；PR CI 提供稳定版 Chrome。默认使用本机 Chrome，可用 `JAVDEX_BROWSER_EXECUTABLE` 指定可执行文件，或用 `JAVDEX_BROWSER_CHANNEL` 选择已安装通道。完整矩阵默认使用 Chrome，支持后者；`JAVDEX_CSS_FIXTURE` 可传入逗号分隔的场景名运行定向检查。两个入口使用合成资料，不读取个人媒体库；完整矩阵记录截图和几何/行为断言，不是像素差异或完整 Electron GUI 验收。
 
 需要运行特定 Electron 测试文件时：

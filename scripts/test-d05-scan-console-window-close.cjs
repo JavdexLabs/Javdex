@@ -96,6 +96,11 @@ async function bundleRenderer(outDir) {
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      window.fixtureErrors = []
+      window.addEventListener('error', event => window.fixtureErrors.push(event.message))
+      window.addEventListener('unhandledrejection', event => window.fixtureErrors.push(String(event.reason)))
+    </script>
     <script src="./d05-scan-console.js"></script>
   </body>
 </html>
@@ -116,7 +121,12 @@ async function waitForScanButton(window) {
     if (typeof label === 'string' && label.includes('扫描并导入')) return label
     await new Promise((resolve) => setTimeout(resolve, 50))
   }
-  throw new Error('scan button was not ready')
+  const details = await window.webContents.executeJavaScript(`({
+    url: location.href, readyState: document.readyState, errors: window.fixtureErrors,
+    text: document.body.innerText.slice(0, 1500), api: typeof window.api,
+    buttons: [...document.querySelectorAll('[data-ui="button"]')].map(button => ({ text: button.textContent, disabled: button.disabled }))
+  })`)
+  throw new Error('scan button was not ready: ' + JSON.stringify(details))
 }
 
 async function run() {
@@ -205,6 +215,9 @@ async function run() {
       height: 480,
       backgroundColor: '#101014',
       webPreferences: {
+        // This fixture verifies IPC ownership, not foreground visibility. Other
+        // native test windows must not throttle the recreated renderer's commit.
+        backgroundThrottling: false,
         preload: path.resolve('scripts/test-d05-scan-console-preload.cjs'),
         contextIsolation: true,
         nodeIntegration: false,

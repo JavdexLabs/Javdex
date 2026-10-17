@@ -175,8 +175,8 @@ function ServerUpdateSession({ session, reconnect }: Pick<ReturnType<typeof useD
         <div><span className={styles.label}>此客户端</span><strong className={styles.version}>{clientVersion ?? '—'}</strong></div>
       </div>
       <dl className={styles.environment} aria-label="运行环境版本" aria-busy={environmentBusy}>
-        <div className={styles.environmentValue}><dt>当前环境</dt><dd className={styles.environmentRevision}>{environment?.currentVersion == null ? '未确认' : `修订 ${environment.currentVersion}`}</dd></div>
-        <div className={styles.environmentValue} data-separated><dt>本版要求</dt><dd className={styles.environmentRevision}>修订 {environment?.requiredVersion ?? SERVER_ENVIRONMENT_VERSION}</dd></div>
+        <div className={styles.environmentValue}><dt>当前环境</dt><dd className={styles.environmentRevision}>{environment?.currentVersion == null ? '未确认' : `运行环境版本 ${environment.currentVersion}`}</dd></div>
+        <div className={styles.environmentValue} data-separated><dt>本版要求</dt><dd className={styles.environmentRevision}>运行环境版本 {environment?.requiredVersion ?? SERVER_ENVIRONMENT_VERSION}</dd></div>
       </dl>
       <div id={environmentDescriptionId}><SettingsFeedback message={feedbackMessage} error={Boolean(!imageRequired && (error || pollError || job?.phase === 'recoveryRequired' || (environmentUnavailable && !environmentBusy)))} detail={feedbackDetail} detailPresentation="inline" /></div>
       {locked ? <div className={styles.progress}>

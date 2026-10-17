@@ -21,7 +21,7 @@
 | 模型配置 | [modelManagementTypes.ts](../packages/contracts/src/modelManagementTypes.ts) 的 `MODEL_MANAGEMENT_SCHEMA_VERSION = 4`；属于桌面配置，不是服务端 schema，也不包含在资料库备份中 |
 | 普通业务会话 | 桌面与当前服务端业务/网页包同源码版本；不匹配时不打开本机权威库、不自动回退连接 |
 | 独立更新协议 | 协议 1，`node22-bookworm-v1`，Linux amd64/arm64；可跨业务版本使用；与业务共用统一 HTTPS 入口，按可信设备授权 |
-| 镜像环境门禁 | 镜像管理器公开只读 `GET /runtime/v1/info`；当前 `environmentVersion = 1`，须与客户端及签名升级清单严格相等；不以业务版本或镜像标签推断环境兼容 |
+| 镜像环境门禁 | 镜像管理器通过 HTTPS 公开只读 `GET /runtime/v1/info`；当前源码 `environmentVersion = 1`，须与客户端及签名升级清单严格相等；不以业务版本或镜像标签推断环境兼容 |
 | 业务更新附件 | 每架构一个 `Javdex-server-<version>-linux-<arch>.javdex-update`；签名约束迁移来源/目标、构建、平台、运行环境、大小、摘要及期限，信任根来自管理器而非上传包 |
 | 版本选择 | 在线读取当前客户端版本的 Release tag（含预发布）；离线、准备和安装须匹配同一版本。SemVer 只接受更高版本，同版本重装与降级拒绝，正式 0.8.0 的来源 schema 必须为 19 |
 
@@ -48,6 +48,8 @@
 本地 `VIDEO_LIST` 已有每页 200 条上限，与管理分页上限对齐。现有刮削批次 IPC 可带最多 10000 个 ID；远程管理改为 target list，不把该 IPC 上限搬上 HTTP。
 
 ## 合同分层
+
+托管管理器的单一公共端口按首包识别 HTTP 与 TLS。HTTPS 提供所有既有能力；HTTP 仅转发 [browserRoutes.ts](../packages/http/src/browserRoutes.ts) 的 Web 白名单（静态资源、网页登录及六位码配对、只读资料、图片、浏览器媒体与下载）。管理、客户端播放、令牌领取、运行环境及更新接口均只接受 HTTPS。管理器清理外部转发头，按真实 socket 协议注入带内部令牌的协议元数据；业务层验证后再次限制 HTTP 路由，不能借 Cookie、设备凭据或伪造头扩权。内部业务监听仍为回环端口。Web 两种协议共用会话及不带 `Secure` 的 Cookie，保留 `HttpOnly`、`SameSite=Strict`、有效期与撤销语义，不处理已有 Cookie 迁移。桌面配置的公共地址仍强制 HTTPS。
 
 | 层 | 位置 | 调用方 |
 |---|---|---|
@@ -164,7 +166,7 @@ IPC 去向以 inventory 及其覆盖检查为准。兼容入口不要求一对�
 
 ### 运行环境兼容门禁
 
-本节为 Beta.6 实现的合同，不追溯改变已公开的 Beta.1–5 镜像或升级包；旧镜像采用本能力须更换基础镜像。镜像内管理器拥有 `GET /runtime/v1/info`，实现见 [environmentHttp.ts](../apps/server/src/updater/environmentHttp.ts)；它不经可变业务进程转发、不读取程序卷发行描述来推断环境。常量 `SERVER_ENVIRONMENT_VERSION = 1` 与 `SERVER_RUNTIME_ID = node22-bookworm-v1` 定义在 [serverUpdateTypes.ts](../packages/contracts/src/serverUpdateTypes.ts)，兼容状态及相等断言见 [serverEnvironment.ts](../packages/contracts/src/serverEnvironment.ts)。业务更新不能提升镜像实际环境版本。
+环境门禁从 Beta.6 开始提供；本次同端口双协议管理器及可信协议转发标记仍沿用环境版本 1，不提供旧 Beta 管理器兼容，部署须同步更换包含本次实现的基础镜像。镜像内管理器拥有 HTTPS `GET /runtime/v1/info`，实现见 [environmentHttp.ts](../apps/server/src/updater/environmentHttp.ts)；它不经可变业务进程转发、不读取程序卷发行描述来推断环境。常量 `SERVER_ENVIRONMENT_VERSION = 1` 与 `SERVER_RUNTIME_ID = node22-bookworm-v1` 定义在 [serverUpdateTypes.ts](../packages/contracts/src/serverUpdateTypes.ts)，兼容状态及相等断言见 [serverEnvironment.ts](../packages/contracts/src/serverEnvironment.ts)。业务更新不能提升镜像实际环境版本。
 
 查询无需配对、设备凭据或业务 AppVersion；客户端不发送这些信息，仍执行既有 HTTPS 信任、来源与重定向限制。返回 `Cache-Control: no-store`，成功响应仅包含公开的粗粒度镜像元数据，不包含业务版本、目录、资料库身份、设备信息或凭据：
 

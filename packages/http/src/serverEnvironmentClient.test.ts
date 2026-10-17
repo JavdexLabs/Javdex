@@ -9,15 +9,15 @@ import { createHash, X509Certificate } from 'node:crypto'
 import { gzipSync } from 'node:zlib'
 import { test } from 'node:test'
 import { promisify } from 'node:util'
+import { build } from 'esbuild'
 import { queryServerEnvironment } from './serverEnvironmentClient'
+import { SERVER_ENVIRONMENT_VERSION } from '@shared/serverEnvironment'
+import { listenFetchServer } from '../../../scripts/test-http'
 
-const environment = { format: 1, environmentVersion: 1, runtimeId: 'node22-bookworm-v1', platform: 'linux/amd64' }
+const environment = { format: 1, environmentVersion: SERVER_ENVIRONMENT_VERSION, runtimeId: 'node22-bookworm-v1', platform: 'linux/amd64' }
 
 async function listen(server: http.Server, protocol = 'http'): Promise<string> {
-  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
-  const address = server.address()
-  assert.ok(address && typeof address !== 'string')
-  return `${protocol}://127.0.0.1:${address.port}`
+  return `${protocol}://127.0.0.1:${await listenFetchServer(server)}`
 }
 
 async function close(server: http.Server): Promise<void> {
@@ -34,6 +34,25 @@ async function bounded<T>(work: Promise<T>, timeoutMs: number): Promise<T> {
   } finally { clearTimeout(timer) }
 }
 
+test('HTTP fixtures stay Fetch-compatible with a low OS dynamic range and an occupied port', async t => {
+  const occupied = http.createServer()
+  const occupiedPort = await listenFetchServer(occupied)
+  const server = http.createServer((_request, response) => response.end('fixture reached'))
+  const originalListen = server.listen.bind(server)
+  const ports: number[] = []
+  // Exercise a real bind collision without racing a released port or changing the host's dynamic range.
+  t.mock.method(server, 'listen', (port: number, host: string) => {
+    ports.push(port)
+    assert.ok(port >= 49152 && port <= 65535, 'do not delegate to a possibly Fetch-blocked OS ephemeral port')
+    return originalListen(ports.length === 1 ? occupiedPort : port, host)
+  })
+  try {
+    const origin = await listen(server)
+    assert.ok(ports.length >= 2, 'retry a real EADDRINUSE bind failure')
+    assert.equal(await (await fetch(origin)).text(), 'fixture reached')
+  } finally { await close(server); await close(occupied) }
+})
+
 test('environment query is public, uncached and compatible only for the required environment', async () => {
   const requests: http.IncomingHttpHeaders[] = []
   const server = http.createServer((request, response) => {
@@ -46,7 +65,7 @@ test('environment query is public, uncached and compatible only for the required
   const origin = await listen(server)
   try {
     assert.deepEqual(await queryServerEnvironment(`${origin}/?ignored=secret#fragment`), {
-      state: 'compatible', currentVersion: 1, requiredVersion: 1,
+      state: 'compatible', currentVersion: SERVER_ENVIRONMENT_VERSION, requiredVersion: SERVER_ENVIRONMENT_VERSION,
       runtimeId: 'node22-bookworm-v1', platform: 'linux/amd64', message: null
     })
     assert.equal(requests.length, 1)
@@ -64,8 +83,8 @@ test('a valid older environment requires the Docker image, without inventing ver
   })
   const origin = await listen(server)
   try {
-    assert.deepEqual(await queryServerEnvironment(origin, undefined, 2), {
-      state: 'imageRequired', currentVersion: 1, requiredVersion: 2,
+    assert.deepEqual(await queryServerEnvironment(origin, undefined, SERVER_ENVIRONMENT_VERSION + 1), {
+      state: 'imageRequired', currentVersion: SERVER_ENVIRONMENT_VERSION, requiredVersion: SERVER_ENVIRONMENT_VERSION + 1,
       runtimeId: 'node22-bookworm-v1', platform: 'linux/amd64', message: '需要升级服务端Docker镜像'
     })
   } finally { await close(server) }
@@ -74,12 +93,12 @@ test('a valid older environment requires the Docker image, without inventing ver
 test('a newer environment requires the client rather than an image downgrade', async () => {
   const server = http.createServer((_request, response) => {
     response.writeHead(200, { 'Content-Type': 'application/json' })
-    response.end(JSON.stringify({ ...environment, environmentVersion: 2, platform: 'linux/arm64' }))
+    response.end(JSON.stringify({ ...environment, environmentVersion: SERVER_ENVIRONMENT_VERSION + 1, platform: 'linux/arm64' }))
   })
   const origin = await listen(server)
   try {
     assert.deepEqual(await queryServerEnvironment(origin), {
-      state: 'clientRequired', currentVersion: 2, requiredVersion: 1,
+      state: 'clientRequired', currentVersion: SERVER_ENVIRONMENT_VERSION + 1, requiredVersion: SERVER_ENVIRONMENT_VERSION,
       runtimeId: 'node22-bookworm-v1', platform: 'linux/arm64', message: '服务端运行环境较新，请升级此客户端'
     })
   } finally { await close(server) }
@@ -97,7 +116,7 @@ test('only a missing or unsupported query endpoint is treated as an old image', 
         const result = await queryServerEnvironment(origin)
         assert.equal(result.state, status === 404 || status === 405 ? 'imageRequired' : 'unavailable')
         assert.equal(result.currentVersion, null)
-        assert.equal(result.requiredVersion, 1)
+        assert.equal(result.requiredVersion, SERVER_ENVIRONMENT_VERSION)
         assert.equal(result.runtimeId, null)
         assert.equal(result.platform, null)
         if (result.state === 'imageRequired') assert.equal(result.message, '需要升级服务端Docker镜像')
@@ -225,14 +244,14 @@ test('an unknown runtime remains incompatible even when the environment version 
   try {
     const result = await queryServerEnvironment(origin)
     assert.equal(result.state, 'unavailable')
-    assert.equal(result.currentVersion, 1)
+    assert.equal(result.currentVersion, SERVER_ENVIRONMENT_VERSION)
     assert.equal(result.runtimeId, 'node24-new-runtime')
     assert.match(result.message ?? '', /不兼容/)
   } finally { await close(server) }
 })
 
 test('rechecking reads the actual environment again instead of reusing an earlier snapshot', async () => {
-  let version = 1
+  let version = SERVER_ENVIRONMENT_VERSION
   const server = http.createServer((_request, response) => {
     response.writeHead(200, { 'Content-Type': 'application/json' })
     response.end(JSON.stringify({ ...environment, environmentVersion: version }))
@@ -240,10 +259,10 @@ test('rechecking reads the actual environment again instead of reusing an earlie
   const origin = await listen(server)
   try {
     assert.equal((await queryServerEnvironment(origin)).state, 'compatible')
-    version = 2
+    version = SERVER_ENVIRONMENT_VERSION + 1
     const result = await queryServerEnvironment(origin)
     assert.equal(result.state, 'clientRequired')
-    assert.equal(result.currentVersion, 2)
+    assert.equal(result.currentVersion, SERVER_ENVIRONMENT_VERSION + 1)
   } finally { await close(server) }
 })
 
@@ -276,32 +295,47 @@ test('connection failures and stalled headers or bodies return unavailable withi
 test('a stalled real HTTP body is explicitly cancelled after GC, before the unchanged deadline', async () => {
   // A fresh process lets this run under both plain Node and Electron without
   // changing the host's GC settings or mocking away Fetch's abort propagation.
-  const probe = String.raw`
+  // Compile the real modules before launching the child: its unchanged 10s
+  // watchdog must measure execution, not a cold TS loader on a mounted source tree.
+  const root = path.resolve(__dirname, '../../..')
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-http-gc-'))
+  const fixture = path.join(directory, 'fixture.cjs')
+  try {
+    await build({
+      stdin: { contents: "export { queryServerEnvironment } from './packages/http/src/serverEnvironmentClient'; export { listenFetchServer } from './scripts/test-http'", resolveDir: root, loader: 'ts' },
+      outfile: fixture, bundle: true, platform: 'node', format: 'cjs', target: 'node22',
+      alias: { '@shared': path.join(root, 'packages/contracts/src') }, logLevel: 'silent'
+    })
+    const probe = String.raw`
     const assert = require('node:assert/strict')
     const http = require('node:http')
-    const { queryServerEnvironment } = require('./packages/http/src/serverEnvironmentClient.ts')
+    const { queryServerEnvironment, listenFetchServer } = require(process.env.JAVDEX_TEST_GC_MODULE)
     async function run() {
       assert.equal(typeof global.gc, 'function')
       let peerClosed
       const closed = new Promise(resolve => { peerClosed = resolve })
+      let requests = 0, collections = 0
       const server = http.createServer((request, response) => {
+        requests++
         request.socket.once('close', peerClosed)
         response.writeHead(200, { 'Content-Type': 'application/json' })
         response.write('{"format":1,')
       })
-      await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
-      const collection = setInterval(() => global.gc(), 50)
+      const port = await listenFetchServer(server)
+      const collection = setInterval(() => { collections++; global.gc() }, 50)
       let deadline, closeDeadline
       try {
         const started = Date.now()
         const result = await Promise.race([
-          queryServerEnvironment('http://127.0.0.1:' + server.address().port),
+          queryServerEnvironment('http://127.0.0.1:' + port),
           new Promise((_resolve, reject) => {
             deadline = setTimeout(() => reject(new Error('body exceeds unchanged 7000ms deadline')), 7000)
           })
         ])
         assert.equal(result.state, 'unavailable')
         assert.equal(result.currentVersion, null)
+        assert.equal(requests, 1, 'the real HTTP request must reach the stalled response body')
+        assert.ok(collections > 0, 'the body must remain pending across real GC')
         assert.match(result.message, /超时/)
         assert.ok(Date.now() - started < 6500)
         await Promise.race([closed, new Promise((_resolve, reject) => {
@@ -309,6 +343,7 @@ test('a stalled real HTTP body is explicitly cancelled after GC, before the unch
         })])
         console.log('GC stalled-body regression passed')
       } finally {
+        console.error('HTTP/GC fixture', JSON.stringify({ port, requests, collections }))
         clearInterval(collection)
         clearTimeout(deadline)
         clearTimeout(closeDeadline)
@@ -318,10 +353,11 @@ test('a stalled real HTTP body is explicitly cancelled after GC, before the unch
     }
     run().catch(error => { console.error(error); process.exitCode = 1 })
   `
-  const { stdout } = await promisify(execFile)(process.execPath, [
-    '--expose-gc', '--require', './scripts/register-test-paths.cjs', '--import', 'tsx', '-e', probe
-  ], { cwd: path.resolve(__dirname, '../../..'), timeout: 10_000, env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } })
-  assert.match(stdout, /GC stalled-body regression passed/)
+    const { stdout } = await promisify(execFile)(process.execPath, [
+      '--expose-gc', '-e', probe
+    ], { cwd: root, timeout: 10_000, env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', JAVDEX_TEST_GC_MODULE: fixture } })
+    assert.match(stdout, /GC stalled-body regression passed/)
+  } finally { fs.rmSync(directory, { recursive: true, force: true }) }
 })
 
 test('TLS trust is checked before HTTP, and owned transports close on success and errors', async t => {

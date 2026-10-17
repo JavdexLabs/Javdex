@@ -20,11 +20,10 @@ const sameVersion = query.get('sameVersion') === '1' || query.get('same') === '1
 let state = { protocolVersion: 1, paired: query.get('unpaired') !== '1', serverId: '11111111-1111-4111-8111-111111111111', catalogId: '22222222-2222-4222-8222-222222222222', currentVersion: sameVersion ? desktopVersion : '0.9.0-beta.4', platform: 'linux/amd64', runtime: 'node22-bookworm-v1', targetVersion: null, job: null }
 const makeEnvironment = scenario => {
   const base = { state: 'compatible', currentVersion: SERVER_ENVIRONMENT_VERSION, requiredVersion: SERVER_ENVIRONMENT_VERSION, runtimeId: state.runtime, platform: state.platform, message: null }
-  // Only this mock previews a future client requirement of 2 against image revision 1.
-  // The real shared requirement is still SERVER_ENVIRONMENT_VERSION === 1.
-  if (scenario === 'mismatch' || scenario === 'older') return { ...base, state: 'imageRequired', requiredVersion: 2, message: '需要升级服务端Docker镜像' }
+  // Preview a future requirement without inventing environment revision 0.
+  if (scenario === 'mismatch' || scenario === 'older') return { ...base, state: 'imageRequired', requiredVersion: SERVER_ENVIRONMENT_VERSION + 1, message: '需要升级服务端Docker镜像' }
   if (scenario === 'missing') return { ...base, state: 'imageRequired', currentVersion: null, runtimeId: null, platform: null, message: '需要升级服务端Docker镜像' }
-  if (scenario === 'higher') return { ...base, state: 'clientRequired', currentVersion: 2, message: '服务端运行环境较新，请升级此客户端' }
+  if (scenario === 'higher') return { ...base, state: 'clientRequired', currentVersion: SERVER_ENVIRONMENT_VERSION + 1, message: '服务端运行环境较新，请升级此客户端' }
   if (scenario === 'unavailable') return { ...base, state: 'unavailable', currentVersion: null, message: '运行环境响应格式无法识别，请检查连接配置后重新检测。' }
   return base
 }

@@ -143,7 +143,7 @@ test('an older image disables both upgrade entries and offers the selected inlin
     assert.equal(panel.button('上传离线包升级').props.disabled, true)
     assert.ok(panel.button('查看镜像升级指引'))
     assert.ok(panel.button('重新检测'))
-    assert.match(renderedText(panel.tree.root), /当前环境.*修订 1.*本版要求.*修订 2/)
+    assert.match(renderedText(panel.tree.root), /当前环境.*运行环境版本 1.*本版要求.*运行环境版本 2/)
     assert.doesNotMatch(renderedText(panel.tree.root), /最低要求|及以上/)
     assert.ok(calls.some(command => command.action === 'environment'))
     assert.ok(calls.every(command => command.action === 'environment' || command.action === 'status'))

@@ -29,8 +29,8 @@ import {
 } from '../desktop/localCatalogIdentity'
 import { copyAgentWorkTables } from '../desktop/agentWorkCopy'
 import { createWriterCredentialStore } from '../desktop/writerCredentialStore'
-import { readServerConnection } from '../desktop/serverConnectionStore'
-import { assertRemoteBaseUrl } from '../desktop/remoteConnectionUrl'
+import { createServerConnectionStore } from '../desktop/serverConnectionStore'
+import { createLegacyServerConnection, legacyHttpsOrigin } from '../desktop/legacyServerConnection'
 import { createServerCertificateTrust } from '../desktop/serverCertificateTrust'
 import type { VerifyServerCertificate } from '@http/pinnedFetch'
 import { openDesktopWorkStore, type DesktopWorkStoreHandle } from '../desktop/workStore'
@@ -53,6 +53,7 @@ export interface CreateDesktopRuntimeOptions {
   credentials?: DesktopCredentialStore
   verifyCertificate?: VerifyServerCertificate
   detectDefaultPlayer?: () => Promise<DefaultPlayerDetectionResult>
+  connectionStore?: ReturnType<typeof createServerConnectionStore>
 }
 
 export function workStorePath(userDataPath: string): string {
@@ -112,21 +113,31 @@ export async function createDesktopRuntime(
         dispose: () => disposeRemote(backend)
       }
     }
-    if (snapshot.remoteBaseUrl) {
-      try { assertRemoteBaseUrl(snapshot.remoteBaseUrl) } catch {
+    let remoteBaseUrl = snapshot.remoteBaseUrl
+    if (remoteBaseUrl) {
+      try { legacyHttpsOrigin(remoteBaseUrl) } catch {
         const backend = createUnconfiguredRemoteBackend({ message: '请在资料库连接中填写统一入口的 HTTPS 地址并重新配对。' })
         return { mode, backend, workStore, settings, openedCatalog: false, scanRecovery: null, dispose: () => disposeRemote(backend) }
       }
     }
     const credentials = options.credentials ?? createWriterCredentialStore({ userDataPath })
+    const connectionStore = options.connectionStore ?? createServerConnectionStore(userDataPath)
+    const saved = remoteBaseUrl ? connectionStore.read() : null
+    const legacy = remoteBaseUrl && (new URL(remoteBaseUrl).protocol === 'http:' || (!saved && fs.existsSync(path.join(userDataPath, 'writer-secrets.json'))))
+      ? createLegacyServerConnection({ address: remoteBaseUrl, appVersion, settings, connectionStore,
+        verifyCertificate: options.verifyCertificate ?? createServerCertificateTrust(userDataPath, legacyHttpsOrigin(remoteBaseUrl)) })
+      : null
+    if (remoteBaseUrl) remoteBaseUrl = legacy?.origin ?? new URL(remoteBaseUrl).origin
     const backend = createCatalogBackendForMode(
       'remote',
       { identity: { mode: 'local', catalogId: '' } },
-      snapshot.remoteBaseUrl
+      remoteBaseUrl
         ? {
-            baseUrl: snapshot.remoteBaseUrl,
-            ...readServerConnection(userDataPath, snapshot.remoteBaseUrl),
-            verifyCertificate: options.verifyCertificate ?? createServerCertificateTrust(userDataPath, snapshot.remoteBaseUrl),
+            baseUrl: remoteBaseUrl,
+            ...(saved?.remoteBaseUrl === remoteBaseUrl ? { certificateSha256: saved.pairing.certificateSha256,
+              deviceIdentity: { serverId: saved.pairing.serverId, secret: saved.pairing.token } } : {}),
+            verifyCertificate: legacy?.verifyCertificate ?? options.verifyCertificate ?? createServerCertificateTrust(userDataPath, remoteBaseUrl),
+            connectionMigration: legacy?.migration,
             appVersion,
             credentials,
             workStore,

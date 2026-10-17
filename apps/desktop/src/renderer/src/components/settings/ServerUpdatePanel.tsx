@@ -48,10 +48,14 @@ function ServerUpdateSession({ session, reconnect }: Pick<ReturnType<typeof useD
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
   const accepts = useCallback((result: ServerUpdateSnapshot): boolean =>
     !result.paired || ((!session.serverId || result.serverId === session.serverId) && (!session.catalogId || result.catalogId === session.catalogId)), [session.serverId, session.catalogId])
-  const checkEnvironment = useCallback(async (): Promise<void> => {
+  const checkEnvironment = useCallback(async (retryConnection = false): Promise<void> => {
     const generation = ++environmentGeneration.current
     setEnvironmentBusy(true)
     try {
+      if (retryConnection && session.legacyHttpUpgradeRequired) {
+        await reconnect()
+        if (!mounted.current) return
+      }
       const result = await api.serverUpdate.control({ action: 'environment' })
       if (!mounted.current || generation !== environmentGeneration.current) return
       if (!accepts(result)) throw new Error('升级目标不属于当前资料库，请核对连接')
@@ -65,7 +69,7 @@ function ServerUpdateSession({ session, reconnect }: Pick<ReturnType<typeof useD
     } finally {
       if (mounted.current && generation === environmentGeneration.current) setEnvironmentBusy(false)
     }
-  }, [accepts])
+  }, [accepts, reconnect, session.legacyHttpUpgradeRequired])
   useEffect(() => {
     if (session.mode !== 'remote' || !api.serverUpdate) return
     void checkEnvironment()
@@ -155,7 +159,9 @@ function ServerUpdateSession({ session, reconnect }: Pick<ReturnType<typeof useD
   const unavailable = !snapshot ? '正在读取升级状态。' : !snapshot.paired ? '请先在资料库连接中连接此服务端。' : null
   const feedbackDetail = [...new Set([error, pollError, environment?.state === 'imageRequired' ? null : environment?.message, job?.message].filter((value): value is string => Boolean(value)))].join('\n\n') || null
   const feedbackMessage = locked ? job?.message ?? '当前服务端任务仍在进行，请等待或按人工恢复指引处理。'
-    : imageRequired ? '业务升级无法更新镜像内的运行环境。请先升级服务端 Docker 镜像，再点击“重新检测”。'
+    : imageRequired ? session.legacyHttpUpgradeRequired
+      ? '服务端仍为 0.8.0，请先升级服务端 Docker 镜像；升级后点击“重新检测”，将自动切换 HTTPS 并保留原授权。'
+      : '业务升级无法更新镜像内的运行环境。请先升级服务端 Docker 镜像，再点击“重新检测”。'
       : environmentBusy ? '正在检测服务端运行环境，可查看上次反馈。'
         : environment?.state === 'clientRequired' ? '请先升级此客户端，不要降级服务端镜像。'
           : environmentUnavailable ? '无法确认运行环境，请检查连接后重新检测。'
@@ -194,7 +200,7 @@ function ServerUpdateSession({ session, reconnect }: Pick<ReturnType<typeof useD
       </div>}
       <div className={styles.environmentActions}>
         {!executing && <Button size="sm" className={styles.environmentAction} variant={imageRequired && !busy ? 'primary' : 'ghost'} aria-haspopup="dialog" onClick={() => setGuide(true)}><BookOpen {...UI_ICON_SM} />查看镜像升级指引</Button>}
-        <Button size="sm" className={styles.environmentAction} variant={!locked && !imageRequired && (environmentBusy || environmentUnavailable) ? 'primary' : undefined} busy={environmentBusy} disabled={environmentBusy || busy} onClick={() => { void checkEnvironment() }}><RefreshCw {...UI_ICON_SM} />重新检测</Button>
+        <Button size="sm" className={styles.environmentAction} variant={!locked && !imageRequired && (environmentBusy || environmentUnavailable) ? 'primary' : undefined} busy={environmentBusy} disabled={environmentBusy || busy} onClick={() => { void checkEnvironment(true) }}><RefreshCw {...UI_ICON_SM} />重新检测</Button>
       </div>
       <div className={styles.footer}><Info {...UI_ICON_SM} /><p className={styles.note}>{executing ? '请等待当前服务端任务结束；安装开始后失败或中断需要人工恢复。' : '升级镜像会中断服务，请保留资料卷、程序卷及图片卷；重要资料请先备份。'}</p></div>
       {technical && <dl className={styles.technical}><dt>架构</dt><dd>{environment?.platform ?? snapshot?.platform ?? '—'}</dd><dt>运行环境</dt><dd>{environment?.runtimeId ?? snapshot?.runtime ?? '—'}</dd></dl>}

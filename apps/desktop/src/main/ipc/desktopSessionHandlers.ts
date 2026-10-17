@@ -162,7 +162,9 @@ export function registerDesktopSessionHandlers(
     const mode = patch.mode ?? current.mode
     const remoteBaseUrl =
       patch.remoteBaseUrl !== undefined ? patch.remoteBaseUrl : current.remoteBaseUrl
-    if (mode === 'remote') {
+    // A saved 0.8.0 HTTP connection may await its server upgrade. Other local
+    // preferences remain editable; selecting a connection still requires HTTPS.
+    if (mode === 'remote' && (patch.mode !== undefined || patch.remoteBaseUrl !== undefined)) {
       if (!remoteBaseUrl || !remoteBaseUrl.trim()) {
         throw structuredError('INVALID_INPUT', '远程模式需要服务器地址')
       }

@@ -125,6 +125,8 @@
 
 `SETTINGS_GET/UPDATE` 拆成此电脑（模式、地址、播放器、代理、模型、窗口）与当前资料库（overview、网页配对）。`SETTINGS_LIBRARY_PATH_*` 是旧全局路径清理，远程禁用；目录管理走 `libraries.*`。加密与资产目录搬迁远程禁用。
 
+正式 0.8.0 的已保存 HTTP 地址由 [legacyServerConnection.ts](../apps/desktop/src/main/desktop/legacyServerConnection.ts) 在启动及手动重连时迁移：优先探测同主机同端口 HTTPS，业务版本匹配后以原 writer 秘密调用 HTTPS `writer.status`，验证通过才补齐加密设备连接记录并保存 HTTPS 地址，不领取新令牌、不新增设备或轮换秘密。HTTP 仅在旧连接的 HTTPS 不可用时请求无凭据的公开 `handshake.get`，严格识别正式 0.8.0/schema 19；不发送 Cookie、bearer 或业务读写。已识别的旧实例/资料库身份加密保存在此电脑，跨重启及同地址手动改为 HTTPS 时继续核对，成功写入设备连接后清理；目标变化、取消、授权失败或保存中断不覆盖原配置及 writer 凭据，部分保存可重试完成。HTTP 识别结果进入现有镜像升级卡片，“重新检测”显式触发重连；新输入的客户端地址仍只接受 HTTPS，服务端不恢复 HTTP 管理接口，环境版本保持 1。
+
 ## IPC 去向摘要
 
 | 去向 | 含义 |

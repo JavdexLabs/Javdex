@@ -179,5 +179,11 @@ describe('desktop session IPC', () => {
       remoteBaseUrl: string
     }
     assert.equal(stored.remoteBaseUrl, 'https://127.0.0.1:8096')
+    await settings.write({ mode: 'remote', remoteBaseUrl: 'http://127.0.0.1:8096' })
+    await handlers.get(IPC.THIS_COMPUTER_UPDATE)!({} as IpcMainInvokeEvent, { resumePlayback: false })
+    assert.equal((await settings.read()).resumePlayback, false, 'unrelated local preferences remain editable while migration is pending')
+    await assert.rejects(async () => handlers.get(IPC.THIS_COMPUTER_UPDATE)!({} as IpcMainInvokeEvent, {
+      remoteBaseUrl: 'http://127.0.0.1:9000'
+    }), (error: unknown) => isStructuredError(error) && error.code === 'INVALID_INPUT')
   })
 })

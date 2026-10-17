@@ -39,6 +39,10 @@ export function createServerUpdateService(backend: CatalogBackend, ctx: IpcConte
     const unavailable = (message: string): ServerEnvironmentSnapshot => ({ state: 'unavailable', currentVersion: null,
       requiredVersion: SERVER_ENVIRONMENT_VERSION, runtimeId: null, platform: null, message })
     if (session.mode !== 'remote' || !session.remoteBaseUrl) return unavailable('请先选择远程资料库')
+    if (session.legacyHttpUpgradeRequired && session.appVersion === '0.8.0') return {
+      state: 'imageRequired', currentVersion: null, requiredVersion: SERVER_ENVIRONMENT_VERSION,
+      runtimeId: null, platform: null, message: '服务端仍为 0.8.0，请先升级服务端 Docker 镜像；重新检测后将自动迁移至 HTTPS 并保留原授权。'
+    }
     assertRemoteBaseUrl(session.remoteBaseUrl)
     const result = await (options.queryEnvironment ?? queryServerEnvironment)(session.remoteBaseUrl, createServerCertificateTrust(root, session.remoteBaseUrl))
     const current = backend.session()

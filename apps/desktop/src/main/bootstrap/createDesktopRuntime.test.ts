@@ -115,16 +115,16 @@ describe('createDesktopRuntime', () => {
     } finally { await runtime.dispose() }
   })
 
-  it('keeps settings accessible without opening an old HTTP deployment on startup', async () => {
+  it('keeps settings and the previous HTTP address accessible when legacy discovery cannot connect', async () => {
     const root = tempDir()
     const settings = createThisComputerSettingsStore(thisComputerSettingsPath(root))
-    await settings.write({ mode: 'remote', remoteBaseUrl: 'http://127.0.0.1:8096' })
+    await settings.write({ mode: 'remote', remoteBaseUrl: 'http://127.0.0.1:1' })
     const runtime = await createDesktopRuntime(root, '0.9.0-beta.4')
     try {
       assert.equal(runtime.openedCatalog, false)
       assert.equal(runtime.backend.session().state, 'disconnected')
-      assert.match(runtime.backend.session().message ?? '', /HTTPS.*重新配对/)
-      assert.equal((await runtime.settings.read()).remoteBaseUrl, 'http://127.0.0.1:8096', 'preserve the previous address for editing')
+      assert.match(runtime.backend.session().message ?? '', /无法连接/)
+      assert.equal((await runtime.settings.read()).remoteBaseUrl, 'http://127.0.0.1:1', 'preserve the previous address for editing')
     } finally { await runtime.dispose() }
   })
 

@@ -26,6 +26,8 @@ export interface DesktopSession {
   appVersion: string | null
   /** Version of the running desktop process, independent of the catalog host. */
   desktopAppVersion?: string | null
+  /** An existing 0.8.0 connection awaits a server image upgrade. */
+  legacyHttpUpgradeRequired?: boolean
   schemaVersion: number | null
   /** Authenticated server image directory; absent in local mode or before remote metadata loads. */
   remoteImagesDir?: string | null

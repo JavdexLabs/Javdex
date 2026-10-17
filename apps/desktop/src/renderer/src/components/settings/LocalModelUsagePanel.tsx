@@ -11,7 +11,7 @@ import SettingsFeedback from './SettingsFeedback'
 import { useLocalModels } from './useLocalModels'
 import { useSettingsDraft } from '../../settings/useSettingsDraft'
 import { useSettingsFormGuard } from '../../settings/SettingsLeaveGuard'
-import { preservesModelUsageDraft, settingsPath } from '../../settings/settingsRoutes'
+import { localModelFilesLocation, preservesModelUsageDraft, settingsPath } from '../../settings/settingsRoutes'
 import styles from './ModelUsagePanel.module.css'
 
 function ModelBinding({ title, state, value, models, disabled, inline = false, stage, onChange }: {
@@ -31,9 +31,7 @@ function ModelBinding({ title, state, value, models, disabled, inline = false, s
   const status = !variant?.installed ? '未下载' : variant.readiness === 'unsupported' ? '当前平台不支持运行'
     : variant.ready ? '已就绪' : '运行依赖待修复'
   const openFiles = (): void => {
-    const query = new URLSearchParams(location.search)
-    query.set('model', value.model); query.set('variant', value.variant)
-    navigate({ pathname: settingsPath('models', 'local'), search: `?${query}`, hash: '' })
+    navigate(localModelFilesLocation(location.search, value.model, value.variant, stage ? 'ai-subtitles' : 'text-translation'))
   }
   const StageIcon = stage === 'recognition' ? Mic : Languages
   const statusLabel = <span className={`${styles.bindingStatusLabel} ${stage ? styles.stageStatusLabel : ''}`} data-ready={variant?.ready === true}>
@@ -150,7 +148,7 @@ function TextUsage({ state, busy, execute, operationError, appDefaultReady }: {
     discard: form.reset, preserveOnNavigate: preservesModelUsageDraft })
   const textLocalReady = state.models.find(m => m.id === form.draft.model)?.variants.find(v => v.id === form.draft.variant)?.ready === true
   const textReady = form.draft.mode === 'app-default' ? appDefaultReady : textLocalReady
-  return <section className={styles.assignmentCard}><SettingsSaveDetailsScope>
+  return <section id="text-translation" className={styles.assignmentCard}><SettingsSaveDetailsScope>
     <header className={styles.cardHeader}>
       <div className={styles.cardHeaderMain}>
         <span className={styles.cardIcon}>
@@ -191,8 +189,8 @@ export default function LocalModelUsagePanel({ layoutReady = true, appDefaultRea
   const anchor = useRef<HTMLDivElement>(null)
   const loaded = state !== null
   useEffect(() => {
-    if (loaded && layoutReady && location.pathname === settingsPath('models', 'usage') && location.hash === '#ai-subtitles') {
-      const target = anchor.current?.querySelector<HTMLElement>('#ai-subtitles')
+    if (loaded && layoutReady && location.pathname === settingsPath('models', 'usage') && ['#ai-subtitles', '#text-translation'].includes(location.hash)) {
+      const target = anchor.current?.querySelector<HTMLElement>(location.hash)
       const scroller = target?.closest<HTMLElement>('[data-settings-scroll-region]')
       if (target && scroller) scroller.scrollTop += target.getBoundingClientRect().top - scroller.getBoundingClientRect().top
     }

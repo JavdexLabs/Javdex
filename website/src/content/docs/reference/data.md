@@ -1,6 +1,6 @@
 ---
 title: "数据保存在哪里"
-description: "Javdex 0.9.0-beta.7 · 数据保存在哪里"
+description: "Javdex 0.9.0 · 数据保存在哪里"
 ---
 
 应用使用系统的 Javdex 用户数据目录，与安装目录分开。默认目录结构如下，`userData` 表示实际应用数据目录，并非需要手动创建的文件夹：

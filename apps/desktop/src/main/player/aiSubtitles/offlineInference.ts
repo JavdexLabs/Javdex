@@ -1,7 +1,8 @@
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { runLocalModelProcess } from '../../services/localModels/processRunner'
+import { gpuMemoryFailure, LocalModelProcessFailure, runLocalModelProcess } from '../../services/localModels/processRunner'
+import { cpuExecution, reportLocalExecution, selectLocalExecution } from '../../services/localModels/runtimeAcceleration'
 import type { AiRuntimePaths } from '../../services/localModels/runtimeInstaller'
 import { createLocalTextInference, type LocalTextInferenceOptions } from '../../services/localModels/textInference'
 import { localSubtitleTranslationPrompt } from '../../services/localModels/localTranslation'
@@ -12,10 +13,12 @@ export { localModelProcessEnvironment } from '../../services/localModels/process
 export function translationPrompt(japanese: string, context: string[] = []): string {
   return localSubtitleTranslationPrompt('qwen3', japanese, context)
 }
-export function createOfflineSubtitleInference(paths: AiRuntimePaths, workRoot: string, options: LocalTextInferenceOptions = {}) {
+export function createOfflineSubtitleInference(paths: AiRuntimePaths, workRoot: string, options: LocalTextInferenceOptions & { run?: typeof runLocalModelProcess } = {}) {
   const model = paths.translationModelId ?? 'qwen3'
   const translator = createLocalTextInference(paths, options)
   const threads = String(Math.max(1, Math.min(6, Math.floor(os.availableParallelism() / 2))))
+  let recognitionCpuReason: string | undefined
+  const run = options.run ?? runLocalModelProcess
   return {
     translateText: translator.translateText,
     async probe(locator: string, expectedIndex: number, signal: AbortSignal): Promise<SubtitleAudioStream> {
@@ -35,12 +38,30 @@ export function createOfflineSubtitleInference(paths: AiRuntimePaths, workRoot: 
       const wav = path.join(directory, 'audio.wav'), output = path.join(directory, 'recognized')
       const extractStart = Math.max(0, start - SUBTITLE_CONTEXT_SECONDS)
       try {
-        await runLocalModelProcess(paths.ffmpeg, ['-nostdin', '-v', 'error', '-ss', String(extractStart), '-i', locator,
+        await run(paths.ffmpeg, ['-nostdin', '-v', 'error', '-ss', String(extractStart), '-i', locator,
           '-t', String(end - extractStart + SUBTITLE_CONTEXT_SECONDS), '-map', `0:${audioIndex}`, '-vn', '-sn', '-dn',
           '-ar', '16000', '-ac', '1', '-c:a', 'pcm_s16le', '-y', wav], { signal, timeoutMs: 45000 })
         if ((await fs.stat(wav)).size > 4 * 1024 * 1024) throw new Error('音频提取结果超限')
-        await runLocalModelProcess(paths.whisper, ['-m', paths.kotoba, '-f', wav, '-l', 'ja', '-ojf', '-of', output,
-          '-t', threads, '-np', '-mc', '0', '--vad', '--vad-model', paths.vad], { signal, timeoutMs: 240000 })
+        const args = ['-m', paths.kotoba, '-f', wav, '-l', 'ja', '-ojf', '-of', output,
+          '-t', threads, '-mc', '0', '--vad', '--vad-model', paths.vad]
+        const execution = recognitionCpuReason ? cpuExecution(paths.whisper, 'recognition', paths.acceleration, recognitionCpuReason)
+          : await selectLocalExecution(paths.whisper, paths.kotoba, 'recognition', paths.acceleration)
+        let retry = false, diagnostic = ''
+        try {
+          await run(execution.executable, [...args, ...execution.args], { signal, timeoutMs: 240000,
+            runtimeEnv: execution.env, diagnostic: value => { diagnostic = value } })
+          options.nativeDiagnostic?.(diagnostic)
+          retry = !reportLocalExecution(paths.acceleration, 'recognition', execution, diagnostic)
+        } catch (cause) {
+          if (signal.aborted || !execution.device || !(cause instanceof LocalModelProcessFailure) || !cause.gpuFailure) throw cause
+          retry = true
+        } finally { execution.release() }
+        if (retry) {
+          signal.throwIfAborted()
+          recognitionCpuReason = gpuMemoryFailure(diagnostic) ? 'GPU 显存分配失败，已自动回退 CPU' : 'GPU 未启用或运行失败，已自动回退 CPU'
+          const cpu = cpuExecution(paths.whisper, 'recognition', paths.acceleration, recognitionCpuReason)
+          await run(cpu.executable, [...args, ...cpu.args], { signal, timeoutMs: 240000 })
+        }
         if ((await fs.stat(`${output}.json`)).size > 4 * 1024 * 1024) throw new Error('日语识别结果超限')
         const raw = await fs.readFile(`${output}.json`, 'utf8')
         options.log?.('识别原始响应', { start, end, extractStart, response: raw })

@@ -17,7 +17,7 @@ function fixture(kind?: 'device') {
   roots.push(root)
   const file = path.join(root, 'server-update-secrets.bin')
   writeFileSync(file, JSON.stringify({ pairing, remoteBaseUrl: 'https://example.test', credentialKind: kind }))
-  const store = createServerConnectionStore(root, { assertAvailable() {}, decrypt: value => value.toString() })
+  const store = createServerConnectionStore(root, { assertAvailable() {}, decrypt: value => value.toString(), encrypt: value => Buffer.from(value) })
   return { root, file, store }
 }
 
@@ -68,6 +68,6 @@ it('refuses inconsistent origins and unavailable secure storage without deleting
   writeFileSync(file, JSON.stringify({ pairing, remoteBaseUrl: 'https://other.test', credentialKind: 'device' }))
   await assert.rejects(store.forget({ deleteWriterSecret: async () => { assert.fail('invalid identity') } }), /身份不一致/)
   assert.equal(existsSync(file), true)
-  const locked = createServerConnectionStore(root, { assertAvailable() { throw new Error('locked') }, decrypt: () => { assert.fail('must not decrypt') } })
+  const locked = createServerConnectionStore(root, { assertAvailable() { throw new Error('locked') }, decrypt: () => { assert.fail('must not decrypt') }, encrypt: () => { assert.fail('must not encrypt') } })
   assert.throws(() => locked.read(), /locked/)
 })

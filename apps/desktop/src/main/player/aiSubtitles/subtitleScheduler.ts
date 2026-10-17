@@ -13,6 +13,8 @@ export interface SubtitleSchedulerState {
   activeStart: number | null
   recognizedSeconds: number
   translatedSeconds: number
+  recognizedUntil: number | null
+  translatedUntil: number | null
   error: string | null
   cues: SubtitleCue[]
 }
@@ -25,16 +27,38 @@ export function createSubtitleScheduler(duration: number, deps: Dependencies) {
   let position = 0, stopped = true, loop: Promise<void> | null = null
   let active: { index: number; controller: AbortController } | null = null
   let error: string | null = null
-  const publish = (phase: SubtitleSchedulerState['phase']): void => {
+  let phase: SubtitleSchedulerState['phase'] = 'ready'
+  const currentIndex = (): number => Math.min(count - 1, Math.max(0, Math.floor(position / SUBTITLE_CHUNK_SECONDS)))
+  const coverageUntil = (translated: boolean): number | null => {
+    let until: number | null = null
+    for (let index = currentIndex(); index < count; index++) {
+      const chunk = chunks.get(index)
+      if (!chunk) break
+      if (translated && !chunk.translated) {
+        // Partial translation is published in cue order. Do not bridge an untranslated gap.
+        for (const cue of chunk.cues) {
+          if (!cue.chinese) break
+          until = Math.min(duration, (index + 1) * SUBTITLE_CHUNK_SECONDS, cue.end)
+        }
+        break
+      }
+      // A completed silent chunk still covers its whole time range.
+      until = Math.min(duration, (index + 1) * SUBTITLE_CHUNK_SECONDS)
+    }
+    return until
+  }
+  const publish = (value: SubtitleSchedulerState['phase']): void => {
     if (stopped) return
+    phase = value
     const seconds = (index: number): number => Math.min(SUBTITLE_CHUNK_SECONDS, duration - index * SUBTITLE_CHUNK_SECONDS)
     deps.changed({ phase, activeStart: active ? active.index * SUBTITLE_CHUNK_SECONDS : null, error,
       recognizedSeconds: [...chunks.keys()].reduce((sum, index) => sum + seconds(index), 0),
       translatedSeconds: [...chunks.values()].filter(chunk => chunk.translated).reduce((sum, chunk) => sum + seconds(chunk.index), 0),
+      recognizedUntil: coverageUntil(false), translatedUntil: coverageUntil(true),
       cues: [...chunks.values()].flatMap(chunk => chunk.cues) })
   }
   const next = (): number | null => {
-    const current = Math.min(count - 1, Math.max(0, Math.floor(position / SUBTITLE_CHUNK_SECONDS)))
+    const current = currentIndex()
     for (let offset = 0; offset < count; offset++) {
       const index = (current + offset) % count
       if (!attempted.has(index)) return index
@@ -89,10 +113,12 @@ export function createSubtitleScheduler(duration: number, deps: Dependencies) {
     position(value: number): void {
       if (!Number.isFinite(value)) return
       const jumped = Math.abs(value - position) > 5
+      const previousIndex = currentIndex()
       position = Math.max(0, Math.min(duration, value))
-      const current = Math.min(count - 1, Math.floor(position / SUBTITLE_CHUNK_SECONDS))
+      const current = currentIndex()
       // Normal clock progression must not repeatedly cancel useful read-ahead work.
       if (active && !attempted.has(current) && active.index !== current && (jumped || Math.abs(active.index - current) > 2)) active.controller.abort()
+      if (previousIndex !== current) publish(phase)
       kick()
     },
     retry(): void { error = null; for (const index of attempted) if (!chunks.get(index)?.translated) attempted.delete(index); kick() },

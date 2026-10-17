@@ -19,6 +19,7 @@ it('opens remote pairing through the existing panel and removes controls when th
   Object.defineProperty(globalThis, 'window', { configurable: true, value: { api: { webAccess: {
     status: async () => status,
     pairOpen: async () => { calls.push('open'); status = { ...status, pairingUntil: Date.now() + 300000 }; return status },
+    pairClose: async () => { calls.push('close'); status = { ...status, pairingUntil: 0 }; return status },
     pairInspect: async (code: string) => { calls.push(code); return { name: 'Remote phone', expires: Date.now() + 60000, remember: true } },
     pairDecide: async (code: string, approve: boolean) => { calls.push(`${code}:${approve}`); return status }
   } } } })
@@ -41,6 +42,10 @@ it('opens remote pairing through the existing panel and removes controls when th
     await act(async () => button('核对设备').props.onClick())
     await act(async () => button('允许登录').props.onClick())
     assert.deepEqual(calls, ['open', '123456', '123456:true'])
+    await act(async () => button('关闭配对').props.onClick())
+    assert.equal(button('关闭配对'), undefined)
+    assert.ok(button('开启配对'))
+    assert.deepEqual(calls, ['open', '123456', '123456:true', 'close'])
     await act(async () => renderer!.update(render('frozen')))
     assert.equal(renderer!.root.findAllByType('button').length, 0)
     assert.ok(JSON.stringify(renderer!.toJSON()).includes('资料库已冻结'))

@@ -4,6 +4,7 @@ import path from 'node:path'
 import sharp from 'sharp'
 import { captureAcceptanceFrame, nativeEvidence, waitForState, waitForValue } from './playback-acceptance-support.mjs'
 import { bitmapFixture } from './playback-pgs-fixture.mjs'
+import { openPlaybackSettings, closePlaybackSettings, selectPlaybackSetting } from './playback-settings-ui.mjs'
 
 export async function checkBitmapSubtitlePixels(application, page, directory, prefix) {
   assert.match(prefix, /^[a-z-]+$/)
@@ -126,17 +127,17 @@ export async function checkBitmapSubtitlePixels(application, page, directory, pr
   const firstFrame = await compare('first-expanded', first)
   await seek(4)
   const firstClear = await compare('first-cleared', null)
-  await page.getByRole('button', { name: '播放选项', exact: true }).click()
+  await openPlaybackSettings(page, '字幕')
   assert.equal(await page.getByRole('button', { name: '字幕字号', exact: true }).isDisabled(), true, 'bitmap subtitles must not offer plaintext font size')
   await page.getByRole('button', { name: '延后 0.5 秒', exact: true }).click()
   await waitForState(page, state => state.subtitleDelay === 0.5 && state.paused, 'PGS delay UI')
-  await page.getByRole('button', { name: '播放选项', exact: true }).click()
+  await closePlaybackSettings(page)
   await seek(3.25)
   const delayed = await compare('delayed-first', first)
-  await page.getByRole('button', { name: '播放选项', exact: true }).click()
+  await openPlaybackSettings(page, '字幕')
   await page.getByRole('button', { name: '重置延迟', exact: true }).click()
   await waitForState(page, state => state.subtitleDelay === 0, 'PGS delay reset UI')
-  await page.getByRole('button', { name: '播放选项', exact: true }).click()
+  await closePlaybackSettings(page)
   await seek(3.25)
   const resetDelay = await compare('reset-delay', null)
   await seek(12)
@@ -204,13 +205,13 @@ export async function checkComplexSubtitlePixels(application, page, directory, p
     return frame
   }
   const expanded = await compare('expanded')
-  await page.getByRole('button', { name: '播放选项', exact: true }).click()
+  await openPlaybackSettings(page, '字幕')
   assert.equal(await page.getByRole('button', { name: '字幕字号', exact: true }).isDisabled(), true)
   await page.getByRole('button', { name: '延后 0.5 秒', exact: true }).click()
   await waitForState(page, state => state.subtitleDelay === 0.5 && state.paused, 'complex ASS delay UI')
   await page.getByRole('button', { name: '重置延迟', exact: true }).click()
   await waitForState(page, state => state.subtitleDelay === 0, 'complex ASS delay reset')
-  await page.getByRole('button', { name: '播放选项', exact: true }).click()
+  await closePlaybackSettings(page)
   await control({ kind: 'seek', seconds: 16 })
   await waitForState(page, state => state.paused && !state.seeking && Math.abs(state.position - 16) < 0.15, 'karaoke later frame')
   const later = await compare('karaoke-later')
@@ -249,7 +250,7 @@ export async function checkLocalSubtitlePicker(application, page, directory, fil
   assert.equal(before?.source, 'remote')
   assert.equal(before.paused, true)
   const originalIds = new Set(before.tracks.filter(track => track.type === 'sub').map(track => track.id))
-  await page.getByRole('button', { name: '播放选项', exact: true }).click()
+  await openPlaybackSettings(page, '字幕')
   await page.getByRole('button', { name: '选择本机外挂字幕', exact: true }).click()
   ready()
   const codec = file.endsWith('.srt') ? 'subrip' : 'ass'
@@ -263,14 +264,13 @@ export async function checkLocalSubtitlePicker(application, page, directory, fil
   assert.ok(!snapshot.includes(directory) && !snapshot.includes('?t='), 'no local sidecar path or playback grant in renderer snapshot')
   assert.equal(await page.getByRole('button', { name: '字幕字号', exact: true }).isDisabled(), codec === 'ass')
   if (codec === 'ass') {
-    await page.getByRole('button', { name: '播放选项', exact: true }).click()
+    await closePlaybackSettings(page)
     return { file, selection: `real ${process.platform} system picker`,
       ...await checkComplexSubtitlePixels(application, page, directory, 'remote-local-ass') }
   }
-  await page.getByRole('button', { name: '字幕字号', exact: true }).click()
-  await page.getByRole('option', { name: '40', exact: true }).click()
+  await selectPlaybackSetting(page, '字幕字号', '40')
   await waitForState(page, state => state.subtitleSize === 40, 'local SRT size UI')
-  await page.getByRole('button', { name: '播放选项', exact: true }).click()
+  await closePlaybackSettings(page)
   const sid = selected.tracks.find(track => track.type === 'sub' && track.selected).id
   const control = command => page.evaluate(({ id, command }) => window.api.playback.control(id, command), { id: before.sessionId, command })
   const compare = async (name, minimum) => {

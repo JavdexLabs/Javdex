@@ -15,36 +15,65 @@
   gap: var(--settings-gap-sm, 8px);
 }
 
+/* Segmented capsule: status | undo | save share one bordered control with a fixed width. */
 .toolbar {
   --save-action-width: 56px;
 
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 1px var(--control-h-sm) 1px var(--save-action-width);
-  align-items: center;
-  gap: 4px;
-  width: calc(128px + var(--save-action-width));
+  display: inline-grid;
+  grid-template-columns: minmax(0, 1fr) var(--control-h-sm) var(--save-action-width);
+  width: calc(120px + var(--save-action-width));
   max-width: 100%;
-  padding: 0;
+  height: var(--control-h-sm);
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-control);
+  transition: border-color var(--motion-fast), box-shadow var(--motion-fast);
 }
 
 .toolbar[data-long-action='true'] {
   --save-action-width: 72px;
 }
 
+.toolbar[data-state='dirty'],
+.toolbar[data-state='saving'] {
+  border-color: var(--border-info);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.toolbar[data-state='error'] {
+  border-color: var(--border-danger);
+}
+
+.toolbar[data-state='conflict'] {
+  border-color: var(--border-warning);
+}
+
 .status {
   display: flex;
   min-width: 0;
-  height: var(--control-h-sm);
   align-items: center;
-  justify-content: flex-start;
-  gap: 4px;
-  padding: 0;
+  gap: 6px;
+  padding: 0 10px;
   border: 0;
-  border-radius: var(--radius-sm);
+  border-inline-end: 1px solid var(--border-subtle);
   background: transparent;
   color: var(--text-muted);
   font: inherit;
   font-size: var(--settings-fs-secondary, 12px);
+}
+
+.status[data-state='dirty'],
+.status[data-state='conflict'] {
+  color: var(--text-warning);
+}
+
+.status[data-state='saving'] {
+  color: var(--text-secondary);
+}
+
+.status[data-state='error'] {
+  color: var(--text-danger);
 }
 
 button.status {
@@ -53,30 +82,20 @@ button.status {
 
 button.status:hover {
   background: var(--surface-control-hover);
-  color: var(--text-primary);
 }
 
 .indicator {
   flex: none;
 }
 
+.indicator[data-state='saved'] {
+  color: var(--text-success);
+}
+
 .statusText {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
-}
-
-.indicator[data-state='saved'] {
-  color: var(--text-accent);
-}
-
-.indicator[data-state='dirty'],
-.indicator[data-state='conflict'] {
-  color: var(--text-warning);
-}
-
-.indicator[data-state='error'] {
-  color: var(--text-danger);
 }
 
 .chevron {
@@ -88,42 +107,73 @@ button.status:hover {
   transform: rotate(180deg);
 }
 
-.divider {
-  height: 16px;
-  background: var(--border-subtle);
+.spinner {
+  flex: none;
+  animation: save-spin 0.8s linear infinite;
 }
 
-.undo {
-  width: var(--control-h-sm);
-  padding-inline: 0;
+@keyframes save-spin {
+  to { transform: rotate(360deg); }
 }
 
 .undo,
 .save {
-  height: var(--control-h-sm);
-  min-height: var(--control-h-sm);
-  padding-block: 0;
-}
-
-.save {
-  width: var(--save-action-width);
-  padding-inline: var(--settings-gap-sm, 8px);
+  display: grid;
+  place-items: center;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: var(--settings-fs-secondary, 12px);
+  font-weight: 500;
   white-space: nowrap;
+  cursor: pointer;
+  transition: background var(--motion-fast), color var(--motion-fast);
 }
 
-.undo:hover {
-  border-color: transparent;
-  background: var(--surface-control-hover);
+.undo {
+  border-inline-end: 1px solid var(--border-subtle);
 }
 
-.undo:active,
-.save:active {
-  transform: none;
-}
-
-button.status:focus-visible {
+.status:focus-visible,
+.undo:focus-visible,
+.save:focus-visible {
   outline: var(--focus-outline);
-  outline-offset: 1px;
+  outline-offset: -2px;
+}
+
+.save[data-state='dirty'],
+.save[data-state='saving'] {
+  background: var(--accent);
+  color: var(--text-on-accent);
+}
+
+.save[data-state='error'] {
+  background: var(--surface-danger);
+  color: var(--text-danger);
+}
+
+.save[data-state='conflict'] {
+  color: var(--text-primary);
+}
+
+.undo:disabled,
+.save[data-state='saved']:disabled,
+.save[data-state='dirty']:disabled {
+  color: var(--text-muted);
+  cursor: default;
+  opacity: 0.55;
+}
+
+.undo:hover:not(:disabled) {
+  background: var(--surface-control-hover);
+  color: var(--text-primary);
+}
+
+.save[data-state='dirty']:hover {
+  background: var(--accent-hover);
 }
 
 .live {

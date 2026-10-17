@@ -152,10 +152,12 @@ AI 服务三页签之间保留已挂载的用途草稿；下载跳转用 `model`
 - 前进到已结束的观看 marker 后重新打开，复用该无人持有的同类历史位置而非再压入一个空步骤，仍保留 Router 字段；不同类型的匿名位置保留为父层，不能在其重新接管之前被覆盖，活跃父子层继续正常叠加。播放界面重建时，初始快照只接管已记录且无人持有的同类位置，包括仍在图片层下的父层，不创建历史、导航或替换活跃回调；卸载释放旧回调但保留匿名位置。整页重载后不复活图片内容，用户返回时一次消费已消失的临时子层与当前恢复的观看层，不留下空返回步骤。
 - 恢复已有播放面板不代表新的打开动作。交互层按稳定所有者保留重建前的相对次序，图片原来在上或在下都不颠倒；没有旧次序时置于已有弹层之下。普通时钟更新不重排层级；早于初始快照响应的通知先显示，临时保留会话／展示转换并合并时钟更新。快照与通知携带主进程共享的单调观测修订，停止为空和更换会话也继续递增；只结算严格晚于快照修订的通知，不把已包含的旧收起动作再次写入历史。快照失败时用首通知建立基线，仍结算之后的显式转换。新的播放会话或从底栏显式展开仍按用户动作处理，每次激活都保持历史位置与模态所有权同步，旧匿名位置不能留下空返回步骤。
 - 系统 pop 只关闭已弹出的层，不再后退。主动关闭一次消费所属层及子层；旧异步遍历未完成前，新 token 排队，不能被迟到的旧事件关闭。事件 marker 必须与实时游标一致，fallback 已结算后到达的旧事件不能确认新的遍历。超时检查不发起第二次后退。
+- 观看激活身份由 `playbackHistory` 与历史 token 一起提供，播放面板只消费同一份快照及激活信息；初始 RPC、提前通知、订阅清理和恢复次序由该控制器统一协调。一次激活在时钟、全屏和设置变化中保持不变，收起后重开及替换会话创建新的激活。
+- 遍历等待明确返回 `completed`／`cancelled`／`failed`。300 ms 检查漏送事件；2 s 截止检查仍未移动游标或调用被拒绝时结束等待，已关闭位置退为匿名槽位，取消排队观看面，后续显式打开可复用槽位；不自动重试后退。失败不继续字幕设置或受保护的业务跳转，不放弃草稿；路由离开取消旧等待，调用方只能在 `completed` 后继续。超时无法撤销 Chromium 已受理的遍历，迟到事件仍按实时游标校验。
 - 系统后退、鼠标返回键及历史导航快捷键在播放界面统一等同“收起到底栏”，一次收起展开或全屏播放并关闭播放设置，保留同一会话和当前业务页面；播放设置和全屏共用一个观看历史项。Esc 保持原有逐层行为：先关闭播放设置，再退出全屏，最后收起展开播放。底栏不拦截业务页面返回。离开业务路由只释放旧观看层，不额外后退，也不由前进标记复活已结束的层。
 - `NavigationGuardProvider` 忽略同一 pathname/search 的临时观看历史；真正离开时顺序组合草稿保护。主动关闭的遍历尚未完成时，业务跳转等待其结算，避免返回两次。待处理的业务目标与已确认草稿独立于 Router 的临时 blocker 状态保存；只继续当前有效 blocker，重放必须保留 PUSH／REPLACE／POP 的原始语义、目标 state 和历史游标，不能把 POP 降级为 PUSH。取消、卸载和新的业务目标使旧等待失效。
 
-主进程 `windowNavigation.ts` 将 Windows/Linux Alt+Left/Right、macOS ⌘[/⌘]、系统 app-command 和 Electron 的 legacy swipe 统一导向真实浏览器历史；macOS Option+Left/Right 保留系统文本按词编辑行为。原生播放器分别提交受限 back/forward 与 Escape 动作，前者进入浏览器历史，后者透传至页面键盘处理以保留逐层关闭；策略仍由 renderer 的历史、交互层与离开保护所有者决定。macOS 原生键位识别兼容中文输入源的【/】字符。[Electron legacy swipe](https://raw.githubusercontent.com/electron/electron/v43.4.1/docs/api/browser-window.md) 不是现代双指手势的支持承诺；后者及物理鼠标返回键仍需实机验收。
+主进程 `windowNavigation.ts` 将 Windows/Linux Alt+Left/Right、macOS ⌘[/⌘]、系统 app-command 和 Electron 的 legacy swipe 统一导向真实浏览器历史，使用 `canGoToOffset(±1)` / `goToOffset(±1)` 精确遍历一项。不能使用 Chromium UI 的 `canGoBack/goBack` 或 `canGoForward/goForward`：原生小窗点击不激活页面用户手势，这些 API 会跳过脚本创建的观看位置，甚至在确有上一项时报告不可返回。macOS Option+Left/Right 保留系统文本按词编辑行为。原生播放器分别提交受限 back/forward 与 Escape 动作，前者进入浏览器历史，后者透传至页面键盘处理以保留逐层关闭；策略仍由 renderer 的历史、交互层与离开保护所有者决定。macOS 原生键位识别兼容中文输入源的【/】字符。[Electron legacy swipe](https://raw.githubusercontent.com/electron/electron/v43.4.1/docs/api/browser-window.md) 不是现代双指手势的支持承诺；后者及物理鼠标返回键仍需实机验收。
 
 macOS 全屏焦点交接以 AppKit `NSWindowDidEnterFullScreenNotification` 完成通知补充一次确认，不能仅根据提前设置的 fullscreen style bit 判断动画结束；仅当前原生播放窗口且仍在全屏展示时请求交接，不在普通帧中反复抢占控制焦点，销毁播放实例时解除观察。
 

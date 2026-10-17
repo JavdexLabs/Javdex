@@ -1,7 +1,7 @@
 services:
   javdex:
     # 新程序卷以镜像初始化；已有 /program 在镜像业务版本更高时自动升级（不会创建资料库备份），不降级。
-    image: ghcr.io/javdexlabs/javdex-server:${JAVDEX_VERSION:?Set JAVDEX_VERSION to the base image version, for example 0.9.0-beta.7}
+    image: ghcr.io/javdexlabs/javdex-server:${JAVDEX_VERSION:?Set JAVDEX_VERSION to the base image version, for example 0.9.0}
     restart: unless-stopped
     stop_grace_period: 150s
     security_opt:
@@ -10,7 +10,8 @@ services:
       - "8096:8096"
     environment:
       JAVDEX_WEB_PASSWORD: "replace-with-a-long-password"
-      # 网页、客户端、配对和更新共用此地址；仅向可信局域网或私有网络开放。
+      # 客户端、授权和更新使用 HTTPS；Web 同端口支持 HTTP/HTTPS，共用登录 Cookie。
+      # 此处仍须填写 HTTPS 地址；仅向可信局域网或私有网络开放。
       JAVDEX_PUBLIC_URL: "https://192.168.1.10:8096"
       # 业务子进程身份；需同时能访问 /data、图片目录和媒体目录。
       JAVDEX_SERVER_UID: "1000"

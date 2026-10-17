@@ -23,7 +23,10 @@ window.api = {
     snapshot: async () => snapshot,
     observation: async () => ({ snapshot, revision: 0 }),
     onChanged: () => () => {},
-    aiSubtitleSnapshot: async () => null,
+    aiSubtitleSnapshot: async () => {
+      if (new URLSearchParams(location.search).has('ai-error')) throw new Error('离线字幕诊断：合成模型目录暂不可用')
+      return null
+    },
     onAiSubtitleChanged: () => () => {},
     viewport: async value => { window.fixtureViewports.push(value) },
     control: async (_id, command) => { window.fixtureControls.push(command) },

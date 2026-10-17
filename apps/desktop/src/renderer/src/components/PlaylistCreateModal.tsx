@@ -72,6 +72,7 @@ export default function PlaylistCreateModal({
     <Modal
       title={editing ? '编辑播放清单' : '创建播放清单'}
       size="lg"
+      layout="form"
       busy={saving}
       confirmText={editing ? '保存' : '创建'}
       confirmDisabled={!canSave || saving}

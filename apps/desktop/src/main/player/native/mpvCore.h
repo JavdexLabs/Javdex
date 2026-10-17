@@ -18,6 +18,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include "generatedSubtitles.h"
 
 namespace javdex {
 #ifndef JAVDEX_STANDALONE_PLAYBACK
@@ -105,7 +106,55 @@ class MpvCore {
     std::deque<NativeAction> actions;
     std::string lastError;
     int lastErrorCode = 0;
-    uint64_t frames = 0, presentedFrames = 0, loadedFiles = 0, restarts = 0, commandErrors = 0, subtitleCommandErrors = 0;
+    uint64_t frames = 0, presentedFrames = 0, loadedFiles = 0, restarts = 0, commandErrors = 0, subtitleCommandErrors = 0, subtitleCommandsPending = 0, subtitleCommandReplies = 0;
+    uint64_t generatedSubtitleCommandErrors = 0, generatedSubtitleCommandsPending = 0, generatedSubtitleCommandReplies = 0;
+    GeneratedTimeline generatedTimeline;
+    bool generatedVisible = false, generatedFailed = false, generatedRefreshRequired = false;
+    std::string generatedLastText;
+    uint64_t generatedRevision = 0;
+    int generatedWidth = 0, generatedHeight = 0;
+    double osdWidth = 0, osdHeight = 0, osdLeft = 0, osdRight = 0, osdTop = 0, osdBottom = 0;
+    void refreshGeneratedSubtitles() {
+        if (!handle || generatedWidth <= 0 || generatedHeight <= 0 || generatedFailed) return;
+        try {
+            std::string text;
+            const auto clock = observed.find("time-pos"), sid = observed.find("sid");
+            if (generatedVisible && clock != observed.end() && clock->second.format == MPV_FORMAT_DOUBLE
+                && std::isfinite(clock->second.number) && sid != observed.end() && sid->second.text == "no") {
+                text = generatedTextAt(generatedTimeline, clock->second.number - number("sub-delay"));
+                if (!text.empty()) {
+                    const double sx = osdWidth > 0 ? generatedWidth / osdWidth : 1;
+                    const double sy = osdHeight > 0 ? generatedHeight / osdHeight : 1;
+                    const double videoHeight = std::max(1.0, generatedHeight - (osdTop + osdBottom) * sy);
+                    const double scale = videoHeight / 1080;
+                    const double center = (generatedWidth + (osdLeft - osdRight) * sx) / 2;
+                    const double bottom = generatedHeight - osdBottom * sy - videoHeight * 0.05;
+                    text = "{\\an2\\pos(" + std::to_string(center) + "," + std::to_string(bottom)
+                        + ")\\fnMicrosoft YaHei\\bord" + std::to_string(2 * scale) + "\\shad" + std::to_string(scale)
+                        + "\\1c&HFFFFFF&\\1a&H00&\\3c&H101010&\\3a&H00&\\4c&H000000&\\4a&H80&}"
+                        + scaleGeneratedFonts(std::move(text), scale);
+                }
+            }
+            const std::string key = text.empty() ? std::string() : std::to_string(generatedWidth) + "x" + std::to_string(generatedHeight) + text;
+            if (!generatedRefreshRequired && key == generatedLastText) return;
+            std::string name = "osd-overlay", format = text.empty() ? "none" : "ass-events";
+            char *keys[] = {const_cast<char *>("name"), const_cast<char *>("id"), const_cast<char *>("format"),
+                const_cast<char *>("data"), const_cast<char *>("res_x"), const_cast<char *>("res_y")};
+            mpv_node values[6]{};
+            values[0].format = MPV_FORMAT_STRING; values[0].u.string = name.data();
+            values[1].format = MPV_FORMAT_INT64; values[1].u.int64 = 77;
+            values[2].format = MPV_FORMAT_STRING; values[2].u.string = format.data();
+            values[3].format = MPV_FORMAT_STRING; values[3].u.string = text.data();
+            values[4].format = MPV_FORMAT_INT64; values[4].u.int64 = generatedWidth;
+            values[5].format = MPV_FORMAT_INT64; values[5].u.int64 = generatedHeight;
+            mpv_node_list fields{6, values, keys}; mpv_node command{};
+            command.format = MPV_FORMAT_NODE_MAP; command.u.list = &fields;
+            const int error = mpv_command_node_async(handle, 2, &command);
+            if (error < 0) throw std::runtime_error(mpv_error_string(error));
+            subtitleCommandsPending++; generatedSubtitleCommandsPending++;
+            generatedLastText = key; generatedRefreshRequired = false;
+        } catch (...) { generatedFailed = true; subtitleCommandErrors++; generatedSubtitleCommandErrors++; }
+    }
     static void request(void *context) {
         auto core = static_cast<MpvCore *>(context);
         if (!core->requested.exchange(true)) {
@@ -123,7 +172,10 @@ public:
         void (*wakeup)(void *) = nullptr, void *wakeupContext = nullptr) {
         if (handle || renderer) throw std::runtime_error("Native session is already initialized");
         observed.clear(); actions.clear(); lastError.clear(); lastErrorCode = 0;
-        frames = presentedFrames = loadedFiles = restarts = commandErrors = subtitleCommandErrors = 0; requested.store(false);
+        frames = presentedFrames = loadedFiles = restarts = commandErrors = subtitleCommandErrors = subtitleCommandsPending = subtitleCommandReplies = 0; requested.store(false);
+        generatedSubtitleCommandErrors = generatedSubtitleCommandsPending = generatedSubtitleCommandReplies = 0;
+        generatedTimeline = {}; generatedVisible = generatedFailed = generatedRefreshRequired = false; generatedLastText.clear(); generatedRevision = 0;
+        generatedWidth = generatedHeight = 0; osdWidth = osdHeight = osdLeft = osdRight = osdTop = osdBottom = 0;
         renderWakeupContext.store(wakeupContext); renderWakeup.store(wakeup);
         handle = mpv_create();
         if (!handle) throw std::runtime_error("mpv_create failed");
@@ -157,13 +209,14 @@ public:
         error = mpv_render_context_create(&renderer, handle, params);
         if (error < 0) throw std::runtime_error(mpv_error_string(error));
         const char *numbers[] = {"time-pos", "duration", "volume", "speed", "width", "height", "audio-pts", "frame-drop-count", "sub-delay", "sub-font-size"};
-        const char *strings[] = {"hwdec-current", "video-codec", "audio-codec", "audio-device", "current-ao"};
+        const char *strings[] = {"hwdec-current", "video-codec", "audio-codec", "audio-device", "current-ao", "sid", "aid"};
         const char *flags[] = {"pause", "mute", "eof-reached", "core-idle", "seekable", "seeking", "paused-for-cache"};
         for (const char *name : numbers) mpv_observe_property(handle, 0, name, MPV_FORMAT_DOUBLE);
         for (const char *name : strings) mpv_observe_property(handle, 0, name, MPV_FORMAT_STRING);
         for (const char *name : flags) mpv_observe_property(handle, 0, name, MPV_FORMAT_FLAG);
         mpv_observe_property(handle, 0, "track-list", MPV_FORMAT_NODE);
         mpv_observe_property(handle, 0, "chapter-list", MPV_FORMAT_NODE);
+        mpv_observe_property(handle, 0, "osd-dimensions", MPV_FORMAT_NODE);
         mpv_render_context_set_update_callback(renderer, request, this);
     }
     void shutdown() {
@@ -171,9 +224,37 @@ public:
         if (renderer) { mpv_render_context_set_update_callback(renderer, nullptr, nullptr); mpv_render_context_free(renderer); renderer = nullptr; }
         if (handle) { mpv_terminate_destroy(handle); handle = nullptr; }
         actions.clear(); requested.store(false);
+        generatedTimeline = {}; generatedVisible = false; generatedLastText.clear();
+    }
+    void generatedSubtitles(const std::string &operation, const std::string &document, bool visible, uint64_t revision) {
+        if (!alive()) throw std::runtime_error("No native playback session");
+        if (revision <= generatedRevision) return;
+        try {
+            if (operation == "update") generatedTimeline = parseGeneratedSubtitles(document);
+            else if (operation == "clear") generatedTimeline = {};
+            else if (operation != "visible") throw std::runtime_error("Invalid generated subtitle operation");
+            generatedVisible = operation != "clear" && visible;
+            // A rejected replacement may have left the previous overlay visible.
+            // Retry/clear must submit even when the desired text is empty.
+            if (generatedFailed) generatedRefreshRequired = true;
+            generatedFailed = false;
+            refreshGeneratedSubtitles();
+        } catch (...) { subtitleCommandErrors++; generatedSubtitleCommandErrors++; }
+        generatedRevision = revision;
     }
 #ifndef JAVDEX_STANDALONE_PLAYBACK
-    void command(napi_env env, napi_value array) {
+    void generatedSubtitles(napi_env env, napi_callback_info info) {
+        napi_value args[4]; size_t count = 4; napi_get_cb_info(env, info, &count, args, nullptr, nullptr);
+        bool visible = false; double revision = 0;
+        if (count != 4 || napi_get_value_bool(env, args[2], &visible) != napi_ok
+            || napi_get_value_double(env, args[3], &revision) != napi_ok || !std::isfinite(revision)
+            || revision < 1 || revision > 9007199254740991.0 || std::floor(revision) != revision)
+            throw std::runtime_error("Invalid generated subtitle update");
+        generatedSubtitles(stringArg(env, args[0]), stringArg(env, args[1]), visible, static_cast<uint64_t>(revision));
+    }
+#endif
+#ifndef JAVDEX_STANDALONE_PLAYBACK
+    void command(napi_env env, napi_value array, bool generatedSubtitle = false) {
         if (!alive()) throw std::runtime_error("No native playback session");
         bool isArray = false; napi_is_array(env, array, &isArray);
         if (!isArray) throw std::runtime_error("Expected command array");
@@ -181,23 +262,37 @@ public:
         if (!length || length > 8) throw std::runtime_error("Invalid command length");
         std::vector<std::string> values;
         for (uint32_t i = 0; i < length; i++) { napi_value value; napi_get_element(env, array, i, &value); values.push_back(stringArg(env, value)); }
-        command(values);
+        command(values, generatedSubtitle);
     }
 #endif
-    void command(const std::vector<std::string> &values) {
+    void command(const std::vector<std::string> &values, bool generatedSubtitle = false) {
         if (!alive()) throw std::runtime_error("No native playback session");
         if (values.empty() || values.size() > 8) throw std::runtime_error("Invalid command length");
         std::vector<const char *> args;
         for (const auto &value : values) args.push_back(value.c_str());
         args.push_back(nullptr);
         // Never synchronously wait on the mpv client from the platform GL thread.
-        const int error = mpv_command_async(handle, optionalSubtitleCommand(values) ? 1 : 0, args.data());
+        const int error = mpv_command_async(handle, optionalSubtitleCommand(values) ? (generatedSubtitle ? 2 : 1) : 0, args.data());
         if (error < 0) throw std::runtime_error(mpv_error_string(error));
+        if (optionalSubtitleCommand(values)) subtitleCommandsPending++;
+        if (generatedSubtitle && optionalSubtitleCommand(values)) generatedSubtitleCommandsPending++;
+        if (values[0] == "loadfile") {
+            generatedTimeline = {}; generatedVisible = false;
+            if (generatedFailed) generatedRefreshRequired = true;
+            generatedFailed = false; refreshGeneratedSubtitles();
+        }
     }
     void queue(const char *kind, double value = 0) { if (actions.size() < 32) actions.push_back({kind, value}); }
-    bool updateRequested() { return renderer && requested.exchange(false) && (mpv_render_context_update(renderer) & MPV_RENDER_UPDATE_FRAME); }
+    bool updateRequested() {
+        // Drain into the existing action queue without consuming its ownership.
+        // Subtitle timing follows native frame observations, not the 200ms UI poll.
+        drainEvents(); refreshGeneratedSubtitles();
+        return renderer && requested.exchange(false) && (mpv_render_context_update(renderer) & MPV_RENDER_UPDATE_FRAME);
+    }
     bool render(int width, int height) {
         if (!renderer || width <= 0 || height <= 0) return false;
+        generatedWidth = width; generatedHeight = height;
+        drainEvents(); refreshGeneratedSubtitles();
         mpv_render_context_update(renderer);
         mpv_opengl_fbo fbo = {0, width, height, 0}; int flip = 1, block = 0;
         mpv_render_param params[] = {{MPV_RENDER_PARAM_OPENGL_FBO, &fbo}, {MPV_RENDER_PARAM_FLIP_Y, &flip},
@@ -210,8 +305,29 @@ public:
     void swapped() { if (renderer) mpv_render_context_report_swap(renderer); }
     void presented(bool visible) { if (visible && loadedFiles > 0) presentedFrames++; }
     void consume(const mpv_event &event) {
+        if (event.event_id == MPV_EVENT_COMMAND_REPLY && (event.reply_userdata == 1 || event.reply_userdata == 2)) {
+            if (subtitleCommandsPending) subtitleCommandsPending--;
+            subtitleCommandReplies++;
+            if (event.reply_userdata == 2) {
+                if (generatedSubtitleCommandsPending) generatedSubtitleCommandsPending--;
+                generatedSubtitleCommandReplies++;
+            }
+        }
         if (event.event_id == MPV_EVENT_PROPERTY_CHANGE) {
             const auto *property = static_cast<mpv_event_property *>(event.data);
+            if (std::string(property->name) == "osd-dimensions" && property->format == MPV_FORMAT_NODE && property->data) {
+                const auto &node = *static_cast<mpv_node *>(property->data);
+                if (node.format == MPV_FORMAT_NODE_MAP && node.u.list) for (int i = 0; i < node.u.list->num; i++) {
+                    const std::string key = node.u.list->keys[i]; const auto &entry = node.u.list->values[i];
+                    const double value = entry.format == MPV_FORMAT_INT64 ? static_cast<double>(entry.u.int64)
+                        : entry.format == MPV_FORMAT_DOUBLE ? entry.u.double_ : 0;
+                    if (!std::isfinite(value)) continue;
+                    if (key == "w") osdWidth = value; else if (key == "h") osdHeight = value;
+                    else if (key == "ml") osdLeft = value; else if (key == "mr") osdRight = value;
+                    else if (key == "mt") osdTop = value; else if (key == "mb") osdBottom = value;
+                }
+                return;
+            }
             ObservedValue value; value.format = property->format;
             if (property->data) {
                 if (property->format == MPV_FORMAT_DOUBLE) value.number = *static_cast<double *>(property->data);
@@ -222,13 +338,22 @@ public:
             observed[property->name] = std::move(value);
         }
         if (event.event_id == MPV_EVENT_FILE_LOADED) loadedFiles++;
+        if (event.event_id == MPV_EVENT_START_FILE) {
+            generatedTimeline = {}; generatedVisible = false;
+            if (generatedFailed) generatedRefreshRequired = true;
+            generatedFailed = false;
+        }
         if (event.event_id == MPV_EVENT_PLAYBACK_RESTART) restarts++;
         int error = event.event_id == MPV_EVENT_COMMAND_REPLY ? event.error : event.event_id == MPV_EVENT_END_FILE ? static_cast<mpv_event_end_file *>(event.data)->error : 0;
         if (error < 0) {
             if (event.event_id == MPV_EVENT_COMMAND_REPLY) {
                 commandErrors++;
                 // Optional track/display failures must not destroy the video session.
-                if (event.reply_userdata == 1) { subtitleCommandErrors++; return; }
+                if (event.reply_userdata == 1 || event.reply_userdata == 2) {
+                    subtitleCommandErrors++;
+                    if (event.reply_userdata == 2) { generatedSubtitleCommandErrors++; generatedFailed = true; }
+                    return;
+                }
             }
             lastErrorCode = error; lastError = mpv_error_string(error);
         }
@@ -262,6 +387,12 @@ public:
         number("nativeFrames", frames); number("presentedFrames", presentedFrames); number("loadedFiles", loadedFiles);
         number("playbackRestarts", restarts); number("commandErrors", commandErrors);
         number("subtitleCommandErrors", subtitleCommandErrors);
+        number("generatedSubtitleCommandErrors", generatedSubtitleCommandErrors);
+        number("generatedSubtitleCommandsPending", generatedSubtitleCommandsPending);
+        number("generatedSubtitleCommandReplies", generatedSubtitleCommandReplies);
+        number("generatedSubtitleOverlayVersion", 1); number("generatedSubtitleRevision", generatedRevision);
+        number("subtitleCommandsPending", subtitleCommandsPending);
+        number("subtitleCommandReplies", subtitleCommandReplies);
         result += ",\"errorKind\":" + jsonString(errorKind()) + ",\"error\":" + jsonString(lastError.c_str()) + ",\"actions\":[";
         for (size_t i = 0; i < actions.size(); i++) {
             if (i) result += ',';
@@ -288,6 +419,12 @@ public:
         }
         setNumber(env, result, "nativeFrames", frames); setNumber(env, result, "presentedFrames", presentedFrames);
         setNumber(env, result, "loadedFiles", loadedFiles); setNumber(env, result, "playbackRestarts", restarts); setNumber(env, result, "commandErrors", commandErrors);
+        setNumber(env, result, "subtitleCommandsPending", subtitleCommandsPending);
+        setNumber(env, result, "subtitleCommandReplies", subtitleCommandReplies);
+        setNumber(env, result, "generatedSubtitleCommandErrors", generatedSubtitleCommandErrors);
+        setNumber(env, result, "generatedSubtitleCommandsPending", generatedSubtitleCommandsPending);
+        setNumber(env, result, "generatedSubtitleCommandReplies", generatedSubtitleCommandReplies);
+        setNumber(env, result, "generatedSubtitleOverlayVersion", 1); setNumber(env, result, "generatedSubtitleRevision", generatedRevision);
         setNumber(env, result, "subtitleCommandErrors", subtitleCommandErrors);
         setString(env, result, "error", lastError);
         if (lastErrorCode < 0) setString(env, result, "errorKind", errorKind());

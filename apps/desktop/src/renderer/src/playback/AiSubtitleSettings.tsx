@@ -1,52 +1,37 @@
 import { useEffect, useRef, useState } from 'react'
-import type { AiSubtitleCommand, AiSubtitleSnapshot } from '@shared/desktop/aiSubtitles'
+import type { AiSubtitleSnapshot } from '@shared/desktop/aiSubtitles'
 import type { PlaybackSnapshot } from '@shared/desktop/playback'
-import { api } from '../api'
+import { useAiSubtitles, type AiSubtitleController } from './useAiSubtitles'
 import Button from '../components/Button'
 import SelectControl from '../components/SelectControl'
 import { playbackTime } from './playbackTime'
 import styles from './AiSubtitleSettings.module.css'
 import { useLocalModels } from '../components/settings/useLocalModels'
 
-export default function AiSubtitleSettings({ playback, onOpenModels }: {
+export default function AiSubtitleSettings({ playback, onOpenModels, controller }: {
   playback: PlaybackSnapshot
+  controller?: AiSubtitleController
   onOpenModels: (sessionId: string) => Promise<void>
 }): JSX.Element {
   const { state: models } = useLocalModels()
-  const [state, setState] = useState<AiSubtitleSnapshot | null>(null)
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const request = useRef({ revision: 0, events: 0 })
+  const fallback = useAiSubtitles(controller ? null : playback.sessionId)
+  const { state, busy: commandBusy, error: commandError, enabled, execute } = controller ?? fallback
+  const [navigationBusy, setBusy] = useState(false)
+  const [navigationError, setError] = useState<string | null>(null)
+  const busy = commandBusy || navigationBusy
+  const error = commandError || navigationError
+  const request = useRef({ revision: 0 })
   useEffect(() => {
     const counter = request.current
     setBusy(false); setError(null)
-    let mounted = true, observed = false
-    const unsubscribe = api.playback.onAiSubtitleChanged(value => {
-      observed = true
-      if (mounted) { counter.events++; setState(value) }
-    })
-    void api.playback.aiSubtitleSnapshot().then(value => { if (mounted && !observed) setState(value) }).catch(() => {
-      if (mounted) setError('无法读取离线字幕状态')
-    })
-    return () => { mounted = false; counter.revision++; unsubscribe() }
+    return () => { counter.revision++ }
   }, [playback.sessionId])
-  const enabled = state?.enabled === true && state.sessionId === playback.sessionId
   async function openModels(): Promise<void> {
     const revision = ++request.current.revision
     setBusy(true); setError(null)
     try {
       await onOpenModels(playback.sessionId)
     } catch { if (revision === request.current.revision) setError('无法打开模型设置，请先收起播放器后打开设置') }
-    finally { if (revision === request.current.revision) setBusy(false) }
-  }
-  const execute = async (command: AiSubtitleCommand): Promise<void> => {
-    const revision = ++request.current.revision
-    const events = request.current.events
-    setBusy(true); setError(null)
-    try {
-      const value = await api.playback.aiSubtitleCommand(playback.sessionId, command)
-      if (revision === request.current.revision && events === request.current.events) setState(value)
-    } catch (error) { if (revision === request.current.revision) setError(error instanceof Error ? error.message : '离线字幕操作失败') }
     finally { if (revision === request.current.revision) setBusy(false) }
   }
   const status = !state ? '正在读取状态'
@@ -90,7 +75,7 @@ export default function AiSubtitleSettings({ playback, onOpenModels }: {
         </SelectControl></label>
         <div className={styles.actions}>
           <Button size="sm" disabled={busy || !enabled || !state.recognizedSeconds} onClick={() => void execute({ action: 'export' })}>导出已生成字幕</Button>
-          <Button size="sm" disabled={busy || !enabled} onClick={() => void execute({ action: 'clear-cache' })}>清除本片缓存</Button>
+          <Button size="sm" disabled={busy || !enabled || state.phase === 'preparing'} onClick={() => void execute({ action: 'clear-cache' })}>清除本片缓存</Button>
         </div>
         <p className={styles.note}>跳转后优先生成新位置，未译完时先显示日语；停止 AI 字幕后恢复此前字幕。</p>
       </>}

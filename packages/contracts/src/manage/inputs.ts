@@ -1265,6 +1265,7 @@ export const MANAGE_OPERATION_INPUTS = {
   'browser.status': emptyInput,
   'browser.setEnabled': z.object({ enabled: z.boolean() }).strict(),
   'browser.pairOpen': emptyInput,
+  'browser.pairClose': emptyInput,
   'browser.pairInspect': z.object({ code: z.string().min(1).max(32) }).strict(),
   'browser.pairDecide': z
     .object({

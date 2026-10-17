@@ -3,7 +3,7 @@ import type { BrowserWindow } from 'electron'
 type Direction = 'back' | 'forward'
 interface NavigationWindow {
   isDestroyed(): boolean
-  webContents: { navigationHistory: { canGoBack(): boolean; canGoForward(): boolean; goBack(): void; goForward(): void } }
+  webContents: { navigationHistory: { canGoToOffset(offset: number): boolean; goToOffset(offset: number): void } }
 }
 const navigationAllowed = new WeakMap<NavigationWindow, () => boolean>()
 interface KeyInput {
@@ -25,8 +25,10 @@ export function historyKey(input: KeyInput, platform: NodeJS.Platform): Directio
 export function navigateWindowHistory(window: NavigationWindow | null, direction: Direction): void {
   if (!window || window.isDestroyed() || navigationAllowed.get(window)?.() === false) return
   const history = window.webContents.navigationHistory
-  if (direction === 'back' && history.canGoBack()) history.goBack()
-  if (direction === 'forward' && history.canGoForward()) history.goForward()
+  const offset = direction === 'back' ? -1 : 1
+  // Native clicks do not activate Chromium's document. Its UI Back/Forward may
+  // skip our viewing entries; traverse exactly one entry like history.go instead.
+  if (history.canGoToOffset(offset)) history.goToOffset(offset)
 }
 const bound = new WeakSet<BrowserWindow>()
 /** All entries traverse the real browser history; the renderer owns overlay/leave policy. */

@@ -21,7 +21,7 @@ async function hashFixture(children?: ReactNode) {
   let index = 1
   const listeners = new Map<string, Set<EventListener>>()
   const queued: number[] = [], goes: number[] = []
-  const timers = new Map<number, () => void>()
+  const timers = new Map<number, { callback: () => void; milliseconds: number }>()
   let timer = 0
   const location = { href: '', origin: '', pathname: '', search: '', hash: '' }
   const sync = () => {
@@ -37,7 +37,7 @@ async function hashFixture(children?: ReactNode) {
       listeners.get(type)!.add(listener)
     },
     removeEventListener(type: string, listener: EventListener) { listeners.get(type)?.delete(listener) },
-    setTimeout(callback: () => void) { timers.set(++timer, callback); return timer },
+    setTimeout(callback: () => void, milliseconds: number) { timers.set(++timer, { callback, milliseconds }); return timer },
     clearTimeout(id: number) { timers.delete(id) },
     history: {
       get state() { return stack[index].state },
@@ -80,7 +80,8 @@ async function hashFixture(children?: ReactNode) {
     router, overlay, tree, stack, queued, goes, move, deliver, pop,
     cursor: () => index,
     state: () => stack[index].state,
-    fallback: () => { for (const callback of [...timers.values()]) callback() },
+    fallback: () => { for (const entry of [...timers.values()]) if (entry.milliseconds === 300) entry.callback() },
+    deadline: () => { for (const entry of [...timers.values()]) if (entry.milliseconds === 2000) entry.callback() },
     dispose: () => {
       act(() => tree.unmount()); router.dispose()
       Object.defineProperty(globalThis, 'window', { configurable: true, value: oldWindow })
@@ -260,6 +261,28 @@ test('a later business destination supersedes an earlier wait without replaying 
     assert.equal(f.router.state.location.pathname, '/next')
     assert.equal(f.stack.length, 3)
     assert.deepEqual(f.goes, [-1])
+  } finally { f.dispose() }
+})
+
+test('a failed owned traversal cancels business navigation and preserves draft protection for a retry', async () => {
+  const decisions: NavigationDecision[] = []
+  function Draft() { useNavigationGuard(() => true, decision => decisions.push(decision)); return null }
+  const f = await hashFixture(<Draft />)
+  try {
+    f.overlay.close(f.overlay.open('image-preview', () => {}))
+    await act(async () => { await f.router.navigate('/obsolete') })
+    await act(async () => { f.fallback() })
+    assert.equal(f.overlay.isTraversing(), true)
+    await act(async () => { f.deadline() })
+    assert.equal(f.overlay.isTraversing(), false)
+    assert.equal(f.router.state.location.pathname, '/detail')
+    assert.equal(decisions.length, 0, 'a failed view close must not discard or prompt for the draft')
+    await act(async () => { f.pop() })
+    assert.equal(f.router.state.location.pathname, '/detail', 'a late owned pop cannot revive the cancelled target')
+    await act(async () => { await f.router.navigate('/next') })
+    assert.equal(decisions.length, 1, 'the next explicit attempt still asks the draft guard')
+    await act(async () => { decisions[0].proceed() })
+    assert.equal(f.router.state.location.pathname, '/next')
   } finally { f.dispose() }
 })
 

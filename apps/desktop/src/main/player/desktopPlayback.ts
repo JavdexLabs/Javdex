@@ -3,7 +3,7 @@ import path from 'node:path'
 import type { CatalogBackend } from '../application/catalogBackend'
 import { removePlayedWatchLater } from '../application/watchLaterPlayback'
 import { createPlaybackSession } from './playbackSession'
-import { createPlaybackSourceResolver } from './playbackSource'
+import { createPlaybackSourceResolver, playbackCatalogKey } from './playbackSource'
 import { builtinPlaybackAvailability, createLibmpvPlayback } from './libmpvPlayback'
 import { appCommandAdapter, appEventAdapter } from '../ipc/appContractAdapter'
 import { IPC } from '@shared/ipc-channels'
@@ -104,8 +104,10 @@ export function registerBuiltinPlayback(backend: CatalogBackend, getWindow: () =
       window.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Escape' })
     },
     started: async source => {
+      const current = (): boolean => source.identityKey === playbackCatalogKey(backend)
+      if (!current()) return
       await recentStarted?.(source.target.videoId)
-      await removePlayedWatchLater(backend, source.target.videoId)
+      if (current()) await removePlayedWatchLater(backend, source.target.videoId, current)
     },
     awake: playing => {
       if (playing && blocker == null) blocker = powerSaveBlocker.start('prevent-display-sleep')

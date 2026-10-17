@@ -142,6 +142,7 @@ export default function EditMetadataModal({ video, onCancel, onSave }: Props): J
       title="编辑影片资料"
       subtitle={video.code}
       size="xl"
+      layout="form"
       busy={saving}
       confirmText="保存"
       confirmDisabled={saving || releaseDateInvalid || (!metadataLocked && externalRatingsDraftErrors(externalRatings).size > 0)}

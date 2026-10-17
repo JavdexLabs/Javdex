@@ -207,6 +207,7 @@ export const MANAGE_OPERATIONS = {
   'browser.status': { auth: 'manageRead', versions: ['C'], completion: 'sync', summary: 'Browser pairing status without secrets' },
   'browser.setEnabled': { auth: 'manageWrite', versions: ['C'], completion: 'sync', summary: 'Enable or disable the browser surface; management stays up' },
   'browser.pairOpen': { auth: 'manageWrite', versions: ['C'], completion: 'sync', summary: 'Open a pairing window' },
+  'browser.pairClose': { auth: 'manageWrite', versions: ['C'], completion: 'sync', summary: 'Close pairing and invalidate unfinished requests; existing browser sessions remain authorized' },
   'browser.pairInspect': { auth: 'manageRead', versions: ['C'], completion: 'sync', summary: 'Inspect a pairing request' },
   'browser.pairDecide': { auth: 'manageWrite', versions: ['C'], completion: 'sync', summary: 'Approve or deny pairing' },
   'browser.deviceRemove': { auth: 'manageWrite', versions: ['C'], completion: 'sync', summary: 'Remove a paired device' },

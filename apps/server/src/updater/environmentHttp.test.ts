@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { test } from 'node:test'
 import { serveServerEnvironment } from './environmentHttp'
+import { SERVER_ENVIRONMENT_VERSION } from '@shared/serverEnvironment'
 
 test('image environment discovery works without business, pairing or version headers', async () => {
   const server = createServer((request, response) => {
@@ -15,7 +16,7 @@ test('image environment discovery works without business, pairing or version hea
     const response = await fetch(`${origin}/runtime/v1/info`)
     assert.equal(response.status, 200)
     assert.equal(response.headers.get('cache-control'), 'no-store')
-    assert.deepEqual(await response.json(), { format: 1, environmentVersion: 1, runtimeId: 'node22-bookworm-v1', platform: process.arch === 'x64' ? 'linux/amd64' : 'linux/arm64' })
+    assert.deepEqual(await response.json(), { format: 1, environmentVersion: SERVER_ENVIRONMENT_VERSION, runtimeId: 'node22-bookworm-v1', platform: process.arch === 'x64' ? 'linux/amd64' : 'linux/arm64' })
     const wrongMethod = await fetch(`${origin}/runtime/v1/info`, { method: 'POST' })
     assert.equal(wrongMethod.status, 405)
     assert.equal(wrongMethod.headers.get('allow'), 'GET')

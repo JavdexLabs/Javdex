@@ -49,6 +49,16 @@ test('a desktop filename from another version cannot satisfy the current Release
   const value = fixture(); value.assets[0].name = 'Javdex-Setup-0.8.0-x64.exe';
   assert.throws(() => createReleaseManifest(value), /version mismatch/);
 });
+test('stable downloads require the complete installer version, not a matching prefix', () => {
+  for (const version of ['0.9.0-dev.1', '0.9.0-beta.1', '0.9.0+build.1', '0.9.00', '1.0.9.0']) {
+    const value = fixture();
+    value.assets[0].name = `Javdex-Setup-${version}-x64.exe`;
+    assert.throws(() => createReleaseManifest(value), /version mismatch/, version);
+  }
+  const historicalZip = fixture('0.8.0');
+  historicalZip.assets[1].name = 'Javdex 0.8.0-win.zip';
+  assert.equal(createReleaseManifest(historicalZip).downloads.windowsZip.name, 'Javdex 0.8.0-win.zip');
+});
 test('empty or invalid asset sizes are rejected', () => {
   const value = fixture(); value.assets[0].size = 0;
   assert.throws(() => createReleaseManifest(value), /Invalid Release asset size/);

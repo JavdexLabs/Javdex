@@ -300,6 +300,7 @@ const api = {
     pairDecide: (code: string, approve: boolean) => invokeApp(IPC.WEB_ACCESS_PAIR_DECIDE, code, approve),
     pairInspect: (code: string) => invokeApp(IPC.WEB_ACCESS_PAIR_INSPECT, code),
     pairOpen: () => invokeApp(IPC.WEB_ACCESS_PAIR_OPEN),
+    pairClose: () => invokeApp(IPC.WEB_ACCESS_PAIR_CLOSE),
     status: () => invokeApp(IPC.WEB_ACCESS_STATUS),
     apply: (input: WebAccessInput) => invokeApp(IPC.WEB_ACCESS_APPLY, input),
     revoke: () => invokeApp(IPC.WEB_ACCESS_REVOKE)

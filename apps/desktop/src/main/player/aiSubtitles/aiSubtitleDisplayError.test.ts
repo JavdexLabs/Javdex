@@ -82,15 +82,15 @@ test('silent scheduler publications retain a display warning until explicit retr
   const updates: Array<{ filename: string; select: boolean; document: string }> = []
   const publications: AiSubtitleSnapshot[] = []
   const recognizedStarts: number[] = []
-  let subtitleErrors = 0
+  let failUpdate = false
   let finishSilentChunk: (() => void) | null = null
   const native: NativePlayback = {
     create: () => {}, load: () => {}, command: () => {}, read: () => ({ alive: true }),
     viewport: () => {}, render: () => {}, addSubtitle: () => {}, destroy: () => {},
     selectedAudioStream: () => 1,
-    subtitleCommandErrors: () => subtitleErrors,
     updateGeneratedSubtitle: (filename, select) => {
       updates.push({ filename, select, document: readFileSync(filename, 'utf8') })
+      if (failUpdate) { failUpdate = false; throw new Error('fixture generated subtitle failure') }
     }
   }
   const runtime = createAiRuntimeInstaller(path.join(root, 'models'))
@@ -121,10 +121,11 @@ test('silent scheduler publications retain a display warning until explicit retr
   try {
     await controller.command(playback.sessionId, { action: 'start' })
     await until(() => finishSilentChunk !== null && updates.at(-1)?.document.includes('你好') === true)
-    const beforeFailure = updates.length
     const filename = updates.at(-1)!.filename
-    subtitleErrors++
-    controller.tick(playback)
+    failUpdate = true
+    await controller.command(playback.sessionId, { action: 'font-size', value: 50 })
+    await until(() => controller.snapshot().error !== null)
+    const beforeFailure = updates.length
     const warning = controller.snapshot().error
     assert.match(warning!, /字幕显示更新失败.*播放不受影响/)
     const publicationBoundary = publications.length

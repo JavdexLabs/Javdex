@@ -8,6 +8,7 @@ import path from 'node:path'
 import { pipeline } from 'node:stream/promises'
 import { fileURLToPath } from 'node:url'
 import { electronBuilderArchName } from './packaging-runtime.mjs'
+import { buildWindowsVulkanRuntime, verifyWindowsVulkanBundle } from './windows-vulkan-runtime.mjs'
 
 export const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 export const aiRuntimeSources = JSON.parse(await fs.readFile(new URL('./ai-runtime-sources.json', import.meta.url), 'utf8'))
@@ -143,10 +144,19 @@ export async function buildMacAiRuntime(root = projectRoot, arch = process.arch)
 }
 
 export async function preparePackagedAiRuntime(context) {
+  if (context.electronPlatformName === 'win32') { await buildWindowsVulkanRuntime(context.packager.projectDir); return }
   if (context.electronPlatformName !== 'darwin') return
   await buildMacAiRuntime(context.packager.projectDir, electronBuilderArchName(context.arch))
 }
 export async function stagePackagedAiRuntime(context) {
+  if (context.electronPlatformName === 'win32') {
+    const source = path.join(context.packager.projectDir, 'out/ai-runtime/win32-x64-vulkan')
+    await verifyWindowsVulkanBundle(source)
+    const destination = path.join(context.packager.getResourcesDir(context.appOutDir), 'ai-runtime/win32-x64-vulkan')
+    await fs.mkdir(path.dirname(destination), { recursive: true })
+    await fs.cp(source, destination, { recursive: true, dereference: false, force: false, errorOnExist: true })
+    return
+  }
   if (context.electronPlatformName !== 'darwin') return
   const arch = electronBuilderArchName(context.arch)
   const source = path.join(context.packager.projectDir, 'out/ai-runtime', `darwin-${arch}`)

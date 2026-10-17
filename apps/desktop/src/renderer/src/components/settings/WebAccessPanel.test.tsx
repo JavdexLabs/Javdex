@@ -10,11 +10,16 @@ it('retries a failed service with saved configuration, and prevents submitting u
   let status = { enabled: true, running: false, port: 8088, username: 'viewer', hasPassword: true, urls: ['http://192.168.1.20:8088'], devices: [], sessions: 0, pairingUntil: 0, pairingActivity: [], error: '端口被占用' }
   const applied: unknown[] = []
   const inspected: string[] = []
+  let closeAttempts = 0
   const previousFrame = globalThis.requestAnimationFrame
   globalThis.requestAnimationFrame = () => 0
   Object.defineProperty(globalThis, 'window', { configurable: true, value: { api: { webAccess: {
     status: async () => status,
     pairOpen: async () => { status = { ...status, pairingUntil: Date.now() + 300000 }; return status },
+    pairClose: async () => {
+      if (++closeAttempts === 1) throw new Error('关闭配对失败，请重试')
+      status = { ...status, pairingUntil: 0, pairingActivity: [] }; return status
+    },
     pairInspect: async (code: string) => { inspected.push(code); return { name: '测试手机', expires: Date.now() + 60000, remember: true } },
     pairDecide: async () => status,
     apply: async (input: unknown) => { applied.push(input); status = { ...status, running: true, error: '' }; return status }
@@ -34,8 +39,8 @@ it('retries a failed service with saved configuration, and prevents submitting u
     await act(async () => { retry().props.onClick() })
     assert.equal(applied.length, 1)
     assert.equal(retry(), undefined)
-    const button = (text: string) => renderer.root.findAllByType('button').find(item => renderedText(item) === text)!
-    await act(async () => { button('打开').props.onClick() })
+    const button = (text: string) => renderer.root.findAllByType('button').find(item => renderedText(item) === text || item.props['aria-label'] === text)!
+    await act(async () => { button('打开访问地址').props.onClick() })
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 3100)) })
     assert.ok(JSON.stringify(renderer.toJSON()).includes('无法打开浏览器'), 'errors remain after the success timeout')
     act(() => button('关闭提示').props.onClick())
@@ -51,6 +56,17 @@ it('retries a failed service with saved configuration, and prevents submitting u
     assert.ok(button('允许登录'))
     await act(async () => { button('拒绝').props.onClick() })
     assert.equal(codeInput().props.value, '897982')
+    await act(async () => { button('核对设备').props.onClick() })
+    await act(async () => { button('关闭配对').props.onClick() })
+    assert.ok(button('允许登录'), 'a failed close keeps the current pairing candidate available')
+    assert.match(JSON.stringify(renderer.toJSON()), /关闭配对失败，请重试/)
+    await act(async () => { button('关闭配对').props.onClick() })
+    assert.equal(button('允许登录'), undefined)
+    assert.equal(button('关闭配对'), undefined)
+    assert.equal(codeInput(), undefined)
+    assert.match(JSON.stringify(renderer.toJSON()), /配对已关闭/)
+    await act(async () => { button('开启配对').props.onClick() })
+    assert.equal(codeInput().props.value, '', 'reopening does not retain an invalidated pairing code')
   } finally {
     globalThis.requestAnimationFrame = previousFrame
     if (renderer) act(() => renderer.unmount())

@@ -39,6 +39,23 @@ int main() {
     value.u.list = nullptr; assert(nodeJson(value) == "[]");
     value.format = MPV_FORMAT_NODE_MAP; assert(nodeJson(value) == "{}");
 
+    const std::string generatedHeader = "Style: Default,Microsoft YaHei,42,x\n";
+    const std::string currentCue = "Dialogue: 0,0:00:00.00,0:00:10.00,Default,,0,0,0,,中文\\N{\\fs34}日本語\n";
+    auto timeline = javdex::parseGeneratedSubtitles(generatedHeader + currentCue);
+    const auto visibleText = javdex::generatedTextAt(timeline, 5);
+    timeline = javdex::parseGeneratedSubtitles(generatedHeader + currentCue
+        + "Dialogue: 0,0:00:30.00,0:00:32.00,Default,,0,0,0,,未来字幕\n");
+    assert(javdex::generatedTextAt(timeline, 5) == visibleText); // future generation cannot invalidate this frame
+    assert(javdex::generatedTextAt(timeline, 10).empty()); // end is exclusive
+    assert(javdex::generatedTextAt(timeline, 31).find("未来字幕") != std::string::npos);
+    assert(javdex::generatedTextAt(timeline, 5).find("中文") != std::string::npos); // backward seek
+    assert(javdex::scaleGeneratedFonts(visibleText, 0.5).find("\\fs17.") != std::string::npos);
+    assert(javdex::parseGeneratedSubtitles(generatedHeader + "Dialogue: 0,0:00:01.00,0:00:01.00,Default,,0,0,0,,rounded\n").cues.empty());
+    bool rejected = false;
+    try { javdex::parseGeneratedSubtitles(generatedHeader + "Dialogue: 0,0:00:10.00,0:00:01.00,Default,,0,0,0,,bad\n"); }
+    catch (const std::exception &) { rejected = true; }
+    assert(rejected);
+
     javdex::MpvCore core;
     assert(!core.alive()); assert(core.number("time-pos") == 0);
     double position = 12.25;
@@ -66,11 +83,24 @@ int main() {
     assert(javdex::optionalSubtitleCommand({"set", "sid", "2"}));
     assert(!javdex::optionalSubtitleCommand({"loadfile", "/fixture.mp4", "replace"}));
     assert(!javdex::optionalSubtitleCommand({"set", "pause", "yes"}));
+    event = {MPV_EVENT_COMMAND_REPLY, 0, 1, nullptr};
+    core.consume(event);
+    assert(core.stateJson().find("\"subtitleCommandReplies\":1") != std::string::npos);
+    assert(core.stateJson().find("\"subtitleCommandsPending\":0") != std::string::npos);
     event = {MPV_EVENT_COMMAND_REPLY, MPV_ERROR_COMMAND, 1, nullptr};
     core.consume(event);
     const auto subtitleFailure = core.stateJson();
     assert(subtitleFailure.find("\"subtitleCommandErrors\":1") != std::string::npos);
+    assert(subtitleFailure.find("\"subtitleCommandReplies\":2") != std::string::npos);
     assert(subtitleFailure.find("\"error\":\"\"") != std::string::npos);
+    assert(subtitleFailure.find("\"generatedSubtitleCommandErrors\":0") != std::string::npos);
+    assert(subtitleFailure.find("\"generatedSubtitleCommandReplies\":0") != std::string::npos);
+    event.reply_userdata = 2;
+    core.consume(event);
+    assert(core.stateJson().find("\"generatedSubtitleCommandErrors\":1") != std::string::npos);
+    assert(core.stateJson().find("\"generatedSubtitleCommandReplies\":1") != std::string::npos);
+    assert(core.stateJson().find("\"generatedSubtitleCommandsPending\":0") != std::string::npos);
+    assert(core.stateJson().find("\"error\":\"\"") != std::string::npos);
     event.reply_userdata = 0;
     core.consume(event);
     assert(core.stateJson().find("\"error\":\"\"") == std::string::npos);

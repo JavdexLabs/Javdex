@@ -60,6 +60,7 @@ export default function SeriesEditModal({ series, onCancel, onSave }: Props): JS
       title={series ? '编辑系列资料' : '新增系列'}
 
       size="lg"
+      layout="form"
       busy={saving}
       confirmText="保存"
       confirmDisabled={saving || !draft.mainName.trim()}

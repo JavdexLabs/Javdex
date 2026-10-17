@@ -1,8 +1,10 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import type { NativePlaybackState } from './nativePlayback'
+import type { PlaybackOcclusion } from '@shared/desktop/playback'
 
 interface Bounds { x: number; y: number; width: number; height: number; scale?: number }
 const LIMIT = 1024 * 1024
+const GENERATED_LIMIT = 8 * 1024 * 1024 + 4096
 const actionKinds = new Set(['toggle-pause', 'toggle-mute', 'expand', 'dock', 'fullscreen', 'stop', 'seek', 'seek-relative', 'volume', 'volume-relative', 'focus-forward', 'focus-backward', 'history-back', 'history-forward', 'escape'])
 function validAction(value: unknown): boolean {
   if (!value || typeof value !== 'object') return false
@@ -14,10 +16,10 @@ function validAction(value: unknown): boolean {
 /** Length-delimited UTF-8 fields keep paths, URLs and subtitle names out of shell
  * parsing. The helper has only inherited private pipes, never a listening port. */
 export function encodePlaybackMessage(fields: string[]): Buffer {
-  if (!fields.length || fields.length > 16 || fields.some(value => value.includes('\0'))) throw new Error('无效的播放控制参数')
+  if (!fields.length || fields.length > (fields[0] === 'occlusions' ? 257 : 16) || fields.some(value => value.includes('\0'))) throw new Error('无效的播放控制参数')
   const values = fields.map(value => Buffer.from(value, 'utf8'))
   const size = 4 + values.reduce((sum, value) => sum + 4 + value.length, 0)
-  if (size > LIMIT) throw new Error('播放控制参数过长')
+  if (size > (fields[0] === 'generated-subtitles' ? GENERATED_LIMIT : LIMIT)) throw new Error('播放控制参数过长')
   const result = Buffer.allocUnsafe(size + 4)
   result.writeUInt32LE(size, 0); result.writeUInt32LE(fields.length, 4)
   let offset = 8
@@ -33,10 +35,11 @@ export function createLinuxPlaybackBridge(executable: string) {
   let failure: Error | null = null
   let input = ''
   let lastBounds = '', lastVisible: boolean | undefined, lastPresentation = ''
+  let lastOcclusions = '', lastRendererControls: boolean | undefined
   const send = (fields: string[]): void => {
     if (failure) throw failure
     if (!child || child.killed || !child.stdin.writable) throw new Error('Linux 播放进程未运行')
-    if (child.stdin.writableLength > LIMIT) throw new Error('Linux 播放进程未响应')
+    if (child.stdin.writableLength > GENERATED_LIMIT) throw new Error('Linux 播放进程未响应')
     child.stdin.write(encodePlaybackMessage(fields))
   }
   const destroy = (): void => {
@@ -53,7 +56,7 @@ export function createLinuxPlaybackBridge(executable: string) {
       if (host?.backend !== 'x11' || ![4, 8].includes(handle.length)) throw new Error('需要显式选择的 X11 窗口')
       const id = handle.length === 8 ? handle.readBigUInt64LE() : BigInt(handle.readUInt32LE())
       if (!id || id > 0xffffffffn) throw new Error('无效的 X11 窗口')
-      destroy(); lastBounds = ''; lastVisible = undefined; lastPresentation = ''
+      destroy(); lastBounds = ''; lastVisible = undefined; lastPresentation = ''; lastOcclusions = ''; lastRendererControls = undefined
       const process = spawn(executable, ['--stdio-v1'], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true })
       child = process; snapshot = { alive: true }
       const failed = (error: Error): void => { if (child === process) { failure = error; snapshot = { alive: false }; process.kill() } }
@@ -90,7 +93,20 @@ export function createLinuxPlaybackBridge(executable: string) {
     },
     setVisible(visible: boolean): void { if (visible !== lastVisible) { send(['visible', visible ? '1' : '0']); lastVisible = visible } },
     setPresentation(value: string): void { if (value !== lastPresentation) { send(['presentation', value]); lastPresentation = value } },
-    command(args: string[]): void { send(['command', ...args]) },
+    setRendererControls(enabled: boolean): void {
+      if (enabled !== lastRendererControls) { send(['renderer-controls', enabled ? '1' : '0']); lastRendererControls = enabled }
+    },
+    setOcclusions(rects: PlaybackOcclusion[]): void {
+      if (rects.length > 32) throw new Error('播放控件遮挡区域过多')
+      const values = rects.flatMap(rect => [rect.x, rect.y, rect.width, rect.height, ...(rect.radii ?? [0, 0, 0, 0])])
+      if (values.some(value => !Number.isFinite(value))) throw new Error('无效的播放控件遮挡区域')
+      const key = values.join(',')
+      if (key !== lastOcclusions) { send(['occlusions', ...values.map(String)]); lastOcclusions = key }
+    },
+    command(args: string[], generatedSubtitle = false): void { send([generatedSubtitle ? 'generated-subtitle-command' : 'command', ...args]) },
+    generatedSubtitles(operation: 'update' | 'visible' | 'clear', document: string, visible: boolean, revision: number): void {
+      send(['generated-subtitles', operation, document, visible ? '1' : '0', String(revision)])
+    },
     render(): void { if (failure) throw failure },
     state(): NativePlaybackState {
       if (failure) throw failure

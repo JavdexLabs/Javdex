@@ -20,6 +20,7 @@ export function useLocalModels() {
   const [busy, setBusy] = useState(false)
   const [feedback, setFeedback] = useState('')
   const [localError, setError] = useState<string | null>(null)
+  const [errorCommand, setErrorCommand] = useState<LocalModelCommand | null>(null)
   const [acknowledgedErrorEpoch, setAcknowledgedErrorEpoch] = useState<number | null>(null)
   const lifetime = useRef({ mounted: false, events: 0, request: 0, requestBusy: false,
     snapshot: null as LocalModelSnapshot | null, errorEpoch: 0 })
@@ -57,6 +58,7 @@ export function useLocalModels() {
         setAcknowledgedErrorEpoch(previousErrorEpoch)
       }
       setError(null)
+      setErrorCommand(null)
       setFeedback(command.action === 'copy-download-url' ? '下载地址已复制'
         : command.action === 'cancel-download' ? '下载已暂停，下次可继续下载'
           : command.action === 'clean-downloads' ? '未完成下载已清理'
@@ -66,6 +68,7 @@ export function useLocalModels() {
     } catch (cause) {
       if (counter.mounted && request === counter.request) {
         setError(cause instanceof Error ? cause.message : '本地模型操作失败')
+        setErrorCommand(command)
       }
       return false
     } finally {
@@ -75,5 +78,5 @@ export function useLocalModels() {
   }, [])
 
   const snapshotError = state?.error && acknowledgedErrorEpoch !== lifetime.current.errorEpoch ? state.error : null
-  return { state, busy, feedback, error: localError, snapshotError, execute }
+  return { state, busy, feedback, error: localError, errorCommand, snapshotError, execute }
 }

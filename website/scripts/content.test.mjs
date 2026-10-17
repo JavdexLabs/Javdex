@@ -41,3 +41,22 @@ test('server developer instructions use the current authorization and upgrade co
   assert.doesNotMatch(body, /增加独立[^\n]*更新端口|默认在线检查只读取正式 Release|提交前托管更新失败可自动恢复|自动执行停服备份/);
   assert.match(body, /安装[\s\S]*人工恢复/);
 });
+
+test('product upgrade FAQ links the single upgrade guide with the current database schema', async () => {
+  const product = await readFile(path.join(root, 'website/src/components/ProductContent.html'), 'utf8');
+  assert.match(product, /href="\/Javdex\/releases\/upgrade\/"/);
+  assert.doesNotMatch(product, /schema\s*19\s*→\s*20/);
+  const migrations = await readFile(path.join(root, 'packages/library/src/db/migrations.ts'), 'utf8');
+  const current = /export const CURRENT_SCHEMA_VERSION = (\d+)/.exec(migrations)?.[1];
+  assert.ok(current, 'the library publishes its current schema');
+  const upgrade = await readFile(path.join(content, 'releases/upgrade.md'), 'utf8');
+  assert.match(upgrade, new RegExp(`schema 19[^\\n]*升级到 ${current}`));
+});
+
+test('legacy server authorization section points at the current developer heading', async () => {
+  const legacy = await readFile(path.join(root, 'docs/SERVER_MODE.md'), 'utf8');
+  const developer = await readFile(path.join(content, 'developers/server.md'), 'utf8');
+  assert.match(developer, /^## 启动与设备授权$/m);
+  assert.match(legacy, /developers\/server\.md#启动与设备授权/);
+  assert.doesNotMatch(legacy, /developers\/server\.md#启动与认主/);
+});

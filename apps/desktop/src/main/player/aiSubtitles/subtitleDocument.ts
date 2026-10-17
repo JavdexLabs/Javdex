@@ -47,7 +47,9 @@ export function orderedCues(cues: SubtitleCue[]): SubtitleCue[] {
 }
 export function renderSubtitleAss(cues: SubtitleCue[], display: SubtitleDisplay, fontSize = 42): string {
   const size = Math.max(20, Math.min(72, fontSize))
-  const header = `[Script Info]\nTitle: AI 日中字幕\nScriptType: v4.00+\nPlayResX: 1920\nPlayResY: 1080\nWrapStyle: 0\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Default,Microsoft YaHei,${size},&H00FFFFFF,&H00FFFFFF,&H00101010,&H80000000,0,0,0,0,100,100,0,0,1,2,1,2,60,60,120,1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n`
+  // Bottom-center at 5% of the 1080-line ASS canvas, close to mpv's 34/720 default margin.
+  const bottomMargin = 54
+  const header = `[Script Info]\nTitle: AI 日中字幕\nScriptType: v4.00+\nPlayResX: 1920\nPlayResY: 1080\nWrapStyle: 0\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Default,Microsoft YaHei,${size},&H00FFFFFF,&H00FFFFFF,&H00101010,&H80000000,0,0,0,0,100,100,0,0,1,2,1,2,60,60,${bottomMargin},1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n`
   return header + orderedCues(cues).map(cue => {
     const ja = escapeAss(cue.japanese), zh = cue.chinese ? escapeAss(cue.chinese) : null
     const text = display === 'japanese' ? ja : display === 'chinese' ? zh ?? ja

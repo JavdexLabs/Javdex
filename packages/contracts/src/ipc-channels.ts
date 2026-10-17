@@ -25,6 +25,7 @@ export const IPC = {
 
   // Settings
   WEB_ACCESS_PAIR_OPEN: 'webAccess:pairOpen',
+  WEB_ACCESS_PAIR_CLOSE: 'webAccess:pairClose',
   WEB_ACCESS_PAIR_INSPECT: 'webAccess:pairInspect',
   WEB_ACCESS_PAIR_DECIDE: 'webAccess:pairDecide',
   WEB_ACCESS_DEVICE_REMOVE: 'webAccess:deviceRemove',

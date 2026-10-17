@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import type { PlaybackControl, PlaybackSnapshot } from '@shared/desktop/playback'
+import type { PlaybackControl, PlaybackSnapshot, PlaybackObservation } from '@shared/desktop/playback'
 import { createOverlayHistory, readOverlayHistoryMarker } from '../interaction/overlayHistory'
 import { createPlaybackHistory } from './playbackHistory'
 
@@ -277,4 +277,58 @@ test('the error surface closes on back and clearing ownership does not control a
   const commands = f.commands.length
   f.playback.abandon()
   assert.equal(f.commands.length, commands); assert.deepEqual(f.goes, [])
+})
+
+test('a viewing activation shares its history token and stays stable across clocks, fullscreen and settings', () => {
+  const f = fixture()
+  f.playback.observe(null, true)
+  f.playback.observe(f.state())
+  const expanded = f.playback.view().activation
+  assert.deepEqual(expanded, { key: f.marker()?.token, restoring: false })
+  f.playback.observe(f.state()); f.playback.observe(f.state('fullscreen')); f.playback.setOptions(true)
+  assert.equal(f.playback.view().activation, expanded)
+  f.playback.observe(f.state('docked'))
+  assert.equal(f.playback.view().activation, null)
+  f.pop()
+  f.playback.observe(f.state())
+  assert.notEqual(f.playback.view().activation?.key, expanded?.key, 'reopening the same session is a new viewing activation')
+  assert.equal(f.playback.view().activation?.key, f.marker()?.token)
+})
+
+for (const failSnapshot of [false, true]) test(`subscription reconciliation owns early clocks and explicit activations (snapshot failure: ${failSnapshot})`, async () => {
+  const f = fixture()
+  let notify!: (value: PlaybackSnapshot | null, revision: number) => void
+  let resolve!: (value: PlaybackObservation) => void
+  let reject!: (error: Error) => void
+  const snapshot = new Promise<PlaybackObservation>((done, fail) => { resolve = done; reject = fail })
+  const views: ReturnType<typeof f.playback.view>[] = []
+  let unsubscribed = 0
+  const disconnect = f.playback.connect({ observation: () => snapshot, onChanged: listener => { notify = listener; return () => { unsubscribed++ } } }, view => views.push(view))
+  notify(f.state(), 1); notify(f.state('docked'), 2); notify(f.state(), 3)
+  assert.equal(f.marker(), null, 'early notifications cannot invent a viewing entry before their baseline')
+  if (failSnapshot) reject(new Error('snapshot unavailable'))
+  else resolve({ snapshot: f.state(), revision: 0 })
+  await Promise.resolve()
+  assert.equal(f.marker()?.token, f.playback.view().activation?.key)
+  assert.equal(f.playback.view().activation?.restoring, false)
+  assert.equal(views.at(-1)?.snapshot?.presentation, 'expanded')
+  disconnect(); disconnect()
+  assert.equal(unsubscribed, 1)
+  const published = views.length
+  notify(f.state('expanded', 'playing', 'obsolete'), 4)
+  assert.equal(views.length, published, 'obsolete subscribers cannot update the view')
+  assert.equal(f.playback.view().snapshot, null)
+})
+
+test('reconnecting ignores an old snapshot response and obsolete cleanup cannot abandon the new owner', async () => {
+  const f = fixture()
+  let resolve!: (value: PlaybackObservation) => void
+  const old = f.playback.connect({ observation: () => new Promise(done => { resolve = done }), onChanged: () => () => {} }, () => assert.fail('obsolete snapshot'))
+  f.playback.connect({ observation: async () => ({ snapshot: f.state('docked', 'playing', 'current'), revision: 1 }), onChanged: () => () => {} }, () => {})
+  await Promise.resolve()
+  resolve({ snapshot: f.state(), revision: 0 }); old()
+  await Promise.resolve()
+  assert.equal(f.playback.view().snapshot?.sessionId, 'current')
+  assert.equal(f.marker(), null)
+  f.playback.abandon()
 })

@@ -38,7 +38,7 @@
 
 ## 启动与认主
 
-[阅读本节](../website/src/content/docs/developers/server.md#启动与认主)。
+[阅读本节](../website/src/content/docs/developers/server.md#启动与设备授权)。
 
 ## 备份、恢复与本机导入
 

@@ -33,9 +33,9 @@ export function modelAssetDirectory(root: string, asset: AiRuntimeAsset): string
   const { family, publisher, revision, precision } = asset.model
   return path.join(root, 'models', ...[family, publisher, revision, precision].map(component))
 }
-export function runtimeAssetDirectory(root: string, id: AiRuntimeAsset['id'], target: AiRuntimeTarget): string {
-  const runtime = id === 'whisper' ? ['whisper.cpp', 'b5130'] : id === 'translator' ? ['llama.cpp', 'b11435'] : ['ffmpeg', 'n8.1.3-14-g330caae0c1']
-  return path.join(root, 'runtimes', ...runtime, component(`${target.platform}-${target.arch}${id === 'ffmpeg' ? '' : '-cpu'}`))
+export function runtimeAssetDirectory(root: string, id: AiRuntimeAsset['id'], target: AiRuntimeTarget, backend = 'cpu'): string {
+  const runtime = id === 'whisper' ? ['whisper.cpp', 'b5130'] : ['translator', 'cuda'].includes(id) ? ['llama.cpp', 'b11435'] : ['ffmpeg', 'n8.1.3-14-g330caae0c1']
+  return path.join(root, 'runtimes', ...runtime, component(`${target.platform}-${target.arch}${id === 'ffmpeg' ? '' : `-${backend}${id === 'cuda' ? '-dependencies' : ''}`}`))
 }
 export function modelDownloadDirectory(root: string, asset: AiRuntimeAsset): string {
   if (!/^[a-f0-9]{64}$/.test(asset.sha256)) throw new Error('本地模型下载身份无效')

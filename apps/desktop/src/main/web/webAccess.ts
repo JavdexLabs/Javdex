@@ -181,6 +181,10 @@ export class WebAccess {
     if (!this.server) throw new Error('Web 服务未运行')
     return this.server.pairing.inspect(code)
   }
+  closePairing(): WebAccessStatus {
+    this.server?.pairing.clear()
+    return this.status()
+  }
   decidePair(code: string, approve: boolean): WebAccessStatus {
     if (!this.server) throw new Error('Web 服务未运行')
     this.server.pairing.decide(code, approve)

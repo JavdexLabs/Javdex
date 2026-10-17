@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useId, useRef, type ReactNode } from 'react'
 import { UNSAFE_DataRouterContext, useBlocker, useLocation, useNavigate, type Location, type NavigationType } from 'react-router-dom'
 import { useOverlayHistory } from './OverlayHistoryContext'
+import { useToast } from '../components/Toast'
 
 export interface NavigationDecision { proceed(): void; reset(): void }
 interface Guard { enabled(nextPath?: string): boolean; blocked(decision: NavigationDecision): void }
@@ -26,6 +27,7 @@ function matchesIntent(intent: NavigationIntent, location: Location, action: Nav
 export function NavigationGuardProvider({ children }: { children: ReactNode }): JSX.Element {
   const guards = useRef(new Map<string, Guard>()).current
   const history = useOverlayHistory()
+  const toast = useToast()
   const location = useLocation()
   const navigate = useNavigate()
   // A raw overlay POP can reset router.state before React renders useBlocker's new value.
@@ -54,7 +56,16 @@ export function NavigationGuardProvider({ children }: { children: ReactNode }): 
     const intent = pending.current
     if (!mounted.current || !intent || intent.prompting) return
     if (history.isTraversing()) {
-      if (!intent.cancelWait) intent.cancelWait = history.afterTraversal(() => { intent.cancelWait = undefined; advance() })
+      if (!intent.cancelWait) intent.cancelWait = history.afterTraversal(result => {
+        intent.cancelWait = undefined
+        if (!mounted.current || pending.current !== intent) return
+        if (result === 'completed') { advance(); return }
+        pending.current = null
+        replay.current = null
+        const current = [...router.state.blockers.values()].find(value => value.state === 'blocked' && value.location.key === intent.location.key)
+        if (current?.state === 'blocked') current.reset()
+        if (result === 'failed') toast.show('观看窗口关闭失败，请重试跳转', 'error')
+      })
       return
     }
     const entry = [...guards].find(([id, guard]) => !intent.approved.has(id) && guard.enabled(intent.location.pathname))
@@ -88,7 +99,7 @@ export function NavigationGuardProvider({ children }: { children: ReactNode }): 
       void navigate({ pathname: intent.location.pathname, search: intent.location.search, hash: intent.location.hash },
         { state: intent.location.state, replace: intent.action === 'REPLACE' })
     }
-  }, [guards, history, navigate, router])
+  }, [guards, history, navigate, router, toast])
   useEffect(() => { advance() }, [advance, blocker])
   useEffect(() => {
     mounted.current = true

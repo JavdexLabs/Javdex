@@ -5,7 +5,16 @@ import { isBuiltin } from 'node:module'
 import { importsOf, sourceFiles } from './lib/import-boundary-check.mjs'
 
 const root = JSON.parse(fs.readFileSync('package.json', 'utf8'))
-const workspaces = ['apps/desktop', 'apps/web', 'apps/server', 'packages/contracts', 'packages/ui', 'packages/library', 'packages/http']
+const patterns = Array.isArray(root.workspaces) ? root.workspaces : root.workspaces?.packages
+assert.ok(Array.isArray(patterns) && patterns.length > 0, 'Root must declare its workspaces')
+const workspaces = [...new Set(patterns.flatMap(pattern => {
+  assert.ok(typeof pattern === 'string' && /^(?:[\w.-]+\/)*[\w.-]+(?:\/\*)?$/.test(pattern), `Unsupported workspace pattern: ${pattern}`)
+  if (!pattern.endsWith('/*')) return [pattern]
+  const directory = pattern.slice(0, -2)
+  return fs.readdirSync(directory, { withFileTypes: true })
+    .filter(entry => entry.isDirectory() && fs.existsSync(`${directory}/${entry.name}/package.json`))
+    .map(entry => `${directory}/${entry.name}`)
+}))].sort()
 const lock = JSON.parse(fs.readFileSync('package-lock.json', 'utf8'))
 assert.equal(lock.version, root.version, 'Lockfile version must match the product version')
 assert.equal(lock.packages[''].version, root.version, 'Lockfile root version must match the product version')

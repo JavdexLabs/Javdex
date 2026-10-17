@@ -2,12 +2,12 @@ import { site } from '../site.config.mjs';
 
 export const releaseUrl = `https://github.com/${site.repository}/releases/latest`;
 export const desktopMatchers = {
-  windowsX64: /^Javdex-Setup-.+-x64\.exe$/i,
-  windowsZip: /^(?:Javdex-Setup-.+-x64|Javdex[ -].+-win)\.zip$/i,
-  macArm64: /^Javdex-.+-arm64\.dmg$/i,
-  macX64: /^Javdex-.+-x64\.dmg$/i,
-  linuxAppImage: /^Javdex-.+-x86_64\.AppImage$/i,
-  linuxDeb: /^Javdex-.+-amd64\.deb$/i,
+  windowsX64: /^Javdex-Setup-(.+)-x64\.exe$/i,
+  windowsZip: /^(?:Javdex-Setup-(.+)-x64|Javdex[ -](.+)-win)\.zip$/i,
+  macArm64: /^Javdex-(.+)-arm64\.dmg$/i,
+  macX64: /^Javdex-(.+)-x64\.dmg$/i,
+  linuxAppImage: /^Javdex-(.+)-x86_64\.AppImage$/i,
+  linuxDeb: /^Javdex-(.+)-amd64\.deb$/i,
 };
 
 export function fallbackManifest() {
@@ -33,7 +33,7 @@ export function createReleaseManifest(release) {
     if (candidates.length > 1) throw new Error(`Ambiguous Release asset: ${key}`);
     if (!candidates.length) continue;
     const asset = candidates[0];
-    if (key !== 'checksums' && asset.name.match(/\d+\.\d+\.\d+(?:-(?:alpha|beta|rc)\.\d+)?/)?.[0] !== version) {
+    if (key in desktopMatchers && !matcher.exec(asset.name).slice(1).includes(version)) {
       throw new Error(`Release asset version mismatch: ${key}`);
     }
     if (!Number.isFinite(asset.size) || asset.size <= 0) throw new Error(`Invalid Release asset size: ${key}`);

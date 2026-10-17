@@ -109,6 +109,7 @@ export const IPC_DISPOSITION = {
   HOME_LOAD: query('home.load'),
   HOME_SEARCH: query('home.search'),
   WEB_ACCESS_PAIR_OPEN: mutate('browser.pairOpen', ['C']),
+  WEB_ACCESS_PAIR_CLOSE: mutate('browser.pairClose', ['C']),
   WEB_ACCESS_PAIR_INSPECT: query('browser.pairInspect', ['C']),
   WEB_ACCESS_PAIR_DECIDE: mutate('browser.pairDecide', ['C']),
   WEB_ACCESS_DEVICE_REMOVE: mutate('browser.deviceRemove', ['C']),

@@ -104,6 +104,14 @@ function Fixture() {
   </NavigationGuardProvider></ImagePreviewOverlayProvider></OverlayHistoryProvider></ToastProvider>
 }
 const router = createHashRouter([{ path: '*', element: <Fixture /> }])
+// Isolated Electron acceptance drives native intents without a DOM user gesture.
+window.playbackHistoryFixture = {
+  open: () => publish(makeState()),
+  expand: () => window.api.playback.control(state.sessionId, { kind: 'presentation', value: 'expanded' }),
+  snapshot: () => state,
+  controls,
+  detail: () => router.navigate('/libraries/1/video/2')
+}
 const root = createRoot(document.getElementById('root'))
 root.render(<RouterProvider router={router} />)
 // Hot updates must not leave duplicate React roots or router listeners behind.

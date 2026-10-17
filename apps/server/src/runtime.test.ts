@@ -2265,6 +2265,23 @@ describe('server runtime lifecycle', () => {
       assert.equal((await poll.json() as { authenticated: boolean }).authenticated, true)
       const cookie = poll.headers.get('set-cookie')!.split(';')[0]
       assert.equal((await fetch(`${base}/api/collections`, { headers: { Cookie: cookie } })).status, 200)
+      const waiting = await web('/api/pair/start', { name: 'Unfinished browser', remember: false })
+      const waitingCookie = waiting.headers.get('set-cookie')!.split(';')[0]
+      const waitingPair = await waiting.json() as { code: string }
+      await remote.browser.pairDecide({ code: waitingPair.code, decision: 'approve' }, mutation())
+      const closed = await remote.browser.pairClose({}, mutation())
+      assert.equal(closed.pairingUntil, 0)
+      assert.deepEqual(closed.pairingActivity, [])
+      await assert.rejects(remote.browser.pairInspect({ code: waitingPair.code }))
+      assert.notEqual((await (await web('/api/pair/poll', {}, waitingCookie)).json() as { authenticated?: boolean }).authenticated, true)
+      assert.notEqual((await web('/api/pair/start', { name: 'Blocked browser', remember: false })).status, 200)
+      assert.equal((await fetch(`${base}/api/collections`, { headers: { Cookie: cookie } })).status, 200, 'closing pairing preserves existing authorization')
+      assert.equal((await postManage(base, 'browser.pairClose', {
+        serverId: writer.serverId, catalogId: writer.catalogId, writerEpoch: writer.writerEpoch,
+        operationId: randomUUID(), expectedVersions: {}, input: {}
+      }, { cookie })).status, 401, 'browser cookies cannot close desktop pairing')
+      await remote.browser.pairOpen({}, mutation())
+      assert.equal((await web('/api/pair/start', { name: 'New browser', remember: false })).status, 200)
       assert.equal((await postManage(base, 'browser.pairOpen', {
         serverId: writer.serverId, catalogId: writer.catalogId, writerEpoch: writer.writerEpoch,
         operationId: randomUUID(), expectedVersions: {}, input: {}

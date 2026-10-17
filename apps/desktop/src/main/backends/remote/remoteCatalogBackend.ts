@@ -1,4 +1,5 @@
 import { createRemoteBackup } from './remoteBackup'
+import { readRemoteWriterSecret } from './remoteWriterSecret'
 import { catalogRemoteResult } from './catalogRemoteResults'
 import { parseManageInput } from '@shared/manage/parse'
 import type { CatalogOperationInput, CatalogWireInput } from '../../application/catalogOperationInputs'
@@ -6,6 +7,7 @@ import type { CatalogOperationResults } from '../../application/catalogOperation
 import { randomUUID } from 'node:crypto'
 import { ManageHttpClient } from '@http/manageClient'
 import type { VerifyServerCertificate } from '@http/pinnedFetch'
+import type { LegacyServerConnectionMigration } from '../../desktop/legacyServerConnection'
 import { createPlaybackBridge } from '@http/playbackBridge'
 import { trustedDevicesSchema } from '@shared/serverUpdateTypes'
 import { digestToken, generateSecret } from '@library/catalog/catalogSecrets'
@@ -35,6 +37,7 @@ export interface RemoteCatalogBackendOptions {
   timeoutMs?: number
   certificateSha256?: string
   verifyCertificate?: VerifyServerCertificate
+  connectionMigration?: LegacyServerConnectionMigration
   /** Server-bound device identity survives an authorized catalog restore. */
   deviceIdentity?: { serverId: string; secret: string }
   workStore?: { putVerification(operationId: string, catalogId: string): void }
@@ -59,6 +62,7 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
   let generation = options.generation ?? 1
   const identity: CatalogIdentity = { mode: 'remote', catalogId: '' }
   let handshake: HandshakeResult | null = null
+  let legacyHttpUpgradeRequired = false
   let secret: string | null = null
   let remoteImagesDir: string | null = null
   let sessionState: DesktopSessionState = 'disconnected'
@@ -86,6 +90,7 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
     state: sessionState,
     mode: 'remote',
     remoteBaseUrl: options.baseUrl,
+    legacyHttpUpgradeRequired,
     catalogId: identity.catalogId || null,
     serverId: identity.serverId ?? null,
     generation,
@@ -177,12 +182,18 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
 
   const handshakeOnly = async (signal?: AbortSignal): Promise<HandshakeResult> => {
     const revision = connectionRevision
-    const hello = (await client.post(
+    const migrating = options.connectionMigration
+    const discovered = migrating?.handshake && !migrating.completed ? await migrating.handshake(
+      signal ? AbortSignal.any([signal, authorizationAbort.signal]) : authorizationAbort.signal
+    ) : undefined
+    const hello = discovered ?? (await client.post(
       'handshake.get',
       { input: {} },
       { sendAppVersion: false, signal }
     )) as HandshakeResult
     if (revision !== connectionRevision) throw structuredError('CONNECTION_UNAVAILABLE', '资料库连接已变化')
+    legacyHttpUpgradeRequired = Boolean(migrating && !migrating.completed && hello.appVersion === '0.8.0' && hello.schemaVersion === 19)
+    if (migrating && !migrating.completed) migrating.checkIdentity(hello)
     identity.catalogId = hello.identity.catalogId
     identity.serverId = hello.identity.serverId
     handshake = hello
@@ -201,8 +212,7 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
     let claimRequired = false
     try {
       const hello = await handshakeOnly(signal)
-      const storedSecret = await options.credentials.readWriterSecret(hello.identity.catalogId) ??
-        (options.deviceIdentity?.serverId === hello.identity.serverId ? options.deviceIdentity.secret : null)
+      const storedSecret = await readRemoteWriterSecret(options, hello)
       if (revision !== connectionRevision) throw structuredError('CONNECTION_UNAVAILABLE', '资料库连接已变化')
       secret = storedSecret
       if (!secret || hello.writerEpoch === 0) {
@@ -215,6 +225,8 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
           sessionMessage
         )
       }
+      await options.connectionMigration?.complete(hello, secret, signal ? AbortSignal.any([signal, authorizationAbort.signal]) : authorizationAbort.signal)
+      if (revision !== connectionRevision) throw structuredError('CONNECTION_UNAVAILABLE', '资料库连接已变化')
       try {
         const storageInfo = (await client.post(
           'catalog.storageInfo',
@@ -388,6 +400,7 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
     abortInFlight()
     generation += 1
     handshake = null
+    legacyHttpUpgradeRequired = false
     secret = null
     remoteImagesDir = null
     sessionState = 'disconnected'
@@ -860,6 +873,7 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
       status: (input, ctx) => query('browser.status', input ?? {}, ctx?.signal),
       setEnabled: m('browser.setEnabled'),
       pairOpen: m('browser.pairOpen'),
+      pairClose: m('browser.pairClose'),
       pairInspect: q('browser.pairInspect'),
       pairDecide: m('browser.pairDecide'),
       deviceRemove: m('browser.deviceRemove'),

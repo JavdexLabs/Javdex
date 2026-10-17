@@ -112,15 +112,15 @@ try {
         await assertUpgradeEntriesDisabled()
         assertOnlyReadCommands(await callsFromPage())
         const fixture = await page.evaluate(() => window.environmentFixture)
-        assert.equal(fixture.actualRequiredVersion, 1, 'the production environment requirement remains revision 1')
+        assert.equal(fixture.actualRequiredVersion, 1, 'the production environment requirement remains version 1')
         assert.equal(fixture.lowerRevisionIsMock, environment === 'mismatch')
         if (environment === 'mismatch' || environment === 'missing') {
           await card.getByText('需要升级服务端Docker镜像', { exact: true }).waitFor()
           assert.ok((await card.getByRole('status').allTextContents()).every(text => !/请先.*配对|请先在资料库连接中连接/.test(text)), 'legacy status failures must not lead to a pairing dead-end')
           assert.equal(await button('查看镜像升级指引').isEnabled(), true)
           if (environment === 'mismatch') {
-            // This fixture alone simulates a future requirement of 2 against image revision 1.
-            assert.deepEqual(await card.locator('dl[aria-label="运行环境版本"] dd').allTextContents(), ['修订 1', '修订 2'])
+            // Only this fixture simulates a future requirement of 2 against image version 1.
+            assert.deepEqual(await card.locator('dl[aria-label="运行环境版本"] dd').allTextContents(), ['运行环境版本 1', '运行环境版本 2'])
             await button('查看镜像升级指引').click()
             const guide = page.getByRole('dialog', { name: '服务端Docker镜像升级指引', exact: true })
             await guide.waitFor()
@@ -141,7 +141,7 @@ try {
           assert.equal(await card.getByText('需要升级服务端Docker镜像', { exact: true }).count(), 0)
           await card.getByText(environment === 'higher' ? '服务端运行环境较新，请升级此客户端' : '无法确认服务端运行环境', { exact: true }).waitFor()
           assert.equal(await button('重新检测').isEnabled(), true)
-          if (environment === 'higher') assert.deepEqual(await card.locator('dl[aria-label="运行环境版本"] dd').allTextContents(), ['修订 2', '修订 1'])
+          if (environment === 'higher') assert.deepEqual(await card.locator('dl[aria-label="运行环境版本"] dd').allTextContents(), ['运行环境版本 2', '运行环境版本 1'])
         }
         assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true)
         await page.screenshot({ path: `out/server-update-ui/${theme}-${viewport.width}-environment-${environment}.png`, fullPage: true })

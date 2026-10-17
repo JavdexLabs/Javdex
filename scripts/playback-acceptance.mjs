@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { closeAcceptance, recordAcceptanceCleanup, createAcceptanceDirectory, launchAcceptance, output, seedAcceptanceCatalog, waitForState } from './playback-acceptance-support.mjs'
+import { prepareNonRecordingPlayback } from './playback-acceptance-settings.mjs'
 
 if (!['darwin', 'win32'].includes(process.platform)) throw new Error('This acceptance runner covers macOS and Windows only')
 const directory = createAcceptanceDirectory()
@@ -49,9 +50,7 @@ try {
   page.on('pageerror', error => errors.push(error.message))
   await page.waitForFunction(() => window.api?.playback && document.querySelector('nav'))
   const target = JSON.parse(fs.readFileSync(path.join(directory, 'targets.json'), 'utf8'))[0]
-  const defaults = await page.evaluate(() => window.api.thisComputer.get())
-  assert.equal(defaults.playerPreference, 'builtin', 'fresh installations use built-in playback without opting in')
-  assert.equal(defaults.resumePlayback, false, 'switching the default player does not enable resume recording')
+  await prepareNonRecordingPlayback(page)
   const result = await page.evaluate(target => window.api.player.play(target.libraryId, target.videoId), target)
   assert.equal(result.ok, true, JSON.stringify(result))
   const initial = await waitForState(page, state => state?.phase === 'playing' && state.position > 0.5, 'video did not start')
@@ -273,7 +272,7 @@ try {
   await clickChrome('停止播放', true)
   await waitForState(page, state => state === null, 'stop before resume acceptance')
   const progressFile = path.join(directory, 'playback-progress.json')
-  assert.equal(fs.existsSync(progressFile), false, 'default-off playback creates no progress file')
+  assert.equal(fs.existsSync(progressFile), false, 'explicitly disabled recording creates no progress file')
   await page.getByRole('link', { name: '设置', exact: true }).click()
   await page.getByRole('link', { name: '存储与导出', exact: true }).click()
   const recordingSwitch = page.getByRole('switch', { name: '保存续播进度', exact: true })
@@ -475,7 +474,7 @@ try {
   const errorChecks = { controlledMessage: failed.error, retriedSameResource: true, nativeReleased: true }
   report = { status: 'partial acceptance passed', directory, initial, paused, adjustedSubtitles, subtitleClearance, hiddenControls, resumeChecks, errorChecks, focusChecks, historyChecks,
     platform: `${process.platform}/${process.arch}`,
-    checks: ['real application startup', 'default player.play / openResource routing', 'options query the scoped file source and expose external open during playback', 'device volume survives stop and decoder replacement', 'H264 decode and platform audio output (decoder recorded in initial state)', 'expanded/docked/fullscreen same session', 'pause and exact seek', 'exact time form validation', 'embedded SRT size/delay controls', fullscreenState.rendererFullscreenControls ? 'fullscreen video size stays fixed behind chrome and settings' : 'fullscreen subtitle/control separation', fullscreenState.rendererFullscreenControls ? 'auto-hide reveals the full frame without resizing' : 'auto-hide restores native viewport', 'default-off progress file absent', 'recording preference uses saved draft', 'paused resume preparation and continue/from-start choices', 'private EOF preserves old progress', 'global off stops recording immediately', 'cancel clear preserves progress', 'controlled format error', 'explicit retry rechecks same resource', 'error releases native decoder', 'native fullscreen focus after animation and detail trigger restoration', 'one history back docks settings/fullscreen/expanded before page back', 'retired viewing slot reuse and reload ownership', 'explicit stop consumes viewing marker'],
+    checks: ['real application startup', 'default player.play / openResource routing', 'options query the scoped file source and expose external open during playback', 'device volume survives stop and decoder replacement', 'H264 decode and platform audio output (decoder recorded in initial state)', 'expanded/docked/fullscreen same session', 'pause and exact seek', 'exact time form validation', 'embedded SRT size/delay controls', fullscreenState.rendererFullscreenControls ? 'fullscreen video size stays fixed behind chrome and settings' : 'fullscreen subtitle/control separation', fullscreenState.rendererFullscreenControls ? 'auto-hide reveals the full frame without resizing' : 'auto-hide restores native viewport', 'default-on preference and explicit non-recording progress file absence', 'recording preference uses saved draft', 'paused resume preparation and continue/from-start choices', 'private EOF preserves old progress', 'global off stops recording immediately', 'cancel clear preserves progress', 'controlled format error', 'explicit retry rechecks same resource', 'error releases native decoder', 'native fullscreen focus after animation and detail trigger restoration', 'one history back docks settings/fullscreen/expanded before page back', 'retired viewing slot reuse and reload ownership', 'explicit stop consumes viewing marker'],
     pending: ['native screen/mini-video frame inspection', 'fullscreen native control interaction', 'remote source', 'full feature/packaging acceptance'], errors }
   assert.deepEqual(errors, [])
   fs.writeFileSync(path.join(output, 'report.json'), JSON.stringify(report, null, 2))

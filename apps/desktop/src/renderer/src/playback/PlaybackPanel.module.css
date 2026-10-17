@@ -168,6 +168,11 @@
   min-width: calc(var(--control-h-sm) * 2.5);
 }
 
+.quickSelect > button {
+  height: var(--control-h-sm);
+  padding-block: 0;
+}
+
 .resume {
   display: flex;
   align-items: center;

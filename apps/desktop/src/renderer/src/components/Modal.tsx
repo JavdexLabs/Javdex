@@ -9,6 +9,7 @@ import styles from './Modal.module.css'
 export type ModalSize = 'compact' | 'sm' | 'md' | 'lg' | 'xl'
 export type ModalChrome = 'form' | 'shellless'
 export type ModalBodyOverflow = 'auto' | 'hidden'
+export type ModalLayout = 'content' | 'form'
 
 interface Props {
   title: string
@@ -22,6 +23,7 @@ interface Props {
   size?: ModalSize
   chrome?: ModalChrome
   bodyOverflow?: ModalBodyOverflow
+  layout?: ModalLayout
   danger?: boolean
   confirmDisabled?: boolean
   busy?: boolean
@@ -46,6 +48,7 @@ export default function Modal({
   size = 'compact',
   chrome = 'form',
   bodyOverflow = 'auto',
+  layout = 'content',
   danger,
   confirmDisabled,
   busy = false,
@@ -107,6 +110,7 @@ export default function Modal({
     styles.root,
     shellless ? '' : styles.form,
     shellless ? '' : styles[size],
+    layout === 'form' ? styles.formLayout : '',
     className
   ]
     .filter(Boolean)

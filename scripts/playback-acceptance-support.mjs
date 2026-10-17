@@ -19,6 +19,12 @@ export function createAcceptanceDirectory(suffix = '') {
   return fs.mkdtempSync(path.join(os.tmpdir(), `javdex-playback-acceptance-${suffix}`))
 }
 
+function macAcceptanceBundle(originalPlist) {
+  const version = /<key>CFBundleVersion<\/key>\s*<string>([^<]+)/.exec(originalPlist)?.[1]
+  assert.match(version ?? '', /^\d+\.\d+\.\d+(?:[.-][a-zA-Z0-9.-]+)?$/, 'Electron bundle has a safe version')
+  return path.join(output, `Javdex Playback Acceptance-${version}.app`)
+}
+
 export function seedAcceptanceCatalog(directory, media) {
   assert.ok(path.basename(directory).startsWith('javdex-playback-acceptance-'))
   const seeded = spawnSync(electron, ['--require', './scripts/register-test-paths.cjs', '--import', 'tsx',
@@ -52,9 +58,9 @@ export async function launchAcceptance(directory, logName = 'application.log', a
     application.process().stderr.on('data', chunk => fs.appendFileSync(path.join(output, logName), chunk))
     return application
   }
-  const bundle = path.join(output, 'Javdex Playback Acceptance.app')
   const original = path.resolve(path.dirname(electron), '../..')
   const originalPlist = fs.readFileSync(path.join(original, 'Contents/Info.plist'), 'utf8')
+  const bundle = macAcceptanceBundle(originalPlist)
   const version = plist => /<key>CFBundleVersion<\/key>\s*<string>([^<]+)/.exec(plist)?.[1]
   if (fs.existsSync(bundle)) {
     assert.equal(version(fs.readFileSync(path.join(bundle, 'Contents/Info.plist'), 'utf8')), version(originalPlist),

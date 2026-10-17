@@ -1,6 +1,6 @@
 ---
 title: "选择本地或远程资料库"
-description: "Javdex 0.9.0-beta.7 · 选择本地或远程资料库"
+description: "Javdex 0.9.0 · 选择本地或远程资料库"
 ---
 
 只在一台电脑使用时，保留默认本地模式即可。希望 NAS 或常开电脑持续扫描并提供网页访问时，先按 [单容器部署步骤](/Javdex/server/deploy/) 启动同版本服务，再连接桌面；已有 0.8.0 部署先读[采用托管更新](/Javdex/server/adoption/)。媒体配置见 [服务端指南](/Javdex/reference/server/#媒体目录权限)。浏览器只用于浏览和播放，资料管理仍使用桌面应用。

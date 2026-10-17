@@ -25,7 +25,7 @@
   &nbsp;·&nbsp;
   <a href="https://javdexlabs.github.io/Javdex/start/">使用文档</a>
   &nbsp;·&nbsp;
-  <a href=".github/release-notes/v0.9.0-beta.7.md">0.9.0 Beta.7 发布说明</a>
+  <a href=".github/release-notes/v0.9.0.md">0.9.0 发布说明</a>
   &nbsp;·&nbsp;
   <a href="CHANGELOG.md">更新日志</a>
   &nbsp;·&nbsp;
@@ -34,7 +34,7 @@
 
 Javdex 是一款以番号为核心的本地影片管理工具。扫描目录、补齐封面与资料，按演员、厂商和系列浏览，也可以创建清单、导入网页收藏，并通过 NFO 与其他媒体软件交换资料。
 
-> 本页与使用指南面向 **0.9.0-beta.7 预发布**。Beta.7 的安装包、镜像和升级文件以[对应 Release](https://github.com/JavdexLabs/Javdex/releases/tag/v0.9.0-beta.7)实际发布状态为准；最新正式版仍为 0.8.0，默认下载和更新提醒不切换到 Beta。升级前完整备份，schema 21 不能直接交给旧版打开。
+> 本页与使用指南面向 **0.9.0**。安装包、镜像和升级文件以[正式 Release](https://github.com/JavdexLabs/Javdex/releases/tag/v0.9.0)实际发布状态为准；发布前默认下载与更新提醒仍指向上一正式版。升级前完整备份，schema 21 不能直接交给旧版打开。
 
 <p align="center">
   <img src="docs/images/library.webp" alt="媒体库演示：竖版封面浏览、搜索、筛选与排序" width="1200">
@@ -62,9 +62,9 @@ Javdex 是一款以番号为核心的本地影片管理工具。扫描目录、�
 
 服务端可独立运行，无需保持桌面应用开启；刮削插件、AI 采集和网页登录仍在桌面执行。网页不是管理后台，不提供视频转码。服务端与桌面须使用同一版本，当前面向可信局域网。
 
-服务端使用单个 Docker 容器，支持 x86_64 和 ARM64，无需编译源码或安装宿主机更新助手。Beta.7 桌面须配合同版本服务端；按 [服务端部署与托管更新](docs/SERVER_UPDATE.md) 配置数据卷、独立的 `/program` 程序卷及首次配对。业务、播放与更新共用一个 HTTPS 地址，一次配对即可授权，可管理和单独撤销多台可信电脑；网页账号仍独立。媒体挂载与权限说明见 [服务端指南](docs/SERVER_MODE.md#媒体目录权限)。部署示例从对应版本源码获取，安装包和每架构单个 `.javdex-update` 签名升级文件以[对应 Beta.7 Release](https://github.com/JavdexLabs/Javdex/releases/tag/v0.9.0-beta.7)实际附件为准。
+服务端使用单个 Docker 容器，支持 x86_64 和 ARM64，无需编译源码或安装宿主机更新助手。0.9.0 桌面须配合同版本服务端；按 [服务端部署与托管更新](docs/SERVER_UPDATE.md) 配置数据卷、独立的 `/program` 程序卷及首次配对。桌面业务、播放与更新共用一个 HTTPS 地址，一次配对即可授权，可管理和单独撤销多台可信电脑；同端口的网页可使用 HTTP 或 HTTPS，网页账号仍独立。媒体挂载与权限说明见 [服务端指南](docs/SERVER_MODE.md#媒体目录权限)。部署示例从对应版本源码获取，安装包和每架构单个 `.javdex-update` 签名升级文件以[对应 Release](https://github.com/JavdexLabs/Javdex/releases/tag/v0.9.0)实际附件为准。
 
-首次从 0.8.0 升级须由管理员停服备份、更换支持托管更新的镜像并保留数据。Beta.1–5 采用本版运行环境兼容检查须先更换 Beta.6 基础镜像，业务升级包不会更新管理器；保留 `/data`、`/program` 和图片卷。更高业务版本的镜像会自动升级和验证，同版或更旧版本不降级；升级不创建资料备份，安装开始后失败或中断保持维护状态并要求人工恢复。服务端落后且运行环境相等时，客户端可在线获取或离线上传与自身完全同版本的签名升级文件，包含 Beta；桌面正式更新提醒仍只读取正式 Release。“备份与恢复”支持本地与服务端互相导入，保留来源资料库，不自动同步两份资料；安全升级与回退步骤见[升级指南](https://javdexlabs.github.io/Javdex/releases/upgrade/)。
+首次从 0.8.0 升级须由管理员停服备份、更换 0.9.0 基础镜像并增加 `/program` 程序卷，保留 `/data`、图片与媒体挂载。业务升级包不会更新管理器；更高业务版本的镜像会自动升级和验证，同版或更旧版本不降级。升级不创建资料备份，安装开始后失败或中断保持维护状态并要求人工恢复。服务端落后且运行环境相等时，客户端可在线获取或离线上传与自身完全同版本的签名升级文件；桌面更新提醒只读取正式 Release。“备份与恢复”支持本地与服务端互相导入，保留来源资料库，不自动同步两份资料；安全升级与回退步骤见[升级指南](https://javdexlabs.github.io/Javdex/releases/upgrade/)。
 
 ## 在应用内播放，边看边整理
 

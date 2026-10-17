@@ -1,5 +1,6 @@
 import TextInput from '../TextInput'
 import { useEffect, useRef, useState } from "react";
+import { Check, Copy, ExternalLink, Globe, KeyRound, QrCode, RefreshCw, Server, ShieldCheck } from "lucide-react";
 import type { WebAccessStatus } from "@shared/webTypes";
 import { api } from "../../api";
 import { useSettingsDraft } from "../../settings/useSettingsDraft";
@@ -7,7 +8,9 @@ import { useSettingsFormGuard } from "../../settings/SettingsLeaveGuard";
 import SettingsSwitchRow from "../SettingsSwitchRow";
 import SettingsToggleList from "../SettingsToggleList";
 import Button from "../Button";
-import { SettingsCard } from "./SettingsPrimitives";
+import IconButton from "../IconButton";
+import { UI_ICON_SM } from "../iconDefaults";
+import { SettingsCard, SettingsStatusPill } from "./SettingsPrimitives";
 import SettingsFormActions from "./SettingsFormActions";
 import { WEB_ACCESS_LABEL } from "../../settings/settingsRoutes";
 import styles from "./WebAccessPanel.module.css";
@@ -61,6 +64,7 @@ function WebAccessForm({
     password: "",
   });
   const [saving, setSaving] = useState(false);
+  const [devicesBusy, setDevicesBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedUrl, setSelectedUrl] = useState("");
   const [helpOpen, setHelpOpen] = useState(false);
@@ -79,6 +83,7 @@ function WebAccessForm({
     return () => clearTimeout(timer);
   }, [addressFeedback]);
   const lock = useRef(false);
+  const operationRevision = useRef(0);
   const save = async (): Promise<boolean> => {
     if (lock.current) return false;
     const submitted = form.draft;
@@ -102,6 +107,7 @@ function WebAccessForm({
       }
     }
     lock.current = true;
+    operationRevision.current++;
     setSaving(true);
     setError(null);
     try {
@@ -141,14 +147,17 @@ function WebAccessForm({
   useSettingsFormGuard({
     label: WEB_ACCESS_LABEL,
     dirty: form.dirty,
-    busy: saving,
+    busy: saving || devicesBusy,
     save,
     discard: form.reset,
   });
   const config = (
     <div ref={configuration}>
       <SettingsCard
-        title="服务配置"
+        as="section"
+        aria-label="服务配置"
+        headerClassName={styles.cardHeader}
+        title={<span className={styles.sectionTitle}><Server {...UI_ICON_SM} />服务配置</span>}
         hint={
           remoteCatalog
             ? "关闭浏览入口不会关闭管理接口。端口和访问账号由服务端部署配置决定。"
@@ -159,6 +168,7 @@ function WebAccessForm({
             placement="header"
             dirty={form.dirty}
             saving={saving}
+            disabled={devicesBusy}
             conflict={form.conflict}
             error={error}
             onSave={() => void save()}
@@ -216,14 +226,15 @@ function WebAccessForm({
                 }
               />
             </label>
-            <div className={styles.field}>
+            <div className={`${styles.field} ${styles.passwordField}`}>
               {status.hasPassword && !changingPassword ? (
                 <>
                   <span>访问密码</span>
-                  <div className={styles.address}>
-                    <span className={styles.hint}>密码已设置</span>
+                  <div className={styles.passwordValue}>
+                    <span className={styles.passwordStatus}><KeyRound {...UI_ICON_SM} />已设置</span>
                     <Button
                       size="sm"
+                      variant="ghost"
                       disabled={saving}
                       onClick={() => setChangingPassword(true)}
                     >
@@ -255,7 +266,7 @@ function WebAccessForm({
             </div>
           </div>
           )}
-          <p className={styles.hint}>
+          <p className={styles.networkNote}><ShieldCheck {...UI_ICON_SM} className={styles.inlineIcon} />
             仅在自己的网络使用，请勿把端口映射到公网。
           </p>
         </div>
@@ -263,22 +274,23 @@ function WebAccessForm({
     </div>
   );
   return (
-    <>
+    <div className={styles.root}>
       {config}
       <SettingsCard
-        title="访问入口"
+        as="section"
+        aria-label="访问入口"
+        headerClassName={styles.cardHeader}
+        title={<span className={styles.sectionTitle}><Globe {...UI_ICON_SM} />访问入口</span>}
         hint="在其他设备浏览和播放；媒体库管理仍在桌面端完成。"
         actions={
           <div className={styles.actions}>
-            <span
-              className={styles.state}
-              data-running={status.running}
-              role="status"
-            >
-              {status.running ? "可打开" : status.error ? "启动失败" : "未开启"}
-            </span>
-            <Button
-              size="sm"
+            <span role="status"><SettingsStatusPill status={status.running ? 'success' : status.error ? 'warning' : 'muted'}>
+              {status.running ? "运行中" : status.error ? "启动失败" : "未开启"}
+            </SettingsStatusPill></span>
+            <IconButton
+              size="control"
+              label="刷新服务状态"
+              icon={<RefreshCw {...UI_ICON_SM} />}
               disabled={saving}
               onClick={() =>
                 void api.webAccess
@@ -286,34 +298,33 @@ function WebAccessForm({
                   .then(onChange)
                   .catch((e) => setAddressFeedback(e.message))
               }
-            >
-              刷新
-            </Button>
+            />
             {status.enabled && !status.running && <Button size="sm" disabled={saving || form.dirty}
               title={form.dirty ? '请先保存或取消配置更改' : undefined} onClick={() => void save()}>重试启动</Button>}
           </div>
         }
       >
         <div className={styles.accessBody}>
-          <div className={styles.stableRow}>
+          <div className={styles.accessToolbar}>
             <div className={styles.addressSelect}><SelectControl aria-label="访问地址" value={url} disabled={!status.running || !url} onChange={e => { setSelectedUrl(e.target.value); setAddressFeedback("") }}>
               {!url && <option value="">服务未运行</option>}
               {status.urls.map(value => <option key={value} value={value}>{value}{value.includes('127.0.0.1') ? ' · 仅本机' : ''}</option>)}
             </SelectControl></div>
             <div className={styles.actions}>
-              <Button size="sm" disabled={!status.running || !url} onClick={() => void navigator.clipboard.writeText(url).then(() => setAddressFeedback('地址已复制')).catch(() => setAddressFeedback(`复制失败，请手动复制：${url}`))}>复制</Button>
-              <Button size="sm" disabled={!status.running || !url} onClick={() => void api.externalLinks.open(url).catch(e => setAddressFeedback(e.message))}>打开</Button>
-              <Button size="sm" disabled={!status.running || !url} onClick={() => setQrOpen(true)}>二维码</Button>
+              <IconButton size="control" icon={addressFeedback === '地址已复制' ? <Check {...UI_ICON_SM} /> : <Copy {...UI_ICON_SM} />} label="复制访问地址" disabled={!status.running || !url} onClick={() => void navigator.clipboard.writeText(url).then(() => setAddressFeedback('地址已复制')).catch(() => setAddressFeedback(`复制失败，请手动复制：${url}`))} />
+              <IconButton size="control" icon={<ExternalLink {...UI_ICON_SM} />} label="打开访问地址" disabled={!status.running || !url} onClick={() => void api.externalLinks.open(url).catch(e => setAddressFeedback(e.message))} />
+              <Button size="sm" className={styles.iconLabel} disabled={!status.running || !url} onClick={() => setQrOpen(true)}><QrCode {...UI_ICON_SM} />扫码访问</Button>
             </div>
           </div>
           <div className={styles.accessFeedback}>
-            <Button size="sm" variant="ghost" aria-expanded={helpOpen} onClick={() => setHelpOpen(!helpOpen)}>{helpOpen ? '收起说明' : '无法连接？'}</Button>
-            <div className={styles.inlineFeedback} role="status">{addressFeedback || (helpOpen ? '其他设备需连接同一网络（例如同一个 Wi-Fi），不要使用仅本机地址。可切换其他地址尝试，并检查防火墙是否允许此端口。' : status.error || (!status.running ? '请在上方开启并保存。' : '连上同一网络后，用浏览器打开此地址。'))}</div>
-            {addressFeedback && <Button size="sm" variant="ghost" onClick={() => setAddressFeedback("")}>关闭提示</Button>}
+            <div className={styles.inlineFeedback} data-error={Boolean(status.error)} role="status">{addressFeedback || (helpOpen ? '其他设备需连接同一网络（例如同一个 Wi-Fi），不要使用仅本机地址。可切换其他地址尝试，并检查防火墙是否允许此端口。' : status.error || (!status.running ? '请在上方开启并保存。' : '此地址用于只读浏览与播放，首次访问需登录或配对。'))}</div>
+            <div className={styles.actions}><Button size="sm" variant="ghost" aria-expanded={helpOpen} onClick={() => setHelpOpen(!helpOpen)}>{helpOpen ? '收起说明' : '无法连接？'}</Button>
+              {addressFeedback && <Button size="sm" variant="ghost" onClick={() => setAddressFeedback("")}>关闭提示</Button>}</div>
           </div>
         </div>
       </SettingsCard>
-      <WebDevices status={status} onChange={onChange} />
+      <WebDevices status={status} onChange={onChange} coordination={{ lock, revision: operationRevision,
+        busy: saving, onBusyChange: setDevicesBusy }} />
       {qrOpen && status.running && url && (
         <Modal
           title="扫码访问"
@@ -329,6 +340,6 @@ function WebAccessForm({
           </div>
         </Modal>
       )}
-    </>
+    </div>
   );
 }

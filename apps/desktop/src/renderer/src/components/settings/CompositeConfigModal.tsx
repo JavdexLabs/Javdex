@@ -108,6 +108,7 @@ export default function CompositeConfigModal({
       }
       hint="将不同插件擅长的字段组合使用。每个字段固定使用一个来源，未分配的字段跳过。"
       size="lg"
+      layout="form"
       bodyClassName={styles.body}
       busy={saving}
       onCancel={() => requestLeave(onCancel)}

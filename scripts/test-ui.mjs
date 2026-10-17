@@ -5,6 +5,7 @@ import fs from 'node:fs'
 import { createServer } from 'vite'
 import react from '@vitejs/plugin-react'
 import { chromium } from 'playwright-core'
+import { waitForLocalModelSettings, checkLocalModelCatalog, checkLocalModelInstalledFilters } from './local-model-settings-ui.mjs'
 
 // Small PR suite: production Modules, synthetic data, actual browser input. No personal catalog.
 const repo = process.cwd()
@@ -195,19 +196,34 @@ try {
   assert.deepEqual(await page.evaluate(() => window.fixtureControls), [], 'toast dismissal does not alter playback or start another session')
   assert.ok(await page.evaluate(() => window.fixtureViewports.every(value => value.sessionId === 'toast-fixture')))
   await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/settings.html`)
-  await page.getByRole('button', { name: '管理精度', exact: false }).first().waitFor()
+  await waitForLocalModelSettings(page)
+  const modelState = await page.evaluate(() => window.api.settings.getLocalModels())
+  await checkLocalModelCatalog(page, modelState.models)
+  await checkLocalModelInstalledFilters(page)
+  assert.deepEqual(await page.evaluate(() => window.api.settings.getLocalModels().then(value => value.usage)), modelState.usage,
+    'catalog, provenance dialogs and filters do not change model usage')
   for (const viewport of [{ width: 1440, height: 900 }, { width: 1000, height: 640 }]) {
     await page.setViewportSize(viewport)
     for (const theme of ['slate', 'light']) {
       await page.evaluate(value => window.setSettingsTheme(value), theme)
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true,
         `settings have no document overflow at ${viewport.width} in ${theme}`)
-      for (const name of ['更改并迁移', '恢复默认位置', '清理未完成下载', '清理推理缓存']) {
+      for (const name of ['更改并迁移', '清理未完成下载', '清理推理缓存']) {
         const action = page.getByRole('button', { name, exact: true })
         await action.scrollIntoViewIfNeeded()
         const box = await action.boundingBox()
         assert.ok(box.x >= 220 && box.x + box.width <= viewport.width, `${name} remains inside the workspace`)
       }
+      const locationMenu = page.getByRole('button', { name: '保存位置更多操作', exact: true })
+      await locationMenu.scrollIntoViewIfNeeded()
+      await locationMenu.click()
+      const resetLocation = page.getByRole('menuitem', { name: '恢复默认位置', exact: true })
+      await resetLocation.waitFor()
+      const resetBox = await resetLocation.boundingBox()
+      assert.ok(resetBox.x >= 220 && resetBox.x + resetBox.width <= viewport.width, 'location action menu remains inside the workspace')
+      await page.keyboard.press('Escape')
+      await resetLocation.waitFor({ state: 'detached' })
+      assert.equal(await locationMenu.evaluate(element => document.activeElement === element), true, 'closing the location menu restores its trigger focus')
       await page.getByText('下载校验与目录迁移说明', { exact: true }).click()
       assert.equal(await page.getByText('下载校验与目录迁移说明', { exact: true }).evaluate(element => element.closest('details').open), true)
       await page.getByText('下载校验与目录迁移说明', { exact: true }).click()

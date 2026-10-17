@@ -20,7 +20,8 @@ import {
 } from './surfaces'
 import { handleManageHttpRequest, type ManageHttpSurface } from './manage'
 import { handlePlayHttpRequest, closePlayStreams, type PlayHttpSurface } from './play'
-import { gatewayPeer, isLocalPeer, type GatewayConfig } from './gatewayPeer'
+import { gatewayContext, isLocalPeer, type GatewayConfig } from './gatewayPeer'
+import { browserVideoRoute, isBrowserRequest } from './browserRoutes'
 export { isLocalPeer } from './gatewayPeer'
 
 const COOKIE = 'javdex_web_session'
@@ -49,7 +50,7 @@ function token(request: IncomingMessage): string {
   return match?.slice(COOKIE.length + 1) ?? ''
 }
 function cookie(value: string, expire = false, remember = false): string {
-  // Direct LAN HTTP cannot use Secure; HTTPS termination is deliberately not trusted implicitly.
+  // Both Web schemes share this cookie and session; HttpOnly and SameSite stay enforced.
   return `${COOKIE}=${value}; HttpOnly; SameSite=Strict; Path=/${expire || remember ? `; Max-Age=${expire ? 0 : 365 * 86400}` : ''}`
 }
 const HEALTH_LIVE_KEYS = new Set(['status'])
@@ -246,12 +247,14 @@ export class WebServer {
       'Content-Security-Policy',
       "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self' http: https:; connect-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
     )
-    const forwardedPeer = gatewayPeer(request, this.options.gateway)
-    const remoteAddress = forwardedPeer ?? request.socket.remoteAddress ?? ''
+    const forwarded = gatewayContext(request, this.options.gateway)
+    if (this.options.gateway && Object.keys(request.headers).some(key => key.startsWith('x-javdex-gateway') || key === 'x-javdex-peer') && !forwarded)
+      throw new WebError(403, '网关信息无效')
+    const remoteAddress = forwarded?.peer ?? request.socket.remoteAddress ?? ''
     if (!isLocalPeer(remoteAddress))
       throw new WebError(403, '仅允许局域网访问')
     const authority = request.headers.host ?? ''
-    const origin = forwardedPeer ? this.options.gateway!.origin : `http://${authority}`
+    const origin = forwarded?.origin ?? `http://${authority}`
     const port = request.socket.localPort ?? 0
     // Literal access hosts only: prevents DNS rebinding and ignores forwarded headers.
     if (!this.allowedAuthorities(port).has(authority))
@@ -267,10 +270,12 @@ export class WebServer {
     if (url.origin !== origin)
       throw new WebError(400, '请求地址无效')
     const originOk = !request.headers.origin || request.headers.origin === origin
+    if (forwarded?.protocol === 'http' && !isBrowserRequest(request.method ?? 'GET', url.pathname))
+      throw new WebError(403, '此接口仅支持 HTTPS')
     if (this.options.maintenance?.() && !((request.method === 'GET' || request.method === 'HEAD') && (url.pathname === '/live' || url.pathname === '/ready'))) {
       throw new WebError(503, '服务端正在更新验证，请稍后重试')
     }
-    if (await handleManageHttpRequest(request, response, url, this.options.manage, originOk, forwardedPeer ? { remoteAddress, isLoopback: false } : undefined)) {
+    if (await handleManageHttpRequest(request, response, url, this.options.manage, originOk, forwarded ? { remoteAddress, isLoopback: false } : undefined)) {
       return
     }
     if (await handlePlayHttpRequest(request, response, url, this.options.play)) {
@@ -518,10 +523,7 @@ export class WebServer {
         }
         return
       }
-      const match =
-        /^\/api\/videos\/([1-9]\d{0,9})(?:\/(images|media)\/(cover|actress-[1-9]\d{0,9}|[1-9]\d{0,9}))?$/.exec(
-          url.pathname
-        )
+      const match = browserVideoRoute.exec(url.pathname)
       if (!match) throw new WebError(404, '页面不存在')
       const id = Number(match[1])
       if (!match[2]) {
@@ -566,7 +568,7 @@ export class WebServer {
     }
     const file = url.pathname === '/' ? 'index.html' : url.pathname.slice(1)
     // Vite output only. No source tree, arbitrary paths, maps, or Electron renderer assets.
-    if (file !== 'index.html' && !/^assets\/[\w.-]+\.(js|css|png)$/.test(file))
+    if (!isBrowserRequest(method, url.pathname))
       throw new WebError(404, '页面不存在')
     const mime = file.endsWith('.js')
       ? 'text/javascript; charset=utf-8'

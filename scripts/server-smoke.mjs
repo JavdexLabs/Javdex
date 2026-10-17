@@ -131,6 +131,11 @@ try {
   }
   assert.deepEqual(await live.json(), { status: 'live' })
   assert.equal((await fetch(`${base}/ready`)).status, 200)
+  const webHttp = `http://127.0.0.1:${port}`
+  assert.equal((await globalThis.fetch(webHttp)).status, 200, 'the same public port must also serve HTTP Web')
+  for (const route of ['/manage/v1/handshake.get', '/connect/v1/claim', '/update/v1/control', '/runtime/v1/info', '/play/v1/file', '/live', '/ready']) {
+    assert.equal((await globalThis.fetch(`${webHttp}${route}`, { headers: { 'X-Forwarded-Proto': 'https', 'X-Javdex-Gateway-Protocol': 'https' } })).status, 403, `HTTP must not expose ${route}`)
+  }
 
   const login = await fetch(`${base}/api/login`, {
     method: 'POST',
@@ -142,7 +147,9 @@ try {
     body: JSON.stringify({ username: 'viewer', password: 'correct horse battery', remember: true })
   })
   assert.equal(login.status, 200)
+  assert.doesNotMatch(login.headers.get('set-cookie') ?? '', /;\s*Secure(?:;|$)/i)
   const cookie = login.headers.get('set-cookie')?.split(';')[0] ?? ''
+  assert.equal((await globalThis.fetch(`${webHttp}/api/session`, { headers: { Cookie: cookie } })).status, 200, 'HTTPS login must also authorize the HTTP Web surface')
   assert.equal((await fetch(`${base}/api/collections`, { headers: { Cookie: cookie } })).status, 503)
 
   const handshake = await fetch(`${base}/manage/v1/handshake.get`, {
@@ -170,6 +177,7 @@ try {
   assert.equal(claimed.serverId, hello.identity.serverId)
   assert.equal(claimed.catalogId, hello.identity.catalogId)
   assert.equal((await fetch(`${base}/api/collections`, { headers: { Cookie: cookie } })).status, 200)
+  assert.equal((await globalThis.fetch(`${webHttp}/api/collections`, { headers: { Cookie: cookie } })).status, 200)
 
   spawnSync('docker', ['restart', 'javdex-server-smoke'], { stdio: 'inherit' })
   live = null
@@ -189,7 +197,7 @@ try {
     "process.exit(require('node:fs').existsSync('/data/library.db') ? 0 : 1)"
   ], { encoding: 'utf8' })
   assert.equal(dataCheck.status, 0, dataCheck.stderr)
-  console.log('PASS: Docker image, volume SQLite, unified HTTPS pairing gate, session restart')
+  console.log('PASS: Docker image, volume SQLite, same-port HTTP Web / HTTPS client gate, shared session restart')
 } finally {
   await connection.close()
   spawnSync('docker', ['rm', '-f', 'javdex-server-smoke'], { stdio: 'ignore' })

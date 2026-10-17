@@ -8,6 +8,7 @@ import { FileMatcher } from 'app-builder-lib/out/fileMatcher.js'
 import buildConfig from '../electron-builder.config.mjs'
 import { aiRuntimeSources, macAiBuildCommands, refreshAiBundleInventory, verifyAiBundle, stagePackagedAiRuntime,
   signPackagedAiTools, verifySignedAiRuntime, preparePackagedAiRuntime } from './ai-runtime-build.mjs'
+import { refreshWindowsVulkanInventory, verifyWindowsVulkanBundle, windowsVulkanCommands } from './windows-vulkan-runtime.mjs'
 
 async function fixture(t) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'javdex-ai-bundle-'))
@@ -23,6 +24,26 @@ async function fixture(t) {
     packager: { projectDir: root, getResourcesDir: () => resources } }
   return { root, directory, resources, context }
 }
+
+test('Windows Vulkan bundles stage only verified native tools, reject mutation/unlisted files and pin baseline CPU instructions', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'javdex-vulkan-bundle-'))
+  t.after(() => fs.rm(root, { recursive: true, force: true }))
+  const directory = path.join(root, 'out/ai-runtime/win32-x64-vulkan'), filesRoot = path.join(directory, 'whisper')
+  await fs.mkdir(filesRoot, { recursive: true })
+  for (const name of ['whisper-cli.exe', 'vulkan-1.dll', 'LICENSE-whisper.txt', 'LICENSE-vulkan-loader.txt']) await fs.writeFile(path.join(filesRoot, name), name)
+  await refreshWindowsVulkanInventory(directory)
+  await verifyWindowsVulkanBundle(directory)
+  const resources = path.join(root, 'resources')
+  await stagePackagedAiRuntime({ electronPlatformName: 'win32', packager: { projectDir: root, getResourcesDir: () => resources } })
+  await verifyWindowsVulkanBundle(path.join(resources, 'ai-runtime/win32-x64-vulkan'))
+  await fs.writeFile(path.join(filesRoot, 'injected.dll'), 'unexpected')
+  await assert.rejects(verifyWindowsVulkanBundle(directory), /Unlisted/)
+  await fs.rm(path.join(filesRoot, 'injected.dll'))
+  await fs.appendFile(path.join(filesRoot, 'whisper-cli.exe'), 'modified')
+  await assert.rejects(verifyWindowsVulkanBundle(directory))
+  const commands = windowsVulkanCommands('/source', '/build', '/sdk', 'Visual Studio 17 2022')
+  for (const flag of ['-DGGML_VULKAN=ON', '-DBUILD_SHARED_LIBS=OFF', '-DGGML_NATIVE=OFF', '-DGGML_AVX2=OFF', '-DWHISPER_CURL=OFF']) assert.ok(commands[0].includes(flag))
+})
 test('macOS recipes pin static, relocatable tools and select each target architecture', () => {
   assert.match(aiRuntimeSources.whisper.url, /\/[a-f0-9]{40}$/)
   for (const source of [aiRuntimeSources.whisper, aiRuntimeSources.ffmpeg]) {
@@ -74,9 +95,9 @@ test('packaging stages tools outside asar, signs them before sealing the app and
   assert.notEqual(JSON.parse(final).assets.whisper.files.find(entry => entry.name === 'whisper-cli').sha256,
     source.assets.whisper.files.find(entry => entry.name === 'whisper-cli').sha256)
 })
-test('non-Mac packages do not build/stage tools and all packages exclude AI build and acceptance files', async () => {
+test('Linux packages do not build/stage bundled tools and all packages exclude AI build and acceptance files', async () => {
   await preparePackagedAiRuntime({ electronPlatformName: 'linux' })
-  await stagePackagedAiRuntime({ electronPlatformName: 'win32' })
+  await stagePackagedAiRuntime({ electronPlatformName: 'linux' })
   await verifySignedAiRuntime({ electronPlatformName: 'linux' })
   const root = process.cwd(), config = buildConfig()
   assert.equal(typeof config.afterSign, 'function')

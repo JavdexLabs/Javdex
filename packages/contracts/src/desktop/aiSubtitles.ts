@@ -13,6 +13,9 @@ export interface AiSubtitleSnapshot {
   activeStart: number | null
   recognizedSeconds: number
   translatedSeconds: number
+  /** Absolute video endpoints of continuous coverage from the current playback chunk; null while that range is pending. */
+  recognizedUntil: number | null
+  translatedUntil: number | null
   duration: number | null
   display: AiSubtitleDisplay
   fontSize: number

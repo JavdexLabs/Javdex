@@ -3,6 +3,8 @@ dist
 dist-pages
 out
 out-tsc
+/output/
+/design-qa.md
 *.log
 .DS_Store
 .vite

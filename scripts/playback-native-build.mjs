@@ -76,6 +76,7 @@ export function playbackNativeBuild({ platform, arch, root, prefix, include, nod
       { command: 'cmake', args: ['--build', build, '--config', 'Release'] },
       { command: path.join(output, 'mpv-core-test'), args: [] },
       { command: path.join(output, 'x11-controls-test'), args: [] },
+      { command: path.join(output, 'x11-surface-test'), args: [] },
       { command: process.execPath, args: [path.join(root, 'scripts/playback-linux-helper-smoke.mjs'), path.join(output, 'playback-helper')] }
     ]
   }

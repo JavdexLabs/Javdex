@@ -1,0 +1,11 @@
+[
+  { "filename": "mingw-w64-ucrt-x86_64-shaderc-2026.4-1-any.pkg.tar.zst", "sha256": "a4ad271f76acd2307ed67738770b30d6486bd3c7acff63ba83dd13e56ce9ab82" },
+  { "filename": "mingw-w64-ucrt-x86_64-glslang-16.6.0-1-any.pkg.tar.zst", "sha256": "74742908b850637e4f0710cd9630f511b0def5b0f18d653cf9657197758bda82" },
+  { "filename": "mingw-w64-ucrt-x86_64-spirv-tools-3~1.4.363.0-1-any.pkg.tar.zst", "sha256": "d31d67fe918aeee21d1e930fd96360856a60146d23094e4ae8baf071a4049aaa" },
+  { "filename": "mingw-w64-ucrt-x86_64-libgcc-16.2.0-6-any.pkg.tar.zst", "sha256": "80b2497f019977dd9528b1abc8621b1328a0115ab1f724047ccbb56bf323f11d" },
+  { "filename": "mingw-w64-ucrt-x86_64-libstdc++-16.2.0-6-any.pkg.tar.zst", "sha256": "33c5e58a85a538cf843a8672991cce591f0231d66da3b66a57629712d64be17f" },
+  { "filename": "mingw-w64-ucrt-x86_64-libwinpthread-14.0.0.r426.g4564ee4b5-2-any.pkg.tar.zst", "sha256": "a02f5e09d666d3be657c78c86fe67c975d04fe33b5211cd5ff1b23a91c118524" },
+  { "filename": "mingw-w64-ucrt-x86_64-vulkan-headers-1~1.4.363.0-1-any.pkg.tar.zst", "sha256": "be602b2657cace531316e78b1eda4087e8f7f84ebb877f08fba198a2db06406a" },
+  { "filename": "mingw-w64-ucrt-x86_64-vulkan-loader-1~1.4.363.0-1-any.pkg.tar.zst", "sha256": "065076fe13d39ab97eea4740596426d5ae741b5044e48e1c9495d04835c92dbe" },
+  { "filename": "mingw-w64-ucrt-x86_64-spirv-headers-2~1.4.363.0-1-any.pkg.tar.zst", "sha256": "c15f7df169ccd4bf57fc9053d34e762818fa96e3da229c92501d7eedf4aa71dd" }
+]

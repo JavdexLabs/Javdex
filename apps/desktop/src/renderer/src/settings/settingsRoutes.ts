@@ -155,6 +155,19 @@ export function preservesModelUsageDraft(pathname: string): boolean {
   return /^\/settings\/models\/(usage|providers|local|advanced)$/.test(pathname)
 }
 
+export type ModelUsageSection = 'ai-subtitles' | 'text-translation'
+export function localModelFilesLocation(search: string, model: string, variant: string, section: ModelUsageSection) {
+  const query = new URLSearchParams(search)
+  query.set('model', model); query.set('variant', variant); query.set('usage', section)
+  return { pathname: settingsPath('models', 'local'), search: `?${query}`, hash: '' }
+}
+export function modelUsageLocation(search: string, fallback: ModelUsageSection = 'ai-subtitles') {
+  const query = new URLSearchParams(search)
+  const section = query.get('usage') === 'text-translation' ? 'text-translation' : query.get('usage') === 'ai-subtitles' ? 'ai-subtitles' : fallback
+  query.delete('model'); query.delete('variant'); query.delete('usage')
+  return { pathname: settingsPath('models', 'usage'), search: query.toString() ? `?${query}` : '', hash: `#${section}` }
+}
+
 export function settingsPluginDevPath(): string {
   return ROUTE_PATH.settingsPluginDev
 }

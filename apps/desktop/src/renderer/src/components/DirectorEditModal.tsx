@@ -35,6 +35,7 @@ export default function DirectorEditModal({ director, onCancel, onSave }: Props)
       title={director ? '编辑导演资料' : '新增导演'}
 
       size="lg"
+      layout="form"
       busy={saving}
       confirmText="保存"
       confirmDisabled={saving || !draft.mainName.trim()}

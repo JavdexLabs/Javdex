@@ -41,7 +41,7 @@ import { videoMaintenanceService } from './services/videoMaintenanceService'
 import { videoLifecycleService } from './services/videoLifecycleService'
 import { videoQueryService } from './services/videoQueryService'
 import { disposeBuiltinPlayback, stopBuiltinPlayback } from './player/desktopPlayback'
-import { closeLocalModels } from './services/localModels/desktopLocalModels'
+import { captureInitialLocalModelMode, closeLocalModels } from './services/localModels/desktopLocalModels'
 
 let mainWindow: BrowserWindow | null = null
 let shutdownInProgress = false
@@ -158,6 +158,7 @@ function registerAssetProtocol(): void {
 
 if (gotSingleInstanceLock) {
   void app.whenReady().then(async () => {
+    captureInitialLocalModelMode()
     applyAppIcons()
     configureDesktopLibraryRuntime()
     const runtime = await createDesktopRuntime(app.getPath('userData'), app.getVersion(), {

@@ -226,6 +226,7 @@ export interface CatalogBrowserCommands {
   status: Query<'browser.status'>
   setEnabled: Command<'browser.setEnabled'>
   pairOpen: Command<'browser.pairOpen'>
+  pairClose: Command<'browser.pairClose'>
   pairInspect: Query<'browser.pairInspect'>
   pairDecide: Command<'browser.pairDecide'>
   deviceRemove: Command<'browser.deviceRemove'>

@@ -126,6 +126,7 @@ export default function VideoResourceMoveModal({
     <Modal
       title="移动资源到其它媒体库"
       size="md"
+      layout="form"
       confirmText={impact ? '确认移动' : '读取影响'}
       confirmDisabled={loadingLibraries || targetLibraryId == null}
       busy={busy}

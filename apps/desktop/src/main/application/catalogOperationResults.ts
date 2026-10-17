@@ -407,6 +407,7 @@ export interface CatalogOperationResults {
   'browser.status': CatalogBrowserStatus
   'browser.setEnabled': CatalogBrowserStatus
   'browser.pairOpen': CatalogBrowserStatus
+  'browser.pairClose': CatalogBrowserStatus
   'browser.pairInspect': {
     name: string
     expires: number

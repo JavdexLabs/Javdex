@@ -138,6 +138,7 @@ export default function PosterCard<TVideo extends VideoCard = Video>({
       className={`${styles.root}${className ? ` ${className}` : ''}`}
       data-video-card
       data-selected={selected || undefined}
+      data-menu-open={menuOpen || undefined}
       role="button"
       tabIndex={0}
       onClick={openVideo}

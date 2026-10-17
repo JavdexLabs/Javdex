@@ -9,6 +9,7 @@
 }
 
 .root {
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
   max-height: calc(100vh - var(--modal-viewport-inset));
@@ -21,6 +22,10 @@
 
 .form {
   padding: 20px 22px;
+}
+
+.formLayout {
+  height: min(640px, calc(100vh - var(--modal-viewport-inset)));
 }
 
 .compact {
@@ -132,6 +137,7 @@
 
 .formBody {
   min-width: 0;
+  min-height: var(--control-h-sm);
 }
 
 .bodyHidden {

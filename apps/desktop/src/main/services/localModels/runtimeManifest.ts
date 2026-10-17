@@ -2,7 +2,7 @@ import type { LocalTranslationModelId } from '@shared/desktop/localModels'
 
 /** Fixed upstream releases and repository revisions, never resolve `latest` at installation. */
 export interface AiRuntimeAsset {
-  id: 'whisper' | 'translator' | 'ffmpeg' | 'kotoba' | 'translation-model' | 'vad'
+  id: 'whisper' | 'translator' | 'ffmpeg' | 'kotoba' | 'translation-model' | 'vad' | 'cuda'
   label: string
   url: string
   sha256: string
@@ -13,6 +13,10 @@ export interface AiRuntimeAsset {
   /** POSIX archives retain their bin/lib layout after removing this fixed prefix. */
   archivePrefix?: string
   translationModelId?: LocalTranslationModelId
+  backend?: 'cuda' | 'vulkan'
+  /** Reviewed uncompressed limit for large GPU DLL distributions. */
+  expandedBytes?: number
+  bundledVersion?: string
 }
 export const LOCAL_MODEL_ASSETS: readonly AiRuntimeAsset[] = [
   { id: 'whisper', label: '日语识别运行库', filename: 'whisper.zip', archive: true, bytes: 8573270,

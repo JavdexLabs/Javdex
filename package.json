@@ -1,11 +1,22 @@
 {
   "name": "Javdex",
-  "version": "0.9.0-beta.7",
+  "version": "0.9.0",
   "description": "Javdex — local JAV library manager",
   "main": "./out/main/index.js",
   "author": "Javdex",
   "license": "GPL-3.0-or-later",
   "private": false,
+  "overrides": {
+    "@earendil-works/pi-coding-agent": {
+      "undici": "8.10.2",
+      "minimatch": {
+        "brace-expansion": "5.0.12"
+      }
+    },
+    "postcss-nested": {
+      "postcss-selector-parser": "7.1.6"
+    }
+  },
   "scripts": {
     "dev": "npm run web:build && node scripts/dev.mjs",
     "pages:build": "node website/scripts/build.mjs",
@@ -20,11 +31,14 @@
     "packaging:configure": "node scripts/configure-packaging.mjs",
     "packaging:verify-agent-runtime": "node scripts/check-packaged-agent-runtime.mjs",
     "packaging:verify-playback-runtime": "node scripts/check-packaged-playback-runtime.mjs",
-    "test:packaging": "node --test scripts/packaging-runtime.test.mjs scripts/playback-runtime.test.mjs scripts/aggregate-playback-sources.test.mjs scripts/check-playback-installers.test.mjs scripts/ai-runtime-build.test.mjs scripts/renderer-bundle-report.test.mjs",
+    "test:packaging": "node --test scripts/packaging-runtime.test.mjs scripts/playback-runtime.test.mjs scripts/playback-linux-elf.test.mjs scripts/aggregate-playback-sources.test.mjs scripts/check-playback-installers.test.mjs scripts/ai-runtime-build.test.mjs scripts/renderer-bundle-report.test.mjs",
     "test:playback:fixtures": "node --test scripts/playback-pgs-fixture.test.mjs",
-    "test:playback:build": "node --test scripts/playback-native-build.test.mjs scripts/playback-source-build.test.mjs scripts/release-metadata.test.mjs",
+    "test:playback:build": "node --test scripts/playback-native-build.test.mjs scripts/playback-source-build.test.mjs scripts/stage-playback-linux-context.test.mjs scripts/release-metadata.test.mjs scripts/release-publication.test.mjs && node --import tsx --test scripts/playback-acceptance-settings.test.mjs",
     "test:backup-smoke": "node --test scripts/backup-smoke-status.test.mjs",
-    "test:ui": "node scripts/test-ui.mjs",
+    "test:playback:navigation": "node scripts/playback-navigation-acceptance.mjs",
+    "test:playback:remote": "node --require ./scripts/register-test-paths.cjs --import tsx scripts/playback-remote-acceptance.mjs",
+    "test:playback:remote:connection": "node --require ./scripts/register-test-paths.cjs --import tsx scripts/playback-remote-connection-smoke.mts",
+    "test:ui": "node scripts/test-ui.mjs && node scripts/ai-subtitle-guide-check.mjs && node scripts/modal-stability-check.mjs && node scripts/playback-settings-ui-check.mjs && node scripts/model-providers-ui-check.mjs",
     "test:ui:server-update": "node scripts/server-update-ui-check.mjs",
     "test:ui:matrix": "node scripts/css-module-migration.mjs",
     "measure:renderer": "node scripts/renderer-bundle-report.mjs",
@@ -75,7 +89,7 @@
     "server:build": "npm run web:build && node scripts/server-build.mjs && node scripts/check-server-production-closure.mjs",
     "server:updater:build": "node scripts/updater-build.mjs",
     "server:updater:smoke": "node --require ./scripts/register-test-paths.cjs --import tsx scripts/server-updater-smoke.ts",
-    "server:updater:test": "node --require ./scripts/register-test-paths.cjs --import tsx --test apps/server/src/updater/*.test.ts apps/server/src/updateGuard.test.ts packages/http/src/updateClient.test.ts packages/http/src/updateBundle.test.ts packages/http/src/pinnedFetch.test.ts packages/http/src/serverEnvironmentClient.test.ts packages/contracts/src/serverEnvironment.test.ts scripts/server-release-package.test.mjs scripts/server-update-release.test.mjs",
+    "server:updater:test": "node --require ./scripts/register-test-paths.cjs --import tsx --test apps/server/src/updater/*.test.ts apps/server/src/updateGuard.test.ts packages/http/src/updateClient.test.ts packages/http/src/updateBundle.test.ts packages/http/src/pinnedFetch.test.ts packages/http/src/serverEnvironmentClient.test.ts packages/contracts/src/serverEnvironment.test.ts scripts/server-release-package.test.mjs scripts/server-update-release.test.mjs scripts/server-updater-smoke-legacy.test.mts",
     "server:test": "npm run check:server-boundaries && node scripts/server-test.mjs",
     "server:smoke": "node --import tsx scripts/server-smoke.mjs",
     "server:smoke:agent": "node scripts/run-electron-tests.mjs apps/desktop/src/main/services/agentMetadata/agentMetadataDocker.smoke.ts",
@@ -87,20 +101,20 @@
   "dependencies": {
     "@earendil-works/pi-coding-agent": "0.84.2",
     "acorn": "8.18.0",
-    "axios": "^1.7.7",
+    "axios": "^1.20.0",
     "better-sqlite3": "13.0.3",
     "cheerio": "^1.0.0",
     "fast-xml-parser": "5.11.1",
     "https-proxy-agent": "^7.0.5",
-    "music-metadata": "^11.14.0",
+    "music-metadata": "^11.16.0",
     "playwright-core": "1.62.1",
     "qrcode": "^1.5.4",
     "semver": "7.8.5",
-    "sharp": "0.35.4",
+    "sharp": "0.35.5",
     "socks": "2.8.9",
     "strtok3": "^10.3.5",
     "tar": "7.5.22",
-    "undici": "^7.28.0",
+    "undici": "^7.29.1",
     "yet-another-react-lightbox": "^3.32.2",
     "zod": "^4.4.3"
   },
@@ -110,7 +124,7 @@
     "@electron/rebuild": "^4.2.0",
     "@eslint/js": "^9.39.5",
     "@mediapipe/tasks-vision": "0.10.35",
-    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@modelcontextprotocol/sdk": "^1.31.0",
     "@tanstack/react-query": "^5.101.0",
     "@types/better-sqlite3": "^7.6.11",
     "@types/node": "^22.9.0",
@@ -121,7 +135,7 @@
     "@types/react-window": "^1.8.8",
     "@types/semver": "7.8.0",
     "@vitejs/plugin-react": "^5.2.0",
-    "electron": "43.4.1",
+    "electron": "43.8.0",
     "electron-builder": "^26.15.3",
     "electron-vite": "^5.0.0",
     "esbuild": "0.25.12",

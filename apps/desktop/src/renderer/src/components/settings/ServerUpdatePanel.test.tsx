@@ -107,14 +107,13 @@ for (const interrupted of [false, true]) test(`an older completed job cannot blo
   }
 })
 
-async function mountPanel(control: (command: ServerUpdateCommand) => Promise<ServerUpdateSnapshot>, currentSession: DesktopSession = session) {
+async function mountPanel(control: (command: ServerUpdateCommand) => Promise<ServerUpdateSnapshot>, currentSession: DesktopSession = session, reconnect = async () => {}) {
   const previousWindow = globalThis.window
   Object.defineProperty(globalThis, 'window', { configurable: true, value: { api: { serverUpdate: { control } } } })
   const { api } = await import('../../api')
   const previousApi = api.serverUpdate
   api.serverUpdate = window.api.serverUpdate
   const [{ default: Panel }, { default: Button }] = await Promise.all([import('./ServerUpdatePanel'), import('../Button')])
-  const reconnect = async () => {}
   const provider = (value: DesktopSession) => <DesktopSessionContext.Provider value={{ session: value, capabilities: {} as never, catalogReadsEnabled: false, reconnect, claimWriter: async () => { throw new Error('unused') } }}><Panel /></DesktopSessionContext.Provider>
   let tree: TestRenderer.ReactTestRenderer
   await act(async () => { tree = TestRenderer.create(provider(currentSession)) })
@@ -143,10 +142,26 @@ test('an older image disables both upgrade entries and offers the selected inlin
     assert.equal(panel.button('上传离线包升级').props.disabled, true)
     assert.ok(panel.button('查看镜像升级指引'))
     assert.ok(panel.button('重新检测'))
-    assert.match(renderedText(panel.tree.root), /当前环境.*修订 1.*本版要求.*修订 2/)
+    assert.match(renderedText(panel.tree.root), /当前环境.*运行环境版本 1.*本版要求.*运行环境版本 2/)
     assert.doesNotMatch(renderedText(panel.tree.root), /最低要求|及以上/)
     assert.ok(calls.some(command => command.action === 'environment'))
     assert.ok(calls.every(command => command.action === 'environment' || command.action === 'status'))
+  } finally { panel.dispose() }
+})
+
+test('an old HTTP deployment offers the image upgrade and retries migration only on explicit recheck', async () => {
+  let reconnects = 0
+  const environment: ServerEnvironmentSnapshot = { ...compatible, state: 'imageRequired', currentVersion: null, message: '需要升级服务端Docker镜像' }
+  const panel = await mountPanel(async () => ({ ...initial, paired: false, environment }),
+    { ...session, appVersion: '0.8.0', legacyHttpUpgradeRequired: true }, async () => { reconnects++ })
+  try {
+    assert.equal(reconnects, 0)
+    assert.match(renderedText(panel.tree.root), /服务端仍为 0.8.0.*升级服务端 Docker 镜像.*保留原授权/)
+    assert.equal(panel.button('在线升级').props.disabled, true)
+    assert.equal(panel.button('上传离线包升级').props.disabled, true)
+    assert.ok(panel.button('查看镜像升级指引'))
+    await act(async () => { panel.button('重新检测').props.onClick() })
+    assert.equal(reconnects, 1)
   } finally { panel.dispose() }
 })
 

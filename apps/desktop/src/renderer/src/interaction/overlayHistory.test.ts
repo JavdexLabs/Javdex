@@ -250,3 +250,87 @@ test('nested adoption never steals a live lower owner and abandoned queued entri
   f.pop()
   assert.equal(readOverlayHistoryMarker(f.state()), null)
 })
+
+test('a traversal deadline fails waiting navigation and queued views without retrying history.go', () => {
+  const f = fixture()
+  const old = f.open('image-preview')
+  f.history.close(old)
+  f.open('playback-expanded')
+  const results: string[] = []
+  f.history.afterTraversal(result => results.push(result))
+  f.timers[0]()
+  assert.equal(f.history.isTraversing(), true, 'the short fallback still allows a slow traversal to arrive')
+  f.timers[1]()
+  assert.equal(f.history.isTraversing(), false)
+  assert.deepEqual(results, ['failed'])
+  assert.deepEqual(f.goes, [-1], 'a timeout must never issue a second Back')
+  assert.deepEqual(f.closes, ['image-preview:action', 'playback-expanded:failure'])
+  const next = f.open('image-preview')
+  assert.equal(f.stack.length, 2, 'the next explicit open reuses the retired slot')
+  assert.equal(readOverlayHistoryMarker(f.state())?.token, next)
+  f.pop()
+  assert.deepEqual(f.closes, ['image-preview:action', 'playback-expanded:failure', 'image-preview:history'])
+})
+
+test('a synchronous traversal rejection is reported to later waiters and can be retried explicitly', () => {
+  let state: unknown = {}
+  const history = createOverlayHistory({ read: () => ({ state, url: '#/detail' }), push: value => { state = value },
+    replace: value => { state = value }, go: () => { throw new Error('history unavailable') },
+    later: () => () => {}, token: () => 'view' })
+  const token = history.open('image-preview', () => {})
+  assert.doesNotThrow(() => history.close(token))
+  assert.equal(history.isTraversing(), false)
+  let result = ''
+  history.afterTraversal(value => { result = value })
+  assert.equal(result, 'failed')
+  history.open('playback-expanded', () => {})
+  history.afterTraversal(value => { result = value })
+  assert.equal(result, 'completed')
+})
+
+test('a missing pop event is acknowledged at the deadline when the cursor already moved', () => {
+  const f = fixture()
+  f.history.close(f.open('image-preview'))
+  const results: string[] = []
+  f.history.afterTraversal(result => results.push(result))
+  f.move()
+  f.timers[1]()
+  assert.deepEqual(results, ['completed'])
+  f.timers[0](); f.timers[1]()
+  assert.deepEqual(results, ['completed'], 'cancelled timers cannot repeat the result')
+})
+
+test('a real route departure cancels the old traversal and its waiters', () => {
+  const f = fixture()
+  f.history.close(f.open('image-preview'))
+  const results: string[] = []
+  f.history.afterTraversal(result => results.push(result))
+  f.route('#/settings')
+  assert.deepEqual(results, ['cancelled'])
+  assert.equal(f.history.isTraversing(), false)
+  f.timers[0](); f.timers[1]()
+  assert.deepEqual(results, ['cancelled'])
+})
+
+test('a URL change retaining the old marker cancels the traversal even before the router effect runs', () => {
+  const f = fixture()
+  f.history.close(f.open('image-preview'))
+  const results: string[] = []
+  f.history.afterTraversal(result => results.push(result))
+  f.stack.at(-1)!.url = '#/settings'
+  f.timers[1]()
+  assert.deepEqual(results, ['cancelled'])
+  assert.equal(f.history.isTraversing(), false)
+})
+
+test('failure retires a closed child while preserving a live parent for the next Back', () => {
+  const f = fixture()
+  f.open('playback-expanded')
+  f.history.close(f.open('image-preview'))
+  f.timers[1]()
+  f.pop()
+  assert.deepEqual(f.closes, ['image-preview:action', 'playback-expanded:history'])
+  assert.deepEqual(f.goes, [-1, -1], 'the same Back drains the now-closed parent position')
+  f.pop()
+  assert.equal(readOverlayHistoryMarker(f.state()), null)
+})

@@ -3,7 +3,8 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { request } from 'node:http'
+import { createServer, request } from 'node:http'
+import { listenFetchServer, startFetchServer } from '../../../../../scripts/test-http'
 import { hashPassword, LoginLimiter, verifyPassword, WebSessions } from './auth'
 import { parseRange } from './http'
 import { isLocalPeer, WebServer } from './server'
@@ -46,9 +47,9 @@ describe('Web authentication and streaming', () => {
       gateway: { origin, token },
       manage: { appVersion: '0.9.0', dispatch: context => ({ isLoopback: context.isLoopback, remoteAddress: context.remoteAddress, bearer: context.bearerSecret }) }
     })
-    const base = `http://127.0.0.1:${await isolated.start(0, '127.0.0.1')}`
+    const base = `http://127.0.0.1:${await startFetchServer(port => isolated.start(port, '127.0.0.1'))}`
     try {
-      const headers = { Origin: origin, 'Content-Type': 'application/json', 'x-javdex-gateway': token, 'x-javdex-peer': '192.168.1.5', Cookie: 'javdex_web_session=not-a-writer' }
+      const headers = { Origin: origin, 'Content-Type': 'application/json', 'x-javdex-gateway': token, 'x-javdex-peer': '192.168.1.5', 'x-javdex-gateway-protocol': 'https', Cookie: 'javdex_web_session=not-a-writer' }
       const response = await fetch(`${base}/manage/v1/handshake.get`, { method: 'POST', headers, body: '{}' })
       assert.equal(response.status, 200)
       assert.deepEqual(await response.json(), { isLoopback: false, remoteAddress: '192.168.1.5', bearer: null })
@@ -75,7 +76,7 @@ describe('Web authentication and streaming', () => {
       staticRoot: directory,
       catalog
     })
-    base = `http://127.0.0.1:${await server.start(0, '127.0.0.1')}`
+    base = `http://127.0.0.1:${await startFetchServer(port => server.start(port, '127.0.0.1'))}`
     const response = await login()
     sessionCookie = response.headers.get('set-cookie')!.split(';')[0]
     assert.equal(response.status, 200)
@@ -83,6 +84,26 @@ describe('Web authentication and streaming', () => {
   after(async () => {
     await server.stop()
     fs.rmSync(directory, { recursive: true, force: true })
+  })
+  it('keeps wrapped HTTP fixtures on Fetch-safe ports and retries a real occupied bind', async (t) => {
+    const occupied = createServer()
+    const occupiedPort = await listenFetchServer(occupied)
+    const isolated = new WebServer({ username: 'viewer', passwordHash, staticRoot: directory, catalog })
+    const start = isolated.start.bind(isolated)
+    let attempts = 0
+    t.mock.method(isolated, 'start', async (port: number, host?: string) => {
+      assert.ok(port >= 49152 && port <= 65535, 'never request a potentially Fetch-blocked ephemeral port')
+      return start(++attempts === 1 ? occupiedPort : port, host)
+    })
+    try {
+      const port = await startFetchServer(port => isolated.start(port, '127.0.0.1'))
+      assert.ok(attempts >= 2, 'the real EADDRINUSE bind must be retried')
+      const response = await fetch(`http://127.0.0.1:${port}/api/session`)
+      assert.equal(response.status, 401, 'Fetch must reach the listening WebServer')
+    } finally {
+      await isolated.stop()
+      await new Promise<void>((resolve) => occupied.close(() => resolve()))
+    }
   })
   it('keeps image responses private and reports read queue overload as 503', async (t) => {
     t.mock.method(catalog, 'image', async () => { throw new AssetReadQueueFullError() })
@@ -135,7 +156,7 @@ describe('Web authentication and streaming', () => {
       } }
     })
     try {
-      const origin = `http://127.0.0.1:${await isolated.start(0, '127.0.0.1')}`
+      const origin = `http://127.0.0.1:${await startFetchServer(port => isolated.start(port, '127.0.0.1'))}`
       const loginResponse = await fetch(origin + '/api/login', {
         method: 'POST', headers: { Origin: origin, 'Content-Type': 'application/json', 'X-Javdex-Client': 'web' },
         body: JSON.stringify({ username: 'viewer', password: 'correct horse battery' })
@@ -453,7 +474,7 @@ describe('Web authentication and streaming', () => {
         ready: () => ({ ready: true })
       }
     })
-    const probedBase = `http://127.0.0.1:${await probed.start(0, '127.0.0.1')}`
+    const probedBase = `http://127.0.0.1:${await startFetchServer(port => probed.start(port, '127.0.0.1'))}`
     try {
       const live = await fetch(`${probedBase}/live`)
       assert.equal(live.status, 200)

@@ -39,6 +39,8 @@ test('cached Japanese survives translation failure and retry never repeats recog
   scheduler.start(); await until(() => states.at(-1)?.phase === 'error')
   assert.equal(states.at(-1)?.cues[0].japanese, 'こんにちは')
   assert.equal(states.at(-1)?.recognizedSeconds, 15)
+  assert.equal(states.at(-1)?.recognizedUntil, 15)
+  assert.equal(states.at(-1)?.translatedUntil, null)
   scheduler.retry(); await until(() => states.at(-1)?.translatedSeconds === 15)
   assert.equal(recognizes, 1); assert.equal(translations, 2); assert.equal(states.at(-1)?.error, null)
   await scheduler.stop()
@@ -53,5 +55,34 @@ test('complete cached chunks load without starting either model', async () => {
   })
   scheduler.position(35); scheduler.start(); await until(() => states.at(-1)?.translatedSeconds === 45)
   assert.equal(states.at(-1)?.cues[0].start, 30)
+  assert.equal(states.at(-1)?.recognizedUntil, 45)
+  assert.equal(states.at(-1)?.translatedUntil, 45)
   await scheduler.stop()
+})
+
+test('time endpoints follow the seek range and partial translation without bridging gaps', async () => {
+  const states: SubtitleSchedulerState[] = []
+  const scheduler = createSubtitleScheduler(95, {
+    read: async () => null, write: async () => {},
+    recognize: async (start, _end, signal) => {
+      if (start !== 60) await delay(1000, undefined, { signal })
+      return [{ start: start + 2, end: start + 4, japanese: 'はい' }, { start: start + 8, end: start + 10, japanese: '次' }]
+    },
+    translate: async (cues, signal, updated) => {
+      await updated(cues.map((cue, index) => index === 0 ? { ...cue, chinese: '是' } : cue))
+      await delay(1000, undefined, { signal })
+      return cues
+    }, changed: state => states.push(state)
+  })
+  scheduler.position(65); scheduler.start()
+  try {
+    await until(() => states.at(-1)?.translatedUntil === 64)
+    assert.equal(states.at(-1)?.recognizedSeconds, 30)
+    assert.equal(states.at(-1)?.recognizedUntil, 90)
+    assert.equal(states.at(-1)?.translatedSeconds, 0)
+    scheduler.position(5)
+    assert.equal(states.at(-1)?.recognizedUntil, null)
+    assert.equal(states.at(-1)?.translatedUntil, null)
+    assert.equal(states.at(-1)?.recognizedSeconds, 30, 'cached work remains, but is not coverage at the new position')
+  } finally { await scheduler.stop() }
 })

@@ -16,6 +16,7 @@ import { ensureMediaAssetDirsAt } from '@library/assetStoragePaths'
 import { createWorkerWebCatalog } from '@http/catalogWorkerAdapter'
 import { WebServer } from '@http/server'
 import { WebSessions } from '@http/auth'
+import { httpBrowserOrigin } from '@http/gatewayPeer'
 import { constrainMediaToMounts, gateCatalogUntilBound } from './catalogGate'
 import type { ServerConfig } from './config'
 import { acquireDataDirLock, ensureLocalDataDir, ensureMediaMounts } from './filesystem'
@@ -71,7 +72,7 @@ function createBrowserSurface(
     port,
     username: config.web.username,
     hasPassword: true,
-    urls: process.env.JAVDEX_GATEWAY_TOKEN && process.env.JAVDEX_PUBLIC_URL ? [new URL(process.env.JAVDEX_PUBLIC_URL).origin] : (config.accessHosts.length > 0 ? config.accessHosts : ['127.0.0.1']).map(
+    urls: process.env.JAVDEX_GATEWAY_TOKEN && process.env.JAVDEX_PUBLIC_URL ? [httpBrowserOrigin(process.env.JAVDEX_PUBLIC_URL), new URL(process.env.JAVDEX_PUBLIC_URL).origin] : (config.accessHosts.length > 0 ? config.accessHosts : ['127.0.0.1']).map(
       (host) => `http://${host}:${port}`
     ),
     devices: http.devices,
@@ -89,6 +90,10 @@ function createBrowserSurface(
     },
     pairOpen() {
       http.pairing.open()
+      return status()
+    },
+    pairClose() {
+      http.pairing.clear()
       return status()
     },
     pairInspect(code) {

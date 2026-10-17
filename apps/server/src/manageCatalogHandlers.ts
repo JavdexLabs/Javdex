@@ -854,6 +854,9 @@ const handlers: Partial<Record<ManageOperationId, CatalogHandler>> = {
   'browser.pairOpen'(args) {
     return commit(args, () => requireManageBrowserSurface().pairOpen())
   },
+  'browser.pairClose'(args) {
+    return commit(args, () => requireManageBrowserSurface().pairClose())
+  },
   'browser.pairInspect'(args) {
     const input = args.envelope.input as { code: string }
     return requireManageBrowserSurface().pairInspect(input.code)

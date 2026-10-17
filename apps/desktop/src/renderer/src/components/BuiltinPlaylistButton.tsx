@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { Heart, Clock } from 'lucide-react'
 import type { VideoCard } from '@shared/videoTypes'
 import { expectedPlaylistVersion } from '@shared/protocol/versions'
 import { api } from '../api'
+import { updateBuiltinPlaylistMembership } from '../query/updateBuiltinPlaylistMembership'
 import { useToast } from './Toast'
 import IconButton from './IconButton'
 import { UI_ICON } from './iconDefaults'
@@ -13,6 +14,7 @@ export default function BuiltinPlaylistButton({ video, kind, className = '' }: {
   const initial = Boolean(kind === 'favorites' ? video.is_favorite : video.is_watch_later)
   const [selected, setSelected] = useState(initial)
   const [busy, setBusy] = useState(false)
+  const pending = useRef(false)
   const toast = useToast()
   const queryClient = useQueryClient()
   useEffect(() => setSelected(initial), [initial, video.id])
@@ -28,10 +30,12 @@ export default function BuiltinPlaylistButton({ video, kind, className = '' }: {
   return <IconButton className={`${className} ${kind === 'watch_later' ? styles.watch : ''} ${selected ? (kind === 'favorites' ? styles.favorite : styles.selected) : ''}`}
     icon={kind === 'favorites' ? <Heart {...UI_ICON} fill={selected ? 'currentColor' : 'none'} /> : <Clock {...UI_ICON} />}
     label={`${selected ? '移出' : '加入'}${name}`} title={`${selected ? '移出' : '加入'}${name}`}
-    aria-pressed={selected} disabled={busy}
+    aria-pressed={selected} aria-disabled={busy} aria-busy={busy}
     onClick={async event => {
       event.stopPropagation()
-      if (busy) return
+      if (pending.current) return
+      // Keep the icon and focus stable while the request runs, without disabled dimming.
+      pending.current = true
       setBusy(true)
       try {
         const memberships = await api.playlists.listForVideo(video.id)
@@ -41,9 +45,9 @@ export default function BuiltinPlaylistButton({ video, kind, className = '' }: {
         if (next) await api.playlists.addVideo(playlist.id, video.id, expectedPlaylistVersion(playlist))
         else await api.playlists.removeVideo(playlist.id, video.id, expectedPlaylistVersion(playlist))
         setSelected(next)
-        void queryClient.invalidateQueries()
+        await updateBuiltinPlaylistMembership(queryClient, video.id, kind, next)
         window.dispatchEvent(new CustomEvent('builtin-playlist-changed', { detail: { videoId: video.id, kind, selected: next } }))
       } catch (error) { toast.show((error as Error).message, 'error') }
-      finally { setBusy(false) }
+      finally { pending.current = false; setBusy(false) }
     }} />
 }

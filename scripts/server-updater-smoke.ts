@@ -15,6 +15,7 @@ import { CURRENT_SCHEMA_VERSION } from '../packages/library/src/db/migrations'
 import { createPinnedFetch } from '../packages/http/src/pinnedFetch'
 import { ManageHttpClient } from '../packages/http/src/manageClient'
 import { smokeConnection } from './server-smoke-connection'
+import { postLegacySmoke } from './server-updater-smoke-legacy'
 
 async function main(): Promise<void> {
   // Real Linux images, real native modules and published schema 19. No mocked Docker.
@@ -67,6 +68,21 @@ async function main(): Promise<void> {
     await waitReady()
     const original = JSON.parse(docker(['exec', source, 'node', '-e', "const D=require('better-sqlite3');const d=new D('/data/library.db');const id=d.prepare('SELECT server_id,catalog_id FROM catalog_identity WHERE id=1').get();d.prepare('INSERT INTO playlists(name) VALUES (?)').run('preserved user list');console.log(JSON.stringify({...id,schema:d.pragma('user_version',{simple:true})}));d.close();"])) as { server_id: string; catalog_id: string; schema: number }
     assert.equal(original.schema, 19)
+    // Bind through the real published 0.8.0 API, before replacing its image.
+    // Never issue a new device token merely to make adoption appear successful.
+    const secret = randomBytes(32).toString('base64url')
+    assert.equal(secret.length, 43)
+    const legacy = { baseUrl: base, authority: '127.0.0.1:8096' }
+    const issued = JSON.parse(docker(['exec', source, 'node', '/app/index.js', 'bind', '--config', '/config/server.json'])) as { oneTimeToken: string }
+    const hello = await postLegacySmoke({ ...legacy, operation: 'handshake.get', body: { input: {} } }) as { identity: { serverId: string; catalogId: string }; writerEpoch: number }
+    assert.equal(hello.identity.serverId, original.server_id)
+    assert.equal(hello.identity.catalogId, original.catalog_id)
+    const claimed = await postLegacySmoke({ ...legacy, operation: 'writer.claim', body: { ...hello.identity, input: {
+        kind: 'initialBind', oneTimeToken: issued.oneTimeToken,
+        candidate: { claimId: randomUUID(), secretDigest: createHash('sha256').update(secret).digest('hex') }
+    } } }) as { status: string; bound: boolean; writerEpoch: number }
+    assert.equal(claimed.status, 'consumed'); assert.equal(claimed.bound, true)
+    await postLegacySmoke({ ...legacy, operation: 'writer.status', body: { ...hello.identity, writerEpoch: claimed.writerEpoch, input: {} }, bearer: secret })
     docker(['stop', '--time', '120', source])
     docker(['rm', source]); created.splice(created.indexOf(source), 1)
 
@@ -90,8 +106,8 @@ async function main(): Promise<void> {
     assert.equal(imageDescriptor.environmentVersion, SERVER_ENVIRONMENT_VERSION, 'image metadata must declare the baked environment version')
     docker(['rm', artifact]); created.splice(created.indexOf(artifact), 1)
     // The published 0.8.0 image supplies real schema-19 data above. The managed
-    // baseline uses this source's unified pairing APIs with a synthetic version;
-    // the old binary itself has no unified device-pairing protocol.
+    // baseline uses this source's manager with a synthetic earlier version.
+    // Its device migration must preserve the old binary's original credential.
     const seed = path.join(directory, 'baseline-release')
     fs.cpSync(good, seed, { recursive: true })
     const baselinePackage = path.join(seed, 'package.json')
@@ -110,10 +126,16 @@ async function main(): Promise<void> {
     assert.equal(environment.headers.get('cache-control'), 'no-store')
     assert.deepEqual(await environment.json(), { format: 1, environmentVersion: SERVER_ENVIRONMENT_VERSION,
       runtimeId: 'node22-bookworm-v1', platform: `linux/${arch}` })
-    const bundle = docker(['exec', name, 'node', '/opt/javdex-manager/index.js', 'token', '--config', '/config/server.json']).trim()
-    const secret = randomBytes(32).toString('hex')
-    const paired = await connection.claim(bundle, baselineVersion, secret)
-    const client = new ServerUpdateClient(updaterPairingSchema.parse({ ...paired, token: secret }))
+    const client = new ServerUpdateClient(updaterPairingSchema.parse({ protocolVersion: 1, url: origin,
+      certificateSha256: connection.certificateSha256, token: secret, serverId: original.server_id, catalogId: original.catalog_id }))
+    const adopted = new ManageHttpClient({ baseUrl: origin, appVersion: baselineVersion, certificateSha256: connection.certificateSha256 })
+    try {
+      const hello = await adopted.post('handshake.get', { input: {} }) as { identity: { serverId: string; catalogId: string }; writerEpoch: number }
+      await adopted.post('writer.status', { ...hello.identity, writerEpoch: hello.writerEpoch, input: {} }, { bearer: secret })
+      const devices = await adopted.post('devices.list', { ...hello.identity, writerEpoch: hello.writerEpoch, input: {} }, { bearer: secret }) as { current: boolean }[]
+      assert.equal(devices.length, 1, 'adoption cannot create a second authorization')
+      assert.equal(devices[0].current, true)
+    } finally { await adopted.close() }
     const initial = await waitForUpdateStatus(() => client.control('status'))
     assert.equal(initial.currentVersion, baselineVersion); assert.equal(initial.serverId, original.server_id)
     // A successful install keeps this fixture available for the image-upgrade checks.

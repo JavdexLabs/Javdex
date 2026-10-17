@@ -72,3 +72,24 @@ test('technical details copy reports both success and failure without opening a 
     else Reflect.deleteProperty(globalThis, 'navigator')
   }
 })
+
+test('segmented toolbar exposes saved, dirty and saving states on one control', () => {
+  let renderer!: TestRenderer.ReactTestRenderer
+  const props = { onSave: () => {}, onCancel: () => {} }
+  act(() => { renderer = TestRenderer.create(<SettingsFormActions dirty={false} {...props} />) })
+  const toolbar = (): TestRenderer.ReactTestInstance => renderer.root.findByProps({ role: 'group', 'aria-label': '保存设置' })
+  const button = (name: string): TestRenderer.ReactTestInstance => renderer.root.findAllByType('button').find(item => item.props['aria-label'] === name)!
+  assert.equal(toolbar().props['data-state'], 'saved')
+  assert.equal(button('保存').props.disabled, true)
+  assert.equal(button('取消更改').props.disabled, true)
+  act(() => renderer.update(<SettingsFormActions dirty {...props} />))
+  assert.equal(toolbar().props['data-state'], 'dirty')
+  assert.equal(button('保存').props['data-state'], 'dirty')
+  assert.equal(button('保存').props.disabled, false)
+  assert.equal(button('取消更改').props.disabled, false)
+  act(() => renderer.update(<SettingsFormActions dirty saving {...props} />))
+  assert.equal(toolbar().props['data-state'], 'saving')
+  assert.equal(button('保存中').props.disabled, true)
+  assert.equal(button('取消更改').props.disabled, true)
+  act(() => renderer.unmount())
+})

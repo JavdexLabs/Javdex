@@ -8,11 +8,13 @@ import { createHash } from 'node:crypto'
 import { createReadStream } from 'node:fs'
 import runtimeManifest from '../apps/desktop/src/main/services/localModels/runtimeManifest.ts'
 import { createAcceptanceDirectory, launchAcceptance, closeAcceptance, recordAcceptanceCleanup } from './playback-acceptance-support.mjs'
+import { waitForLocalModelSettings } from './local-model-settings-ui.mjs'
 const { LOCAL_MODEL_ASSETS } = runtimeManifest
 
-const output = path.resolve('out/playback-acceptance/local-models')
-await fs.mkdir(output, { recursive: true })
-const directory = createAcceptanceDirectory('local-models-')
+const outputRoot = path.resolve('out/playback-acceptance/local-models')
+await fs.mkdir(outputRoot, { recursive: true })
+const output = await fs.mkdtemp(path.join(outputRoot, 'run-'))
+const directory = await fs.realpath(createAcceptanceDirectory('local-models-'))
 const models = path.join(directory, 'local-ai')
 const argumentIndex = process.argv.indexOf('--runtime-root')
 const runtimeRoot = path.resolve(argumentIndex >= 0 ? process.argv[argumentIndex + 1] : '.tmp-ai-subtitle/runtime')
@@ -32,7 +34,7 @@ try {
   page.on('pageerror', cause => rendererErrors.push(cause.message))
   await page.waitForFunction(() => window.api?.settings)
   await page.evaluate(() => { window.location.hash = '/settings/models/local' })
-  await page.getByRole('heading', { name: '模型文件', exact: true }).waitFor()
+  await waitForLocalModelSettings(page)
   const command = command => page.evaluate(command => window.api.settings.localModelCommand(command), command)
   const snapshot = () => page.evaluate(() => window.api.settings.getLocalModels())
   const initial = await snapshot()
@@ -42,7 +44,10 @@ try {
   await page.screenshot({ path: path.join(output, 'settings-wide.png') })
   await page.setViewportSize({ width: 1000, height: 640 })
   await page.screenshot({ path: path.join(output, 'settings-narrow.png') })
-  await command({ action: 'translation', mode: 'local' })
+  const qwen = initial.models.find(model => model.id === 'qwen3')
+  await command({ action: 'usage', expectedRevision: initial.revision, usage: {
+    ...initial.usage, textTranslation: { mode: 'local', model: 'qwen3', variant: qwen.selectedVariant }
+  } })
   // Reject outside fetches to demonstrate that the existing AI translation IPC uses local inference.
   await application.evaluate(() => {
     const original = globalThis.fetch
@@ -86,7 +91,6 @@ try {
   assert.equal(hash.digest('hex'), LOCAL_MODEL_ASSETS.find(asset => asset.id === 'translation-model').sha256)
   assert.ok((await fs.readFile(path.join(exported, 'Qwen3-1.7B-Q4_K_M-bartowski/LICENSE.txt'), 'utf8')).includes('Apache License'))
   report.checks.push({ name: 'export-exact-model-and-license' })
-  await application.evaluate(({ dialog }) => { dialog.showMessageBox = async () => ({ response: 1, checkboxChecked: false }) })
   await command({ action: 'delete', model: 'qwen3' })
   assert.equal((await snapshot()).models.find(model => model.id === 'qwen3').installed, false)
   assert.equal((await snapshot()).translation, 'local')
@@ -95,8 +99,11 @@ try {
   report.checks.push({ name: 'delete-isolated-and-no-online-fallback' })
   await command({ action: 'reset-location' })
   assert.equal((await snapshot()).directory, (await snapshot()).defaultDirectory)
-  await page.getByRole('button', { name: '恢复默认位置', exact: true }).waitFor()
-  assert.equal(await page.getByRole('button', { name: '恢复默认位置', exact: true }).isDisabled(), true)
+  await page.getByRole('button', { name: '保存位置更多操作', exact: true }).click()
+  const reset = page.getByRole('menuitem', { name: '恢复默认位置', exact: true })
+  await reset.waitFor()
+  assert.equal(await reset.isDisabled(), true)
+  await page.keyboard.press('Escape')
   report.checks.push({ name: 'reset-default-location-and-disabled-reset-control' })
   assert.deepEqual(rendererErrors, [])
   report.status = 'pass'
@@ -104,7 +111,7 @@ try {
 finally {
   if (application) recordAcceptanceCleanup(report, await closeAcceptance(application))
   if (!application || (report.cleanup && !report.cleanup.forced && report.cleanup.code === 0)) {
-    assert.equal(path.dirname(path.resolve(directory)), path.resolve(os.tmpdir()))
+    assert.equal(path.dirname(directory), await fs.realpath(os.tmpdir()))
     assert.ok(path.basename(directory).startsWith('javdex-playback-acceptance-local-models-'))
     assert.equal((await fs.lstat(directory)).isSymbolicLink(), false)
     await fs.rm(directory, { recursive: true, force: true })

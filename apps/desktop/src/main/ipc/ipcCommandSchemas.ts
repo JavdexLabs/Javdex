@@ -690,6 +690,7 @@ const mergeInput = z.object({ sourceId: id, targetId: id }).passthrough()
 
 export const appIpcSchemas = {
   [IPC.WEB_ACCESS_PAIR_OPEN]: noArgs,
+  [IPC.WEB_ACCESS_PAIR_CLOSE]: noArgs,
   [IPC.WEB_ACCESS_PAIR_INSPECT]: z.tuple([z.string().regex(/^\d{6}$/)]),
   [IPC.WEB_ACCESS_PAIR_DECIDE]: z.tuple([z.string().regex(/^\d{6}$/), z.boolean()]),
   [IPC.WEB_ACCESS_DEVICE_REMOVE]: z.tuple([z.string().regex(/^[a-f0-9]{32}$/)]),
@@ -742,6 +743,14 @@ export const appIpcSchemas = {
   [IPC.SETTINGS_MODEL_MANAGEMENT_GET]: noArgs,
   [IPC.LOCAL_MODELS_SNAPSHOT]: noArgs,
   [IPC.LOCAL_MODELS_COMMAND]: z.tuple([z.discriminatedUnion('action', [
+    z.object({ action: z.literal('acceleration'), expectedRevision: z.string().min(1).max(128).optional(),
+      policy: z.object({ mode: z.enum(['auto', 'cpu', 'gpu']), device: z.string().min(1).max(256).optional() }).strict()
+    }).strict().refine(value => value.policy.mode !== 'gpu' || !!value.policy.device, { message: '请选择显卡' }),
+    z.object({ action: z.literal('detect-devices') }).strict(),
+    z.object({ action: z.literal('prepare-runtime'), group: z.enum(['speech', 'text']), target: z.enum(['auto', 'cpu', 'gpu']) }).strict(),
+    z.object({ action: z.literal('delete-runtime'), group: z.enum(['speech', 'text']), target: z.enum(['cpu', 'gpu']) }).strict(),
+    z.object({ action: z.literal('prepare-acceleration'), model: z.enum(LOCAL_MODEL_IDS).optional(), variant: z.string().min(1).max(64).optional() }).strict()
+      .refine(value => !value.variant || !!value.model, { message: '请选择需要修复的模型' }),
     z.object({ action: z.literal('translation'), mode: z.enum(['app-default', 'local']) }).strict(),
     z.object({ action: z.literal('download-source'), source: z.enum(['official', 'hf-mirror']) }).strict(),
     z.object({ action: z.literal('translation-model'), model: z.enum(LOCAL_TRANSLATION_MODEL_IDS) }).strict(),
@@ -752,7 +761,7 @@ export const appIpcSchemas = {
     }).strict() }).strict(),
     ...(['download', 'delete', 'export', 'import', 'copy-download-url'] as const).map(action => z.object({ action: z.literal(action), model: z.enum(LOCAL_MODEL_IDS), variant: z.string().min(1).max(64).optional() }).strict()),
     z.object({ action: z.literal('select'), model: z.enum(LOCAL_MODEL_IDS), variant: z.string().min(1).max(64) }).strict(),
-    ...(['cancel-download', 'choose-location', 'reset-location', 'clean-downloads', 'clear-cache'] as const).map(action => z.object({ action: z.literal(action) }).strict())
+    ...(['cancel-download', 'choose-location', 'open-location', 'refresh-storage', 'reset-location', 'clean-downloads', 'clear-cache'] as const).map(action => z.object({ action: z.literal(action) }).strict())
   ]).superRefine((command, context) => {
     if (command.action === 'usage') {
       for (const [purpose, ref] of Object.entries(command.usage)) {
@@ -761,7 +770,7 @@ export const appIpcSchemas = {
       }
     }
     if ('variant' in command && command.variant !== undefined) {
-      try { localModelVariant(command.model, command.variant) }
+      try { if (!command.model) throw new Error('missing model'); localModelVariant(command.model, command.variant) }
       catch { context.addIssue({ code: 'custom', message: '未知或不匹配的本地模型精度', path: ['variant'] }) }
     }
   })]),

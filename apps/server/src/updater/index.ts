@@ -1,6 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import { createServer } from 'node:https'
+import { createDualProtocolServer } from './dualProtocolServer'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { X509Certificate } from 'node:crypto'
 import { execFileSync, spawn } from 'node:child_process'
@@ -17,11 +17,11 @@ import { sha256 } from './manifest'
 import { signedUpdateSchema } from '@shared/serverUpdateTypes'
 import { discoverUpgrade } from './upgradeDiscovery'
 import { serverUpgradeVersionSchema } from '@shared/serverUpdateTypes'
-import { gatewayRequestAllowed, proxyBusiness } from './gateway'
+import { gatewayRequestAllowed, gatewayRouteAllowed, proxyBusiness } from './gateway'
 import { ConnectionPairing } from './connectionPairing'
 import { requestBusiness } from './businessHttp'
 import { connectionClaimSchema } from '@shared/serverUpdateTypes'
-import { authorizeDeviceUpdate } from './deviceAuthorization'
+import { authorizeDeviceUpdate, readDeviceUpdateBearer } from './deviceAuthorization'
 import { businessProcessCommand } from './businessProcess'
 import { serveServerEnvironment } from './environmentHttp'
 import { ServerEnvironmentMismatchError } from '@shared/serverEnvironment'
@@ -95,7 +95,7 @@ async function main(): Promise<void> {
   }
   let manager: ServerUpdateManager | undefined
   let startupFailed = false
-  const serverRef: { current?: ReturnType<typeof createServer> } = {}
+  const serverRef: { current?: ReturnType<typeof createDualProtocolServer> } = {}
   let closing = false
   const stop = (): void => {
     if (closing) return
@@ -115,6 +115,7 @@ async function main(): Promise<void> {
     }
     const url = new URL(request.url ?? '/', 'https://updater.invalid')
     if (!gatewayRequestAllowed(request, config.gateway.origin)) { reply(403, { error: '访问地址或来源无效' }); return }
+    if (!gatewayRouteAllowed(request)) { reply(403, { error: '此接口仅支持 HTTPS' }); return }
     if (serveServerEnvironment(request, response)) return
     if (url.pathname.startsWith('/runtime/')) { reply(404, { error: '运行环境接口不存在' }); return }
     if (!manager || startupFailed) { reply(503, { code: 'BUSINESS_NOT_READY', error: '服务端正在启动或需要人工核对，请查看容器日志' }); return }
@@ -144,7 +145,7 @@ async function main(): Promise<void> {
       } catch (error) { reply(409, { error: error instanceof Error ? error.message : '配对失败' }) }
       return
     }
-    const bearer = request.headers.authorization?.match(/^Bearer ([a-f0-9]{64})$/)?.[1]
+    const bearer = readDeviceUpdateBearer(request.headers.authorization)
     const authorized = bearer && authorizeDeviceUpdate(releases.directory(releases.current()!), config.dataDir, bearer)
     if (request.headers.origin || !authorized) { reply(401, { error: '更新授权无效' }); return }
     try {
@@ -177,12 +178,10 @@ async function main(): Promise<void> {
       } : {}) })
     }
   }
-  const server = createServer({ key: fs.readFileSync(privateFile), cert: fs.readFileSync(certificateFile), minVersion: 'TLSv1.2' }, (request, response) => {
+  const server = createDualProtocolServer({ key: fs.readFileSync(privateFile), cert: fs.readFileSync(certificateFile), minVersion: 'TLSv1.2' }, (request, response) => {
     void handle(request, response).catch(() => { if (!response.destroyed && !response.writableEnded) { response.writeHead(500); response.end() } })
   })
   serverRef.current = server
-  server.requestTimeout = 120_000
-  server.headersTimeout = 15_000
   await new Promise<void>((resolve, reject) => { server!.once('error', reject); server!.listen(config.port, config.listenHost, resolve) })
   process.stdout.write(`Javdex 容器内管理进程正在监听 ${config.listenHost}:${config.port}\n`)
   try {

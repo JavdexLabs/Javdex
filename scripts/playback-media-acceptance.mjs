@@ -4,6 +4,8 @@ import path from 'node:path'
 import { captureAcceptanceFrame, closeAcceptance, recordAcceptanceCleanup, createAcceptanceDirectory, launchAcceptance, nativeEvidence, seedAcceptanceCatalog, waitForState, waitForValue } from './playback-acceptance-support.mjs'
 import { prepareMediaFixtures } from './playback-media-fixtures.mjs'
 import { checkBitmapSubtitlePixels, checkComplexSubtitlePixels } from './playback-subtitle-checks.mjs'
+import { openPlaybackSettings, closePlaybackSettings, selectPlaybackSetting, playbackSettingLabels } from './playback-settings-ui.mjs'
+import { prepareNonRecordingPlayback } from './playback-acceptance-settings.mjs'
 
 assert.ok(['darwin', 'win32'].includes(process.platform), 'this runner accepts macOS and Windows only')
 const fixtures = prepareMediaFixtures()
@@ -26,7 +28,7 @@ try {
   const page = await application.firstWindow()
   page.on('pageerror', error => errors.push(error.message))
   await page.waitForFunction(() => window.api?.playback && document.querySelector('nav'))
-  await page.evaluate(() => window.api.thisComputer.update({ playerPreference: 'builtin' }))
+  await prepareNonRecordingPlayback(page)
   const open = async (index, codec) => {
     const result = await page.evaluate(target => window.api.player.openResource(target.libraryId, target.resourceId, target.videoId), targets[index])
     assert.equal(result.ok, true, result.error)
@@ -38,10 +40,7 @@ try {
     assert.equal(state.recordingProgress, false)
     return state
   }
-  const select = async (label, option) => {
-    await page.getByRole('button', { name: label, exact: true }).click()
-    await page.getByRole('option', { name: option }).click()
-  }
+  const select = (label, option) => selectPlaybackSetting(page, label, option)
   const stop = async () => {
     await page.getByRole('button', { name: '停止播放', exact: true }).click()
     await waitForState(page, state => state === null, 'stop and release')
@@ -56,14 +55,13 @@ try {
   assert.deepEqual(audio.map(track => [track.title, track.language, track.codec]),
     [['Main', 'eng', 'aac'], ['Dub', 'jpn', 'ac3'], ['Commentary', 'fra', 'eac3'], ['Alternate', 'deu', 'dts']])
   assert.deepEqual(multi.chapters.map(chapter => [chapter.title, chapter.time]), [['Opening', 0], ['Middle', 12], ['Ending', 24]])
-  await page.getByRole('button', { name: '播放选项', exact: true }).click()
-  await page.getByRole('button', { name: '音轨', exact: true }).click()
-  report.evidence.audioLabels = await page.getByRole('option').allTextContents()
+  await openPlaybackSettings(page)
+  report.evidence.audioLabels = await playbackSettingLabels(page, '音轨')
   save()
   // A title must not conceal available language and channel hints.
   assert.match(report.evidence.audioLabels.find(label => label.startsWith('Main')) ?? '', /eng.*2 声道/)
   assert.match(report.evidence.audioLabels.find(label => label.startsWith('Dub')) ?? '', /jpn.*6 声道/)
-  await page.getByRole('option', { name: /^Main/ }).click()
+  await select('音轨', /^Main/)
   const decodedCodec = { aac: /AAC/, ac3: /AC-3/, eac3: /E-AC-3/, dts: /DTS/ }
   for (const track of audio) {
     await select('音轨', new RegExp(`^${track.title}`))
@@ -90,6 +88,7 @@ try {
   assert.equal(chapter.sessionId, multi.sessionId)
   assert.equal((await nativeEvidence(application)).loadedFiles, 1)
   report.checks.push({ name: 'chapter UI selection preserves pause', position: chapter.position })
+  await openPlaybackSettings(page, '字幕')
   assert.equal(await page.getByRole('button', { name: '字幕字号', exact: true }).isDisabled(), true, 'ASS style is not overwritten by plaintext size')
   await select('字幕', '关闭字幕')
   await page.evaluate(id => window.api.playback.control(id, { kind: 'seek', seconds: 4 }), multi.sessionId)
@@ -105,7 +104,7 @@ try {
   await page.getByRole('button', { name: '延后 0.5 秒', exact: true }).click()
   await waitForState(page, state => state.subtitleDelay === 0.5 && state.paused, 'ASS delay')
   await page.getByRole('button', { name: '重置延迟', exact: true }).click()
-  await page.getByRole('button', { name: '播放选项', exact: true }).click()
+  await closePlaybackSettings(page)
   await page.getByRole('button', { name: '全屏', exact: true }).click()
   await waitForState(page, state => state.presentation === 'fullscreen' && state.paused, 'ASS fullscreen')
   await page.waitForTimeout(1500)
@@ -155,7 +154,7 @@ try {
 
   const normal = await open(3, 'H.264')
   assert.equal(normal.speed, 1, 'new movie defaults to normal speed')
-  await page.getByRole('button', { name: '播放选项', exact: true }).click()
+  await openPlaybackSettings(page)
   for (const rate of [0.5, 0.75, 1, 1.25, 1.5, 2]) {
     await select('倍速', `${rate}×`)
     const before = await waitForState(page, state => state.speed === rate && state.phase === 'playing', `speed ${rate}`)
@@ -229,14 +228,14 @@ try {
   await stop()
   const reset = await open(0, 'H.264')
   assert.equal(reset.speed, 1)
-  assert.equal(fs.existsSync(path.join(directory, 'playback-progress.json')), false, 'default-off matrix must not persist progress')
+  assert.equal(fs.existsSync(path.join(directory, 'playback-progress.json')), false, 'explicit non-recording matrix must not persist progress')
   assert.deepEqual(errors, [])
   report.status = 'partial-pass'
   save()
   console.log(JSON.stringify({ report: reportFile, checks: report.checks.map(check => check.name), isolatedDirectory: directory }))
   if (process.argv.includes('--keep-open')) {
     await page.getByRole('button', { name: '暂停', exact: true }).click()
-    await page.getByRole('button', { name: '播放选项', exact: true }).click()
+    await openPlaybackSettings(page)
     keepOpen = true
     const observation = setInterval(async () => {
       try {

@@ -169,6 +169,7 @@ export default function EditActressModal({ actress, onCancel, onSave }: Props): 
       title={`编辑${actressGenderMergeLabel(gender)}资料`}
       subtitle={displayName}
       size="xl"
+      layout="form"
       busy={saving}
       confirmText="保存"
       confirmDisabled={saving || !mainName.trim() || dateInvalid}

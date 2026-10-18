@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import { pathToFileURL } from 'node:url'
 
-/** Read-only, fail-closed checks. A published version always needs a new number. */
+/** Default read-only, fail-closed policy: published versions require a new number. */
 export async function assertReleaseAvailable({ tag, version, image, phase = 'prepare', env = process.env, fetcher = fetch }) {
   const repository = env.GITHUB_REPOSITORY
   const source = env.GITHUB_SHA
@@ -51,6 +51,13 @@ export async function assertReleaseAvailable({ tag, version, image, phase = 'pre
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const { version } = JSON.parse(fs.readFileSync('package.json', 'utf8'))
   const metadata = { version, tag: process.env.RELEASE_TAG || `v${version}` }
-  await assertReleaseAvailable({ ...metadata, image: `ghcr.io/${process.env.GITHUB_REPOSITORY_OWNER?.toLowerCase()}/javdex-server`, phase: process.argv[2] })
+  if (process.env.RELEASE_REPLACE_090 === 'true') {
+    // One explicitly authorized original 0.9.0 only; normal checks above remain unchanged.
+    const { replacementApi } = await import('./release-replacement-api.mjs')
+    const { assertOriginalPublication } = await import('./release-replacement.mjs')
+    if (metadata.version !== '0.9.0' || metadata.tag !== 'v0.9.0') throw new Error('Replacement version mismatch')
+    const api = replacementApi()
+    assertOriginalPublication(await api.observeOriginal(), api.source)
+  } else await assertReleaseAvailable({ ...metadata, image: `ghcr.io/${process.env.GITHUB_REPOSITORY_OWNER?.toLowerCase()}/javdex-server`, phase: process.argv[2] })
   console.log(`Publication checks passed for ${metadata.tag} (${process.argv[2]}).`)
 }

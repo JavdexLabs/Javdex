@@ -1,4 +1,5 @@
 import type { LocalTranslationModelId } from '@shared/desktop/localModels'
+import type { RuntimePackagePin } from './runtimePackage'
 
 /** Fixed upstream releases and repository revisions, never resolve `latest` at installation. */
 export interface AiRuntimeAsset {
@@ -16,7 +17,10 @@ export interface AiRuntimeAsset {
   backend?: 'cuda' | 'vulkan'
   /** Reviewed uncompressed limit for large GPU DLL distributions. */
   expandedBytes?: number
-  bundledVersion?: string
+  /** Fixed Javdex Runtime flat-package contract, after outer archive verification. */
+  runtimePackage?: RuntimePackagePin
+  /** Only a reviewed same-engine installation may survive a distribution-only move. */
+  legacyInstalledIdentity?: string
 }
 export const LOCAL_MODEL_ASSETS: readonly AiRuntimeAsset[] = [
   { id: 'whisper', label: '日语识别运行库', filename: 'whisper.zip', archive: true, bytes: 8573270,

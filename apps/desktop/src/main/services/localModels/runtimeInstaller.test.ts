@@ -247,3 +247,33 @@ test('macOS copies only the matching bundled tool, rejects damaged bundles and n
     await assert.rejects(intel.install(new AbortController().signal, () => {}, ['whisper']), /缺少 macOS/)
   } finally { await fs.rm(root, { recursive: true, force: true }) }
 })
+
+test('a valid previously installed Windows Vulkan tool survives the distribution move without downloading or rewriting', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'javdex-runtime-legacy-'))
+  t.after(() => fs.rm(root, { recursive: true, force: true }))
+  const target = { platform: 'win32', arch: 'x64' }
+  const entry: AiRuntimeAsset = { id: 'whisper', backend: 'vulkan', archive: true, label: 'Fixture', filename: 'whisper.zip',
+    bytes: 100, sha256: 'e'.repeat(64), url: 'https://runtime.invalid/fixed.zip', expandedBytes: 1024 * 1024,
+    runtimePackage: { version: 'whisper-b5130-r1', commit: 'a'.repeat(40), runId: 1234, upstreamCommit: '927cfce34f31707e17f2bff35c349632fb9e2c3a' },
+    legacyInstalledIdentity: 'whisper-b5130-vulkan-v1:win32-x64:whisper' }
+  const directory = runtimeAssetDirectory(root, 'whisper', target, 'vulkan')
+  await fs.mkdir(directory, { recursive: true })
+  const files = []
+  for (const name of ['whisper-cli.exe', 'vulkan-1.dll', 'LICENSE.txt']) {
+    const value = Buffer.from(`legacy fixture ${name}`)
+    await fs.writeFile(path.join(directory, name), value)
+    files.push({ name, bytes: value.length, sha256: createHash('sha256').update(value).digest('hex') })
+  }
+  const marker = JSON.stringify({ sha256: entry.legacyInstalledIdentity, target: 'win32-x64', files })
+  await fs.writeFile(path.join(directory, 'asset.json'), marker)
+  let requests = 0
+  const runtime = createAiRuntimeInstaller(root, async () => { requests++; throw Error('fixture download failure') }, [entry], { target })
+  assert.equal(await runtime.assetsInstalled(['whisper']), true)
+  await runtime.install(new AbortController().signal, () => {}, ['whisper'])
+  assert.equal(requests, 0)
+  assert.equal(await fs.readFile(path.join(directory, 'asset.json'), 'utf8'), marker)
+  await fs.appendFile(path.join(directory, 'vulkan-1.dll'), 'corrupt')
+  assert.equal(await runtime.assetsInstalled(['whisper']), false)
+  await assert.rejects(runtime.install(new AbortController().signal, () => {}, ['whisper']), /fixture download failure/)
+  assert.equal(await fs.readFile(path.join(directory, 'whisper-cli.exe'), 'utf8'), 'legacy fixture whisper-cli.exe')
+})

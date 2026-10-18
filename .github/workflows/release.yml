@@ -17,6 +17,14 @@ on:
         required: false
         default: false
         type: boolean
+      replace_published_090:
+        description: "One-time authorized replacement of original 0.9.0; stage all outputs and retain old assets."
+        type: boolean
+        default: false
+      replacement_source_sha:
+        description: "Exact checked source SHA required for the controlled 0.9.0 replacement."
+        type: string
+        required: false
   push:
     branches:
       - "release-*"
@@ -31,6 +39,13 @@ concurrency:
   group: release-publication
   cancel-in-progress: false
 
+env:
+  RELEASE_REPLACE_090: ${{ inputs.replace_published_090 }}
+  RELEASE_REPLACEMENT_SOURCE: ${{ inputs.replacement_source_sha }}
+  RELEASE_TAG: ${{ inputs.release_tag }}
+  RELEASE_VERIFY_ONLY: ${{ inputs.verify_only }}
+  RELEASE_PRERELEASE: ${{ inputs.prerelease }}
+
 jobs:
   metadata:
     runs-on: ubuntu-latest
@@ -39,12 +54,13 @@ jobs:
       version: ${{ steps.meta.outputs.version }}
       prerelease: ${{ steps.meta.outputs.prerelease }}
       image: ${{ steps.meta.outputs.image }}
+      imageTag: ${{ steps.meta.outputs.imageTag }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: node --test scripts/release-metadata.test.mjs scripts/release-publication.test.mjs
+      - run: node --test scripts/release-metadata.test.mjs scripts/release-publication.test.mjs scripts/release-replacement.test.mjs scripts/release-replacement-process.test.mjs
       - id: meta
         run: node scripts/release-metadata.mjs
         env:
@@ -327,7 +343,7 @@ jobs:
       - name: Publish versioned multi-platform image
         env:
           IMAGE: ${{ needs.metadata.outputs.image }}
-          VERSION: ${{ needs.metadata.outputs.version }}
+          VERSION: ${{ needs.metadata.outputs.imageTag }}
         run: |
           set -euo pipefail
           docker buildx imagetools create -t "$IMAGE:$VERSION" "$IMAGE:build-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-amd64" "$IMAGE:build-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-arm64"
@@ -340,7 +356,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      packages: read
+      packages: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -402,6 +418,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
 
       - name: Publish release
+        if: ${{ !inputs.replace_published_090 }}
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.metadata.outputs.tag }}
@@ -419,3 +436,18 @@ jobs:
             release-artifacts/Javdex-Playback-Sources-${{ needs.metadata.outputs.version }}.tar.gz
             release-artifacts/SHA256SUMS.txt
             release-artifacts/Javdex-server-*.javdex-update
+
+      - uses: docker/setup-buildx-action@v3
+        if: inputs.replace_published_090
+      - name: Stage complete replacement and perform conditional recoverable cutover
+        if: inputs.replace_published_090
+        run: node scripts/release-replacement-publish.mjs
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+      - name: Retain replacement receipt including any recovery result
+        if: ${{ always() && inputs.replace_published_090 }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: Controlled-090-Replacement-Receipt
+          path: replacement-receipt.json
+          if-no-files-found: warn

@@ -7,9 +7,12 @@ export function gpuRuntimeAssets(target: AiRuntimeTarget, backend: 'cuda' | 'vul
   if (backend === 'vulkan') return [{ id: 'translator', label: 'Vulkan 翻译运行库', backend, archive: true,
     filename: 'llama-vulkan.zip', bytes: 33337420, sha256: '631b029f7df84aa22d1b8c9c929ea3cc505a70ad091f90ac0eabdb7ef0d05563',
     url: `${llama}llama-b11435-bin-win-vulkan-x64.zip` },
-    { id: 'whisper', label: 'Vulkan 语音识别运行库', backend, archive: true, bundledVersion: 'whisper-b5130-vulkan-v1',
-      filename: 'whisper-vulkan', bytes: 0, sha256: '41b664fee09e79176ac277b5237debec34f8d74af3c7d71f333f1ec67989ecde',
-      url: 'https://codeload.github.com/ggml-org/whisper.cpp/tar.gz/927cfce34f31707e17f2bff35c349632fb9e2c3a' }]
+    { id: 'whisper', label: 'Vulkan 语音识别运行库', backend, archive: true,
+      filename: 'whisper-b5130-r1-win32-x64-vulkan.zip', bytes: 18095994, sha256: '4ebbd89cd9ce82685482b7c63be1ebeb13f5d91ee1e46c451f76bc809b36bfc5',
+      expandedBytes: 58161361, url: 'https://github.com/JavdexLabs/javdex-runtime/releases/download/whisper-b5130-r1/whisper-b5130-r1-win32-x64-vulkan.zip',
+      runtimePackage: { version: 'whisper-b5130-r1', commit: '21bef11113cff0544cdc615fa93767994f4d9cde', runId: 39089754724,
+        upstreamCommit: '927cfce34f31707e17f2bff35c349632fb9e2c3a' },
+      legacyInstalledIdentity: 'whisper-b5130-vulkan-v1:win32-x64:whisper' }]
   return [
     { id: 'translator', label: 'CUDA 翻译运行库', backend, archive: true, filename: 'llama-cuda.zip', bytes: 264473456,
       sha256: '18ef0727457adf843fe0e6dc17da296c019c821e56b7bc5fc88db734538fbfb7',

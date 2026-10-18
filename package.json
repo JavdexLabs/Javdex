@@ -33,7 +33,7 @@
     "packaging:verify-playback-runtime": "node scripts/check-packaged-playback-runtime.mjs",
     "test:packaging": "node --test scripts/packaging-runtime.test.mjs scripts/playback-runtime.test.mjs scripts/playback-linux-elf.test.mjs scripts/aggregate-playback-sources.test.mjs scripts/check-playback-installers.test.mjs scripts/ai-runtime-build.test.mjs scripts/renderer-bundle-report.test.mjs",
     "test:playback:fixtures": "node --test scripts/playback-pgs-fixture.test.mjs",
-    "test:playback:build": "node --test scripts/playback-native-build.test.mjs scripts/playback-source-build.test.mjs scripts/stage-playback-linux-context.test.mjs scripts/release-metadata.test.mjs scripts/release-publication.test.mjs && node --import tsx --test scripts/playback-acceptance-settings.test.mjs",
+    "test:playback:build": "node --test scripts/playback-native-build.test.mjs scripts/playback-source-build.test.mjs scripts/stage-playback-linux-context.test.mjs scripts/release-metadata.test.mjs scripts/release-publication.test.mjs scripts/release-replacement.test.mjs scripts/release-replacement-process.test.mjs && node --import tsx --test scripts/playback-acceptance-settings.test.mjs",
     "test:backup-smoke": "node --test scripts/backup-smoke-status.test.mjs",
     "test:playback:navigation": "node scripts/playback-navigation-acceptance.mjs",
     "test:playback:remote": "node --require ./scripts/register-test-paths.cjs --import tsx scripts/playback-remote-acceptance.mjs",

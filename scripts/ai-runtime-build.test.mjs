@@ -4,48 +4,10 @@ import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 import { spawnSync } from 'node:child_process'
-import { zstdCompressSync } from 'node:zlib'
 import { FileMatcher } from 'app-builder-lib/out/fileMatcher.js'
 import buildConfig from '../electron-builder.config.mjs'
 import { aiRuntimeSources, macAiBuildCommands, refreshAiBundleInventory, verifyAiBundle, stagePackagedAiRuntime,
   signPackagedAiTools, verifySignedAiRuntime, preparePackagedAiRuntime } from './ai-runtime-build.mjs'
-import { extractWindowsVulkanTool, refreshWindowsVulkanInventory, verifyWindowsVulkanBundle, windowsVulkanCommands } from './windows-vulkan-runtime.mjs'
-
-test('Windows Vulkan extraction completely decodes Zstandard before tar and preserves input and extracted bytes', async t => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'javdex-vulkan-extract-'))
-  t.after(() => fs.rm(root, { recursive: true, force: true }))
-  const input = path.join(root, 'input'), destination = path.join(root, 'sdk')
-  await fs.mkdir(input); await fs.mkdir(destination)
-  const content = Buffer.from('Vulkan header fixture\r\n\0\xff', 'latin1')
-  await fs.writeFile(path.join(input, 'vulkan.h'), content)
-  const tar = path.join(root, 'input.tar'), archive = path.join(root, 'input.pkg.tar.zst')
-  const packed = spawnSync('tar', ['-cf', tar, '-C', input, 'vulkan.h'], { encoding: 'utf8' })
-  assert.equal(packed.status, 0, packed.stderr)
-  const tarBytes = await fs.readFile(tar), compressed = zstdCompressSync(tarBytes)
-  await fs.writeFile(archive, compressed)
-  let decoded, calls = 0
-  const extract = async (command, args, cwd) => {
-    calls += 1
-    assert.equal(command, 'tar.exe'); assert.equal(cwd, root)
-    assert.deepEqual(args.slice(2), ['-C', destination])
-    decoded = args[1]
-    assert.deepEqual(await fs.readFile(decoded), tarBytes, 'tar must receive complete plain tar, not an external decompressor pipe')
-    const result = spawnSync('tar', args, { cwd, encoding: 'utf8' })
-    assert.equal(result.status, 0, result.stderr)
-  }
-  await extractWindowsVulkanTool(archive, destination, root, extract)
-  assert.equal(calls, 1)
-  assert.deepEqual(await fs.readFile(path.join(destination, 'vulkan.h')), content)
-  assert.deepEqual(await fs.readFile(archive), compressed)
-  await assert.rejects(fs.stat(decoded), { code: 'ENOENT' })
-  const failure = new Error('tar extraction failed')
-  await assert.rejects(extractWindowsVulkanTool(archive, destination, root, async (_command, args) => {
-    decoded = args[1]; throw failure
-  }), error => error === failure)
-  await assert.rejects(fs.stat(decoded), { code: 'ENOENT' })
-  await fs.writeFile(archive, 'not a Zstandard frame')
-  await assert.rejects(extractWindowsVulkanTool(archive, destination, root, async () => { assert.fail('Invalid input must not reach tar') }))
-})
 
 async function fixture(t) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'javdex-ai-bundle-'))
@@ -62,25 +24,19 @@ async function fixture(t) {
   return { root, directory, resources, context }
 }
 
-test('Windows Vulkan bundles stage only verified native tools, reject mutation/unlisted files and pin baseline CPU instructions', async t => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'javdex-vulkan-bundle-'))
+test('Windows packaging neither builds nor copies optional Vulkan tools, even when an old local bundle exists', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'javdex-ai-unbundled-'))
   t.after(() => fs.rm(root, { recursive: true, force: true }))
-  const directory = path.join(root, 'out/ai-runtime/win32-x64-vulkan'), filesRoot = path.join(directory, 'whisper')
-  await fs.mkdir(filesRoot, { recursive: true })
-  for (const name of ['whisper-cli.exe', 'vulkan-1.dll', 'LICENSE-whisper.txt', 'LICENSE-vulkan-loader.txt']) await fs.writeFile(path.join(filesRoot, name), name)
-  await refreshWindowsVulkanInventory(directory)
-  await verifyWindowsVulkanBundle(directory)
+  const stale = path.join(root, 'out/ai-runtime/win32-x64-vulkan/whisper')
+  await fs.mkdir(stale, { recursive: true }); await fs.writeFile(path.join(stale, 'whisper-cli.exe'), 'retained developer artifact')
   const resources = path.join(root, 'resources')
-  await stagePackagedAiRuntime({ electronPlatformName: 'win32', packager: { projectDir: root, getResourcesDir: () => resources } })
-  await verifyWindowsVulkanBundle(path.join(resources, 'ai-runtime/win32-x64-vulkan'))
-  await fs.writeFile(path.join(filesRoot, 'injected.dll'), 'unexpected')
-  await assert.rejects(verifyWindowsVulkanBundle(directory), /Unlisted/)
-  await fs.rm(path.join(filesRoot, 'injected.dll'))
-  await fs.appendFile(path.join(filesRoot, 'whisper-cli.exe'), 'modified')
-  await assert.rejects(verifyWindowsVulkanBundle(directory))
-  const commands = windowsVulkanCommands('/source', '/build', '/sdk', 'Visual Studio 17 2022')
-  for (const flag of ['-DGGML_VULKAN=ON', '-DBUILD_SHARED_LIBS=OFF', '-DGGML_NATIVE=OFF', '-DGGML_AVX2=OFF', '-DWHISPER_CURL=OFF']) assert.ok(commands[0].includes(flag))
+  const context = { electronPlatformName: 'win32', packager: { projectDir: root, getResourcesDir: () => resources } }
+  await preparePackagedAiRuntime(context)
+  await stagePackagedAiRuntime(context)
+  await assert.rejects(fs.stat(resources), { code: 'ENOENT' })
+  assert.equal(await fs.readFile(path.join(stale, 'whisper-cli.exe'), 'utf8'), 'retained developer artifact')
 })
+
 test('macOS recipes pin static, relocatable tools and select each target architecture', () => {
   assert.match(aiRuntimeSources.whisper.url, /\/[a-f0-9]{40}$/)
   for (const source of [aiRuntimeSources.whisper, aiRuntimeSources.ffmpeg]) {

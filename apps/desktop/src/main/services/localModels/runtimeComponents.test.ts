@@ -31,8 +31,8 @@ test('automatic CPU fallback avoids speculative GPU downloads; explicit Vulkan p
   const options = { groups: ['speech' as const], components: components(), policy: { mode: 'auto' as const }, devices: [], target, supported: true, installed: () => false }
   assert.ok(preparationPlan(options).items.every(item => !/cuda|vulkan/.test(item.id)))
   const explicit = preparationPlan({ ...options, forceGpu: true })
-  assert.equal(explicit.items.find(item => item.id === 'whisper-vulkan')?.action, 'install')
-  assert.equal(explicit.items.find(item => item.id === 'whisper-vulkan')?.downloadBytes, 0)
+  assert.equal(explicit.items.find(item => item.id === 'whisper-vulkan')?.action, 'download')
+  assert.equal(explicit.items.find(item => item.id === 'whisper-vulkan')?.downloadBytes, 18095994)
   assert.ok(explicit.items.some(item => item.id === 'translator-vulkan' && item.group === 'text'))
 })
 test('network planning excludes reusable and resumable bytes and never installs tools on unsupported hosts', () => {

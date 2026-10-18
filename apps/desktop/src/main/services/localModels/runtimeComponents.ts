@@ -13,12 +13,12 @@ const names = { whisper: '语音引擎', translator: '文本引擎', ffmpeg: '�
 export function runtimeComponentDefinitions(target: AiRuntimeTarget): RuntimeComponentDefinition[] {
   const base = aiRuntimeAssets(target)
   const definition = (id: typeof baseIds[number] | 'cuda', backend: LocalRuntimeComponent['backend'], asset?: AiRuntimeAsset): RuntimeComponentDefinition => {
-    const bundled = !!asset?.bundledVersion || (target.platform === 'darwin' && (id === 'whisper' || id === 'ffmpeg'))
+    const bundled = target.platform === 'darwin' && (id === 'whisper' || id === 'ffmpeg')
     return { assetId: id, asset, component: {
       id: `${id}-${backend}`, group: id === 'translator' || id === 'cuda' ? 'text' : 'speech',
       name: names[id], backend, delivery: bundled ? 'bundled' : 'download', bytes: asset?.bytes ?? 0,
       version: asset?.model?.family ?? (id === 'whisper' ? 'b5130' : id === 'ffmpeg' ? '8.1.3' : id === 'cuda' ? '12.4' : 'b11435'),
-      source: bundled ? `应用内置 · ${asset?.bundledVersion ?? AI_MAC_BUNDLE_VERSION}` : asset?.url ?? ''
+      source: bundled ? `应用内置 · ${AI_MAC_BUNDLE_VERSION}` : asset?.url ?? ''
     } }
   }
   return [

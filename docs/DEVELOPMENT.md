@@ -112,9 +112,9 @@ AI 服务设置分为功能、云端服务、本地模型三个页签。提供�
 
 Windows x64 的 CUDA／Vulkan 资产见 `localModels/gpuManifest.ts`，CPU 目录保持原身份，GPU 工具分别保存于 `win32-x64-cuda`／`win32-x64-vulkan`；CUDA 翻译依赖另放 `win32-x64-cuda-dependencies`。通过模型页“准备或修复加速”安装，权重不重复下载。NVIDIA 使用 UUID 隔离 CUDA 设备，Vulkan 使用原生设备列表与 `uma: 0` 证据排除核显；所有探测有超时。每次任务冻结策略、设备和工具路径；主进程设备设置遵守租约和 revision。内置工具移除继承的 `LLAMA_*`、`GGML_*`、CUDA 可见设备和外部 loader／代理覆盖，只注入本次受控设备与依赖路径。翻译按原生层卸载日志、识别按原生 GPU backend 初始化日志报告实际后端；诊断有界保存在内存，不进入普通日志或 Renderer。已知 GPU 初始化／分配错误最多回退一次独立 CPU 工具；取消、配置和模型错误不触发重试。CUDA/Vulkan 对同名显卡共享保守显存预算，文本模型允许自动分层并预留至少 2 GiB，识别预算不足时使用 CPU。
 
-Windows Vulkan whisper 从同一固定 b5130 源码构建，`npm run ai-runtime:build -- --vulkan` 需要本机 Visual Studio C++ 工具。构建器 `scripts/windows-vulkan-runtime.mjs` 下载并校验固定 MSYS2 shaderc／SPIR-V／Vulkan 开发材料，仅在构建目录使用，不安装到系统；可通过 HTTPS 的 `JAVDEX_AI_BUILD_MIRROR` 指定包镜像，SHA-256 保持不变。静态构建关闭 CURL、CUDA、OpenMP、CPU 本机指令探测和 AVX，随工具附 Vulkan loader、头文件／引擎许可、来源与逐文件摘要。Windows 打包自动准备并校验这份 bundle，放在 asar 外的 `Resources/ai-runtime/win32-x64-vulkan`；普通开发启动仍可先用 CPU／下载 CUDA。构建临时目录保持短路径以避开 MSBuild MAX_PATH，跨磁盘产物先复制到目标同盘暂存、校验后再切换。macOS Metal 与 Linux 原有 CPU 路径保持。
+Windows Whisper Vulkan 改为从 [Javdex Runtime 固定发行](https://github.com/JavdexLabs/javdex-runtime/releases/tag/whisper-b5130-r1) 按需下载，主安装包不再编译或携带可选语音 Vulkan 工具。`gpuManifest.ts` 锁定实际 ZIP 大小、SHA-256、展开上限、原生 CI 源码与 run；客户端不跟随 `latest` 或远程清单自动更换运行库。首次准备 GPU 环境时显示下载计划，经现有续传与外层摘要检查后，在隔离暂存目录核对平铺包的目标、接口、来源、逐文件摘要及精确文件集合，再原子晋升；失败保留旧安装。
 
-此 Windows 构建入口需要 Node.js 22.15 或更新版本的内置 Zstandard 解码器。固定 `.pkg.tar.zst` 先完整解码到临时 tar，再交给 `tar.exe` 提取，避免系统 tar 的外部解压管道提前关闭；解码与提取错误仍会中止，临时 tar 在提取结束后删除，原固定输入和摘要不改。
+运行库仓库保留同一 b5130 上游提交、固定开发材料、静态 CRT 与原编译选项，以及完整 Zstandard 解码后再提取的修复；普通用户不安装编译器、SDK 或驱动。已安装且完整的旧 b5130 Windows Vulkan 工具继续复用，不改写其来源标识；缺失或损坏时下载固定新包。模型权重、计算策略、CUDA、macOS Metal 和 Linux CPU 路径保持不变。开发者构建配方与许可材料在独立运行库仓库，本仓库的 `ai-runtime:build` 仅保留现有 macOS 构建。
 
 每个运行租约冻结精度与路径，字幕使用自己的两阶段绑定，文本引擎使用文本用途绑定。文件 snapshot 区分权重存在、完整运行依赖、平台支持、配置引用和运行租约；引用文件删除在主进程阻止。用途保存通过 revision 检查避免覆盖并发更改。文件页下载／导入只维护资源，不暗改用途；用途草稿跨三个模型页签保持挂载，离开该组仍有保存保护。
 

@@ -28,14 +28,14 @@ const deployUrl = version ? `https://github.com/${site.repository}/tree/${releas
       })}
     </section>)}
   </div>
-  <p><a href={sitePath('start/install/')}>安装与首次启动说明</a> · <a href={sitePath('releases/upgrade/')}>已有资料先阅读升级指南</a> · <a href={release.releaseUrl}>发布说明与全部文件</a></p>
+  <p><a href={sitePath('getting-started/installation/')}>安装与首次启动说明</a> · <a href={sitePath('operations/upgrade-and-compatibility/')}>已有资料先阅读升级指南</a> · <a href={release.releaseUrl}>发布说明与全部文件</a></p>
   <aside class="download-note">安装包尚未进行商业代码签名，系统可能显示发布者或安全提示。只从本项目 Release 下载；许可与平台要求以对应版本的随包文件和发布说明为准。</aside>
   <section class="download-server" aria-labelledby="server-download">
     <h2 id="server-download">服务端</h2>
     <p>首次部署使用 Docker 镜像与同版本配置；升级文件只用于已具备托管更新能力的部署，不是 Docker 镜像归档。</p>
     {image && <Code code={`docker pull ${image}`} lang="bash" />}
     <p><a href={sitePath('server/deploy/')}>部署步骤与权限要求</a> · <a href={deployUrl}>对应正式版部署示例</a></p>
-    {hasManagedUpdate ? <><p>后续离线更新选择与服务器架构一致的单个 <code>.javdex-update</code> 文件。停服前先完成配对并核对备份。</p><div class="download-extras">{['serverAmd64', 'serverArm64'].map(key => <a href={release.extras[key].url}>{extraLabels[key]} ↓<small>{size(release.extras[key].size)}</small></a>)}</div></> : <p>此正式 Release 没有本站所述的单文件托管升级包。请遵循该版本发布说明；旧部署首次采用新版前先阅读<a href={sitePath('server/adoption/')}>迁移前提</a>。</p>}
+    {hasManagedUpdate ? <><p>后续离线更新选择与服务器架构一致的单个 <code>.javdex-update</code> 文件。停服前先完成配对并核对备份。</p><div class="download-extras">{['serverAmd64', 'serverArm64'].map(key => <a href={release.extras[key].url}>{extraLabels[key]} ↓<small>{size(release.extras[key].size)}</small></a>)}</div></> : <p>此正式 Release 没有本站所述的单文件托管升级包。请遵循该版本发布说明；旧部署首次采用新版前先阅读<a href={sitePath('operations/upgrade-and-compatibility/')}>升级指南</a>。</p>}
   </section>
   <details class="download-source"><summary>源码、许可证与下载校验</summary><p>普通用户无需下载播放源码。总源码包含四个平台的对应材料、构建配置和恢复说明；SHA256SUMS 用于核对下载字节。</p><div class="download-extras">{['playbackSources', 'checksums'].map(key => release.extras?.[key] && <a href={release.extras[key].url}>{extraLabels[key]} ↓</a>)}<a href={release.releaseUrl}>查看该版本全部附件</a><a href={`https://github.com/${site.repository}/tree/${release.available ? release.version : 'main'}`}>项目源码与许可</a></div></details>
 </StarlightPage>

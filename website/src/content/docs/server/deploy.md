@@ -1,57 +1,156 @@
 ---
-title: "Docker Compose 部署"
-description: "Javdex 0.9.0 · Docker Compose 部署"
+title: Docker 服务端部署指南
+description: 详解 Javdex 独立服务端容器部署、三卷模型（/data、/program、/media）、网络门禁与权限配置。
 ---
 
-发布流程为 `ghcr.io/javdexlabs/javdex-server` 生成 Linux amd64 和 arm64 镜像，Docker 自动选择架构。部署只需要 Docker 与 Compose 插件，无需安装 Node.js、npm 或编译源码。以下以固定版本 `0.9.0` 为例，以[正式 Release](https://github.com/JavdexLabs/Javdex/releases/tag/v0.9.0)的实际发布状态为准，不使用滚动标签。新程序卷从镜像初始化业务；已有程序卷在镜像业务版本更高时自动升级，相同或更旧时保留当前业务，因此基础镜像标签不能代替实际业务版本检查。
+将 Javdex 部署在 NAS（群晖、威联通、Unraid、TrueNAS、极空间、绿联）或常开的家用 Linux 服务器上，可以让服务器 24 小时在后台持续监控文件夹并提供局域网访问，电脑无需整天开机。
 
-1. 确认目标 Release 可用后，从其发布说明中的对应源码版本链接保存 `deploy/docker-compose.example.yml` 和 `deploy/javdex-server.example.json`，放在同一个目录（保留文件名）。它们不是 Release 附件；不要混用其他分支的示例。在该目录创建 `.env`，填写基础镜像版本号（不含 `v`）；首次部署应与桌面安装包一致：
+`0.9.0` 版本引入了全新的**容器内托管管理器架构**，只需单个 Docker 容器即可提供完整服务与无缝热升级。
 
-   ```dotenv
-   JAVDEX_VERSION=0.9.0
-   ```
+---
 
-2. 编辑 [Compose 示例](https://github.com/JavdexLabs/Javdex/blob/main/deploy/docker-compose.example.yml) 和 [服务配置](https://github.com/JavdexLabs/Javdex/blob/main/deploy/javdex-server.example.json)：
-   - 将 `JAVDEX_WEB_PASSWORD` 替换为独立的 12–128 字符密码。
-   - 将 `/absolute/path/to/media` 替换为 NAS 上真实媒体目录；这是宿主机路径，容器内统一使用 `/media`。
-   - 将 `JAVDEX_PUBLIC_URL` 替换为桌面和浏览器能访问的 HTTPS 根地址，例如 `https://NAS实际IP:8096`。只映射 8096；业务、播放与更新共用此地址，仅向可信局域网或私有网络开放。业务子进程的 8098 仅监听容器回环，不映射到宿主机；统一模式不需要额外填写 `accessHosts`。
-   - **服务端媒体库目录必须具备读写权限**。媒体卷使用 `:rw` 挂载，并确保宿主机/NAS 的文件权限允许容器内 `node` 用户读写所选目录及其内容；具体要求见下文[媒体目录权限](/Javdex/reference/server/#媒体目录权限)。
-   - 通过 `JAVDEX_SERVER_UID`、`JAVDEX_SERVER_GID` 设置业务子进程身份，默认均为 `1000`。NAS 使用 ACL 授权其他组时，按[业务身份与附加组](/Javdex/reference/server/#业务身份与附加组)配置；仅设置 Compose `group_add` 不会传入托管业务子进程。修改身份前同时检查已有 `/data` 和图片目录的访问权限。
-   - `/data` 使用持久数据卷，数据库与图片都保存在其中；不要将 SQLite 数据卷放在 SMB/NFS 共享上。
-   - `/program` 使用独立持久卷，保存业务发行选择、更新凭据、任务日志。不要与数据或图片目录互相包含，也不要用 Compose 的 `user:` 覆盖管理进程身份；管理器以容器内 root 启动非 root 业务子进程。
+## 容器架构与三卷模型
 
-3. 在配置文件所在目录拉取并启动，再查看启动日志：
+Javdex 官方镜像（`ghcr.io/javdexlabs/javdex-server:0.9.0`）内部采用双层进程设计，并严格依赖三个独立的数据卷挂载：
 
-   ```bash
-   docker compose -f docker-compose.example.yml pull
-   docker compose -f docker-compose.example.yml up -d
-   docker compose -f docker-compose.example.yml logs --tail=50 javdex
-   ```
+```mermaid
+flowchart TB
+  subgraph DockerContainer["Docker 容器 (ghcr.io/javdexlabs/javdex-server:0.9.0)"]
+    direction TB
+    Manager["/opt/javdex-manager (UID 0: root 守护网关)<br/>监听外部 8096 单端口 · TLS/HTTP 双协议分流"]
+    Business["/program/releases/0.9.0/ (UID 1000: 业务子进程)<br/>监听回环 127.0.0.1:8098 · SQLite 业务读写"]
+    Manager -->|setpriv 降权启动与进程守护| Business
+  end
 
-4. 在服务机器上获取一次性令牌：
+  subgraph HostVolumes["宿主机数据卷挂载 (Volumes)"]
+    DataVol["/data 卷 (持久化数据)<br/>library.db, media_assets, instance.lock<br/>⚠️ 必须为本地文件系统 (严禁 NFS/SMB/FUSE)"]
+    ProgVol["/program 卷 (托管程序卷)<br/>.javdex-program, TLS证书, release闭包<br/>⚠️ 0.9.0 必须挂载独立持久卷"]
+    MediaVol["/media 卷 (影片资源目录)<br/>挂载你的电影文件夹 (:rw 读写权限)"]
+    ConfigVol["/config/server.json (只读配置文件)"]
+  end
 
-   ```bash
-   docker compose -f docker-compose.example.yml exec javdex node /opt/javdex-manager/index.js token --config /config/server.json
-   ```
+  DataVol <-->|读写| Business
+  ProgVol <-->|更新管理| Manager
+  MediaVol <-->|读取视频与写回 .javdex-root| Business
+  ConfigVol -.->|启动时读取| Manager
+```
 
-   在同版本桌面应用打开“设置 → 存储与导出 → 资料库连接”，选择远程资料库，填写 HTTPS 地址并粘贴一次性令牌，点击“完成授权”并重启。令牌有效期 10 分钟；网络中断后在同一电脑粘贴原令牌重试。添加其他电脑时仍运行 `token`，已有电脑继续可用。首次自动保存证书；自签名证书变化需确认，合法公开 HTTPS 证书无需确认。
+### 为什么 0.9.0 必须挂载 `/program` 卷？
+在早期的 0.8.0 版本中，服务程序直接固定在只读镜像内部。从 **0.9.0** 开始，为了支持直接在桌面客户端一键上传 `.javdex-update` 包执行零停机无缝升级，容器管理器需要将可执行程序闭包部署在独立的 `/program` 卷中。**未挂载 `/program` 卷的容器将无法保存升级状态和 TLS 自签名证书**。
 
-   桌面按配对指纹验证自签证书，不会全局关闭 TLS 校验。浏览器首次访问可能提示证书不受信任，需由管理员核对并信任证书；网页密码登录仍独立于桌面配对，首次认主前不能浏览资料。
+---
 
-5. 在桌面创建媒体库，在“来源与扫描 → 添加目录”中选择服务端挂载 **`library`**（对应示例 `mediaMounts` 的键）或其中的子目录，然后启动扫描。不要选择桌面电脑的文件夹。
-6. 其他设备在浏览器打开同一地址，用配置中的账号密码登录；或在连接服务端的桌面中开启网页配对并批准新设备。远程桌面默认用内置播放器读取服务端授权的原文件流，在此电脑解码；也可在“资料库连接 → 播放器”选择支持网络播放的外部程序。播放运行库和平台要求见 [播放影片](/Javdex/guide/playback/)。网页仍按浏览器原生播放能力选择资源，不支持的文件可下载；服务端不转码。
+## 挂载目录与文件系统硬性要求
 
-关闭桌面不会关闭容器。示例已配置 `restart: unless-stopped`，Docker 启动后会恢复非手动停止的容器。服务配置修改后重新创建容器；密码不要提交到公开仓库。完成一次配对后，资料管理与托管更新均已授权，无需另配更新地址。后续可通过已配对入口安装签名 `.javdex-update`，或更换含更高业务版本的基础镜像自动升级；管理器、Node 与系统更新仍须管理员更换基础镜像。
+:::danger[核心安全红线：/data 卷严禁使用网络挂载]
+Javdex 在服务端底层使用 SQLite WAL 高性能并发模式。网络文件系统（如 NFS、CIFS、Samba、FUSE、9P 等）在处理底层文件锁（POSIX `flock` / `fcntl`）时存在严重的延迟与不一致缺陷，极易造成数据库死锁或永久性损坏。
+源码在启动时通过系统调用 `statfs` 进行了代码级强校验：
+- 若检测到 `/data` 所在文件系统为 NFS (`0x6969`)、CIFS (`0xff534d42`)、SMB (`0x517b`)、FUSE (`0x65735546`) 或 9P (`0x1021997`)，**服务将直接报错拒绝启动**！
+- `/data` 必须挂载在 NAS 或宿主机的**本地物理磁盘分区**（如 ext4、btrfs、ZFS、APFS、NTFS 等本地存储池）上，且要求至少有 `64 MiB` 的剩余空间。
+:::
 
-## 连接失败时
+### 媒体目录权限要求（`:rw` 读写挂载）
+- `/media` 下的各个视频目录在 Docker 中必须以读写模式挂载（`:rw`）。
+- 扫描器在初次建库时，需要在每个媒体库根目录写入一个微小的 `.javdex-root` 标识文件以追踪设备身份；如果后续需要执行 NFO 导出或文件重命名，同样需要写权限。
 
-| 现象 | 先检查 |
-|---|---|
-| 浏览器返回 403 | 访问地址是否与 `JAVDEX_PUBLIC_URL` 完全一致，是否来自可信局域网 |
-| 连接超时 | 容器是否运行、端口是否映射、防火墙是否允许同网设备访问 |
-| 提示尚未认主 | 是否已在桌面领取写入凭据；网页登录不能代替认主 |
-| 桌面提示版本不符 | 桌面安装包与服务端是否来自同一源码版本 |
-| 添加目录、扫描或导出提示权限不足 | 媒体卷是否为 `:rw`，宿主机/NAS 权限是否允许服务进程读写所选目录及其子目录；详见[媒体目录权限](/Javdex/reference/server/#媒体目录权限) |
-| 扫描找不到文件 | 宿主机挂载路径、挂载名称及服务进程是否能访问实际文件 |
-| 桌面能浏览但不能播放 | 先查看播放错误详情，检查业务进程是否有权读取实际影片；图片与资料可访问不代表媒体目录可访问，再检查播放授权、网络及客户端解码 |
-| 网页能浏览但不能播放 | 先检查媒体请求状态和服务端文件权限；成功返回媒体数据后，再检查浏览器是否支持视频编码。当前不转码，不支持的文件可下载 |
+### 用户权限匹配（UID / GID）
+- 容器内的业务进程默认降权至 UID `1000`、GID `1000`（`node:node`）运行。
+- 请确保宿主机上映射到 `/data` 与 `/media` 的文件夹，允许 UID `1000` 进行读写。你也可以通过环境变量 `JAVDEX_BUSINESS_UID` 与 `JAVDEX_BUSINESS_GID` 自定义目标用户 ID。
+
+---
+
+## 标准配置范例
+
+建议使用 `docker-compose` 进行编排部署。
+
+### 1. `docker-compose.yml` 配置文件
+新建一个目录（如 `/opt/javdex`），创建 `docker-compose.yml`：
+
+```yaml
+services:
+  javdex:
+    image: ghcr.io/javdexlabs/javdex-server:0.9.0
+    container_name: javdex-server
+    restart: unless-stopped
+    stop_grace_period: 150s # 预留充裕时间让容器优雅停服保存数据库
+    ports:
+      - "8096:8096"
+    volumes:
+      # 1. 核心数据卷（必须位于本地存储池，严禁 NFS/SMB）
+      - ./data:/data
+      # 2. 0.9.0 全新程序管理卷（存放业务程序闭包与 TLS 证书）
+      - ./program:/program
+      # 3. 配置文件目录
+      - ./config:/config:ro
+      # 4. 你的视频媒体目录（根据实际路径修改，确保拥有读写权限）
+      - /volume1/video:/media/movies:rw
+    environment:
+      # 可选：指定宿主机文件所有者 UID/GID
+      - JAVDEX_BUSINESS_UID=1000
+      - JAVDEX_BUSINESS_GID=1000
+      # 首次配置局域网 Web 登录密码（12 ~ 128 位）
+      - JAVDEX_WEB_PASSWORD=YourStrongPassword123
+```
+
+### 2. `/config/server.json` 配置文件
+在 `./config` 目录下创建 `server.json`：
+
+```json
+{
+  "listenHost": "0.0.0.0",
+  "port": 8096,
+  "accessHosts": [
+    "127.0.0.1",
+    "localhost",
+    "192.168.1.100",
+    "nas.local"
+  ],
+  "dataDir": "/data",
+  "imagesDir": "/data/media_assets",
+  "mediaMounts": {
+    "movies": "/media/movies"
+  },
+  "web": {
+    "username": "admin"
+  }
+}
+```
+
+#### 关键字段释义：
+- **`accessHosts`**（必填）：允许通过 HTTP/HTTPS 访问此服务的主机名或局域网 IP 列表。请务必将你的 NAS 局域网 IP（如 `192.168.1.100`）填入，否则跨设备请求会被反代网关安全拦截。
+- **`mediaMounts`**：容器内媒体目录的映射标识字典。将 `movies` 映射至容器路径 `/media/movies`，后续桌面端远程建库时即可直接点选。
+
+---
+
+## 启动容器与健康检查验证
+
+在 `docker-compose.yml` 所在目录执行：
+
+```bash
+docker compose up -d
+```
+
+### 检查运行日志
+查看服务启动日志：
+```bash
+docker logs -f javdex-server
+```
+正常情况下，你会看到守护管理器顺利接管、TLS 自签名证书自动生成并输出类似日志：
+```text
+[manager] Listening on 0.0.0.0:8096 (Dual TLS/HTTP Gateway)
+[business] Database initialized at /data/library.db (Schema 21)
+[business] Server ready.
+```
+
+### 验证健康检查探针
+在局域网内任意终端执行验证：
+- **环境探针（HTTPS）**：
+  ```bash
+  curl -k https://192.168.1.100:8096/runtime/v1/info
+  ```
+  应返回包含 `{"format":1,"runtimeId":"node22-bookworm-v1"}` 的 JSON 响应。
+- **存活探针**：
+  ```bash
+  curl http://192.168.1.100:8096/live
+  ```
+  应返回 `ok`。

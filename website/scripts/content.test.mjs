@@ -30,33 +30,48 @@ test('public documents are explicit and do not include engineering archives', as
   for (const file of entries.filter(file => file.endsWith('.md'))) {
     const body = await readFile(path.join(content, file), 'utf8');
     assert.match(body, /^---\r?\ntitle: /, `Missing title: ${file}`);
+    assert.doesNotMatch(body, /^import\s+\{[^}]+\}\s+from\s+['"]@astrojs\/starlight\/components['"]/m, `Raw MDX import in .md file: ${file}`);
+    assert.doesNotMatch(body, /<(?:Steps|Tabs|TabItem)\b/, `Raw MDX component tag in .md file: ${file}`);
+    assert.doesNotMatch(body, /SenseVoice|Sherpa-ONNX|Marian|rollback --config/, `Hallucinated technical term in: ${file}`);
   }
 });
 
-test('server developer instructions use the current authorization and upgrade contracts', async () => {
-  const body = await readFile(path.join(content, 'developers/server.md'), 'utf8');
+test('server instructions use the current authorization and upgrade contracts', async () => {
+  const body = await readFile(path.join(content, 'server/remote-connection.md'), 'utf8');
   const commands = [...body.matchAll(/```(?:bash|sh)\r?\n([\s\S]*?)```/g)].map(match => match[1]).join('\n');
   assert.doesNotMatch(commands, /(?:index\.js|javdex-server)\s+(?:bind|recover|pair|pair-recover)\b/);
   assert.match(commands, /\/opt\/javdex-manager\/index\.js token --config/);
   assert.doesNotMatch(body, /增加独立[^\n]*更新端口|默认在线检查只读取正式 Release|提交前托管更新失败可自动恢复|自动执行停服备份/);
-  assert.match(body, /安装[\s\S]*人工恢复/);
+  const updateBody = await readFile(path.join(content, 'server/managed-updates.md'), 'utf8');
+  assert.match(updateBody, /人工恢复|recoveryRequired/);
 });
 
 test('product upgrade FAQ links the single upgrade guide with the current database schema', async () => {
   const product = await readFile(path.join(root, 'website/src/components/ProductContent.html'), 'utf8');
-  assert.match(product, /href="\/Javdex\/releases\/upgrade\/"/);
+  assert.match(product, /href="@@BASE@@operations\/upgrade-and-compatibility\/"/);
   assert.doesNotMatch(product, /schema\s*19\s*→\s*20/);
   const migrations = await readFile(path.join(root, 'packages/library/src/db/migrations.ts'), 'utf8');
   const current = /export const CURRENT_SCHEMA_VERSION = (\d+)/.exec(migrations)?.[1];
   assert.ok(current, 'the library publishes its current schema');
-  const upgrade = await readFile(path.join(content, 'releases/upgrade.md'), 'utf8');
+  const upgrade = await readFile(path.join(content, 'operations/upgrade-and-compatibility.md'), 'utf8');
   assert.match(upgrade, new RegExp(`schema 19[^\\n]*升级到 ${current}`));
 });
 
-test('legacy server authorization section points at the current developer heading', async () => {
+test('legacy server authorization section points at the current server heading', async () => {
   const legacy = await readFile(path.join(root, 'docs/SERVER_MODE.md'), 'utf8');
-  const developer = await readFile(path.join(content, 'developers/server.md'), 'utf8');
-  assert.match(developer, /^## 启动与设备授权$/m);
-  assert.match(legacy, /developers\/server\.md#启动与设备授权/);
-  assert.doesNotMatch(legacy, /developers\/server\.md#启动与认主/);
+  const serverDoc = await readFile(path.join(content, 'server/remote-connection.md'), 'utf8');
+  assert.match(serverDoc, /^## 启动与设备授权$/m);
+  assert.match(legacy, /server\/remote-connection\.md#启动与设备授权/);
+  assert.doesNotMatch(legacy, /server\/remote-connection\.md#启动与认主/);
+});
+
+test('markdown documents have valid emphasis delimiter syntax for CommonMark', async () => {
+  const files = await readdir(content, { recursive: true });
+  for (const file of files) {
+    if (!file.endsWith('.md')) continue;
+    const body = await readFile(path.join(content, file), 'utf8');
+    // Ensure no un-spaced ** wrapping punctuation like **“ or ”** or ）** adjacent to CJK characters
+    const badBold = body.match(/[^\s\w`*]\*\*[^\s*]+[）”]\*\*[^\s\w`*]/g);
+    assert.strictEqual(badBold, null, `Found unrendered bold syntax in ${file}: ${badBold}`);
+  }
 });

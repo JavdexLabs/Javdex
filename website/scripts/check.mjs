@@ -36,7 +36,7 @@ for (const [file, { html }] of documents) {
   if (file !== '404.html' && !/<link[^>]+rel="canonical"/.test(html)) errors.push(`${file}: missing canonical`);
   if (!/<html[^>]+lang="zh-CN"/.test(html)) errors.push(`${file}: incorrect document language`);
 }
-for (const route of ['index.html', 'product/index.html', 'download/index.html', 'start/index.html', 'server/index.html', 'guide/local-models/index.html']) assert.ok(documents.has(route), `Missing route: ${route}`);
+for (const route of ['index.html', 'product/index.html', 'download/index.html', 'getting-started/overview/index.html', 'server/deploy/index.html', 'guides/ai-subtitles-and-models/index.html']) assert.ok(documents.has(route), `Missing route: ${route}`);
 assert.ok(entries.includes('pagefind/pagefind.js'), 'Pagefind index must be generated');
 assert.ok(entries.includes('sitemap-index.xml'), 'Sitemap must be generated');
 assert.ok(entries.includes('.nojekyll'), 'Pages must retain its static-site marker');

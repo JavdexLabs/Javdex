@@ -17,4 +17,4 @@
 
 后续接入须同时拆分演员元数据和完整作品数组，调整作品总数展示及编辑封面按需读取；不能只给旧完整数组加前端分页。UI需要有界页窗口和旧请求隔离。Card字符串仍无硬字节上限，资源聚合可随单作品资源数增长；后续窄显示字段合同、查询隔离、稀疏/偏斜与深页成本仍须处理。此批不关闭PERF-05/06/10/12。
 
-复跑：`node scripts/run-electron-tests.mjs scripts/performance/actress-video-page-benchmark.ts`。原始样本、EQP、源码和门结果见[证据清单](large-library-results/implementation/batch-bh-manifest.json)。
+复跑：`node scripts/run-electron-tests.mjs scripts/performance/actress-video-page-benchmark.ts`。原始样本、EQP、源码和门结果见[证据清单](batch-bh-manifest.json)。

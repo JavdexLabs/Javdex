@@ -10,12 +10,55 @@ export function sitePath(value = '') {
 }
 
 export const sections = [
-  { label: '开始使用', items: ['start/index', 'start/install', 'start/connection', 'start/library'] },
-  { label: '使用指南', items: ['guide/index', 'guide/scraping', 'guide/ai-services', 'guide/playlists', 'guide/playback', 'guide/subtitles', 'guide/local-models', 'guide/pending', 'guide/nfo', 'guide/backup', 'guide/appearance', 'guide/web'] },
-  { label: '服务端', items: ['server/index', 'server/deploy', 'server/adoption', 'server/pairing', 'server/update', 'server/recovery'] },
-  { label: '参考资料', items: ['reference/index', 'reference/metatube', 'reference/nfo', 'reference/data', 'reference/server'] },
-  { label: '开发与扩展', items: ['developers/index', 'developers/plugins', 'developers/server', 'developers/releases'] },
-  { label: '版本与帮助', items: ['releases/index', 'releases/upgrade', 'help/index'] },
+  {
+    label: '开始使用',
+    items: [
+      'getting-started/overview',
+      'getting-started/choose-mode',
+      'getting-started/installation',
+      'getting-started/quickstart',
+    ],
+  },
+  {
+    label: '核心指南',
+    items: [
+      'guides/library-and-scanning',
+      'guides/pending-and-curation',
+      'guides/metadata-scraping',
+      'guides/nfo-migration-and-export',
+      'guides/actresses-and-facets',
+      'guides/playlists-and-ai-curation',
+      'guides/playback',
+      'guides/ai-subtitles-and-models',
+      'guides/lan-web-access',
+      'guides/privacy-and-storage',
+    ],
+  },
+  {
+    label: 'NAS 与服务端',
+    items: [
+      'server/deploy',
+      'server/remote-connection',
+      'server/managed-updates',
+    ],
+  },
+  {
+    label: '运维与速查',
+    items: [
+      'operations/backup-and-migration',
+      'operations/upgrade-and-compatibility',
+      'operations/configuration-reference',
+      'operations/shortcuts-reference',
+      'operations/troubleshooting',
+    ],
+  },
+  {
+    label: '插件与开发',
+    items: [
+      'plugins/overview-and-agent',
+      'plugins/contributing-and-build',
+    ],
+  },
 ];
 
 export const legacyHashes = {

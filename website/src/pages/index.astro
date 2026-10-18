@@ -2,21 +2,28 @@
 import StarlightPage from '@astrojs/starlight/components/StarlightPage.astro';
 import { sitePath } from '../../site.config.mjs';
 const paths = [
-  ['01 / 桌面', '在这台电脑开始', '安装、建库、扫描与播放。无需先配置 AI。', 'start/'],
-  ['02 / 服务端', '部署到 NAS', '用单个容器保存资料，通过桌面和浏览器访问。', 'server/'],
-  ['03 / 已有用户', '升级与维护', '先备份，再升级。核对版本、数据范围与恢复条件。', 'releases/upgrade/'],
+  ['01 / 桌面本地', '在个人电脑开始', '安装、建库、扫描与播放。零依赖极速建库。', 'getting-started/quickstart/'],
+  ['02 / 服务端', '部署到 NAS / 服务器', '单个 Docker 容器持久化，支持多电脑 HTTPS 授权与浏览器只读浏览。', 'server/deploy/'],
+  ['03 / 数据运维', '升级与备份迁移', '跨端互相导入、跨系统路径重写、无缝平滑升级。', 'operations/upgrade-and-compatibility/'],
 ];
 const tasks = [
-  ['配置刮削来源', 'guide/scraping/'], ['使用内置播放器', 'guide/playback/'],
-  ['导入已有 NFO', 'guide/nfo/'], ['下载与切换本地模型', 'guide/local-models/'],
-  ['处理待确认资源', 'guide/pending/'], ['备份或恢复资料', 'guide/backup/'],
+  ['整理与扫描', 'guides/library-and-scanning/'],
+  ['消解待办冲突', 'guides/pending-and-curation/'],
+  ['配置刮削来源', 'guides/metadata-scraping/'],
+  ['NFO 互通与导出', 'guides/nfo-migration-and-export/'],
+  ['演员与人脸裁切', 'guides/actresses-and-facets/'],
+  ['内置播放器', 'guides/playback/'],
+  ['实时 AI 日中字幕', 'guides/ai-subtitles-and-models/'],
+  ['局域网多端访问', 'guides/lan-web-access/'],
+  ['防窥与图片加密', 'guides/privacy-and-storage/'],
+  ['备份恢复与迁移', 'operations/backup-and-migration/'],
 ];
 ---
-<StarlightPage frontmatter={{ title: 'Javdex 文档', description: '从第一个媒体库开始，到服务端部署与维护。', template: 'splash', editUrl: false }}>
-  <p class="portal-lead">把影片、人物与收藏整理在一起。<br />从一个任务开始，找到适合你的使用方式。</p>
+<StarlightPage frontmatter={{ title: 'Javdex 官方文档', description: '本地优先的开源影片资料库，从桌面建库到 NAS 部署、AI 字幕与 NFO 互通。', template: 'splash', editUrl: false }}>
+  <p class="portal-lead">以番号为核心，把影片文件、资源链接与人物资料整理成私人媒体库。<br />本地优先 · 桌面与 Docker 双模式 · libmpv 原生播放 · 端侧 AI 日中字幕 · 完整 NFO 生态互通</p>
   <div class="portal-paths not-content">
     {paths.map(([number, title, copy, target]) => <a class="portal-path" href={sitePath(target)} draggable="false"><span>{number}</span><strong>{title} →</strong><p>{copy}</p></a>)}
   </div>
-  <section aria-labelledby="common-tasks"><h2 id="common-tasks">你想完成什么？</h2><div class="task-links not-content">{tasks.map(([label, target]) => <a href={sitePath(target)}>{label} →</a>)}</div></section>
-  <section class="portal-about" aria-labelledby="about-site"><h2 id="about-site">还在了解 Javdex？</h2><p><a id="product" href={sitePath('product/')}>查看产品介绍与真实截图</a> · <a id="download" href={sitePath('download/')}>下载正式版</a> · <a id="workflow" href={sitePath('start/')}>开始使用</a> · <a id="nfo" href={sitePath('guide/nfo/')}>NFO 资料迁移</a></p></section>
+  <section aria-labelledby="common-tasks"><h2 id="common-tasks">核心工作流指南</h2><div class="task-links not-content">{tasks.map(([label, target]) => <a href={sitePath(target)}>{label} →</a>)}</div></section>
+  <section class="portal-about" aria-labelledby="about-site"><h2 id="about-site">了解更多</h2><p><a id="product" href={sitePath('product/')}>查看产品介绍与真实截图</a> · <a id="download" href={sitePath('download/')}>下载中心</a> · <a id="workflow" href={sitePath('getting-started/overview/')}>产品架构与定位</a> · <a id="nfo" href={sitePath('guides/nfo-migration-and-export/')}>NFO 资料互通</a></p></section>
 </StarlightPage>

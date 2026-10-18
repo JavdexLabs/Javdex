@@ -144,7 +144,7 @@ AI 服务三页签之间保留已挂载的用途草稿；下载跳转用 `model`
 
 ## Overlay History
 
-需要响应系统后退、鼠标返回键或 macOS 返回手势的全屏 overlay，不能在组件 Effect cleanup 中直接调用 `history.back()`。History 所有权、实例 token、关闭来源和跨平台测试规范见 [`IMAGE_PREVIEW_HISTORY_DESIGN.md`](IMAGE_PREVIEW_HISTORY_DESIGN.md)。
+需要响应系统后退、鼠标返回键或 macOS 返回手势的全屏 overlay，不能在组件 Effect cleanup 中直接调用 `history.back()`。本节统一维护 History 所有权、实例 token、关闭来源和遍历失败恢复；历史复现与平台边界见[观看历史回归记录](reviews/viewing-history-2026-10.md)。
 
 `interaction/overlayHistory.ts` 是图片预览和内置播放观看层的唯一临时历史写入器，`OverlayHistoryProvider` 提供稳定应用级所有者。`avOverlay` 只包含 `kind/token`，`avOverlayParents` 仅记录同路由父层的匿名 `kind/token` 位置，保留 Router 的 `key/idx/usr`；图片层兼容保留 `avImagePreview`，播放层不带入该标记。不得把回调、影片来源或授权写入浏览器状态。
 

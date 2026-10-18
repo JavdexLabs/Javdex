@@ -32,6 +32,7 @@ export default defineConfig({
       PageTitle: './src/components/PageTitle.astro',
       Footer: './src/components/Footer.astro',
       Head: './src/components/Head.astro',
+      ThemeSelect: './src/components/ThemeSelect.astro',
     },
     sidebar: sections.map(section => ({ label: section.label, collapsed: true, items: section.items.map(slug => ({ slug: slug.replace(/\/index$/, ''), attrs: { draggable: false } })) })),
     lastUpdated: false,

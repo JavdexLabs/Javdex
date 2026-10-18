@@ -17,7 +17,7 @@
 
 本次没有p95、冷盘、Windows/HDD、真实IPC、媒体解码或峰值内存结论。原始路径字符串仍直接返回，行上限不等于字节上限。metadata/编辑器完整gallery、背景首项、图片预览跨页、导入删除后刷新与选择状态需要一起迁移，不能仅在组件中slice。完整15/42计划仍进行中。
 
-复跑：`node scripts/run-electron-tests.mjs scripts/performance/actress-gallery-page-benchmark.ts`；日志、样本、EQP与源快照见[证据清单](large-library-results/implementation/batch-bk-manifest.json)。
+复跑：`node scripts/run-electron-tests.mjs scripts/performance/actress-gallery-page-benchmark.ts`；日志、样本、EQP与源快照见[证据清单](batch-bk-manifest.json)。
 
 
 ## BL：不携带图库全集的资料头
@@ -33,4 +33,4 @@
 
 这是同一探针新增的两项完整返回对象测量，区别于BK的“准备后gallery数组”。同样为ANALYZE/一次预热/3热样本、固定顺序、校验和序列化不计时，完整oracle仍驻留。旧metadata逐次完整字段等值，新profile逐次对照原资料字段及预期双计数/首图；本轮完整原始样本见BL证据。两组查询时间接近，只能确认本夹具返回量大幅减少，不能声称初始化已恒定时间或稳定提速。first_gallery内路径、姓名/别名/链接/简介仍无硬字节上限；924字节是夹具实测，不是API最大值。
 
-39项定向通过，全量2,317通过、1跳过、0失败，build成功。与BK相同的UI、预览跨页、后台化和深页要求继续保留。[BL证据清单](large-library-results/implementation/batch-bl-manifest.json)。
+39项定向通过，全量2,317通过、1跳过、0失败，build成功。与BK相同的UI、预览跨页、后台化和深页要求继续保留。[BL证据清单](batch-bl-manifest.json)。

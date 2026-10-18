@@ -9,6 +9,7 @@
 | [结构准备验证](SERVER_MODE_STRUCTURE_VALIDATION.md) | S00 目录搬迁的 Windows 验证；“server/http 预留”仅指当时 |
 | [S00–S14 原执行计划与证据](SERVER_MODE_EXECUTION_PLAN.md) | 阶段要求、D01–D07、历史实现记录与验收矩阵 |
 | [C1–C7 实施与架构收敛](C1_C7_IMPLEMENTATION_LOG.md) | 2026-09-14 至 09-17 补齐功能、收尾修正及协议简化的过程 |
+| [早期实施与验证](POST_IMPLEMENTATION_VERIFICATION.md) | 从当前状态页分离的 PR #115、旧迁库和平台验证历史 |
 
 阅读时注意后续覆盖关系：
 

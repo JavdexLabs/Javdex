@@ -5,5 +5,5 @@ const matches = manifest.available && manifest.version.replace(/^v/, '') === sit
 ---
 {!matches && <aside class="version-notice" aria-label="文档适用版本" data-pagefind-ignore>
   本文档适用于 <strong>{site.contentVersion}</strong>。{manifest.available ? <>当前正式下载为 <strong>{manifest.version}</strong>，部分功能可能尚未提供。</> : <>离线预览尚未核对实际发布版本。</>}
-  <a href={sitePath('releases/upgrade/')}>查看升级前提</a> · <a href={sitePath('download/')}>核对下载版本</a>
+  <a href={sitePath('operations/upgrade-and-compatibility/')}>查看升级前提</a> · <a href={sitePath('download/')}>核对下载版本</a>
 </aside>}

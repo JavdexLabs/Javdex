@@ -57,6 +57,8 @@ export interface PlaybackSnapshot {
   focusRequest?: { sequence: number; backwards: boolean }
   /** Windows native drawable hands chrome and keyboard traversal to the renderer. */
   rendererFullscreenControls?: boolean
+  /** Experimental Linux canvas generation. Never a locator or GPU handle. */
+  sharedTextureSurface?: string
   nativeVideoFocused?: boolean
   /** Changes only on native pointer/keyboard activity, never on playback ticks. */
   interactionSequence?: number

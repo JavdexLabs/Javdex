@@ -1,6 +1,10 @@
 cmake_minimum_required(VERSION 3.20)
 project(JavdexNativePlayback LANGUAGES CXX)
 
+# Off by default: a separate experimental helper/FD bridge. The existing X11
+# helper remains available and retains its runtime and dependency contract.
+option(JAVDEX_BUILD_LINUX_DMABUF "Build experimental Linux shared-texture playback" OFF)
+
 # JS supplies native Windows paths; normalize before CMake interprets them as
 # target source paths (a backslash followed by P is otherwise an invalid escape).
 foreach(input ELECTRON_INCLUDE_DIR ELECTRON_NODE_LIBRARY ELECTRON_DELAY_LOAD_HOOK MPV_PREFIX PLAYBACK_OUTPUT_DIR)
@@ -110,4 +114,40 @@ endforeach()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   set_target_properties(playback PROPERTIES OUTPUT_NAME "playback-helper" SUFFIX "" INSTALL_RPATH "$ORIGIN;$ORIGIN/lib")
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND JAVDEX_BUILD_LINUX_DMABUF)
+  find_package(PkgConfig REQUIRED)
+  pkg_check_modules(DMABUF_EGL REQUIRED IMPORTED_TARGET egl)
+  pkg_check_modules(DMABUF_GBM REQUIRED IMPORTED_TARGET gbm)
+  pkg_check_modules(DMABUF_DRM REQUIRED IMPORTED_TARGET libdrm)
+  add_executable(playback-dmabuf-helper linuxDmaBufPlayback.cpp)
+  target_compile_features(playback-dmabuf-helper PRIVATE cxx_std_17)
+  target_compile_options(playback-dmabuf-helper PRIVATE -Wall -Wextra -Wpedantic)
+  target_include_directories(playback-dmabuf-helper PRIVATE "${MPV_INCLUDE_DIR}")
+  target_link_libraries(playback-dmabuf-helper PRIVATE "${MPV_LIBRARY}" OpenGL::OpenGL
+    PkgConfig::DMABUF_EGL PkgConfig::DMABUF_GBM PkgConfig::DMABUF_DRM)
+  set_target_properties(playback-dmabuf-helper PROPERTIES INSTALL_RPATH "$ORIGIN")
+
+  # This thin addon owns descriptors and the socketpair only. Never link mpv or
+  # graphics-driver libraries into Electron's main process.
+  add_library(playback-fd MODULE linuxFdBridge.cpp)
+  target_compile_features(playback-fd PRIVATE cxx_std_17)
+  target_compile_options(playback-fd PRIVATE -Wall -Wextra -Wpedantic)
+  target_include_directories(playback-fd PRIVATE "${ELECTRON_INCLUDE_DIR}")
+  set_target_properties(playback-fd PROPERTIES PREFIX "" SUFFIX ".node")
+  add_executable(fd-transport-fixture linuxFdTransportFixture.cpp)
+  target_compile_features(fd-transport-fixture PRIVATE cxx_std_17)
+  target_compile_options(fd-transport-fixture PRIVATE -Wall -Wextra -Wpedantic)
+  add_executable(linux-dmabuf-test linuxDmaBuf.test.cpp)
+  target_compile_features(linux-dmabuf-test PRIVATE cxx_std_17)
+  target_compile_options(linux-dmabuf-test PRIVATE -UNDEBUG -Wall -Wextra -Wpedantic)
+  foreach(target playback-dmabuf-helper playback-fd fd-transport-fixture linux-dmabuf-test)
+    set_target_properties(${target} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PLAYBACK_OUTPUT_DIR}"
+      LIBRARY_OUTPUT_DIRECTORY "${PLAYBACK_OUTPUT_DIR}")
+    foreach(config DEBUG RELEASE RELWITHDEBINFO MINSIZEREL)
+      set_target_properties(${target} PROPERTIES RUNTIME_OUTPUT_DIRECTORY_${config} "${PLAYBACK_OUTPUT_DIR}"
+        LIBRARY_OUTPUT_DIRECTORY_${config} "${PLAYBACK_OUTPUT_DIR}")
+    endforeach()
+  endforeach()
 endif()

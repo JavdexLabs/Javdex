@@ -4,6 +4,8 @@ import type { PlaybackControl, PlaybackOcclusion, PlaybackSnapshot } from '@shar
 export interface NativePlaybackState {
   alive: boolean
   rendererFullscreenControls?: boolean
+  /** Main-owned shared-texture generation, never a media locator or native FD. */
+  sharedTextureSurface?: string
   nativeVideoFocused?: boolean
   interactionSequence?: number
   fullscreenPointerY?: number

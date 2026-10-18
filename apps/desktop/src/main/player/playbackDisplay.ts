@@ -1,6 +1,8 @@
 /** Backend identity is fixed before Electron is ready. Environment variables and
  * native handle size cannot distinguish a Wayland parent from an X11 parent. */
 export const LINUX_X11_PLAYBACK_FLAG = '--javdex-x11'
+export const LINUX_DMABUF_PLAYBACK_FLAG = '--javdex-dmabuf'
+export const LINUX_WAYLAND_PLAYBACK_FLAG = '--javdex-wayland'
 
 interface DisplayStartupHost {
   isReady(): boolean
@@ -9,7 +11,7 @@ interface DisplayStartupHost {
   }
 }
 
-let linuxBackend: 'x11' | null = null
+let linuxBackend: 'x11' | 'dmabuf' | null = null
 
 export function configurePlaybackDisplay(
   host: DisplayStartupHost,
@@ -27,22 +29,25 @@ export function configurePlaybackDisplay(
   // Electron may already report an ozone default (including x11) before ready.
   // Only startup arguments prove opt-in. Match Chromium's switch rules: skip the
   // executable, trim ASCII whitespace, stop at --, and use the last = value.
-  let explicitX11 = false
+  let explicitX11 = false, explicitWayland = false, sharedTexture = false
   let selected: string | undefined
   for (const rawArg of argv.slice(1)) {
     const arg = rawArg.replace(/^[\t\n\v\f\r ]+|[\t\n\v\f\r ]+$/g, '')
     if (arg === '--') break
     if (arg === LINUX_X11_PLAYBACK_FLAG) explicitX11 = true
+    if (arg === LINUX_WAYLAND_PLAYBACK_FLAG) explicitWayland = true
+    if (arg === LINUX_DMABUF_PLAYBACK_FLAG) sharedTexture = true
     const ozone = /^--?ozone-platform(?:=([\s\S]*))?$/.exec(arg)
     if (ozone) selected = ozone[1] ?? ''
   }
-  if (explicitX11) {
-    if (selected !== undefined && selected !== 'x11') throw new Error('--javdex-x11 与 --ozone-platform 的选择冲突，请只选择一种显示后端')
-    host.commandLine.appendSwitch('ozone-platform', 'x11')
-    linuxBackend = 'x11'
-  } else if (selected === 'x11') {
-    linuxBackend = 'x11'
-  } else linuxBackend = null
+  if (explicitX11 && explicitWayland) throw new Error('--javdex-x11 与 --javdex-wayland 的选择冲突，请只选择一种显示后端')
+  const explicit = explicitX11 ? 'x11' : explicitWayland ? 'wayland' : undefined
+  if (explicit && selected !== undefined && selected !== explicit) throw new Error('Javdex 显示参数与 --ozone-platform 的选择冲突，请只选择一种显示后端')
+  sharedTexture ||= explicitWayland
+  const display = explicit ?? selected ?? (sharedTexture ? 'wayland' : undefined)
+  if (sharedTexture && display !== 'x11' && display !== 'wayland') throw new Error('实验共享纹理播放只支持明确选择的 X11 或 Wayland 显示后端')
+  if (explicit || sharedTexture && selected === undefined) host.commandLine.appendSwitch('ozone-platform', display!)
+  linuxBackend = sharedTexture ? 'dmabuf' : display === 'x11' ? 'x11' : null
 }
 
-export function linuxPlaybackBackend(): 'x11' | null { return linuxBackend }
+export function linuxPlaybackBackend(): 'x11' | 'dmabuf' | null { return linuxBackend }

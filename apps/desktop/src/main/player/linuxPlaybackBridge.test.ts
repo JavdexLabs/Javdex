@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, closeSync, existsSync, openSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { test, type TestContext } from 'node:test'
-import { createLinuxPlaybackBridge, encodePlaybackMessage } from './linuxPlaybackBridge'
+import { createLinuxPlaybackBridge, encodePlaybackMessage, linuxSharedTextureFailureCode, type LinuxPlaybackFrameChannel } from './linuxPlaybackBridge'
 
 const LIMIT = 1024 * 1024
 const bounds = { x: 11, y: 22, width: 333, height: 222, scale: 1.5 }
@@ -31,7 +31,7 @@ async function until<T>(read: () => T, done: (value: T) => boolean, reason: stri
   }
 }
 interface Entry { pid: number; fields: string[] }
-function fixture(t: TestContext, mode = 'normal') {
+function fixture(t: TestContext, mode = 'normal', createFrameChannel?: (onError: (error: Error) => void) => LinuxPlaybackFrameChannel) {
   const root = mkdtempSync(path.join(tmpdir(), 'javdex-helper-bridge-'))
   const directory = path.join(root, 'helper spaces 字幕'); mkdirSync(directory)
   const executable = path.join(directory, 'fixture helper.cjs'), log = path.join(root, 'messages.jsonl')
@@ -94,7 +94,7 @@ process.stdin.on('end', () => { if (!hanging && mode !== 'slow-destroy') process
 process.stdin.on('error', () => {});
 `)
   chmodSync(executable, 0o755)
-  const bridge = createLinuxPlaybackBridge(executable)
+  const bridge = createLinuxPlaybackBridge(executable, createFrameChannel)
   const entries = (): Entry[] => existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line) as Entry) : []
   const alive = (pid: number): boolean => { try { process.kill(pid, 0); return true } catch { return false } }
   t.after(async () => {
@@ -251,4 +251,71 @@ test('Linux bridge bounds shutdown of a helper that ignores destroy and EOF', li
   f.bridge.destroy()
   assert.equal(f.bridge.state().alive, false)
   await until(() => f.alive(pid), running => !running, 'unresponsive fixture survived bounded shutdown')
+})
+
+
+test('DMA-BUF bridge inherits a private FD, never passes a native window handle, and binds channel lifetime', linuxOnly, async t => {
+  const events: string[] = []
+  let failTexture: ((error: Error) => void) | undefined
+  let ready = false
+  const f = fixture(t, 'normal', onError => {
+    const fd = openSync('/dev/null', 'r')
+    let closed = false
+    failTexture = onError
+    return { surfaceToken: 'test-generation', childFd: fd,
+      spawned() { events.push('spawned'); closeSync(fd); closed = true },
+      setVisible(value) { events.push(`visible:${value}`) },
+      isReady() { return ready },
+      destroy() { events.push('destroy'); if (!closed) { closeSync(fd); closed = true } } }
+  })
+  f.bridge.create(Buffer.alloc(0), bounds, { backend: 'dmabuf' })
+  const state = await until(() => f.bridge.state(), state => Boolean(state.loadedFiles), 'shared helper create missing')
+  const pid = state.loadedFiles!
+  assert.equal(state.sharedTextureSurface, 'test-generation')
+  assert.deepEqual(f.entries()[1].fields, ['create', '0', '11', '22', '333', '222', '1.5', 'dmabuf'])
+  f.bridge.setVisible(true)
+  assert.deepEqual(events, ['spawned', 'visible:true'])
+  await until(f.entries, entries => entries.some(entry => entry.fields[0] === 'visible'), 'initial visibility missing')
+  assert.deepEqual(f.entries().filter(entry => entry.fields[0] === 'visible').map(entry => entry.fields), [['visible', '0']])
+  ready = true; f.bridge.render()
+  await until(f.entries, entries => entries.filter(entry => entry.fields[0] === 'visible').length === 2, 'ready helper not resumed')
+  assert.deepEqual(f.entries().filter(entry => entry.fields[0] === 'visible').at(-1)?.fields, ['visible', '1'])
+  ready = false; f.bridge.render()
+  await until(f.entries, entries => entries.filter(entry => entry.fields[0] === 'visible').length === 3, 'unbound helper not suspended')
+  assert.deepEqual(f.entries().filter(entry => entry.fields[0] === 'visible').at(-1)?.fields, ['visible', '0'])
+  failTexture!(new Error('synthetic texture transport failure'))
+  assert.throws(() => f.bridge.render(), /synthetic texture transport failure/)
+  await until(() => f.alive(pid), running => !running, 'texture failure must terminate helper')
+  assert.equal(events.filter(event => event === 'destroy').length, 1)
+})
+
+test('DMA-BUF selection fails closed without the private texture channel factory', linuxOnly, t => {
+  const f = fixture(t)
+  assert.throws(() => f.bridge.create(Buffer.alloc(0), bounds, { backend: 'dmabuf' }), /传输通道/)
+  assert.deepEqual(f.entries(), [])
+})
+
+
+test('Shared-texture diagnostics expose only fixed capability codes', () => {
+  assert.equal(linuxSharedTextureFailureCode('No accessible DRM render node; a real GPU render node is required'), 'DRM_RENDER_NODE_UNAVAILABLE')
+  assert.equal(linuxSharedTextureFailureCode('Cannot open DRM render node (missing device or permission)'), 'DRM_RENDER_NODE_UNAVAILABLE')
+  assert.equal(linuxSharedTextureFailureCode('Cannot allocate linear renderable GBM buffer'), 'GBM_LINEAR_BUFFER_UNAVAILABLE')
+  assert.equal(linuxSharedTextureFailureCode('Cannot initialize EGL on DRM render node'), 'EGL_DMABUF_UNAVAILABLE')
+  assert.equal(linuxSharedTextureFailureCode('等待视频画面接收器超时，请停止后重试'), 'RECEIVER_NOT_READY')
+  assert.equal(linuxSharedTextureFailureCode('http://user:password@example.test/private/media'), 'EXPERIMENTAL_PLAYBACK_FAILED')
+})
+
+test('DMA-BUF helper heartbeat terminates a hung producer with no outstanding frames', linuxOnly, async t => {
+  const f = fixture(t, 'normal', () => {
+    const fd = openSync('/dev/null', 'r')
+    return { surfaceToken: 'heartbeat-test', childFd: fd, spawned() { closeSync(fd) },
+      setVisible() {}, isReady() { return false }, destroy() {} }
+  })
+  f.bridge.create(Buffer.alloc(0), bounds, { backend: 'dmabuf' })
+  const state = await until(() => f.bridge.state(), state => Boolean(state.loadedFiles), 'shared helper create missing')
+  const pid = state.loadedFiles!
+  f.bridge.command(['hang'])
+  await until(() => { try { f.bridge.render(); return '' } catch (error) { return (error as Error).message } },
+    value => value.includes('heartbeat timed out'), 'hung helper had no bounded failure', 13000)
+  await until(() => f.alive(pid), running => !running, 'heartbeat failure did not terminate helper')
 })

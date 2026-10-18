@@ -305,6 +305,7 @@ export function createPlaybackSession(deps: Dependencies) {
         width: finite(raw.width), height: finite(raw.height), hardwareDecoder: raw['hwdec-current'] ?? null,
         audioOutput: raw['current-ao'] ?? null, droppedFrames: finite(raw['frame-drop-count']) }
       state.rendererFullscreenControls = raw.rendererFullscreenControls === true
+      state.sharedTextureSurface = raw.sharedTextureSurface
       state.nativeVideoFocused = raw.nativeVideoFocused === true
       state.interactionSequence = finite(raw.interactionSequence) ?? undefined
       state.fullscreenPointerY = finite(raw.fullscreenPointerY) ?? undefined

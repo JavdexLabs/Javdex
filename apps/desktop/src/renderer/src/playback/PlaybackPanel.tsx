@@ -54,6 +54,11 @@ export default function PlaybackPanel(): JSX.Element | null {
   stateRef.current = state
   const root = useRef<HTMLDivElement>(null)
   const video = useRef<HTMLButtonElement>(null)
+  const videoClickTimer = useRef<number | null>(null)
+  const cancelVideoClick = useCallback(() => {
+    if (videoClickTimer.current !== null) window.clearTimeout(videoClickTimer.current)
+    videoClickTimer.current = null
+  }, [])
   const header = useRef<HTMLElement>(null)
   const toolbar = useRef<HTMLDivElement>(null)
   const toast = useToast()
@@ -143,6 +148,12 @@ export default function PlaybackPanel(): JSX.Element | null {
     })
     return () => { disposed = true }
   }, [options, sessionId, libraryId, videoId, presentation])
+  const sharedTextureSurface = state?.phase === 'error' ? undefined : state?.sharedTextureSurface
+  useLayoutEffect(() => {
+    if (!sharedTextureSurface) return
+    return api.playback.bindSharedTextureSurface(sharedTextureSurface)
+  }, [sharedTextureSurface])
+  useEffect(() => cancelVideoClick, [sessionId, sharedTextureSurface, presentation, cancelVideoClick])
   const presentationRevision = state?.presentationRevision
   const focusSequence = state?.focusRequest?.sequence
   const rendererFullscreen = presentation === 'fullscreen' && state?.rendererFullscreenControls === true
@@ -333,8 +344,27 @@ export default function PlaybackPanel(): JSX.Element | null {
           <p className={styles.note}>重试会重新检查同一资源，不自动切换资源或播放器。</p>
         </div> : <button ref={video} className={styles.video} aria-hidden={nativeFullscreen || undefined} tabIndex={nativeFullscreen ? -1 : 0}
           aria-label={docked ? '恢复展开播放器' : '视频画面，单击播放或暂停，双击全屏'}
-          onClick={() => control(docked ? { kind: 'presentation', value: 'expanded' }
-            : state.phase === 'ended' ? { kind: 'restart' } : { kind: 'pause', paused: !state.paused })} />}
+          onClick={event => {
+            cancelVideoClick()
+            const activate = (): void => {
+              videoClickTimer.current = null
+              const current = stateRef.current
+              if (!current || current.sessionId !== state.sessionId || current.presentation !== state.presentation || current.phase === 'error') return
+              control(current.presentation === 'docked' ? { kind: 'presentation', value: 'expanded' }
+                : current.phase === 'ended' ? { kind: 'restart' } : { kind: 'pause', paused: !current.paused })
+            }
+            // Native surfaces handle their own pointer gestures. The canvas uses
+            // the legacy Linux 300 ms window; keyboard activation stays immediate.
+            if (sharedTextureSurface && !docked && event?.detail > 0) {
+              if (event.detail === 1) videoClickTimer.current = window.setTimeout(activate, 300)
+            } else activate()
+          }}
+          onDoubleClick={sharedTextureSurface && !docked ? () => {
+            cancelVideoClick()
+            control({ kind: 'presentation', value: fullscreen ? 'expanded' : 'fullscreen' })
+          } : undefined}>
+          {sharedTextureSurface && <canvas className={styles.sharedTexture} data-playback-surface={sharedTextureSurface} aria-hidden="true" />}
+        </button>}
         {options && !docked && !nativeFullscreen && state.phase !== 'error' && <aside className={styles.options} aria-label="播放设置" id={settingsId} data-native-playback-occluder={rendererFullscreen || undefined}>
           <div className={styles.optionsHeader}><span>播放设置</span><IconButton size="sm" icon={<X size={16} />} label="关闭播放设置" onClick={() => presentationHistory.setOptions(false)} /></div>
           <div className={styles.tabs} role="tablist" aria-label="播放设置分类">

@@ -169,7 +169,7 @@ public:
         return found == observed.end() || !std::isfinite(found->second.number) ? 0 : found->second.number;
     }
     void initialize(void *(*getProc)(void *, const char *), void *context = nullptr, bool softwareRendering = false,
-        void (*wakeup)(void *) = nullptr, void *wakeupContext = nullptr) {
+        void (*wakeup)(void *) = nullptr, void *wakeupContext = nullptr, const char *hardwareDecode = "auto") {
         if (handle || renderer) throw std::runtime_error("Native session is already initialized");
         observed.clear(); actions.clear(); lastError.clear(); lastErrorCode = 0;
         frames = presentedFrames = loadedFiles = restarts = commandErrors = subtitleCommandErrors = subtitleCommandsPending = subtitleCommandReplies = 0; requested.store(false);
@@ -180,7 +180,7 @@ public:
         handle = mpv_create();
         if (!handle) throw std::runtime_error("mpv_create failed");
         const char *options[][2] = {
-            {"config", "no"}, {"load-scripts", "no"}, {"ytdl", "no"}, {"vo", "libmpv"}, {"hwdec", "auto"},
+            {"config", "no"}, {"load-scripts", "no"}, {"ytdl", "no"}, {"vo", "libmpv"}, {"hwdec", hardwareDecode},
             {"idle", "yes"}, {"keep-open", "yes"}, {"pause", "yes"}, {"volume", "50"}, {"terminal", "no"},
             {"input-default-bindings", "no"}, {"input-vo-keyboard", "no"}, {"osc", "no"},
             {"audio-pitch-correction", "yes"}, {"sub-auto", "no"}, {"audio-file-auto", "no"},
@@ -289,17 +289,29 @@ public:
         drainEvents(); refreshGeneratedSubtitles();
         return renderer && requested.exchange(false) && (mpv_render_context_update(renderer) & MPV_RENDER_UPDATE_FRAME);
     }
-    bool render(int width, int height) {
+    bool render(int width, int height, int framebuffer = 0, bool flipY = true) {
         if (!renderer || width <= 0 || height <= 0) return false;
         generatedWidth = width; generatedHeight = height;
         drainEvents(); refreshGeneratedSubtitles();
         mpv_render_context_update(renderer);
-        mpv_opengl_fbo fbo = {0, width, height, 0}; int flip = 1, block = 0;
+        mpv_opengl_fbo fbo = {framebuffer, width, height, 0}; int flip = flipY ? 1 : 0, block = 0;
         mpv_render_param params[] = {{MPV_RENDER_PARAM_OPENGL_FBO, &fbo}, {MPV_RENDER_PARAM_FLIP_Y, &flip},
             {MPV_RENDER_PARAM_BLOCK_FOR_TARGET_TIME, &block}, {MPV_RENDER_PARAM_INVALID, nullptr}};
         const int error = mpv_render_context_render(renderer, params);
         if (error < 0) { lastErrorCode = error; lastError = mpv_error_string(error); return false; }
         frames++;
+        return true;
+    }
+    bool skipRender() {
+        if (!renderer) return false;
+        // Hidden shared-texture surfaces must still consume frame updates so
+        // video does not stall audio. No render target or frame ownership is
+        // involved, and skipped frames are not counted as rendered/presented.
+        int skip = 1, block = 0;
+        mpv_render_param params[] = {{MPV_RENDER_PARAM_SKIP_RENDERING, &skip},
+            {MPV_RENDER_PARAM_BLOCK_FOR_TARGET_TIME, &block}, {MPV_RENDER_PARAM_INVALID, nullptr}};
+        const int error = mpv_render_context_render(renderer, params);
+        if (error < 0) { lastErrorCode = error; lastError = mpv_error_string(error); return false; }
         return true;
     }
     void swapped() { if (renderer) mpv_render_context_report_swap(renderer); }

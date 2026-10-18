@@ -97,6 +97,7 @@ function fixture(platform: 'darwin' | 'win32' | 'linux') {
         case 'node:module': return { createRequire: () => () => bridge }
         case './playbackDisplay': return { linuxPlaybackBackend: () => 'x11' }
         case './linuxPlaybackBridge': return { createLinuxPlaybackBridge: () => bridge }
+        case './linuxSharedTexture': return { createLinuxSharedTexture: () => { throw new Error('Legacy test must not initialize a shared-texture importer') } }
         default: throw new Error(`Unexpected playback wrapper dependency: ${id}`)
       }
     }

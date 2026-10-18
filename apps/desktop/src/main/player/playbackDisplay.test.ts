@@ -152,3 +152,35 @@ it('rejects late Linux selection and ignores Linux flags on other platforms', ()
     assert.equal(linuxPlaybackBackend(), null)
   }
 })
+
+it('opts into shared textures independently of X11 or Wayland window presentation', () => {
+  for (const [args, expected] of [
+    [['--javdex-wayland'], [['ozone-platform', 'wayland']]],
+    [['--javdex-dmabuf'], [['ozone-platform', 'wayland']]],
+    [['--javdex-dmabuf', '--javdex-x11'], [['ozone-platform', 'x11']]],
+    [['--javdex-dmabuf', '--ozone-platform=x11'], []],
+    [['--javdex-dmabuf', '--ozone-platform=wayland'], []]
+  ] as const) {
+    const selected = host()
+    configurePlaybackDisplay(selected, { platform: 'linux', argv: ['electron', ...args] })
+    assert.equal(linuxPlaybackBackend(), 'dmabuf')
+    assert.deepEqual(selected.switches, expected)
+  }
+})
+
+it('rejects conflicting shared-texture display arguments without mutating configuration', () => {
+  configurePlaybackDisplay(host(), { platform: 'linux', argv: ['electron', '--javdex-x11'] })
+  for (const args of [
+    ['--javdex-x11', '--javdex-wayland'],
+    ['--javdex-wayland', '--ozone-platform=x11'],
+    ['--javdex-dmabuf', '--ozone-platform=auto'],
+    ['--javdex-dmabuf', '--ozone-platform=headless']
+  ]) {
+    const selected = host()
+    assert.throws(() => configurePlaybackDisplay(selected, { platform: 'linux', argv: ['electron', ...args] }))
+    assert.deepEqual(selected.switches, [])
+    assert.equal(linuxPlaybackBackend(), 'x11')
+  }
+  configurePlaybackDisplay(host(), { platform: 'linux', argv: ['electron', '--', '--javdex-wayland', '--javdex-dmabuf'] })
+  assert.equal(linuxPlaybackBackend(), null)
+})

@@ -46,6 +46,9 @@ globalThis.fetch = async (input, init = {}) => {
       Object.assign(result, body);
       if (id === 416016386 && body.draft === true) fail('archive');
       if (id === 9001 && body.draft === false) fail('publish');
+      if (id === 9001 && body.draft === false && state.failOn === 'foreign-original') {
+        state.releases.find(release => release.id === 416016386).body = 'changed by another owner'; fail('foreign-original');
+      }
     }
     if (endpoint.endsWith('/assets')) result = result.assets;
   } else if (endpoint.startsWith('git/ref/tags/')) {
@@ -81,7 +84,7 @@ process.on('exit', save);
 
 test('the real publication program preserves old assets through successful and interrupted complete cutovers', async t => {
   const original = JSON.parse(await fs.readFile(new URL('./fixtures/replacement-0.9.0-original.json', import.meta.url), 'utf8'))
-  for (const failure of [undefined, 'archive', 'tag', 'image', 'publish', 'verify']) {
+  for (const failure of [undefined, 'archive', 'tag', 'image', 'publish', 'verify', 'foreign-original']) {
     const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'javdex-replacement-process-'))
     t.after(() => fs.rm(directory, { recursive: true, force: true }))
     const outputs = path.join(directory, 'release-artifacts'), stateFile = path.join(directory, 'state.json')
@@ -106,9 +109,15 @@ test('the real publication program preserves old assets through successful and i
     if (failure) {
       assert.notEqual(result.status, 0)
       assert.match(result.stderr, new RegExp('injected ' + failure))
-      assert.equal(state.tags['v0.9.0'], original.tag.sha)
-      assert.equal(state.images['0.9.0'], original.imageDigest)
-      assert.equal(state.releases.find(release => release.id === 416016386).draft, false)
+      if (failure === 'foreign-original') {
+        assert.match(result.stderr, /recovery requires attention/)
+        assert.equal(state.releases.find(release => release.id === 416016386).body, 'changed by another owner')
+        assert.equal(state.tags['v0.9.0'], candidate)
+      } else {
+        assert.equal(state.tags['v0.9.0'], original.tag.sha)
+        assert.equal(state.images['0.9.0'], original.imageDigest)
+        assert.equal(state.releases.find(release => release.id === 416016386).draft, false)
+      }
     } else {
       assert.equal(result.status, 0, result.stderr)
       assert.equal(state.tags['v0.9.0'], candidate); assert.equal(state.images['0.9.0'], image)

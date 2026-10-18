@@ -109,6 +109,16 @@ await replacePublication({
   },
   async rollback() {
     await record('rollback-started')
+    const retained = await api.github(`releases/${baseline.releaseId}`)
+    assert.equal(retained.target_commitish, baseline.sourceCommit)
+    assert.equal(retained.immutable, false)
+    assert.equal(retained.body, old.release.body, 'Original archive notes changed; refusing to overwrite another owner action')
+    assert.ok((retained.tag_name === api.archiveTag && retained.draft === true
+      && retained.name === 'Archived original Javdex v0.9.0 (retained assets)')
+      || (retained.tag_name === 'v0.9.0' && retained.draft === false && retained.name === old.release.name),
+    'Original archive identity changed; refusing to overwrite another owner action')
+    const projection = assets => assets.map(({ id, name, size, digest }) => ({ id, name, size, digest })).sort((a, b) => a.name.localeCompare(b.name))
+    assert.deepEqual(projection(retained.assets), projection(baseline.assets), 'Original archive assets changed; stop recovery')
     const published = await api.github('releases/tags/v0.9.0')
     assert.ok(!published || [staged.id, baseline.releaseId].includes(published.id), 'Foreign Release appeared; refusing to overwrite it')
     if (published?.id === staged.id) await patchRelease(staged.id, { draft: true, tag_name: api.stagingTag })

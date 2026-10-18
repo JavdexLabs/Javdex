@@ -17,6 +17,8 @@ function fixture(volume?: { read(): Promise<number>; remember(value: number): vo
   const presentations: string[] = []
   const awake: boolean[] = []
   const navigations: string[] = []
+  const released: PlaybackSource[] = []
+  let endings = 0
   let starts = 0
   let resolves = 0
   let destroys = 0
@@ -34,6 +36,7 @@ function fixture(volume?: { read(): Promise<number>; remember(value: number): vo
   let validate = async (_source: PlaybackSource): Promise<void> => {}
   const session = createPlaybackSession({ native,
     resolve: input => { resolves++; return resolve(input) }, validate: source => validate(source),
+    release: source => { released.push(source) }, ending: () => { endings++ },
     changed: state => events.push(state), presentation: value => { presentations.push(value) }, started: async () => { starts++ }, awake: value => { awake.push(value) },
     windowSize: () => ({ width: 1000, height: 700 }),
     focusControls: () => { focuses++ },
@@ -41,7 +44,7 @@ function fixture(volume?: { read(): Promise<number>; remember(value: number): vo
     escape: () => { escapes++ },
     readVolume: volume?.read, volumeChanged: volume?.remember, progress, now: () => time
   })
-  return { session, native, loads, loadOptions, commands, events, viewports, occlusionShapes, presentations, awake, navigations, advance: (ms: number) => { time += ms }, starts: () => starts, resolves: () => resolves, destroys: () => destroys, focuses: () => focuses, escapes: () => escapes,
+  return { session, native, released, endings: () => endings, loads, loadOptions, commands, events, viewports, occlusionShapes, presentations, awake, navigations, advance: (ms: number) => { time += ms }, starts: () => starts, resolves: () => resolves, destroys: () => destroys, focuses: () => focuses, escapes: () => escapes,
     raw: (patch: Partial<NativePlaybackState>) => { raw = { ...raw, ...patch } },
     resolve: (next: typeof resolve) => { resolve = next }, validate: (next: typeof validate) => { validate = next } }
 }
@@ -402,6 +405,42 @@ test('a late open cannot replace a newer source or resurrect a stopped player', 
   await opening
   assert.equal(f.session.snapshot(), null)
   assert.equal(f.loads.length, 0)
+  assert.equal(f.released.length, 1, 'the canceled open releases its unadopted source')
+  assert.equal(f.endings(), 0, 'a stale open must not stop subtitles belonging to another session')
+})
+
+test('switch, stop and failure release their owned source once; pause and dock retain it', async () => {
+  const f = fixture()
+  await f.session.open(target)
+  const id = f.session.snapshot()!.sessionId
+  f.session.control(id, { kind: 'pause', paused: true })
+  f.session.control(id, { kind: 'presentation', value: 'docked' })
+  await f.session.open(target)
+  assert.equal(f.released.length, 0)
+  assert.equal(f.resolves(), 1)
+  await f.session.open({ ...target, resourceId: 4 })
+  assert.deepEqual(f.released.map(source => source.target.resourceId), [3])
+  assert.equal(f.endings(), 1)
+  f.session.fail('read failed')
+  f.session.stop()
+  assert.deepEqual(f.released.map(source => source.target.resourceId), [3, 4])
+  assert.equal(f.endings(), 2)
+})
+
+test('an open canceled during progress preparation releases only its own grant', async () => {
+  let finish!: () => void
+  let entered!: () => void
+  const waiting = new Promise<void>(resolve => { entered = resolve })
+  const f = fixture(undefined, { prepare: async () => {
+    entered(); await new Promise<void>(resolve => { finish = resolve }); return { enabled: false, point: null }
+  }, save() {}, clear() {} })
+  const opening = f.session.open(target)
+  await waiting
+  f.session.stop()
+  finish()
+  assert.equal(await opening, false)
+  assert.equal(f.released.length, 1)
+  assert.equal(f.session.snapshot(), null)
 })
 test('stale source controls and presentation geometry cannot cover the current UI', async () => {
   const f = fixture()

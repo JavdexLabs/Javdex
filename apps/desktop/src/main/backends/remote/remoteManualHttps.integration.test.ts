@@ -14,14 +14,17 @@ it('manual self-signed HTTPS works for probes, saved connections, images and pla
   const key = path.join(root, 'key.pem'), cert = path.join(root, 'cert.pem')
   // Matches the deployment certificate: self-signed, without an IP subjectAltName.
   execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1', '-subj', '/CN=JavdexUpdater', '-keyout', key, '-out', cert], { stdio: 'ignore' })
-  let requests = 0
+  let requests = 0, playbackGrants = 0
+  const revokedPlaybacks = new Set<number>()
   const server = https.createServer({ key: fs.readFileSync(key), cert: fs.readFileSync(cert) }, async (request, response) => {
     requests++
     for await (const _ of request) { /* Drain the request before responding. */ }
     const route = request.url ?? ''
     if (route.startsWith('/play/')) {
       assert.equal(request.headers.authorization, undefined)
-      assert.equal(request.headers.range, 'bytes=1-3')
+      if (request.method !== 'HEAD' || request.headers.range) assert.equal(request.headers.range, 'bytes=1-3')
+      const grantId = Number(/test-(\d+)/.exec(route)?.[1])
+      if (revokedPlaybacks.has(grantId)) { response.writeHead(404); response.end(); return }
       response.writeHead(206, { 'Content-Type': 'video/mp4', 'Content-Length': '3', 'Content-Range': 'bytes 1-3/5' })
       response.end(request.method === 'HEAD' ? undefined : 'bcd')
       return
@@ -36,8 +39,12 @@ it('manual self-signed HTTPS works for probes, saved connections, images and pla
     assert.equal(request.headers.authorization, 'Bearer manual-secret')
     if (route.endsWith('/catalog.storageInfo')) response.end(JSON.stringify({ imagesDir: '/data/images' }))
     else if (route.includes('/assets/')) { response.setHeader('Content-Type', 'image/png'); response.end('image fixture') }
-    else if (route.endsWith('/play.grant')) response.end(JSON.stringify({ grantId: 'grant', resourceId: 1,
-      expiresAt: new Date(Date.now() + 60_000).toISOString(), playbackHandle: '/play/v1/test?t=scoped', methods: ['HEAD', 'GET'], range: true }))
+    else if (route.endsWith('/play.grant')) {
+      playbackGrants++
+      response.end(JSON.stringify({ grantId: 'grant', resourceId: 1,
+        expiresAt: new Date(Date.now() + (playbackGrants === 1 ? 10_000 : 12 * 60 * 60 * 1000)).toISOString(),
+        playbackHandle: `/play/v1/test-${playbackGrants}.mp4?t=scoped`, methods: ['HEAD', 'GET'], range: true }))
+    }
     else { response.statusCode = 404; response.end('{}') }
   })
   const backends: ReturnType<typeof createRemoteCatalogBackend>[] = []
@@ -75,7 +82,7 @@ it('manual self-signed HTTPS works for probes, saved connections, images and pla
     assert.equal((await backend.reconnect()).state, 'available')
     const image = await backend.assets.readImage({ relPath: 'cover.png' })
     assert.equal(image.body.toString(), 'image fixture')
-    const grant = await backend.assets.grantPlayback({ libraryId: 1, videoId: 1, resourceId: 1, locatorRevision: 'fixture' })
+    const grant = await backend.assets.grantPlayback({ libraryId: 1, videoId: 1, resourceId: 1, locatorRevision: 'fixture' }, { sessionBound: true })
     assert.equal(new URL(grant.playbackHandle).protocol, 'http:')
     assert.equal(new URL(grant.playbackHandle).hostname, '127.0.0.1')
     const media = await fetch(grant.playbackHandle, { headers: { Range: 'bytes=1-3' } })
@@ -84,6 +91,19 @@ it('manual self-signed HTTPS works for probes, saved connections, images and pla
     const head = await fetch(grant.playbackHandle, { method: 'HEAD', headers: { Range: 'bytes=1-3' } })
     assert.equal(head.status, 206)
     assert.equal(head.headers.get('content-range'), 'bytes 1-3/5')
+    assert.equal(playbackGrants, 2, 'a near-expiry session route renews its authenticated upstream once')
+    const external = await backend.assets.grantPlayback({ libraryId: 1, videoId: 1, resourceId: 1, locatorRevision: 'fixture' })
+    const repeated = await backend.assets.grantPlayback({ libraryId: 1, videoId: 1, resourceId: 1, locatorRevision: 'fixture' })
+    assert.equal(repeated.playbackHandle, external.playbackHandle)
+    assert.equal(playbackGrants, 3, 'reopening an external resource must reuse the existing server grant')
+    revokedPlaybacks.add(3)
+    const recovered = await backend.assets.grantPlayback({ libraryId: 1, videoId: 1, resourceId: 1, locatorRevision: 'fixture' })
+    assert.notEqual(recovered.playbackHandle, external.playbackHandle)
+    assert.equal(playbackGrants, 4, 'an invalid cached grant is replaced before opening the external player')
+    assert.equal((await fetch(external.playbackHandle)).status, 403)
+    backend.releasePlayback!(grant.playbackHandle)
+    assert.equal((await fetch(grant.playbackHandle)).status, 403)
+    assert.equal((await fetch(recovered.playbackHandle, { method: 'HEAD', headers: { Range: 'bytes=1-3' } })).status, 206)
   } finally {
     await Promise.all(backends.map(backend => backend.dispose()))
     server.closeAllConnections()

@@ -126,6 +126,18 @@ export function revokeDevicePlayGrants(deviceId: string, nextEpoch: number, data
   return revoked
 }
 
+/** Expiration must also reclaim grants that the player never requests again. */
+export function pruneExpiredPlayGrants(now = new Date(), database: Database.Database = getDb()): string[] {
+  const rows = database.prepare(`SELECT value_json FROM catalog_settings
+    WHERE key LIKE 'play-grant:%' AND json_valid(value_json)
+      AND json_extract(value_json, '$.expiresAt') <= ?`).all(now.toISOString()) as Array<{ value_json: string }>
+  const expired = rows.map(row => JSON.parse(row.value_json) as StoredPlayGrant)
+  database.transaction(() => { for (const grant of expired) deleteGrantKeys(grant, database) })()
+  const ids = expired.map(grant => grant.grantId)
+  notifyPlayGrantsRevoked(ids)
+  return ids
+}
+
 export function grantCatalogPlayback(
   input: PlayGrantInput,
   options: { now?: Date; ttlMs?: number; publicOrigin?: string; deviceId?: string } = {},
@@ -163,6 +175,7 @@ export function grantCatalogPlayback(
   }
   inspectLocalResourceFile(resource)
   const now = options.now ?? new Date()
+  pruneExpiredPlayGrants(now, database)
   const ttlMs = options.ttlMs ?? PLAY_GRANT_TTL_MS
   const grantId = cryptoRandomUuid()
   const token = generateSecret()
@@ -178,8 +191,10 @@ export function grantCatalogPlayback(
     expiresAt: new Date(now.getTime() + ttlMs).toISOString(),
     createdAt: now.toISOString()
   }
-  writeCatalogSetting(grantKey(grantId), stored, database)
-  writeCatalogSetting(tokenKey(stored.tokenDigest), grantId, database)
+  database.transaction(() => {
+    writeCatalogSetting(grantKey(grantId), stored, database)
+    writeCatalogSetting(tokenKey(stored.tokenDigest), grantId, database)
+  })()
   const fileName = path.basename(resource.locator)
   const pathAndQuery = `/play/v1/${grantId}/${encodeURIComponent(fileName)}?t=${encodeURIComponent(token)}`
   const origin = options.publicOrigin?.replace(/\/+$/, '') ?? ''

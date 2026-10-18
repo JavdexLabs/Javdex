@@ -169,6 +169,8 @@ export function createPlayerService(
       return { ok: false, error: '请在此电脑设置中指定播放器程序（例如 mpv）' }
     }
     if (!catalog) return { ok: false, error: '远程播放未装配资料库后端' }
+    let handle: string | undefined
+    let opened = false
     try {
       const grant = (await catalog.assets.grantPlayback({
         libraryId,
@@ -176,10 +178,15 @@ export function createPlayerService(
         resourceId: resource.id,
         locatorRevision: resource.locatorRevision ?? resourceLocatorRevision(resource)
       })) as PlayGrant
+      handle = grant.playbackHandle
       if (!current()) return staleResult()
-      return spawnPlayer(playerPath, [grant.playbackHandle])
+      const result = await spawnPlayer(playerPath, [grant.playbackHandle])
+      opened = result.ok
+      return result
     } catch (error) {
       return playError(error, '无法签发播放凭据')
+    } finally {
+      if (handle) catalog.finishExternalPlayback?.(handle, opened)
     }
   }
 

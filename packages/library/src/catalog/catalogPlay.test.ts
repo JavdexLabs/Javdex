@@ -10,7 +10,8 @@ import { getVideoResourceInLibrary } from '@library/db/videoRepo'
 import { insertTestVideoWithFile } from '@library/db/testVideoFixtures'
 import { isStructuredError } from '@shared/protocol/errors'
 import { ensureCatalogIdentity } from './catalogIdentity'
-import { grantCatalogPlayback, resourceLocatorRevision } from './catalogPlay'
+import { grantCatalogPlayback, inspectPlayStream, pruneExpiredPlayGrants, resourceLocatorRevision, setPlayGrantListener } from './catalogPlay'
+import { readCatalogSetting } from './catalogSettings'
 
 describe('catalogPlay locator revision', () => {
   it('changes when the resource locator or fingerprint changes', () => {
@@ -28,6 +29,43 @@ describe('catalogPlay locator revision', () => {
     assert.notEqual(resourceLocatorRevision({ ...base, locator: '/media/ABC-002.mp4' }), first)
     assert.notEqual(resourceLocatorRevision({ ...base, file_mtime_ms: 2000 }), first)
   })
+})
+
+it('retains more than 128 grants without eviction and cleans only expired grants and token indexes', t => {
+  const directory = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-play-grant-pool-')))
+  t.after(() => { setPlayGrantListener(null); closeDatabase(); fs.rmSync(directory, { recursive: true, force: true }) })
+  initDatabaseAtPath(':memory:')
+  ensureCatalogIdentity({ serverId: randomUUID() })
+  const root = addMediaLibraryRoot({ libraryId: 1, expectedRevision: 1, root: { path: directory } })
+  const file = path.join(directory, '原始 影片.mp4')
+  fs.writeFileSync(file, 'synthetic media')
+  const { videoId, fileId } = insertTestVideoWithFile(getDb(), { code: 'POOL-001', filePath: file, rootId: root.id })
+  const input = { libraryId: 1, videoId, resourceId: fileId, locatorRevision: resourceLocatorRevision(getVideoResourceInLibrary(1, fileId)!) }
+  const now = Date.now()
+  const revoked: string[] = []
+  setPlayGrantListener({ onRevoke: ids => { revoked.push(...ids) } })
+  const grants = Array.from({ length: 260 }, (_, index) => grantCatalogPlayback(input, {
+    deviceId: 'client', now: new Date(now + index), ...(index < 130 ? { ttlMs: 1000 } : {})
+  }))
+  const inspect = (grant: typeof grants[0]) => inspectPlayStream({ grantId: grant.grantId,
+    token: new URL(grant.playbackHandle, 'https://fixture.invalid').searchParams.get('t')!, now: new Date(now + 500) })
+  assert.equal(inspect(grants[0]).fileName, '原始 影片.mp4', 'the oldest grant remains valid after 260 issues')
+  assert.doesNotThrow(() => inspect(grants[259]))
+  assert.deepEqual(revoked, [], 'issuing grants must not revoke any unexpired grant')
+  const count = (prefix: string): number => (getDb().prepare('SELECT count(*) AS n FROM catalog_settings WHERE key LIKE ?').get(prefix) as { n: number }).n
+  assert.equal(count('play-grant:%'), 260)
+  assert.equal(count('play-token:%'), 260)
+  const expiredIds = grants.slice(0, 130).map(grant => grant.grantId).sort()
+  assert.deepEqual(pruneExpiredPlayGrants(new Date(now + 2000)).sort(), expiredIds)
+  assert.deepEqual(revoked.sort(), expiredIds)
+  assert.equal(readCatalogSetting(`play-grant:${grants[0].grantId}`, null), null)
+  assert.equal(count('play-grant:%'), 130)
+  assert.equal(count('play-token:%'), 130)
+  assert.doesNotThrow(() => inspect(grants[130]))
+  assert.throws(() => inspect(grants[0]), error => isStructuredError(error) && error.code === 'AUTH_REQUIRED')
+  const expired = pruneExpiredPlayGrants(new Date(now + 13 * 60 * 60 * 1000))
+  assert.equal(expired.length, 130)
+  assert.equal(count('play-grant:%') + count('play-token:%'), 0)
 })
 
 for (const cause of ['missing', 'rootChanged', 'rootPermission', 'filePermission', 'filePermissionAlias', 'traversalPermission'] as const) {

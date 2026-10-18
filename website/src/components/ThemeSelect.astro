@@ -1,0 +1,252 @@
+---
+---
+
+<starlight-theme-select class="theme-select">
+  <button
+    type="button"
+    class="theme-select-trigger"
+    aria-label="选择主题"
+    aria-haspopup="listbox"
+    aria-expanded="false"
+  >
+    <svg
+      aria-hidden="true"
+      class="icon label-icon"
+      width="15"
+      height="15"
+      viewBox="0 0 24 24"
+      fill="currentColor"
+    >
+      <path d="M21 14h-1V7a3 3 0 0 0-3-3H7a3 3 0 0 0-3 3v7H3a1 1 0 0 0-1 1v2a3 3 0 0 0 3 3h14a3 3 0 0 0 3-3v-2a1 1 0 0 0-1-1ZM6 7a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v7H6V7Zm14 10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-1h16v1Z" />
+    </svg>
+    <span class="theme-select-label">自动</span>
+    <svg
+      aria-hidden="true"
+      class="theme-select-caret"
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill="currentColor"
+    >
+      <path d="M17 9.17a1 1 0 0 0-1.41 0L12 12.71 8.46 9.17a1 1 0 1 0-1.41 1.42l4.24 4.24a1.002 1.002 0 0 0 1.42 0L17 10.59a1.002 1.002 0 0 0 0-1.42Z" />
+    </svg>
+  </button>
+
+  <div class="theme-select-menu" role="listbox" aria-label="外观主题" hidden>
+    <button
+      type="button"
+      role="option"
+      class="theme-select-option"
+      data-theme-value="light"
+      aria-selected="false"
+    >
+      <svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M5 12a1 1 0 0 0-1-1H3a1 1 0 0 0 0 2h1a1 1 0 0 0 1-1Zm.64 5-.71.71a1 1 0 0 0 0 1.41 1 1 0 0 0 1.41 0l.71-.71A1 1 0 0 0 5.64 17ZM12 5a1 1 0 0 0 1-1V3a1 1 0 0 0-2 0v1a1 1 0 0 0 1 1Zm5.66 2.34a1 1 0 0 0 .7-.29l.71-.71a1 1 0 1 0-1.41-1.41l-.66.71a1 1 0 0 0 0 1.41 1 1 0 0 0 .66.29Zm-12-.29a1 1 0 0 0 1.41 0 1 1 0 0 0 0-1.41l-.71-.71a1.004 1.004 0 1 0-1.43 1.41l.73.71ZM21 11h-1a1 1 0 0 0 0 2h1a1 1 0 0 0 0-2Zm-2.64 6A1 1 0 0 0 17 18.36l.71.71a1 1 0 0 0 1.41 0 1 1 0 0 0 0-1.41l-.76-.66ZM12 6.5a5.5 5.5 0 1 0 5.5 5.5A5.51 5.51 0 0 0 12 6.5Zm0 9a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7Zm0 3.5a1 1 0 0 0-1 1v1a1 1 0 0 0 2 0v-1a1 1 0 0 0-1-1Z" />
+      </svg>
+      <span>浅色</span>
+      <svg aria-hidden="true" class="theme-select-check" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="20 6 9 17 4 12"></polyline>
+      </svg>
+    </button>
+    <button
+      type="button"
+      role="option"
+      class="theme-select-option"
+      data-theme-value="dark"
+      aria-selected="false"
+    >
+      <svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M21.64 13a1 1 0 0 0-1.05-.14 8.049 8.049 0 0 1-3.37.73 8.15 8.15 0 0 1-8.14-8.1 8.59 8.59 0 0 1 .25-2A1 1 0 0 0 8 2.36a10.14 10.14 0 1 0 14 11.69 1 1 0 0 0-.36-1.05Zm-9.5 6.69A8.14 8.14 0 0 1 7.08 5.22v.27a10.15 10.15 0 0 0 10.14 10.14 9.784 9.784 0 0 0 2.1-.22 8.11 8.11 0 0 1-7.18 4.32v-.04Z" />
+      </svg>
+      <span>深色</span>
+      <svg aria-hidden="true" class="theme-select-check" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="20 6 9 17 4 12"></polyline>
+      </svg>
+    </button>
+    <button
+      type="button"
+      role="option"
+      class="theme-select-option"
+      data-theme-value="auto"
+      aria-selected="true"
+    >
+      <svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M21 14h-1V7a3 3 0 0 0-3-3H7a3 3 0 0 0-3 3v7H3a1 1 0 0 0-1 1v2a3 3 0 0 0 3 3h14a3 3 0 0 0 3-3v-2a1 1 0 0 0-1-1ZM6 7a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v7H6V7Zm14 10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-1h16v1Z" />
+      </svg>
+      <span>自动</span>
+      <svg aria-hidden="true" class="theme-select-check" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="20 6 9 17 4 12"></polyline>
+      </svg>
+    </button>
+  </div>
+</starlight-theme-select>
+
+{/* Inlined to avoid FOUC on initial load */}
+<script is:inline>
+  StarlightThemeProvider.updatePickers();
+  (() => {
+    const raw = typeof localStorage !== 'undefined' && localStorage.getItem('starlight-theme');
+    const theme = raw === 'light' || raw === 'dark' ? raw : 'auto';
+    const labels = { light: '浅色', dark: '深色', auto: '自动' };
+    document.querySelectorAll('starlight-theme-select').forEach((picker) => {
+      const label = picker.querySelector('.theme-select-label');
+      if (label) label.textContent = labels[theme] || '自动';
+      picker.querySelectorAll('.theme-select-option').forEach((opt) => {
+        const val = opt.getAttribute('data-theme-value');
+        opt.setAttribute('aria-selected', val === theme ? 'true' : 'false');
+      });
+    });
+  })();
+</script>
+
+<script>
+  type Theme = 'auto' | 'dark' | 'light';
+
+  const storageKey = 'starlight-theme';
+  const labels: Record<Theme, string> = {
+    light: '浅色',
+    dark: '深色',
+    auto: '自动',
+  };
+
+  const parseTheme = (theme: unknown): Theme =>
+    theme === 'auto' || theme === 'dark' || theme === 'light' ? theme : 'auto';
+
+  const loadTheme = (): Theme =>
+    parseTheme(typeof localStorage !== 'undefined' && localStorage.getItem(storageKey));
+
+  function storeTheme(theme: Theme): void {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(storageKey, theme === 'light' || theme === 'dark' ? theme : '');
+    }
+  }
+
+  const getPreferredColorScheme = (): Theme =>
+    matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+
+  function syncAllPickers(theme: Theme): void {
+    // @ts-expect-error Starlight global injected in Head
+    if (typeof StarlightThemeProvider !== 'undefined') {
+      // @ts-expect-error Starlight global injected in Head
+      StarlightThemeProvider.updatePickers(theme);
+    }
+    document.querySelectorAll('starlight-theme-select').forEach((picker) => {
+      const label = picker.querySelector('.theme-select-label');
+      if (label) label.textContent = labels[theme];
+      picker.querySelectorAll<HTMLButtonElement>('.theme-select-option').forEach((opt) => {
+        const active = opt.dataset.themeValue === theme;
+        opt.setAttribute('aria-selected', active ? 'true' : 'false');
+      });
+    });
+  }
+
+  function onThemeChange(theme: Theme): void {
+    syncAllPickers(theme);
+    document.documentElement.dataset.theme = theme === 'auto' ? getPreferredColorScheme() : theme;
+    storeTheme(theme);
+  }
+
+  matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => {
+    if (loadTheme() === 'auto') onThemeChange('auto');
+  });
+
+  class StarlightThemeSelect extends HTMLElement {
+    private trigger: HTMLButtonElement | null = null;
+    private menu: HTMLElement | null = null;
+
+    constructor() {
+      super();
+      onThemeChange(loadTheme());
+      this.trigger = this.querySelector('.theme-select-trigger');
+      this.menu = this.querySelector('.theme-select-menu');
+
+      this.trigger?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.toggleMenu();
+      });
+
+      this.querySelectorAll<HTMLButtonElement>('.theme-select-option').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const chosen = parseTheme(btn.dataset.themeValue);
+          onThemeChange(chosen);
+          this.closeMenu(true);
+        });
+      });
+
+      this.addEventListener('keydown', (e) => this.handleKeyDown(e));
+    }
+
+    connectedCallback() {
+      document.addEventListener('click', this.handleOutsideClick);
+    }
+
+    disconnectedCallback() {
+      document.removeEventListener('click', this.handleOutsideClick);
+    }
+
+    private handleOutsideClick = (e: MouseEvent) => {
+      if (!this.contains(e.target as Node)) {
+        this.closeMenu(false);
+      }
+    };
+
+    private isOpen(): boolean {
+      return this.trigger?.getAttribute('aria-expanded') === 'true';
+    }
+
+    private toggleMenu(): void {
+      if (this.isOpen()) {
+        this.closeMenu(false);
+      } else {
+        this.openMenu();
+      }
+    }
+
+    private openMenu(): void {
+      // Close any other open theme menus first
+      document.querySelectorAll('starlight-theme-select').forEach((other) => {
+        if (other !== this && 'closeMenu' in other && typeof (other as StarlightThemeSelect).closeMenu === 'function') {
+          (other as StarlightThemeSelect).closeMenu(false);
+        }
+      });
+      this.trigger?.setAttribute('aria-expanded', 'true');
+      if (this.menu) this.menu.hidden = false;
+    }
+
+    public closeMenu(returnFocus: boolean): void {
+      if (!this.isOpen()) return;
+      this.trigger?.setAttribute('aria-expanded', 'false');
+      if (this.menu) this.menu.hidden = true;
+      if (returnFocus) this.trigger?.focus();
+    }
+
+    private handleKeyDown(e: KeyboardEvent): void {
+      if (e.key === 'Escape' && this.isOpen()) {
+        e.preventDefault();
+        this.closeMenu(true);
+        return;
+      }
+      if (!this.isOpen() && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+        e.preventDefault();
+        this.openMenu();
+        const selected = this.querySelector<HTMLButtonElement>('.theme-select-option[aria-selected="true"]');
+        selected?.focus();
+        return;
+      }
+      if (this.isOpen() && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+        e.preventDefault();
+        const options = Array.from(this.querySelectorAll<HTMLButtonElement>('.theme-select-option'));
+        if (!options.length) return;
+        const currentIndex = options.indexOf(document.activeElement as HTMLButtonElement);
+        const delta = e.key === 'ArrowDown' ? 1 : -1;
+        const nextIndex = currentIndex === -1 ? 0 : (currentIndex + delta + options.length) % options.length;
+        options[nextIndex]?.focus();
+      }
+    }
+  }
+
+  if (!customElements.get('starlight-theme-select')) {
+    customElements.define('starlight-theme-select', StarlightThemeSelect);
+  }
+</script>

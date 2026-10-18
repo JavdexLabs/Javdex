@@ -1,8 +1,14 @@
 ---
 import DefaultHeader from '@astrojs/starlight/components/Header.astro';
-import ThemeSelect from '@astrojs/starlight/components/ThemeSelect.astro';
+import ThemeSelect from './ThemeSelect.astro';
 import { sitePath } from '../../site.config.mjs';
-const links = [['使用指南', 'start/'], ['服务端', 'server/'], ['开发', 'developers/'], ['下载', 'download/'], ['产品介绍', 'product/']];
+const links = [
+  ['快速上手', 'getting-started/overview/'],
+  ['使用指南', 'guides/library-and-scanning/'],
+  ['NAS 与服务端', 'server/deploy/'],
+  ['插件与开发', 'plugins/overview-and-agent/'],
+  ['下载中心', 'download/'],
+];
 ---
 <div class="header-shell">
   <DefaultHeader {...Astro.props} />

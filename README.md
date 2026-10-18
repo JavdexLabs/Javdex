@@ -23,13 +23,13 @@
 <p align="center">
   <a href="https://github.com/JavdexLabs/Javdex/releases/latest">下载最新版</a>
   &nbsp;·&nbsp;
-  <a href="https://javdexlabs.github.io/Javdex/start/">使用文档</a>
+  <a href="https://javdexlabs.github.io/Javdex/getting-started/quickstart/">使用文档</a>
   &nbsp;·&nbsp;
   <a href=".github/release-notes/v0.9.0.md">0.9.0 发布说明</a>
   &nbsp;·&nbsp;
   <a href="CHANGELOG.md">更新日志</a>
   &nbsp;·&nbsp;
-  <a href="https://javdexlabs.github.io/Javdex/product/">产品介绍</a>
+  <a href="https://javdexlabs.github.io/Javdex/getting-started/overview/">产品介绍</a>
 </p>
 
 Javdex 是一款以番号为核心的本地影片管理工具。扫描目录、补齐封面与资料，按演员、厂商和系列浏览，也可以创建清单、导入网页收藏，并通过 NFO 与其他媒体软件交换资料。
@@ -64,7 +64,7 @@ Javdex 是一款以番号为核心的本地影片管理工具。扫描目录、�
 
 服务端使用单个 Docker 容器，支持 x86_64 和 ARM64，无需编译源码或安装宿主机更新助手。0.9.0 桌面须配合同版本服务端；按 [服务端部署与托管更新](docs/SERVER_UPDATE.md) 配置数据卷、独立的 `/program` 程序卷及首次配对。桌面业务、播放与更新共用一个 HTTPS 地址，一次配对即可授权，可管理和单独撤销多台可信电脑；同端口的网页可使用 HTTP 或 HTTPS，网页账号仍独立。媒体挂载与权限说明见 [服务端指南](docs/SERVER_MODE.md#媒体目录权限)。部署示例从对应版本源码获取，安装包和每架构单个 `.javdex-update` 签名升级文件以[对应 Release](https://github.com/JavdexLabs/Javdex/releases/tag/v0.9.0)实际附件为准。
 
-首次从 0.8.0 升级须由管理员停服备份、更换 0.9.0 基础镜像并增加 `/program` 程序卷，保留 `/data`、图片与媒体挂载。业务升级包不会更新管理器；更高业务版本的镜像会自动升级和验证，同版或更旧版本不降级。升级不创建资料备份，安装开始后失败或中断保持维护状态并要求人工恢复。服务端落后且运行环境相等时，客户端可在线获取或离线上传与自身完全同版本的签名升级文件；桌面更新提醒只读取正式 Release。“备份与恢复”支持本地与服务端互相导入，保留来源资料库，不自动同步两份资料；安全升级与回退步骤见[升级指南](https://javdexlabs.github.io/Javdex/releases/upgrade/)。
+首次从 0.8.0 升级须由管理员停服备份、更换 0.9.0 基础镜像并增加 `/program` 程序卷，保留 `/data`、图片与媒体挂载。业务升级包不会更新管理器；更高业务版本的镜像会自动升级和验证，同版或更旧版本不降级。升级不创建资料备份，安装开始后失败或中断保持维护状态并要求人工恢复。服务端落后且运行环境相等时，客户端可在线获取或离线上传与自身完全同版本的签名升级文件；桌面更新提醒只读取正式 Release。“备份与恢复”支持本地与服务端互相导入，保留来源资料库，不自动同步两份资料；安全升级与回退步骤见[升级指南](https://javdexlabs.github.io/Javdex/operations/upgrade-and-compatibility/)。
 
 ## 在应用内播放，边看边整理
 
@@ -155,7 +155,7 @@ NFO 导入与导出是一次性操作，不会持续同步，也不等于完整�
 
 ## 下载与开始使用
 
-从 [官网](https://javdexlabs.github.io/Javdex/) 或 [GitHub Releases](https://github.com/JavdexLabs/Javdex/releases/latest) 下载对应平台的安装包。
+从 [下载中心](https://javdexlabs.github.io/Javdex/download/) 或 [GitHub Releases](https://github.com/JavdexLabs/Javdex/releases/latest) 下载对应平台的安装包。
 
 | 平台 | 安装包 |
 |---|---|

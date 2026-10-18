@@ -932,15 +932,35 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
         })
       },
       async grantPlayback(input, ctx) {
-        const grant = await query('play.grant', input, ctx?.signal)
-        if (
-          grant &&
-          typeof grant.playbackHandle === 'string' &&
-          grant.playbackHandle.startsWith('/')
-        ) {
-          grant.playbackHandle = `${client.origin}${grant.playbackHandle}`
+        input = { ...input }
+        const issue = async (signal = ctx?.signal) => {
+          const grant = await query('play.grant', input, signal)
+          if (grant.resourceId !== input.resourceId) throw structuredError('IDENTITY_CONFLICT', '影片资源已变化')
+          grant.playbackHandle = new URL(grant.playbackHandle, client.origin).href
+          return grant
         }
-        if (playback) grant.playbackHandle = await playback.grant(grant.playbackHandle, grant.expiresAt)
+        if (playback && !ctx?.sessionBound) {
+          await ensureConnected(ctx?.signal)
+          const key = JSON.stringify([connectionRevision, identity.serverId, identity.catalogId,
+            input.libraryId, input.videoId, input.resourceId, input.locatorRevision])
+          return playback.external(key, issue, ctx?.signal)
+        }
+        const grant = await issue()
+        ctx?.signal?.throwIfAborted()
+        if (playback) {
+          const revision = connectionRevision, catalogId = identity.catalogId, serverId = identity.serverId
+          grant.playbackHandle = await playback.grant(grant.playbackHandle, grant.expiresAt, {
+            signal: ctx?.signal,
+            renew: ctx?.sessionBound ? async signal => {
+              const current = (): boolean => revision === connectionRevision && catalogId === identity.catalogId && serverId === identity.serverId
+              if (!current()) throw structuredError('CONNECTION_UNAVAILABLE', '播放连接已变化')
+              const renewed = await query('play.grant', input, signal)
+              signal.throwIfAborted()
+              if (!current() || renewed.resourceId !== input.resourceId) throw structuredError('IDENTITY_CONFLICT', '影片资源已变化')
+              return { url: new URL(renewed.playbackHandle, client.origin).href, expiresAt: renewed.expiresAt }
+            } : undefined
+          })
+        }
         return grant
       },
       async readImage(input, ctx) {
@@ -967,6 +987,8 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
         })
       }
     },
+    releasePlayback: handle => playback?.release(handle),
+    finishExternalPlayback: (handle, opened) => playback?.finishExternal(handle, opened),
     async dispose(): Promise<void> {
       await playback?.close()
       await client.close()

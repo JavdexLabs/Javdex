@@ -232,6 +232,7 @@ export function createAiSubtitleController(deps: Dependencies) {
   }
   return {
     snapshot,
+    stop,
     async command(id: string, command: AiSubtitleCommand): Promise<AiSubtitleSnapshot> {
       current(id); await initialization; current(id)
       if (command.action === 'view-log') {

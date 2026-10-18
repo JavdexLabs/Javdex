@@ -8,6 +8,7 @@ import semver from 'semver'
 import { packageRelease } from './server-release-package.mjs'
 import { writeUpdateBundle } from '../packages/http/src/updateBundle.ts'
 import { SERVER_ENVIRONMENT_VERSION } from '../packages/contracts/src/serverUpdateTypes.ts'
+import { replacementContext } from './release-replacement.mjs'
 
 function validateVersion(version) {
   if (typeof version !== 'string' || version.length > 128 || version.includes('+') || semver.valid(version) !== version) throw new Error('Unsupported server release version')
@@ -88,7 +89,9 @@ async function main() {
   const schema = Number(fs.readFileSync('packages/library/src/db/migrations.ts', 'utf8').match(/export const CURRENT_SCHEMA_VERSION = (\d+)/)?.[1])
   if (!Number.isSafeInteger(schema) || schema < 19) throw new Error('Missing supported catalog schema')
   const repository = 'ghcr.io/javdexlabs/javdex-server'
-  const index = JSON.parse(execFileSync('docker', ['buildx', 'imagetools', 'inspect', '--raw', `${repository}:${version}`], { encoding: 'utf8' }))
+  const imageTag = process.env.RELEASE_REPLACE_090 === 'true' ? replacementContext().imageTag : version
+  if (process.env.RELEASE_REPLACE_090 === 'true' && version !== '0.9.0') throw new Error('Replacement version mismatch')
+  const index = JSON.parse(execFileSync('docker', ['buildx', 'imagetools', 'inspect', '--raw', `${repository}:${imageTag}`], { encoding: 'utf8' }))
   fs.mkdirSync(directory, { recursive: true, mode: 0o700 })
   for (const arch of ['amd64', 'arm64']) {
     const digest = index.manifests?.find(item => item.platform?.os === 'linux' && item.platform?.architecture === arch)?.digest

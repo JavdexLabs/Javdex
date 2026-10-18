@@ -26,14 +26,18 @@ function fixture(locator: string, mode: 'local' | 'remote' = 'local') {
   let grantId = 3
   let handle = 'https://server.invalid/play?token=secret'
   const grants: unknown[] = []
+  const released: string[] = [], contexts: unknown[] = []
+  let afterGrant = (): void => {}
   const backend = {
     mode, identity: { mode, catalogId: 'catalog-1', serverId: mode === 'remote' ? 'server-1' : undefined }, generation: 1,
     session: () => ({ state: sessionState, writerEpoch: epoch }),
     libraries: { get: async () => ({ status }) },
     queries: { getResource: async () => { queries++; return row } },
-    assets: { grantPlayback: async (input: unknown) => { grants.push(input); return { resourceId: grantId, playbackHandle: handle } } }
+    assets: { grantPlayback: async (input: unknown, context: unknown) => { grants.push(input); contexts.push(context); afterGrant(); return { resourceId: grantId, playbackHandle: handle } } },
+    releasePlayback: (value: string) => { released.push(value) }
   } as unknown as CatalogBackend
-  return { resolver: createPlaybackSourceResolver(backend), backend, grants, queries: () => queries,
+  return { resolver: createPlaybackSourceResolver(backend), backend, grants, released, contexts, queries: () => queries,
+    afterGrant: (callback: () => void) => { afterGrant = callback },
     patch: (value: Partial<VideoResource>) => { row = { ...row!, ...value } },
     epoch: (value: number) => { epoch = value }, status: (value: string) => { status = value },
     sessionState: (value: typeof sessionState) => { sessionState = value },
@@ -153,6 +157,7 @@ test('remote playback remains valid when another device revocation advances only
   assert.equal(source.revision, resourceLocatorRevision({ kind: 'local', locator: '/server/movie.mkv', source_identity: null,
     root_id: null, size_bytes: null, file_mtime_ms: null }))
   assert.deepEqual(f.grants, [{ ...target, locatorRevision: source.revision }])
+  assert.deepEqual(f.contexts, [{ sessionBound: true }])
   await f.resolver.validate(source)
   assert.equal(f.grants.length, 1, 'validation never acquires another grant')
   f.epoch(2)
@@ -187,4 +192,12 @@ test('mismatched resources, URL credentials and non-HTTP grants are rejected wit
     f.grant(id, url)
     await assert.rejects(f.resolver.resolve(target), error => error instanceof PlaybackFailure && error.code === 'grant' && !error.message.includes('secret'))
   }
+  assert.equal(f.released.length, 4, 'invalid returned routes cannot consume local capacity')
+})
+
+test('a catalog change while obtaining a grant releases the unadopted route', async () => {
+  const f = fixture('/server/movie.mkv', 'remote')
+  f.afterGrant(() => { f.backend.identity.catalogId = 'replacement' })
+  await assert.rejects(f.resolver.resolve(target), error => error instanceof PlaybackFailure && error.code === 'identity')
+  assert.deepEqual(f.released, ['https://server.invalid/play?token=secret'])
 })

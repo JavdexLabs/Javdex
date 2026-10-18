@@ -32,7 +32,7 @@ function run(fixture = {}, extra = {}, script = 'release-metadata.mjs', args = [
       encoding: 'utf8', env: { ...process.env, GITHUB_OUTPUT: output,
         GITHUB_REPOSITORY: 'JavdexLabs/Javdex', GITHUB_REPOSITORY_OWNER: 'JavdexLabs',
         GITHUB_REF_TYPE: 'branch', GITHUB_SHA: sha, RELEASE_TAG: tag, RELEASE_PRERELEASE: 'false',
-        RELEASE_VERIFY_ONLY: 'false', PUBLICATION_FIXTURE: JSON.stringify(fixture), ...extra }
+        RELEASE_VERIFY_ONLY: 'false', RELEASE_REPLACE_090: 'false', PUBLICATION_FIXTURE: JSON.stringify(fixture), ...extra }
     })
     return { ...result, output: result.status === 0 && script === 'release-metadata.mjs' ? readFileSync(output, 'utf8') : '' }
   } finally { rmSync(directory, { recursive: true, force: true }) }

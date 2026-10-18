@@ -1,0 +1,90 @@
+{
+  "release": {
+    "assets": [
+      {
+        "browser_download_url": "https://github.com/JavdexLabs/Javdex/releases/download/v0.9.0/Javdex-0.9.0-amd64.deb",
+        "digest": "sha256:bb7406ff945aa75c79fbed24e3f6d8b87381d00ed77334bf90b834201089b349",
+        "id": 651394810,
+        "name": "Javdex-0.9.0-amd64.deb",
+        "size": 145144888
+      },
+      {
+        "browser_download_url": "https://github.com/JavdexLabs/Javdex/releases/download/v0.9.0/Javdex-0.9.0-arm64.dmg",
+        "digest": "sha256:1262b883879fc7bb6813bbf150cd10119993bf0be3b067b768699c15a6ccddd4",
+        "id": 651394809,
+        "name": "Javdex-0.9.0-arm64.dmg",
+        "size": 184355342
+      },
+      {
+        "browser_download_url": "https://github.com/JavdexLabs/Javdex/releases/download/v0.9.0/Javdex-0.9.0-x64.dmg",
+        "digest": "sha256:9e5cdb39a405cd4d2e170b005314c6c98875eef541d1d93b096225648e2e9cd0",
+        "id": 651394815,
+        "name": "Javdex-0.9.0-x64.dmg",
+        "size": 194058564
+      },
+      {
+        "browser_download_url": "https://github.com/JavdexLabs/Javdex/releases/download/v0.9.0/Javdex-0.9.0-x86_64.AppImage",
+        "digest": "sha256:dd1a7e236abcc07bf9713b7288991ce534d8c52b9378366bf217455bfab74034",
+        "id": 651394808,
+        "name": "Javdex-0.9.0-x86_64.AppImage",
+        "size": 182876895
+      },
+      {
+        "browser_download_url": "https://github.com/JavdexLabs/Javdex/releases/download/v0.9.0/Javdex-Playback-Sources-0.9.0.tar.gz",
+        "digest": "sha256:b91a40e74222a4f6d2ba94e74a7307166173dfaa149a41a9f91bbecbb5490f04",
+        "id": 651394816,
+        "name": "Javdex-Playback-Sources-0.9.0.tar.gz",
+        "size": 113830849
+      },
+      {
+        "browser_download_url": "https://github.com/JavdexLabs/Javdex/releases/download/v0.9.0/Javdex-server-0.9.0-linux-amd64.javdex-update",
+        "digest": "sha256:b52c24789dc7ada2faf68e702a5881239bc8240e4360851d1205d93dc2e7644a",
+        "id": 651394813,
+        "name": "Javdex-server-0.9.0-linux-amd64.javdex-update",
+        "size": 24921324
+      },
+      {
+        "browser_download_url": "https://github.com/JavdexLabs/Javdex/releases/download/v0.9.0/Javdex-server-0.9.0-linux-arm64.javdex-update",
+        "digest": "sha256:8ca1a65d933caf184eb06a4159a987d30ab1ce5bef744f2abc9276bb3ded51a2",
+        "id": 651394811,
+        "name": "Javdex-server-0.9.0-linux-arm64.javdex-update",
+        "size": 25177896
+      },
+      {
+        "browser_download_url": "https://github.com/JavdexLabs/Javdex/releases/download/v0.9.0/Javdex-Setup-0.9.0-x64.exe",
+        "digest": "sha256:9466707e4bb438577a5b6824cf507d33728655752933269d71368ca966c04557",
+        "id": 651394807,
+        "name": "Javdex-Setup-0.9.0-x64.exe",
+        "size": 147064961
+      },
+      {
+        "browser_download_url": "https://github.com/JavdexLabs/Javdex/releases/download/v0.9.0/Javdex-Setup-0.9.0-x64.zip",
+        "digest": "sha256:e3b5b996282dbcd1b01c41a4b15f64563c4458860637c0b7e4ebc3faed2922be",
+        "id": 651394814,
+        "name": "Javdex-Setup-0.9.0-x64.zip",
+        "size": 207445067
+      },
+      {
+        "browser_download_url": "https://github.com/JavdexLabs/Javdex/releases/download/v0.9.0/SHA256SUMS.txt",
+        "digest": "sha256:a4af112c927144c7fc8448dd2130d3526f92a367005a8a7fa03ac66dbe15a63d",
+        "id": 651394812,
+        "name": "SHA256SUMS.txt",
+        "size": 873
+      }
+    ],
+    "body": "**0.9.0 正式版**新增内置播放器、本地 AI 字幕和最近播放，让影片浏览、播放与资料整理在同一个窗口完成；服务端支持多台电脑管理和应用内升级。\n\n> 不知道应该下载哪个版本？请前往 [Javdex 官网](https://javdexlabs.github.io/Javdex/)，根据平台和设备说明选择对应安装包。\n\n## ▶️ 内置播放器\n\n- 本机影片和远程媒体库可直接播放，支持音轨、内嵌／手动字幕、倍速、音量与断点续播；远程播放读取原文件，不做服务端转码\n- 在展开、全屏和底部小窗之间切换，继续播放不中断；返回时收起播放器，保留当前浏览位置\n- 保留外部播放器及已保存的播放偏好，播放失败不会擅自切换程序\n\n## 💬 本地 AI 字幕与模型\n\n- 播放时在本机识别日语并翻译为中文，支持双语／单语显示、字号调整和 SRT／ASS 导出；跳转后优先处理当前位置，字幕失败不影响播放\n- 模型按需下载，支持中断续传、检查修复、切换精度、导入导出、目录迁移和存储清理；普通播放无需下载 AI 模型\n- Windows 支持 CUDA／Vulkan 独显加速与设备选择，macOS 支持 Metal；显示实际使用的 CPU／GPU，无法使用加速时可回到 CPU\n- 本地推理不把音频与文本发送给云端；云端服务新增 OpenAI Responses 和 Google Gemini 原生接入，保留已有连接与用途设置\n\n## 📚 清单与操作体验\n\n- 新增此电脑的“最近播放”，支持移除和清空；不影响断点续播，也不同步到服务端\n- 改善收藏、稍后观看、演员／标签搜索、评分编辑和外部清单导入，减少海报墙更新时的闪烁\n- 修复详情与图片叠层返回、播放快捷键、分页和滚动恢复，以及迟到请求造成的保存冲突；完善撤销、进度和错误详情\n- 官网新增分类使用文档、中文搜索与下载中心\n\n## 🖥️ 远程管理与服务端升级\n\n- 桌面使用统一 HTTPS 地址和一次性令牌连接；支持多台可信电脑同时管理，查看设备并单独撤销，共享资料保留编辑冲突检查\n- 浏览器仍可通过 HTTP 或 HTTPS 只读浏览、配对、播放和下载；桌面管理始终使用 HTTPS\n- 新版 Docker 镜像内置升级入口，可在桌面在线升级或上传一个离线升级文件，支持断点续传；不需安装宿主机助手\n- 升级会暂停服务，不自动备份资料；安装失败或中断时保留维护状态并提示人工恢复，请事先做好备份\n\n## 📌 升级说明\n\n- 桌面和服务端须一起升级到 **0.9.0**。升级前正常退出并完整备份资料、图片、配置及桌面用户数据；旧版不能直接打开升级后的资料库，回退须恢复升级前备份\n- 0.8.0 服务端须先替换为 `ghcr.io/javdexlabs/javdex-server:0.9.0`，沿用原资料、图片和配置挂载，增加并保留 `/program` 程序卷；不要执行 `docker compose down -v`。已保存的 0.8.0 连接会尝试迁移并复用原授权，失败保留原配置\n- 资料库从 schema 19 升至 21，保留原有资料与管理授权；模型设置随首次读取升级。应用内资料库备份不包含原始视频、本地模型及全部桌面工作记录，完整桌面备份应保存整个用户数据目录\n- Linux 内置播放需 X11／XWayland，并以 `--javdex-x11` 启动。本地 AI 另有系统和资源要求：macOS 13.3+；Linux 需 glibc 2.38+、GCC 14 C++ 运行库及 xz-utils。生成速度取决于设备，不保证长片实时字幕\n- macOS 为 ad-hoc 签名而非 Apple 公证，Windows 未作可信发布者签名；请从官方入口下载。本版源码采用 GPL-3.0-or-later，第三方许可保持不变\n\n### Docker 服务端\n\n镜像：`ghcr.io/javdexlabs/javdex-server:0.9.0`（Linux amd64 / arm64）。\n\n部署见 [Compose 示例](https://github.com/JavdexLabs/Javdex/blob/v0.9.0/deploy/docker-compose.example.yml)、[JSON 配置](https://github.com/JavdexLabs/Javdex/blob/v0.9.0/deploy/javdex-server.example.json)和[部署说明](https://github.com/JavdexLabs/Javdex/blob/v0.9.0/website/src/content/docs/server/deploy.md)。普通桌面用户只需下载对应安装包，无需下载源码或服务端升级文件。\n\n\n### 下载与部署\n\n桌面用户选择对应系统的安装包即可，无需下载源码。`Javdex-Playback-Sources-0.9.0.tar.gz` 为四个平台的总源码包，含摘要去重材料和恢复说明。\n\nDocker 镜像：`ghcr.io/javdexlabs/javdex-server:0.9.0`（Linux amd64 / arm64）。桌面与服务端须使用相同版本。\n\n[Compose 示例](https://github.com/JavdexLabs/Javdex/blob/bb843322112d536380ec7587c8569cc80680e733/deploy/docker-compose.example.yml) · [JSON 配置示例](https://github.com/JavdexLabs/Javdex/blob/bb843322112d536380ec7587c8569cc80680e733/deploy/javdex-server.example.json) · [部署说明](https://github.com/JavdexLabs/Javdex/blob/bb843322112d536380ec7587c8569cc80680e733/docs/SERVER_MODE.md)。可信升级公钥已内置镜像，不需要下载公钥附件。\n",
+    "draft": false,
+    "id": 416016386,
+    "immutable": false,
+    "name": "Javdex v0.9.0",
+    "prerelease": false,
+    "published_at": "2026-10-17T19:32:53Z",
+    "tag_name": "v0.9.0",
+    "target_commitish": "bb843322112d536380ec7587c8569cc80680e733"
+  },
+  "tag": {
+    "type": "commit",
+    "sha": "bb843322112d536380ec7587c8569cc80680e733"
+  },
+  "imageDigest": "sha256:d2cb482d5d3f981fd55a8c871f6f5a5d53fefa9cfd46d1605c75ff4736149693"
+}

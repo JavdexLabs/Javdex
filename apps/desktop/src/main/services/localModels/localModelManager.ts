@@ -246,7 +246,7 @@ export function createLocalModelManager(userData: string, options: {
       resumed.clear()
       const assets = [...componentDefinitions.map(definition => ({ id: definition.component.id, asset: definition.asset })),
         ...LOCAL_MODEL_VARIANTS.map(variant => ({ id: `model:${variant.id}`, asset: variant.asset }))]
-      for (const { id, asset } of assets) if (asset && !asset.bundledVersion) {
+      for (const { id, asset } of assets) if (asset) {
         const stat = await fs.lstat(modelDownloadFile(directory, asset)).catch(() => null)
         if (stat?.isFile() && !stat.isSymbolicLink() && stat.size <= asset.bytes) resumed.set(id, stat.size)
       }

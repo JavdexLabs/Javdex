@@ -74,11 +74,16 @@ export function createPlaybackSourceResolver(backend: CatalogBackend) {
       let locator: string
       let fileIdentity: string | undefined
       if (backend.mode === 'remote') {
-        const grant = await backend.assets.grantPlayback({ ...target, locatorRevision: revision })
+        const grant = await backend.assets.grantPlayback({ ...target, locatorRevision: revision }, { sessionBound: true })
         let url: URL
-        try { url = new URL(grant.playbackHandle) } catch { throw new PlaybackFailure('grant') }
-        if (grant.resourceId !== target.resourceId || !['http:', 'https:'].includes(url.protocol) || url.username || url.password) {
-          throw new PlaybackFailure('grant')
+        try {
+          url = new URL(grant.playbackHandle)
+          if (grant.resourceId !== target.resourceId || !['http:', 'https:'].includes(url.protocol) || url.username || url.password)
+            throw new PlaybackFailure('grant')
+          if (identityKey !== playbackCatalogKey(backend)) throw new PlaybackFailure('identity')
+        } catch (error) {
+          backend.releasePlayback?.(grant.playbackHandle)
+          throw error instanceof PlaybackFailure ? error : new PlaybackFailure('grant')
         }
         locator = grant.playbackHandle
       } else {
@@ -88,6 +93,9 @@ export function createPlaybackSourceResolver(backend: CatalogBackend) {
       if (identityKey !== playbackCatalogKey(backend)) throw new PlaybackFailure('identity')
       return { target, title: resource.display_name || '影片播放', mode: backend.mode, locator, identityKey, revision,
         resumeKey: playbackResumeKey(backend.identity, target.resourceId, fileIdentity ? JSON.stringify([revision, fileIdentity]) : revision), fileIdentity }
+    },
+    release(source: PlaybackSource): void {
+      if (source.mode === 'remote') backend.releasePlayback?.(source.locator)
     },
     async validate(source: PlaybackSource): Promise<void> {
       const { resource, identityKey } = await inspect(source.target)

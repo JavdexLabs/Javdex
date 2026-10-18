@@ -10,6 +10,8 @@ import type { CatalogBackend } from '../application/catalogBackend'
 import { createPlaybackSession } from './playbackSession'
 import { playbackCatalogKey } from './playbackSource'
 import type { NativePlaybackState } from './nativePlayback'
+import type { PlaybackSource } from './playbackSource'
+import type { createAiSubtitleController } from './aiSubtitles/aiSubtitleController'
 
 const requireDependency = createRequire(import.meta.url)
 const code = transpileModule(readFileSync(new URL('./desktopPlayback.ts', import.meta.url), 'utf8'), {
@@ -26,6 +28,9 @@ function fixture(t: TestContext, pause: 'recent' | 'playlist') {
   const root = mkdtempSync(path.join(os.tmpdir(), 'javdex-playback-start-'))
   const entered = deferred(), release = deferred(), finished = deferred()
   const removals: Array<{ catalog: string; videoId: number }> = []
+  const released: PlaybackSource[] = []
+  let resolutions = 0, validations = 0, subtitleStops = 0
+  let subtitleDependencies!: Parameters<typeof createAiSubtitleController>[0]
   let generation = 1
   const identity = { mode: 'remote' as const, catalogId: 'catalog-A', serverId: 'server-1' }
   const backend = {
@@ -47,10 +52,16 @@ function fixture(t: TestContext, pause: 'recent' | 'playlist') {
   const mocks: Record<string, unknown> = {
     electron: { app: { getPath: () => root }, dialog: {}, shell: {}, powerSaveBlocker: { start: () => 1, stop() {} }, powerMonitor: { on() {}, off() {} } },
     './libmpvPlayback': { builtinPlaybackAvailability: () => ({ available: true }), createLibmpvPlayback: () => native },
-    './playbackSource': { playbackCatalogKey, createPlaybackSourceResolver: () => ({ resolve: async () => structuredClone(source), validate: async () => {} }) },
+    './playbackSource': { playbackCatalogKey, createPlaybackSourceResolver: () => ({
+      resolve: async (target: PlaybackSource['target']) => { resolutions++; return { ...structuredClone(source), target } },
+      validate: async () => { validations++ }, release: (value: PlaybackSource) => { released.push(value) }
+    }) },
     '../ipc/appContractAdapter': { appCommandAdapter: { register() {} }, appEventAdapter: { send() {} } },
     '../desktop/windowNavigation': { navigateWindowHistory() {} },
-    './aiSubtitles/aiSubtitleController': { createAiSubtitleController: () => ({ tick() {}, close: async () => {}, snapshot() {}, command() {} }) },
+    './aiSubtitles/aiSubtitleController': { createAiSubtitleController: (dependencies: typeof subtitleDependencies) => {
+      subtitleDependencies = dependencies
+      return { tick() {}, stop: async () => { subtitleStops++ }, close: async () => {}, snapshot() {}, command() {} }
+    } },
     '../services/localModels/desktopLocalModels': { getLocalModels: () => ({ subtitleRuntime: () => ({}), acquireSubtitleRuntime() {}, onChanged() {} }) },
     './playbackSession': { createPlaybackSession: (dependencies: Parameters<typeof createPlaybackSession>[0]) => {
       const started = dependencies.started
@@ -68,7 +79,8 @@ function fixture(t: TestContext, pause: 'recent' | 'playlist') {
   const open = exports.registerBuiltinPlayback(backend, () => null, { read: async () => ({ resumePlayback: false, playbackVolume: 50 }) } as never,
     async () => { if (pause === 'recent') { entered.resolve(); await release.promise } })
   t.after(async () => { release.resolve(); await exports.disposeBuiltinPlayback(); rmSync(root, { recursive: true, force: true }) })
-  return { removals, entered, release, finished,
+  return { removals, entered, release, finished, open, source, released, subtitles: () => subtitleDependencies,
+    resolutions: () => resolutions, validations: () => validations, subtitleStops: () => subtitleStops,
     restore: () => { identity.catalogId = 'catalog-B'; generation++; exports.stopBuiltinPlayback() },
     start: async () => {
       assert.equal((await open(source.target)).ok, true)
@@ -96,4 +108,20 @@ test('confirmed playback still removes its original watch-later item', { timeout
   f.release.resolve()
   await f.finished.promise
   assert.deepEqual(f.removals, [{ catalog: 'catalog-A', videoId: 7 }])
+})
+
+test('more than 128 subtitle chunks share the decoder grant and switching ends old subtitle ownership', async t => {
+  const f = fixture(t, 'recent')
+  assert.equal((await f.open(f.source.target)).ok, true)
+  for (let index = 0; index < 260; index++) {
+    const resolved = await f.subtitles().resolve(f.source as PlaybackSource)
+    assert.equal(resolved.locator, f.source.locator)
+  }
+  assert.equal(f.resolutions(), 1)
+  assert.equal(f.validations(), 260, 'reuse must still verify resource and catalog identity')
+  assert.equal(f.released.length, 0, 'subtitle reads cannot release the decoder route')
+  assert.equal((await f.open({ ...f.source.target, resourceId: 10 })).ok, true)
+  assert.equal(f.subtitleStops(), 1)
+  assert.equal(f.released.length, 1)
+  assert.equal(f.released[0].target.resourceId, 9)
 })

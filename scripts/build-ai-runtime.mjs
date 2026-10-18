@@ -1,5 +1,4 @@
 import { buildMacAiRuntime } from './ai-runtime-build.mjs'
-import { buildWindowsVulkanRuntime } from './windows-vulkan-runtime.mjs'
+if (process.argv.includes('--vulkan')) throw new Error('Windows Whisper Vulkan is now downloaded through model preparation; native builds live in JavdexLabs/javdex-runtime.')
 if (process.platform === 'darwin') console.log(`AI runtime ready: ${await buildMacAiRuntime()}`)
-else if (process.platform === 'win32' && process.argv.includes('--vulkan')) console.log(`Vulkan AI runtime ready: ${await buildWindowsVulkanRuntime()}`)
 else console.log('AI runtime tools use pinned platform downloads; no local compilation needed.')

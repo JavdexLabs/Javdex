@@ -25,6 +25,8 @@ interface Dependencies {
   native: NativePlayback
   resolve(target: PlaybackTarget): Promise<PlaybackSource>
   validate(source: PlaybackSource): Promise<void>
+  release?(source: PlaybackSource): void
+  ending?(): void
   changed(state: PlaybackSnapshot | null): void
   presentation(value: PlaybackSnapshot['presentation']): void
   started(source: PlaybackSource): Promise<void>
@@ -46,6 +48,7 @@ interface Dependencies {
 /** One stable owner. Neither React teardown nor presentation changes owns the decoder. */
 export function createPlaybackSession(deps: Dependencies) {
   let source: PlaybackSource | null = null
+  let sourceOwned = false
   let snapshot: PlaybackSnapshot | null = null
   let generation = 0
   let sequence = -1
@@ -61,6 +64,13 @@ export function createPlaybackSession(deps: Dependencies) {
   let focusSequence = 0
   const now = deps.now ?? Date.now
   const publish = (): void => { deps.changed(snapshot ? structuredClone(snapshot) : null) }
+  function destroySource(): void {
+    if (!source || !sourceOwned) { deps.native.destroy(); return }
+    const previous = source
+    sourceOwned = false
+    try { deps.ending?.() }
+    finally { try { deps.native.destroy() } finally { deps.release?.(previous) } }
+  }
   function saveProgress(force = false): void {
     if (!source || !snapshot || !started || !snapshot.recordingProgress || snapshot.resumePosition != null
       || snapshot.seeking || snapshot.phase === 'error' || snapshot.position == null) return
@@ -78,7 +88,7 @@ export function createPlaybackSession(deps: Dependencies) {
   function stop(): void {
     generation++
     saveProgress(true)
-    deps.native.destroy()
+    destroySource()
     deps.focusControls?.()
     deps.awake(false)
     deps.presentation('expanded')
@@ -86,7 +96,7 @@ export function createPlaybackSession(deps: Dependencies) {
     publish()
   }
   function fail(message: string): void {
-    deps.native.destroy(); deps.awake(false)
+    destroySource(); deps.awake(false)
     deps.focusControls?.()
     if (snapshot) {
       snapshot.phase = 'error'; snapshot.error = message; snapshot.paused = true
@@ -191,39 +201,44 @@ export function createPlaybackSession(deps: Dependencies) {
         control(snapshot.sessionId, { kind: 'presentation', value: 'expanded' }); return true
       }
       const resolved = await deps.resolve(target)
-      const volume = await deps.readVolume?.() ?? 50
-      if (request !== generation) return false
-      let progress: { enabled: boolean; point: ResumePoint | null } = { enabled: false, point: null }
-      let progressError: string | null = null
-      if (deps.progress) {
-        try { progress = await deps.progress.prepare(resolved) }
-        catch { progressError = '无法读取本机续播记录，本次从头播放且不保存进度' }
-      }
-      if (request !== generation) return false
-      saveProgress(true)
-      deps.native.destroy(); deps.awake(false)
-      source = resolved; sequence = -1; started = false; sample = null; validation = null; lastValidation = now(); openedAt = now()
-      lastProgressSave = now(); savedProgress = ''; pendingSeek = null; subtitleRefresh = null
-      const resumePosition = progress.enabled ? progress.point?.position ?? null : null
-      snapshot = {
-        sessionId: randomUUID(), target: { ...target }, title: resolved.title, source: resolved.mode,
-        presentation: 'expanded', presentationRevision: 0, phase: 'opening', paused: resumePosition != null, seeking: false,
-        position: null, duration: null, seekable: false, volume, muted: false, speed: 1,
-        subtitleDelay: null, subtitleSize: null,
-        tracks: [], chapters: [], error: null,
-        resumePosition, recordingProgress: progress.enabled, progressError,
-        info: { videoCodec: null, audioCodec: null, width: null, height: null, hardwareDecoder: null, audioOutput: null, droppedFrames: null }
-      }
+      let adopted = false
       try {
-        deps.native.create()
-        deps.native.command({ kind: 'volume', value: volume })
-        deps.native.load(resolved.locator, { paused: resumePosition != null })
-        deps.presentation('expanded'); publish(); return true
-      } catch {
-        const error = new PlaybackFailure('runtime')
-        fail(error.message)
-        throw error
-      }
+        if (request !== generation) return false
+        const volume = await deps.readVolume?.() ?? 50
+        if (request !== generation) return false
+        let progress: { enabled: boolean; point: ResumePoint | null } = { enabled: false, point: null }
+        let progressError: string | null = null
+        if (deps.progress) {
+          try { progress = await deps.progress.prepare(resolved) }
+          catch { progressError = '无法读取本机续播记录，本次从头播放且不保存进度' }
+        }
+        if (request !== generation) return false
+        saveProgress(true)
+        destroySource(); deps.awake(false)
+        source = resolved; sequence = -1; started = false; sample = null; validation = null; lastValidation = now(); openedAt = now()
+        sourceOwned = true; adopted = true
+        lastProgressSave = now(); savedProgress = ''; pendingSeek = null; subtitleRefresh = null
+        const resumePosition = progress.enabled ? progress.point?.position ?? null : null
+        snapshot = {
+          sessionId: randomUUID(), target: { ...target }, title: resolved.title, source: resolved.mode,
+          presentation: 'expanded', presentationRevision: 0, phase: 'opening', paused: resumePosition != null, seeking: false,
+          position: null, duration: null, seekable: false, volume, muted: false, speed: 1,
+          subtitleDelay: null, subtitleSize: null,
+          tracks: [], chapters: [], error: null,
+          resumePosition, recordingProgress: progress.enabled, progressError,
+          info: { videoCodec: null, audioCodec: null, width: null, height: null, hardwareDecoder: null, audioOutput: null, droppedFrames: null }
+        }
+        try {
+          deps.native.create()
+          deps.native.command({ kind: 'volume', value: volume })
+          deps.native.load(resolved.locator, { paused: resumePosition != null })
+          deps.presentation('expanded'); publish(); return true
+        } catch {
+          const error = new PlaybackFailure('runtime')
+          fail(error.message)
+          throw error
+        }
+      } finally { if (!adopted) deps.release?.(resolved) }
     },
     control,
     fail,

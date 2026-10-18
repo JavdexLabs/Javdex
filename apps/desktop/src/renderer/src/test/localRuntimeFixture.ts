@@ -10,7 +10,7 @@ export const runtimeComponentsFixture: LocalRuntimeComponent[] = [
   { id: 'translator-cuda', group: 'text', name: '文本引擎', version: 'b11435', backend: 'cuda', delivery: 'download', bytes: 264473456, installed: false, source: 'https://github.com/ggml-org/llama.cpp' },
   { id: 'cuda-cuda', group: 'text', name: 'CUDA/cuBLAS 依赖', version: '12.4', backend: 'cuda', delivery: 'download', bytes: 391443627, installed: false, source: 'https://github.com/ggml-org/llama.cpp' },
   { id: 'translator-vulkan', group: 'text', name: '文本引擎', version: 'b11435', backend: 'vulkan', delivery: 'download', bytes: 33337420, installed: false, source: 'https://github.com/ggml-org/llama.cpp' },
-  { id: 'whisper-vulkan', group: 'speech', name: '语音引擎', version: 'b5130', backend: 'vulkan', delivery: 'bundled', bytes: 0, installed: false, source: '应用内置' }
+  { id: 'whisper-vulkan', group: 'speech', name: '语音引擎', version: 'b5130', backend: 'vulkan', delivery: 'download', bytes: 18095994, installed: false, source: 'https://github.com/JavdexLabs/javdex-runtime/releases/download/whisper-b5130-r1/whisper-b5130-r1-win32-x64-vulkan.zip' }
 ]
 
 export function runtimePlanFixture(group: LocalModelGroup, components: LocalRuntimeComponent[], backend?: 'cuda' | 'vulkan', probe = false): LocalPreparationPlan {

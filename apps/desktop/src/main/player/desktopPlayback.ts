@@ -65,6 +65,7 @@ export function registerBuiltinPlayback(backend: CatalogBackend, getWindow: () =
   let observationRevision = 0
   const session = createPlaybackSession({
     native, ...resolver,
+    ending: () => { void stopSubtitles().catch(() => { console.warn('[playback] unable to finish subtitle cleanup') }) },
     readVolume: volume.read,
     volumeChanged: volume.remember,
     progress: {
@@ -130,10 +131,9 @@ export function registerBuiltinPlayback(backend: CatalogBackend, getWindow: () =
     playback: session.snapshot, source: session.aiSubtitleSource,
     resolve: async source => {
       await resolver.validate(source)
-      if (source.mode === 'local') return source
-      const renewed = await resolver.resolve(source.target)
-      if (renewed.identityKey !== source.identityKey || renewed.revision !== source.revision) throw new Error('影片资源已变化，请重新打开影片')
-      return renewed
+      // The session-owned local route renews its upstream grant when necessary.
+      // Probe, recognition chunks and the decoder all share this same route.
+      return source
     },
     changed: state => {
       const window = getWindow()
@@ -155,6 +155,7 @@ export function registerBuiltinPlayback(backend: CatalogBackend, getWindow: () =
       if (error) throw new Error('无法打开日志，请检查系统的默认浏览器')
     }
   })
+  const stopSubtitles = aiSubtitles.stop
   const renderTimer = setInterval(() => {
     try { native.render() } catch { session.fail(new PlaybackFailure('video').message) }
   }, 16)

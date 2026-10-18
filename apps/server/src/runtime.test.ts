@@ -4168,6 +4168,30 @@ describe('server runtime lifecycle', () => {
     }
   })
 
+  it('periodically reclaims expired grants and token indexes without another playback request', async t => {
+    t.mock.timers.enable({ apis: ['setInterval'] })
+    const dataDir = path.join(root, 's11-play-cleanup')
+    const { base, config } = await boot(dataDir)
+    const writer = await claimInitialWriter(base, config)
+    const clip = path.join(mediaRoot, 'S11-CLEANUP.mp4')
+    fs.writeFileSync(clip, 'synthetic media')
+    const { videoId, fileId } = await insertBoundVideo('S11-CLEANUP', clip)
+    const resource = getDb().prepare('SELECT * FROM video_resources WHERE id = ?').get(fileId) as Parameters<typeof resourceLocatorRevision>[0]
+    const response = await postManage(base, 'play.grant', {
+      serverId: writer.serverId, catalogId: writer.catalogId,
+      input: { libraryId: 1, videoId, resourceId: fileId, locatorRevision: resourceLocatorRevision(resource) }
+    }, { bearer: writer.secret })
+    assert.equal(response.status, 200, JSON.stringify(response.json))
+    const play = response.json as { grantId: string }
+    const stored = readCatalogSetting<StoredPlayGrant | null>(`play-grant:${play.grantId}`, null)
+    assert.ok(stored)
+    assert.ok(stored.deviceId)
+    writeCatalogSetting(`play-grant:${play.grantId}`, { ...stored, expiresAt: new Date(Date.now() - 1000).toISOString() })
+    t.mock.timers.tick(60_000)
+    assert.equal(readCatalogSetting(`play-grant:${play.grantId}`, null), null)
+    assert.equal(readCatalogSetting(`play-token:${stored.tokenDigest}`, null), null)
+  })
+
   it('grants a 12-hour play token, streams Range, and serves manage images without cookies', async () => {
     const dataDir = path.join(root, 's11-play')
     const { base, config } = await boot(dataDir)

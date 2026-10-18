@@ -270,7 +270,10 @@ export interface CatalogAssetCommands {
     input: { uploadId: string; body: Buffer; contentType: string },
     ctx?: CatalogQueryContext
   ) => Promise<import('@shared/protocol/uploads').UploadInspectResult>
-  grantPlayback: Query<'play.grant'>
+  grantPlayback: (
+    input: CatalogOperationInput<'play.grant'>,
+    ctx?: CatalogQueryContext & { sessionBound?: boolean }
+  ) => Promise<CatalogOperationResults['play.grant']>
   readImage: (
     input: { relPath: string; size?: 320 | 640 | 1280 },
     ctx?: CatalogQueryContext
@@ -291,6 +294,9 @@ export interface CatalogBackend {
   capabilities(): DesktopCapabilityMap
   session(): DesktopSession
   onSessionChanged?(listener: () => void): () => void
+  /** Main-process local route only; does not revoke the server's scoped grant. */
+  releasePlayback?(playbackHandle: string): void
+  finishExternalPlayback?(playbackHandle: string, opened: boolean): void
   reconnect(): Promise<DesktopSession>
   claimWriter(input: DesktopWriterClaimRequest): Promise<DesktopWriterClaimResult>
   devices?: {

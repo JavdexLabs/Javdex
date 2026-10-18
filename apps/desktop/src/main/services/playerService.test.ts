@@ -310,9 +310,12 @@ describe('PlayerService', () => {
 
   it('spawns the configured player with a grant URL and does not shell-concatenate', async () => {
     const spawned: Array<{ program: string; args: string[] }> = []
+    const finished: boolean[] = []
+    let succeed = true
     const service = createPlayerService({
       catalog: {
         mode: 'remote',
+        finishExternalPlayback: (_handle: string, opened: boolean) => { finished.push(opened) },
         queries: {
           getVideo: async () => ({ resources: [{ id: 3, is_primary: 1 }] }),
           getResource: async () => ({
@@ -338,13 +341,16 @@ describe('PlayerService', () => {
       readPlayerPath: async () => '/usr/bin/mpv',
       spawnPlayer: async (program, args) => {
         spawned.push({ program, args })
-        return { ok: true }
+        return succeed ? { ok: true } : { ok: false, error: 'launch failed' }
       }
     })
     assert.deepEqual(await service.playVideo(1, 7), { ok: true })
     assert.deepEqual(spawned, [
       { program: '/usr/bin/mpv', args: ['http://127.0.0.1:8096/play/v1/g?t=secret'] }
     ])
+    succeed = false
+    assert.deepEqual(await service.playVideo(1, 7), { ok: false, error: 'launch failed' })
+    assert.deepEqual(finished, [true, false])
     assert.deepEqual(service.revealVideo(1, 7) as { ok: boolean; error: string }, {
       ok: false,
       error: '远程模式不能在本机显示文件位置'

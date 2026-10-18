@@ -230,7 +230,7 @@ export const CATALOG_METHODS = {
 }
 
 export type CatalogMethodSlice = Exclude<keyof CatalogBackend,
-  'mode' | 'identity' | 'generation' | 'capabilities' | 'session' | 'onSessionChanged' | 'reconnect' | 'claimWriter' | 'devices' | 'dispose'>
+  'mode' | 'identity' | 'generation' | 'capabilities' | 'session' | 'onSessionChanged' | 'releasePlayback' | 'finishExternalPlayback' | 'reconnect' | 'claimWriter' | 'devices' | 'dispose'>
 
 export function rejectingCatalogSlice<S extends CatalogMethodSlice>(
   slice: S,

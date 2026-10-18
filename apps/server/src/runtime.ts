@@ -7,7 +7,7 @@ import { closeDatabase, initDatabaseAtPath } from '@library/db/database'
 import { recoverInterruptedLibraryScanRuns } from '@library/db/libraryScanRepo'
 import { recoverCatalogImages } from '@library/catalog/catalogImageRecovery'
 import { recoverCatalogMaintenance } from '@library/catalog/catalogMaintenanceRecover'
-import { inspectPlayStream, setPlayGrantListener } from '@library/catalog/catalogPlay'
+import { inspectPlayStream, pruneExpiredPlayGrants, setPlayGrantListener } from '@library/catalog/catalogPlay'
 import { closePlayStreams } from '@http/play'
 import { scanCoordinator } from '@library/scan/scanCoordinator'
 import { automaticScanScheduler } from '@library/scan/automaticScanScheduler'
@@ -139,7 +139,10 @@ export async function startJavdexServer(
   let ready = false
   let stopping = false
   let activationTimer: ReturnType<typeof setInterval> | undefined
+  let playbackCleanupTimer: ReturnType<typeof setInterval> | undefined
   const fail = async (error: unknown): Promise<never> => {
+    clearInterval(playbackCleanupTimer)
+    clearInterval(activationTimer)
     setPlayGrantListener(null)
     setManageBrowserSurface(null)
     setBackupRestoredHandler(undefined)
@@ -215,6 +218,15 @@ export async function startJavdexServer(
         closePlayStreams(grantIds)
       }
     })
+    const cleanupPlayback = (): void => {
+      if (!stopping && !updatePending) pruneExpiredPlayGrants(new Date(), database)
+    }
+    cleanupPlayback()
+    playbackCleanupTimer = setInterval(() => {
+      try { cleanupPlayback() }
+      catch { console.warn('[playback] expired grant cleanup failed') }
+    }, 60_000)
+    playbackCleanupTimer.unref()
     const port = await http.start(config.port, config.listenHost)
     setManageBrowserSurface(createBrowserSurface(http, config, port))
     if (!updatePending) automaticScanScheduler.start()
@@ -242,6 +254,7 @@ export async function startJavdexServer(
       async stop(_signal?: NodeJS.Signals): Promise<void> {
         stopping = true
         clearInterval(activationTimer)
+        clearInterval(playbackCleanupTimer)
         ready = false
         automaticScanScheduler.stop()
         try {

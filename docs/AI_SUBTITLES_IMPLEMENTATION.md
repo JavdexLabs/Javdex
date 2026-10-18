@@ -83,7 +83,11 @@ ASS 文件替换仅对 Windows `EPERM`／`EACCES`／`EBUSY` 最多重试五次�
 
 普通/轻声日语对白、音乐和静音、非语言发声、分块边界、多个音轨；播放中跳远/连续定位、暂停、倍速、关闭和换片；已生成区间不重复识别；翻译失败仍有原文；重启复用模型与字幕；断网时运行；窗口/全屏字幕同步、更新不黑屏且不改变视频尺寸。
 
-## Windows 独显加速与 CPU 回退（2026-10-16）
+## Windows Whisper Vulkan 按需分发（2026-10-18）
+
+Windows Vulkan 语音工具的构建已迁至 `JavdexLabs/javdex-runtime`，固定发行 `whisper-b5130-r1` 保持原 b5130 引擎和编译选项，Javdex 改为在准备 GPU 环境时按需下载并验证完整包。主安装包不再携带这项可选工具；有效旧安装继续复用，模型、用途、设备策略及 CPU 回退不变。运行库原生 CI 通过 CLI、固定 Kotoba/VAD 的 CPU 烟测；未将托管 runner 记为真实 GPU 推理通过。下面 10 月 16 日的硬件与界面记录保留为历史，不代替新下载分发路径的检查。
+
+## Windows 独显加速与 CPU 回退（2026-10-16 历史）
 
 Windows x64 内置文本翻译／字幕翻译使用固定 llama.cpp b11435 的 CUDA 12.4 或 Vulkan 包，Kotoba 使用固定 whisper b5130 CUDA 12.4 包或同提交源码构建的 Vulkan CLI。模型权重共用，CPU 工具与 GPU 工具独立安装、校验和修复；原有 CPU 目录不改名。Vulkan whisper 随安装包放在 asar 外，普通用户不需要编译器；构建器固定源码与开发材料的 SHA-256，静态编译并附来源／许可。CUDA DLL 的 NVIDIA 许可独立于引擎 MIT。
 
@@ -100,7 +104,7 @@ Windows x64 内置文本翻译／字幕翻译使用固定 llama.cpp b11435 的 C
 重放（Windows，从仓库根开始；用户原模型目录仅作为只读复制来源）：
 
 ```powershell
-npm run ai-runtime:build -- --vulkan
+# 先在本地模型页准备 GPU 运行环境；Windows Vulkan 已改为固定下载，不在此仓库编译。
 node --require ./scripts/register-test-paths.cjs --import tsx scripts/local-ai-gpu-acceptance.ts --source-root <local-ai目录> --audio <公开日语音频>
 npm run desktop:build
 node scripts/local-ai-gpu-ui-acceptance.mjs

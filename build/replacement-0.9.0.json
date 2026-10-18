@@ -1,0 +1,73 @@
+{
+  "formatVersion": 1,
+  "version": "0.9.0",
+  "tag": "v0.9.0",
+  "releaseId": 416016386,
+  "sourceCommit": "bb843322112d536380ec7587c8569cc80680e733",
+  "tagObject": "bb843322112d536380ec7587c8569cc80680e733",
+  "imageDigest": "sha256:d2cb482d5d3f981fd55a8c871f6f5a5d53fefa9cfd46d1605c75ff4736149693",
+  "bodySha256": "4f232d5ea9e64f1d94701c9d2328fd8d43f1c5fc609ad27955c2646ce9978973",
+  "assets": [
+    {
+      "id": 651394810,
+      "name": "Javdex-0.9.0-amd64.deb",
+      "size": 145144888,
+      "digest": "sha256:bb7406ff945aa75c79fbed24e3f6d8b87381d00ed77334bf90b834201089b349"
+    },
+    {
+      "id": 651394809,
+      "name": "Javdex-0.9.0-arm64.dmg",
+      "size": 184355342,
+      "digest": "sha256:1262b883879fc7bb6813bbf150cd10119993bf0be3b067b768699c15a6ccddd4"
+    },
+    {
+      "id": 651394815,
+      "name": "Javdex-0.9.0-x64.dmg",
+      "size": 194058564,
+      "digest": "sha256:9e5cdb39a405cd4d2e170b005314c6c98875eef541d1d93b096225648e2e9cd0"
+    },
+    {
+      "id": 651394808,
+      "name": "Javdex-0.9.0-x86_64.AppImage",
+      "size": 182876895,
+      "digest": "sha256:dd1a7e236abcc07bf9713b7288991ce534d8c52b9378366bf217455bfab74034"
+    },
+    {
+      "id": 651394816,
+      "name": "Javdex-Playback-Sources-0.9.0.tar.gz",
+      "size": 113830849,
+      "digest": "sha256:b91a40e74222a4f6d2ba94e74a7307166173dfaa149a41a9f91bbecbb5490f04"
+    },
+    {
+      "id": 651394813,
+      "name": "Javdex-server-0.9.0-linux-amd64.javdex-update",
+      "size": 24921324,
+      "digest": "sha256:b52c24789dc7ada2faf68e702a5881239bc8240e4360851d1205d93dc2e7644a"
+    },
+    {
+      "id": 651394811,
+      "name": "Javdex-server-0.9.0-linux-arm64.javdex-update",
+      "size": 25177896,
+      "digest": "sha256:8ca1a65d933caf184eb06a4159a987d30ab1ce5bef744f2abc9276bb3ded51a2"
+    },
+    {
+      "id": 651394807,
+      "name": "Javdex-Setup-0.9.0-x64.exe",
+      "size": 147064961,
+      "digest": "sha256:9466707e4bb438577a5b6824cf507d33728655752933269d71368ca966c04557"
+    },
+    {
+      "id": 651394814,
+      "name": "Javdex-Setup-0.9.0-x64.zip",
+      "size": 207445067,
+      "digest": "sha256:e3b5b996282dbcd1b01c41a4b15f64563c4458860637c0b7e4ebc3faed2922be"
+    },
+    {
+      "id": 651394812,
+      "name": "SHA256SUMS.txt",
+      "size": 873,
+      "digest": "sha256:a4af112c927144c7fc8448dd2130d3526f92a367005a8a7fa03ac66dbe15a63d"
+    }
+  ],
+  "authorization": "2026-10-18: 仍覆盖 0.9.0，整套安装包、源码、升级包、镜像及标签一起重建替换"
+}

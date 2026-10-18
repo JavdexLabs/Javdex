@@ -14,6 +14,7 @@ const messages = {
   permission: '服务进程无权读取影片文件或媒体目录，请检查服务端 UID、GID、附加组及 NAS ACL',
   unsupported: '此资源请使用外部打开，内置播放目前仅支持影片文件',
   grant: '服务端未返回可用的原文件播放授权，请检查连接后重试',
+  capacity: '本机播放授权已达上限，请重新连接资料库后重试',
   runtime: '内置播放运行库无法初始化，请检查运行库或显式使用外部播放器',
   format: '无法识别所选影片格式，文件可能损坏或格式不受支持，可检查文件或显式使用外部播放器',
   streams: '所选文件没有可播放的音视频流，请检查文件或显式使用外部播放器',
@@ -36,6 +37,10 @@ export class PlaybackFailure extends Error {
 /** Discard third-party messages, even when they are structured catalog errors. */
 export function playbackFailure(error: unknown, fallback: PlaybackFailureCode = 'load'): PlaybackFailure {
   if (error instanceof PlaybackFailure) return error
+  const code = (error as NodeJS.ErrnoException | null)?.code
+  if (code === 'PLAYBACK_BRIDGE_CAPACITY') return new PlaybackFailure('capacity')
+  if (code === 'PLAYBACK_BRIDGE_CLOSED') return new PlaybackFailure('connection')
+  if (code === 'PLAYBACK_BRIDGE_GRANT') return new PlaybackFailure('grant')
   if (isStructuredError(error)) {
     if (error.code === 'AUTH_REQUIRED' || error.code === 'WRITER_REVOKED') return new PlaybackFailure('authorization')
     if (error.code === 'VERSION_MISMATCH') return new PlaybackFailure('version')

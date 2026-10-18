@@ -1,0 +1,309 @@
+{
+  "formatVersion": 1,
+  "checkedAt": "2026-10-18T05:41:17.011Z",
+  "scope": "Normal CI and read-only publication metadata/registry HEAD; no independent software artifact acceptance",
+  "source": "9d48f4fe80df614137a3b67480309aa17e3e6161",
+  "run": 39097548024,
+  "runUrl": "https://github.com/JavdexLabs/Javdex/actions/runs/39097548024",
+  "jobs": [
+    {
+      "id": 117587009781,
+      "name": "metadata",
+      "conclusion": "success",
+      "completedAt": "2026-10-18T04:34:20Z"
+    },
+    {
+      "id": 117587038919,
+      "name": "Typecheck and test",
+      "conclusion": "success",
+      "completedAt": "2026-10-18T04:58:05Z"
+    },
+    {
+      "id": 117590960723,
+      "name": "Package mac-x64",
+      "conclusion": "success",
+      "completedAt": "2026-10-18T05:28:52Z"
+    },
+    {
+      "id": 117590960746,
+      "name": "Package linux-x64",
+      "conclusion": "success",
+      "completedAt": "2026-10-18T05:10:46Z"
+    },
+    {
+      "id": 117590960763,
+      "name": "Package win-x64",
+      "conclusion": "success",
+      "completedAt": "2026-10-18T05:20:49Z"
+    },
+    {
+      "id": 117590960855,
+      "name": "Package mac-arm64",
+      "conclusion": "success",
+      "completedAt": "2026-10-18T05:10:01Z"
+    },
+    {
+      "id": 117596159712,
+      "name": "Aggregate corresponding playback sources",
+      "conclusion": "success",
+      "completedAt": "2026-10-18T05:30:01Z"
+    },
+    {
+      "id": 117596346898,
+      "name": "Server image (arm64)",
+      "conclusion": "success",
+      "completedAt": "2026-10-18T05:32:54Z"
+    },
+    {
+      "id": 117596346956,
+      "name": "Server image (amd64)",
+      "conclusion": "success",
+      "completedAt": "2026-10-18T05:33:27Z"
+    },
+    {
+      "id": 117596954861,
+      "name": "server-manifest",
+      "conclusion": "success",
+      "completedAt": "2026-10-18T05:33:47Z"
+    },
+    {
+      "id": 117597008055,
+      "name": "Publish GitHub release",
+      "conclusion": "success",
+      "completedAt": "2026-10-18T05:35:52Z"
+    }
+  ],
+  "release": {
+    "id": 416257668,
+    "tag": "v0.9.0",
+    "source": "9d48f4fe80df614137a3b67480309aa17e3e6161",
+    "publishedAt": "2026-10-18T05:35:46Z",
+    "publishedAtShanghai": "2026-10-18 13:35:46",
+    "url": "https://github.com/JavdexLabs/Javdex/releases/tag/v0.9.0",
+    "draft": false,
+    "prerelease": false,
+    "assets": [
+      {
+        "id": 652590046,
+        "name": "Javdex-0.9.0-amd64.deb",
+        "size": 145148420,
+        "digest": "sha256:e682e1ba08bc25a769fe77e30f88ca446661ce332592e3fe1293a7769e42cc4c"
+      },
+      {
+        "id": 652590048,
+        "name": "Javdex-0.9.0-arm64.dmg",
+        "size": 184370115,
+        "digest": "sha256:2ca5c5cb0158cd665403d393c56317330e3e68e90033f9ac53b15c16f0804610"
+      },
+      {
+        "id": 652590049,
+        "name": "Javdex-0.9.0-x64.dmg",
+        "size": 194075542,
+        "digest": "sha256:68f97fe1f37f5d3fb260f9e9c3bd5ef7086349027a01e024061ce55b8b0a56d5"
+      },
+      {
+        "id": 652590045,
+        "name": "Javdex-0.9.0-x86_64.AppImage",
+        "size": 182880989,
+        "digest": "sha256:3c81825544a86c680d433842f283b7cab85e302595408688fd027301a7dc08e1"
+      },
+      {
+        "id": 652590047,
+        "name": "Javdex-Playback-Sources-0.9.0.tar.gz",
+        "size": 113830952,
+        "digest": "sha256:bc3a6d34ccde853313970c0ea4c9c6173426d4ac65b5ef4a43a213b7796bbf35"
+      },
+      {
+        "id": 652590534,
+        "name": "Javdex-server-0.9.0-linux-amd64.javdex-update",
+        "size": 24921695,
+        "digest": "sha256:251c9ca44720b38faf6a5eb8e3677e3f30aa6d939e793fbf298d6dfa0abe515e"
+      },
+      {
+        "id": 652590542,
+        "name": "Javdex-server-0.9.0-linux-arm64.javdex-update",
+        "size": 25178594,
+        "digest": "sha256:32dfe19be06c7b7c109c5c706ff2ef2e50c79a1a5d983a289914f8607b147917"
+      },
+      {
+        "id": 652590415,
+        "name": "Javdex-Setup-0.9.0-x64.exe",
+        "size": 140295848,
+        "digest": "sha256:c678944c517deb9606e81be799f829ab89c1bb44f49f4914a3e28876baf42307"
+      },
+      {
+        "id": 652590493,
+        "name": "Javdex-Setup-0.9.0-x64.zip",
+        "size": 190652923,
+        "digest": "sha256:317774c3767f6e8a4cfec4a04aab0f2fc6955c659bedc5c7f9cc4e81afff9c5a"
+      },
+      {
+        "id": 652590573,
+        "name": "SHA256SUMS.txt",
+        "size": 873,
+        "digest": "sha256:19cb0a8ff677fd6f9811722cd07829867fd971c9dd047eaccd26b9233a9fe190"
+      }
+    ]
+  },
+  "tagSource": "9d48f4fe80df614137a3b67480309aa17e3e6161",
+  "image": {
+    "tag": "0.9.0",
+    "digest": "sha256:729b05138f9ddd617e8cd40efe619875a8bea9001d273e09e3736767ee862ccc",
+    "method": "anonymous HEAD only"
+  },
+  "retainedOriginal": {
+    "releaseId": 416016386,
+    "draft": true,
+    "tag": "archive/0.9.0/original-bb843322112d536380ec7587c8569cc80680e733",
+    "tagObject": "bb843322112d536380ec7587c8569cc80680e733",
+    "imageTag": "archive-0.9.0-bb843322112d536380ec7587c8569cc80680e733",
+    "imageDigest": "sha256:d2cb482d5d3f981fd55a8c871f6f5a5d53fefa9cfd46d1605c75ff4736149693",
+    "assets": [
+      {
+        "id": 651394810,
+        "name": "Javdex-0.9.0-amd64.deb",
+        "size": 145144888,
+        "digest": "sha256:bb7406ff945aa75c79fbed24e3f6d8b87381d00ed77334bf90b834201089b349"
+      },
+      {
+        "id": 651394809,
+        "name": "Javdex-0.9.0-arm64.dmg",
+        "size": 184355342,
+        "digest": "sha256:1262b883879fc7bb6813bbf150cd10119993bf0be3b067b768699c15a6ccddd4"
+      },
+      {
+        "id": 651394815,
+        "name": "Javdex-0.9.0-x64.dmg",
+        "size": 194058564,
+        "digest": "sha256:9e5cdb39a405cd4d2e170b005314c6c98875eef541d1d93b096225648e2e9cd0"
+      },
+      {
+        "id": 651394808,
+        "name": "Javdex-0.9.0-x86_64.AppImage",
+        "size": 182876895,
+        "digest": "sha256:dd1a7e236abcc07bf9713b7288991ce534d8c52b9378366bf217455bfab74034"
+      },
+      {
+        "id": 651394816,
+        "name": "Javdex-Playback-Sources-0.9.0.tar.gz",
+        "size": 113830849,
+        "digest": "sha256:b91a40e74222a4f6d2ba94e74a7307166173dfaa149a41a9f91bbecbb5490f04"
+      },
+      {
+        "id": 651394813,
+        "name": "Javdex-server-0.9.0-linux-amd64.javdex-update",
+        "size": 24921324,
+        "digest": "sha256:b52c24789dc7ada2faf68e702a5881239bc8240e4360851d1205d93dc2e7644a"
+      },
+      {
+        "id": 651394811,
+        "name": "Javdex-server-0.9.0-linux-arm64.javdex-update",
+        "size": 25177896,
+        "digest": "sha256:8ca1a65d933caf184eb06a4159a987d30ab1ce5bef744f2abc9276bb3ded51a2"
+      },
+      {
+        "id": 651394807,
+        "name": "Javdex-Setup-0.9.0-x64.exe",
+        "size": 147064961,
+        "digest": "sha256:9466707e4bb438577a5b6824cf507d33728655752933269d71368ca966c04557"
+      },
+      {
+        "id": 651394814,
+        "name": "Javdex-Setup-0.9.0-x64.zip",
+        "size": 207445067,
+        "digest": "sha256:e3b5b996282dbcd1b01c41a4b15f64563c4458860637c0b7e4ebc3faed2922be"
+      },
+      {
+        "id": 651394812,
+        "name": "SHA256SUMS.txt",
+        "size": 873,
+        "digest": "sha256:a4af112c927144c7fc8448dd2130d3526f92a367005a8a7fa03ac66dbe15a63d"
+      }
+    ]
+  },
+  "receipt": {
+    "artifactId": 12126194268,
+    "sha256": "7dee468b370bd89158cbd0c9998a3c050be8e074aff9bcb332123134022b344e",
+    "bytes": 31621,
+    "steps": [
+      {
+        "step": "observed-original",
+        "at": "2026-10-18T05:35:10.452Z"
+      },
+      {
+        "step": "created-staging-draft",
+        "at": "2026-10-18T05:35:12.873Z"
+      },
+      {
+        "step": "all-ten-new-assets-staged-and-bound",
+        "at": "2026-10-18T05:35:34.888Z"
+      },
+      {
+        "step": "old-tag-and-image-backed-up",
+        "at": "2026-10-18T05:35:38.761Z"
+      },
+      {
+        "step": "original-release-retained-as-archive-draft",
+        "at": "2026-10-18T05:35:39.614Z"
+      },
+      {
+        "step": "fixed-tag-switched",
+        "at": "2026-10-18T05:35:42.335Z"
+      },
+      {
+        "step": "fixed-image-switched",
+        "at": "2026-10-18T05:35:45.438Z"
+      },
+      {
+        "step": "new-release-published",
+        "at": "2026-10-18T05:35:46.466Z"
+      },
+      {
+        "step": "replacement-complete-metadata-only",
+        "at": "2026-10-18T05:35:47.505Z"
+      }
+    ]
+  },
+  "windowsElectron": {
+    "batches": [
+      {
+        "tests": 2551,
+        "pass": 2526,
+        "fail": 0,
+        "skip": 25
+      },
+      {
+        "tests": 1645,
+        "pass": 1644,
+        "fail": 0,
+        "skip": 1
+      }
+    ],
+    "total": {
+      "tests": 4196,
+      "pass": 4170,
+      "fail": 0,
+      "skip": 26
+    },
+    "playbackAuthorization": {
+      "tests": 8,
+      "pass": 8,
+      "fail": 0,
+      "skip": 0
+    },
+    "nativeFlatZip": "passed real Windows install/resume/reuse/rejected replacement test"
+  },
+  "rootSupplementaryGroups": {
+    "amd64": {
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    "arm64": {
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    }
+  },
+  "independentArtifactAcceptance": "not performed at user request; no public software asset or image bytes downloaded"
+}

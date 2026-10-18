@@ -61,6 +61,7 @@ function dispatch(fields) {
       case 'actions':
         process.stdout.write(JSON.stringify({ alive: true, loadedFiles: process.pid, 'time-pos': 10, actions: [{ kind: 'toggle-pause' }] }) + '\\n'
           + JSON.stringify({ alive: true, loadedFiles: process.pid, 'time-pos': 11, actions: [{ kind: 'seek-relative', value: 5 }, { kind: 'escape' }] }) + '\\n'); break;
+      case 'native-error': emit({ alive: false, error: 'https://user:secret@example.test/private-media' }); break;
       case 'invalid-json': process.stdout.write('not json\\n'); break;
       case 'invalid-state': emit({ alive: 'yes' }); break;
       case 'invalid-actions': emit({ alive: true, actions: 'toggle-pause' }); break;
@@ -318,4 +319,90 @@ test('DMA-BUF helper heartbeat terminates a hung producer with no outstanding fr
   await until(() => { try { f.bridge.render(); return '' } catch (error) { return (error as Error).message } },
     value => value.includes('heartbeat timed out'), 'hung helper had no bounded failure', 13000)
   await until(() => f.alive(pid), running => !running, 'heartbeat failure did not terminate helper')
+})
+
+test('CPU helper uses no native handle and invalidates the frame generation before load and seek only', linuxOnly, async t => {
+  let generation = 1
+  const f = fixture(t, 'normal', () => {
+    const fd = openSync('/dev/null', 'r')
+    let closed = false
+    return { kind: 'cpu', surfaceToken: 'cpu-generation', childFd: fd,
+      spawned() { closeSync(fd); closed = true }, setVisible() {}, isReady: () => true,
+      invalidateFrames: () => ++generation, presentedFrames: () => 7,
+      diagnostics: () => ({ copiedFrames: 9, transportDroppedFrames: 2, cpuFramesInFlight: 1 }),
+      destroy() { if (!closed) { closeSync(fd); closed = true } } }
+  })
+  f.bridge.create(Buffer.alloc(0), bounds, { backend: 'cpu' })
+  const state = await until(() => f.bridge.state(), state => Boolean(state.loadedFiles), 'CPU helper create missing')
+  assert.equal(state.cpuFrameSurface, 'cpu-generation'); assert.equal(state.sharedTextureSurface, undefined)
+  assert.equal(state.presentedFrames, 7); assert.equal(state.copiedFrames, 9); assert.equal(state.transportDroppedFrames, 2)
+  assert.deepEqual(f.entries()[1].fields, ['create', '0', '11', '22', '333', '222', '1.5', 'cpu'])
+  f.bridge.command(['loadfile', '/fixture.mp4', 'replace'])
+  f.bridge.command(['set', 'pause', 'yes'])
+  f.bridge.command(['seek', '5', 'absolute+exact'])
+  await until(f.entries, entries => entries.length >= 7, 'CPU generation control missing')
+  assert.deepEqual(f.entries().slice(2).map(entry => entry.fields), [
+    ['generation', '2'], ['command', 'loadfile', '/fixture.mp4', 'replace'],
+    ['command', 'set', 'pause', 'yes'], ['generation', '3'], ['command', 'seek', '5', 'absolute+exact']
+  ])
+  assert.equal(f.bridge.inspect().cpuFrameSurface, 'cpu-generation')
+})
+test('CPU selection needs its private binary channel and uses fixed safe failure codes', linuxOnly, t => {
+  const f = fixture(t)
+  assert.throws(() => f.bridge.create(Buffer.alloc(0), bounds, { backend: 'cpu' }), /传输通道/)
+  assert.deepEqual(f.entries(), [])
+  assert.equal(linuxSharedTextureFailureCode('CPU frame consumer stalled waiting for release'), 'CPU_FRAME_RELEASE_TIMEOUT')
+  assert.equal(linuxSharedTextureFailureCode('CPU 视频帧复制或传输失败，请停止后重试'), 'CPU_FRAME_TRANSFER_FAILED')
+  assert.equal(linuxSharedTextureFailureCode('CPU 视频画面接收失败，请停止后重试'), 'CPU_RECEIVER_NOT_READY')
+  assert.equal(linuxSharedTextureFailureCode('CPU-frame helper heartbeat timed out'), 'HELPER_HEARTBEAT_TIMEOUT')
+  assert.equal(linuxSharedTextureFailureCode('CPU frame timeline transition timed out'), 'CPU_TIMELINE_TIMEOUT')
+})
+
+test('every fixed native CPU helper exception has a privacy-safe diagnostic code', () => {
+  for (const filename of ['linuxCpuPlayback.cpp', 'linuxCpuFrame.h', 'linuxCpuFonts.h']) {
+    const source = readFileSync(new URL(`./native/${filename}`, import.meta.url), 'utf8')
+    for (const match of source.matchAll(/throw std::runtime_error\("([^"\n]+)"\)/g)) {
+      assert.notEqual(linuxSharedTextureFailureCode(match[1]), 'EXPERIMENTAL_PLAYBACK_FAILED', match[1])
+    }
+  }
+  assert.equal(linuxSharedTextureFailureCode('Unknown CPU frame acknowledgement'), 'CPU_FRAME_ACK_INVALID')
+  assert.equal(linuxSharedTextureFailureCode('Playback state consumer stalled'), 'HELPER_STATE_STALLED')
+  assert.equal(linuxSharedTextureFailureCode('option not found'), 'LIBMPV_OPTION_UNAVAILABLE')
+  assert.equal(linuxSharedTextureFailureCode('Cannot locate CPU frame helper'), 'CPU_HELPER_LOCATION_UNAVAILABLE')
+  assert.equal(linuxSharedTextureFailureCode('CPU frame subtitle font is missing or invalid'), 'CPU_SUBTITLE_FONT_UNAVAILABLE')
+  assert.equal(linuxSharedTextureFailureCode('https://user:secret@example.test/media'), 'EXPERIMENTAL_PLAYBACK_FAILED')
+})
+
+test('unknown CPU helper failures retain a fixed origin without logging the original error', linuxOnly, async t => {
+  const warnings: string[] = []
+  t.mock.method(console, 'warn', (value: string) => warnings.push(value))
+  const f = fixture(t, 'normal', () => {
+    const fd = openSync('/dev/null', 'r')
+    return { kind: 'cpu', surfaceToken: 'cpu-failure', childFd: fd, spawned() { closeSync(fd) },
+      setVisible() {}, isReady: () => true, destroy() {} }
+  })
+  f.bridge.create(Buffer.alloc(0), bounds, { backend: 'cpu' })
+  await until(() => f.bridge.state(), state => Boolean(state.loadedFiles), 'CPU helper create missing')
+  f.bridge.command(['native-error'])
+  await failure(f.bridge)
+  assert.deepEqual(warnings, ['[playback-cpu] failure=EXPERIMENTAL_PLAYBACK_FAILED origin=HELPER_STATE_ERROR'])
+  assert.equal(warnings.join('').includes('secret'), false)
+})
+
+test('public libmpv error names map to fixed codes, including known initialization option prefixes', () => {
+  // Verified against the actual Linux acceptance runtime's mpv_error_string(-1..-20).
+  const errors = ['event queue full', 'memory allocation failed', 'core not initialized', 'invalid parameter', 'option not found',
+    'unsupported format for accessing option', 'error setting option', 'property not found', 'unsupported format for accessing property',
+    'property unavailable', 'error accessing property', 'error running command', 'loading failed', 'audio output initialization failed',
+    'video output initialization failed', 'no audio or video data played', 'unrecognized file format', 'not supported',
+    'operation not implemented', 'something happened']
+  for (const message of errors) assert.match(linuxSharedTextureFailureCode(message), /^LIBMPV_[A-Z_]+$/)
+  assert.equal(linuxSharedTextureFailureCode('vo: option not found'), 'LIBMPV_OPTION_UNAVAILABLE')
+  assert.equal(linuxSharedTextureFailureCode('video-timing-offset: error setting option'), 'LIBMPV_OPTION_FAILED')
+  for (const option of ['sub-font', 'osd-font', 'sub-fonts-dir', 'osd-fonts-dir']) {
+    assert.equal(linuxSharedTextureFailureCode(`${option}: option not found`), 'LIBMPV_OPTION_UNAVAILABLE')
+    assert.equal(linuxSharedTextureFailureCode(`${option}: error setting option`), 'LIBMPV_OPTION_FAILED')
+    assert.equal(linuxSharedTextureFailureCode(`${option}: /private/font/path`), 'EXPERIMENTAL_PLAYBACK_FAILED')
+  }
+  assert.equal(linuxSharedTextureFailureCode('hwdec: private URL'), 'EXPERIMENTAL_PLAYBACK_FAILED')
 })

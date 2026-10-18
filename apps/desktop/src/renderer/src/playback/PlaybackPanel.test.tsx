@@ -63,6 +63,7 @@ const fake = {
   settings: { getLocalModels: async () => localModels(), onLocalModelsChanged: () => () => {} },
   playback: {
     bindSharedTextureSurface: (token: string) => { boundSurfaces.push(token); return () => { releasedSurfaces.push(token) } },
+    bindCpuFrameSurface: (token: string) => { boundSurfaces.push(`cpu:${token}`); return () => { releasedSurfaces.push(`cpu:${token}`) } },
     aiSubtitleSnapshot: async () => aiState,
     onAiSubtitleChanged: (listener: typeof aiChanged) => { aiChanged = listener; return () => { aiChanged = () => {} } },
     aiSubtitleCommand: (id: string, command: AiSubtitleCommand) => aiCommand(id, command),
@@ -1056,4 +1057,28 @@ test('shared-texture pointer gestures distinguish single-click pause from double
   await act(async () => changed({ ...snapshot('replacement'), sharedTextureSurface: 'next-surface', presentation: 'docked' }))
   await act(async () => button('恢复展开播放器').props.onClick({ detail: 1 }))
   assert.deepEqual(controls, [{ id: 'replacement', command: { kind: 'presentation', value: 'expanded' } }], 'docked mouse activation remains immediate')
+})
+
+test('CPU canvas uses its isolated binding and retains controls through pause, rebind, errors and close', async () => {
+  await mount()
+  const current = { ...snapshot(), cpuFrameSurface: 'first-cpu' }
+  await act(async () => changed(current))
+  const canvas = renderer!.root.findByType('canvas')
+  assert.equal(canvas.props['data-playback-cpu-surface'], 'first-cpu')
+  assert.equal(canvas.props['data-playback-surface'], undefined)
+  assert.equal(canvas.props['aria-hidden'], 'true'); assert.equal(canvas.parent!.type, 'button')
+  assert.deepEqual(boundSurfaces, ['cpu:first-cpu'])
+  await act(async () => changed({ ...current, phase: 'paused', paused: true }))
+  await act(async () => changed({ ...current, presentation: 'fullscreen', rendererFullscreenControls: true }))
+  assert.deepEqual(boundSurfaces, ['cpu:first-cpu'])
+  await act(async () => button('视频画面，单击播放或暂停，双击全屏').props.onDoubleClick())
+  assert.deepEqual(controls.at(-1), { id: 'first', command: { kind: 'presentation', value: 'expanded' } })
+  await act(async () => changed({ ...snapshot('replacement'), cpuFrameSurface: 'second-cpu' }))
+  assert.deepEqual(releasedSurfaces, ['cpu:first-cpu'])
+  await act(async () => changed({ ...snapshot('replacement'), cpuFrameSurface: 'second-cpu', phase: 'error', error: 'CPU transport stopped' }))
+  assert.equal(renderer!.root.findAllByType('canvas').length, 0)
+  assert.deepEqual(releasedSurfaces, ['cpu:first-cpu', 'cpu:second-cpu'])
+  await act(async () => changed({ ...snapshot('reopened'), cpuFrameSurface: 'third-cpu' }))
+  await act(async () => changed(null))
+  assert.deepEqual(releasedSurfaces, ['cpu:first-cpu', 'cpu:second-cpu', 'cpu:third-cpu'])
 })

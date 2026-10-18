@@ -17,6 +17,7 @@
 #include <string>
 
 #include "linuxFdTransport.h"
+#include "linuxCpuFrame.h"
 
 namespace {
 using namespace javdex_transport;
@@ -24,12 +25,14 @@ using namespace javdex_transport;
 struct State {
   std::set<int> owned;
   std::set<int> parents;
+  std::set<int> frames;
 };
 
 // On Linux, never retry close(2) after EINTR: the descriptor may already have
 // been released and reused. Ownership leaves the addon before close is called.
 void CloseOwned(State* state, int fd) {
   state->parents.erase(fd);
+  state->frames.erase(fd);
   state->owned.erase(fd);
   ::close(fd);
 }
@@ -211,6 +214,40 @@ napi_value Receive(napi_env env, napi_callback_info info) {
     return nullptr;
   }
   state->owned.insert(received[0]);
+  state->frames.insert(received[0]);
+  return result;
+}
+
+// Consume exactly one received descriptor. Bytes are copied before returning;
+// neither the renderer nor V8 retains a mapping of the producer's writable file.
+napi_value CopyFrame(napi_env env, napi_callback_info info) {
+  napi_value argv[2];
+  State* state;
+  int fd;
+  if (!Args(env, info, 2, argv, &state) || !GetFd(env, argv[0], &fd)) return nullptr;
+  if (!state->frames.count(fd))
+    return Error(env, "ERR_FD_BRIDGE_OWNERSHIP", "Descriptor is not a received frame owned by this addon");
+  struct CloseFrame { State* state; int fd; ~CloseFrame() { CloseOwned(state, fd); } } close{state, fd};
+  napi_valuetype type;
+  double value;
+  if (!Check(env, napi_typeof(env, argv[1], &type))) return nullptr;
+  if (type != napi_number || napi_get_value_double(env, argv[1], &value) != napi_ok
+      || !std::isfinite(value) || value < 1 || value > javdex::cpu::maxBufferBytes || std::floor(value) != value)
+    return Error(env, "ERR_FD_BRIDGE_SIZE", "CPU frame size must be a positive integer within the 720p RGBA limit");
+  const auto size = static_cast<std::size_t>(value);
+  if (!javdex::cpu::validFrameFile(fd, size))
+    return Error(env, "ERR_FD_BRIDGE_FRAME", "CPU frame requires an exact-size regular memfd sealed against shrink and grow");
+  napi_value result;
+  void* bytes = nullptr;
+  if (!Check(env, napi_create_buffer(env, size, &bytes, &result))) return nullptr;
+  std::size_t offset = 0;
+  while (offset < size) {
+    const auto count = ::pread(fd, static_cast<unsigned char*>(bytes) + offset, size - offset, static_cast<off_t>(offset));
+    if (count < 0 && errno == EINTR) continue;
+    if (count < 0) return SystemError(env, "copy CPU frame", errno);
+    if (count == 0) return Error(env, "ERR_FD_BRIDGE_FRAME", "CPU frame ended before its declared size");
+    offset += static_cast<std::size_t>(count);
+  }
   return result;
 }
 
@@ -253,10 +290,11 @@ napi_value Init(napi_env env, napi_value exports) {
   const napi_property_descriptor properties[] = {
     {"createChannel", nullptr, CreateChannel, nullptr, nullptr, nullptr, napi_default, state},
     {"receive", nullptr, Receive, nullptr, nullptr, nullptr, napi_default, state},
+    {"copyFrame", nullptr, CopyFrame, nullptr, nullptr, nullptr, napi_default, state},
     {"sendAck", nullptr, SendAck, nullptr, nullptr, nullptr, napi_default, state},
     {"close", nullptr, Close, nullptr, nullptr, nullptr, napi_default, state},
   };
-  if (!Check(env, napi_define_properties(env, exports, 4, properties))) return nullptr;
+  if (!Check(env, napi_define_properties(env, exports, 5, properties))) return nullptr;
   return exports;
 }
 }  // namespace

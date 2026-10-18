@@ -9,6 +9,7 @@ import type { WebAccessInput } from '../../../../packages/contracts/src/webTypes
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { IPC } from '../../../../packages/contracts/src/ipc-channels'
 import { installLinuxSharedTextureReceiver } from './linuxSharedTexture'
+import { installLinuxCpuFrameReceiver } from './linuxCpuFrames'
 import type { UpdateCheckState } from '../../../../packages/contracts/src/updateTypes'
 import type {
   AppIpcArgs,
@@ -222,6 +223,7 @@ function onScrapeEvent<Channel extends ScrapeIpcEventChannel>(
 }
 
 const bindSharedTextureSurface = installLinuxSharedTextureReceiver()
+const bindCpuFrameSurface = installLinuxCpuFrameReceiver()
 
 const api = {
   nfoExport: {
@@ -865,6 +867,7 @@ const api = {
   },
   playback: {
     bindSharedTextureSurface,
+    bindCpuFrameSurface,
     availability: () => invokeApp(IPC.PLAYBACK_AVAILABILITY),
     open: (target: import('@shared/desktop/playback').PlaybackTarget) => invokeApp(IPC.PLAYBACK_OPEN, target),
     snapshot: async () => (await invokeApp(IPC.PLAYBACK_SNAPSHOT)).snapshot,

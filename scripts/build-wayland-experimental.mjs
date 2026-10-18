@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import path from 'node:path'
-import { experimentalRoot, verifyExperimentalRuntime } from './wayland-experimental-package.mjs'
+import { experimentalRoot, EXPERIMENTAL_OUTPUT, verifyExperimentalRuntime } from './wayland-experimental-package.mjs'
 import { resolveNodeGypPythonEnvironment } from './packaging-runtime.mjs'
 
 assert.equal(process.platform, 'linux', 'Build the experimental Linux package on Linux')
@@ -18,7 +18,7 @@ function run(command, args) {
 if (!process.argv.includes('--skip-build')) run('npm', ['run', 'build'])
 run(process.execPath, [path.join(experimentalRoot, 'node_modules/electron-builder/cli.js'),
   '--config', 'electron-builder.wayland-experimental.config.mjs', '--linux', '--x64', '--publish', 'never'])
-const output = path.join(experimentalRoot, 'dist/wayland-experimental')
+const output = path.join(experimentalRoot, EXPERIMENTAL_OUTPUT)
 run(process.execPath, ['scripts/check-packaged-playback-runtime.mjs', output])
 verifyExperimentalRuntime(path.join(output, 'linux-unpacked/resources/linux-texture-experimental'), { sourceDirectory: output })
 run(process.execPath, ['scripts/check-wayland-experimental-appimage.mjs', output])

@@ -6,10 +6,10 @@ import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { extractFile } from '@electron/asar'
-import { EXPERIMENTAL_VERSION, experimentalRoot, verifyExperimentalRuntime } from './wayland-experimental-package.mjs'
+import { EXPERIMENTAL_VERSION, EXPERIMENTAL_OUTPUT, experimentalRoot, verifyExperimentalRuntime } from './wayland-experimental-package.mjs'
 import { verifyPackagedPlaybackResources } from './check-packaged-playback-runtime.mjs'
 
-const output = path.resolve(process.argv[2] ?? path.join(experimentalRoot, 'dist/wayland-experimental'))
+const output = path.resolve(process.argv[2] ?? path.join(experimentalRoot, EXPERIMENTAL_OUTPUT))
 const files = fs.readdirSync(output).filter(name => name.endsWith('.AppImage'))
 assert.equal(files.length, 1, 'Expected exactly one experimental AppImage')
 const artifact = path.join(output, files[0]), scratch = fs.mkdtempSync(path.join(output, '.inspect-appimage-'))
@@ -47,10 +47,26 @@ try {
     assert.equal(smoke.status, 0, `Actual AppImage runtime smoke failed: ${smoke.stdout} ${smoke.stderr}`)
     console.log(smoke.stdout.trim())
   }
+  let cpuPlayback = 'Not run: set JAVDEX_CPU_ACCEPTANCE_MEDIA to a generated acceptance MP4.'
+  if (process.env.JAVDEX_CPU_ACCEPTANCE_MEDIA) {
+    const media = path.resolve(process.env.JAVDEX_CPU_ACCEPTANCE_MEDIA)
+    assert.ok(fs.statSync(media).isFile(), 'CPU acceptance media must be a real file')
+    const smoke = spawnSync(path.join(app, 'javdex-linux-texture-experimental'),
+      [path.join(experimentalRoot, 'scripts/linux-cpu-playback-smoke.cjs'), media, '--quick'], {
+        env: { ...environment, CPU_PLAYBACK_HELPER: path.join(resources, 'linux-texture-experimental/playback-cpu-helper'),
+          CPU_SMOKE_OUTPUT: path.join(output, 'packaged-cpu-smoke') },
+        encoding: 'utf8', timeout: 60000, maxBuffer: 4 * 1024 * 1024
+      })
+    if (smoke.error) throw smoke.error
+    assert.equal(smoke.status, 0, `Actual AppImage CPU playback failed: ${smoke.stdout} ${smoke.stderr}`)
+    cpuPlayback = 'Passed real H264/AAC decode, binary CPU frames, subtitle/seek/reopen and PCM checks; quick mode, not GUI or steady-state performance.'
+    console.log(smoke.stdout.trim())
+  }
   const receipt = { fileName: files[0], bytes: fs.statSync(artifact).size,
     sha256: createHash('sha256').update(fs.readFileSync(artifact)).digest('hex'),
     version: metadata.version, experimental: true, sandboxLauncherVerified: true,
     packagedElectronFdTransport: 'passed', packagedHelperRejectionTests: 'passed',
+    packagedCpuPlayback: cpuPlayback,
     reviewedSource: reviewed.manifest.sourceBundle, experimentalSource: experimental.sourceBundle,
     elf: experimental.elf, gpuAcceptance: 'Not run: build host has no DRM render node.' }
   fs.writeFileSync(path.join(output, 'experimental-appimage-verification.json'), JSON.stringify(receipt, null, 2) + '\n')

@@ -8,11 +8,14 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { validatePlaybackRuntime } from './playback-runtime.mjs'
 
-export const EXPERIMENTAL_VERSION = '0.9.1-linux-texture.1'
+export const EXPERIMENTAL_VERSION = '0.9.1-linux-texture.2'
+export const EXPERIMENTAL_OUTPUT = 'dist/cpu-frame-experimental'
 export const EXPERIMENTAL_DIRECTORY = 'linux-texture-experimental'
 export const experimentalRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const binaries = ['playback-fd.node', 'playback-dmabuf-helper', 'libmpv.so.2']
+const binaries = ['playback-fd.node', 'playback-dmabuf-helper', 'playback-cpu-helper', 'libmpv.so.2']
 const notices = ['LICENSE', 'libmpv-LICENSE.txt', 'SOURCE-ACCESS.txt']
+const fontFiles = ['NotoSans-Regular.ttf', 'LICENSE.txt', 'SOURCE.json']
+const fontResources = fontFiles.map(name => `fonts/${name}`)
 const sha256 = file => createHash('sha256').update(fs.readFileSync(file)).digest('hex')
 const systemLibraries = new Set([
   'libc.so.6', 'libm.so.6', 'libdl.so.2', 'libpthread.so.0', 'librt.so.1',
@@ -42,12 +45,13 @@ function versionMaximum(text, prefix) {
 }
 export function inspectExperimentalElf(file) {
   const data = fs.readFileSync(file), name = path.basename(file)
+  const helper = name === 'playback-dmabuf-helper' || name === 'playback-cpu-helper'
   assert.ok(data.length >= 64 && data.subarray(0, 4).equals(Buffer.from([0x7f, 0x45, 0x4c, 0x46])), 'Experimental binary must be ELF')
   assert.ok(data[4] === 2 && data[5] === 1 && data.readUInt16LE(18) === 62, 'Experimental binary must be little-endian Linux x86_64')
-  assert.ok(data.readUInt16LE(16) === 3 || (name === 'playback-dmabuf-helper' && data.readUInt16LE(16) === 2), 'Invalid experimental ELF type')
-  if (name === 'playback-dmabuf-helper') {
-    assert.ok(fs.statSync(file).mode & 0o111, 'DMA-BUF helper must be executable')
-    assert.ok(data.readBigUInt64LE(24) !== 0n, 'DMA-BUF helper needs an entry point')
+  assert.ok(data.readUInt16LE(16) === 3 || (helper && data.readUInt16LE(16) === 2), 'Invalid experimental ELF type')
+  if (helper) {
+    assert.ok(fs.statSync(file).mode & 0o111, 'Experimental helper must be executable')
+    assert.ok(data.readBigUInt64LE(24) !== 0n, 'Experimental helper needs an entry point')
     const programHeaders = run('readelf', ['-lW', file])
     assert.match(programHeaders, /Requesting program interpreter: \/(?:lib64|lib\/x86_64-linux-gnu)\/ld-linux-x86-64\.so\.2\]/)
   }
@@ -60,7 +64,7 @@ export function inspectExperimentalElf(file) {
   for (const dependency of dependencies)
     assert.ok(systemLibraries.has(dependency) || dependency === 'libmpv.so.2', `Unexpected experimental dependency: ${dependency}`)
   if (dependencies.includes('libmpv.so.2')) assert.match(dynamic, /\((?:RPATH|RUNPATH)\)[^\n]*\[\$ORIGIN\]/)
-  if (name === 'playback-dmabuf-helper') assert.ok(dependencies.includes('libmpv.so.2'), 'DMA-BUF helper must link reviewed libmpv')
+  if (helper) assert.ok(dependencies.includes('libmpv.so.2'), 'Experimental helper must link reviewed libmpv')
   if (name === 'playback-fd.node') assert.ok(!dependencies.includes('libmpv.so.2'), 'FD bridge must not load libmpv into Electron')
   const symbols = run('readelf', ['--version-info', file])
   return { dependencies, glibc: versionMaximum(symbols, 'GLIBC'), glibcxx: versionMaximum(symbols, 'GLIBCXX') }
@@ -81,8 +85,11 @@ export function verifyExperimentalRuntime(directory, { sourceDirectory, inspect 
   assert.equal(manifest.electronVersion, '43.8.0')
   assert.equal(manifest.version, EXPERIMENTAL_VERSION)
   assert.equal(manifest.mpvVersion, '0.41.0')
-  assert.deepEqual(Object.keys(manifest.files).sort(), [...binaries, ...notices].sort())
-  assert.deepEqual(fs.readdirSync(directory).sort(), [...binaries, ...notices, 'experimental-runtime.json'].sort())
+  assert.deepEqual(Object.keys(manifest.files).sort(), [...binaries, ...notices, ...fontResources].sort())
+  assert.deepEqual(fs.readdirSync(directory).sort(), [...binaries, ...notices, 'fonts', 'experimental-runtime.json'].sort())
+  const fonts = path.join(directory, 'fonts')
+  assert.ok(fs.lstatSync(fonts).isDirectory() && !fs.lstatSync(fonts).isSymbolicLink(), 'Expected regular font directory')
+  assert.deepEqual(fs.readdirSync(fonts).sort(), [...fontFiles].sort())
   for (const name of Object.keys(manifest.files)) {
     const file = path.join(directory, name)
     realRegularFile(file)
@@ -133,7 +140,7 @@ export function prepareExperimentalRuntime(context) {
       builtAt: new Date().toISOString(), compiler: run('c++', ['--version']).split('\n')[0],
       recipe: 'docs/LINUX_TEXTURE_EXPERIMENTAL.md',
       reviewedRuntimeSha256: sha256(path.join(reviewed.directory, 'runtime.json')),
-      validation: 'Build and structural checks only; real Wayland GPU playback requires host testing.'
+      validation: 'See docs/LINUX_CPU_FRAME_EXPERIMENT.md and separately delivered test evidence. CPU acceptance does not establish DMA-BUF or native Wayland acceptance.'
     }, null, 2) + '\n')
     const sourceName = `Javdex-Linux-Texture-Experimental-Sources-${EXPERIMENTAL_VERSION}.tar.gz`
     const archive = path.join(output, sourceName)
@@ -143,6 +150,15 @@ export function prepareExperimentalRuntime(context) {
       realRegularFile(file); fs.copyFileSync(file, path.join(runtime, name))
       fs.chmodSync(path.join(runtime, name), 0o755)
     }
+    const fontSource = path.join(experimentalRoot, 'resources/linux-cpu-fonts')
+    assert.deepEqual(fs.readdirSync(fontSource).sort(), [...fontFiles].sort())
+    for (const name of fontFiles) realRegularFile(path.join(fontSource, name))
+    const fontLock = JSON.parse(fs.readFileSync(path.join(fontSource, 'SOURCE.json'), 'utf8'))
+    assert.equal(fontLock.fileName, 'NotoSans-Regular.ttf')
+    assert.equal(fontLock.license, 'OFL-1.1')
+    assert.equal(fontLock.sha256, sha256(path.join(fontSource, fontLock.fileName)), 'Bundled subtitle font does not match its source lock')
+    assert.equal(fontLock.bytes, fs.statSync(path.join(fontSource, fontLock.fileName)).size)
+    fs.cpSync(fontSource, path.join(runtime, 'fonts'), { recursive: true })
     fs.copyFileSync(path.join(experimentalRoot, 'LICENSE'), path.join(runtime, 'LICENSE'))
     fs.copyFileSync(path.join(reviewed.directory, 'licenses/libmpv.txt'), path.join(runtime, 'libmpv-LICENSE.txt'))
     fs.writeFileSync(path.join(runtime, 'SOURCE-ACCESS.txt'), `Experimental testing build, not a production release.\nCorresponding complete source, build recipes and third-party materials accompany this AppImage as ${sourceName}.\nSHA-256: ${sha256(archive)}\nThe reviewed X11 runtime has its own separate source archive and unchanged audit gate.\n`)
@@ -150,7 +166,7 @@ export function prepareExperimentalRuntime(context) {
       electronVersion: '43.8.0', mpvVersion: reviewed.manifest.mpvVersion,
       reviewedLibmpvSha256: reviewed.manifest.files['libmpv.so.2'],
       sourceBundle: { fileName: sourceName, sha256: sha256(archive) },
-      files: Object.fromEntries([...binaries, ...notices].map(name => [name, sha256(path.join(runtime, name))])),
+      files: Object.fromEntries([...binaries, ...notices, ...fontResources].map(name => [name, sha256(path.join(runtime, name))])),
       elf: Object.fromEntries(binaries.map(name => [name, inspectExperimentalElf(path.join(runtime, name))])) }
     fs.writeFileSync(path.join(runtime, 'experimental-runtime.json'), JSON.stringify(manifest, null, 2) + '\n')
     verifyExperimentalRuntime(runtime, { sourceDirectory: output })

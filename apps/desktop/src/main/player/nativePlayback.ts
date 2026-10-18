@@ -6,6 +6,15 @@ export interface NativePlaybackState {
   rendererFullscreenControls?: boolean
   /** Main-owned shared-texture generation, never a media locator or native FD. */
   sharedTextureSurface?: string
+  cpuFrameSurface?: string
+  backend?: string
+  copiedFrames?: number
+  transportDroppedFrames?: number
+  exportedFrames?: number
+  cpuFramesInFlight?: number
+  pixelWidth?: number
+  pixelHeight?: number
+  poolMemoryBudgetBytes?: number
   nativeVideoFocused?: boolean
   interactionSequence?: number
   fullscreenPointerY?: number

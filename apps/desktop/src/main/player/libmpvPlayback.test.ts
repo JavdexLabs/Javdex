@@ -97,6 +97,7 @@ function fixture(platform: 'darwin' | 'win32' | 'linux') {
         case 'node:module': return { createRequire: () => () => bridge }
         case './playbackDisplay': return { linuxPlaybackBackend: () => 'x11' }
         case './linuxPlaybackBridge': return { createLinuxPlaybackBridge: () => bridge }
+        case './linuxCpuFrames': return { createLinuxCpuFrames: () => { throw new Error('Legacy test must not initialize a CPU-frame bridge') } }
         case './linuxSharedTexture': return { createLinuxSharedTexture: () => { throw new Error('Legacy test must not initialize a shared-texture importer') } }
         default: throw new Error(`Unexpected playback wrapper dependency: ${id}`)
       }
@@ -224,4 +225,39 @@ test('cached native selection flags cannot override sid or aid observations', t 
   const tracks = JSON.parse(f.native.read()['track-list']!) as Array<{ type: string; id: number; selected: boolean }>
   assert.equal(tracks.some(track => track.type === 'sub' && track.selected), false)
   assert.equal(tracks.find(track => track.type === 'audio' && track.selected)?.id, 4)
+})
+
+test('CPU startup selects its isolated helper and copy bridge without DISPLAY, GPU imports or native window handles', () => {
+  const paths: string[] = [], creates: unknown[][] = []
+  let copied = 0, rendererControls = false
+  const current = { isDestroyed: () => false, getBounds: () => ({ x: 0, y: 0, width: 1, height: 1 }),
+    getNativeWindowHandle: () => { throw new Error('CPU must never request an XID or wl_surface') } } as unknown as BrowserWindow
+  const bridge = { create: (...args: unknown[]) => creates.push(args), setRendererControls: (value: boolean) => { rendererControls = value }, destroy() {} }
+  const exports = {} as typeof import('./libmpvPlayback')
+  runInNewContext(wrapperCode, { exports, Buffer, process: { platform: 'linux', resourcesPath: '/fixture/resources', env: {} },
+    require(id: string): unknown {
+      switch (id) {
+        case 'electron': return { app: { isPackaged: true, getAppPath: () => '/fixture/app' }, screen: { getDisplayMatching: () => ({ scaleFactor: 1 }) } }
+        case 'node:fs': return { existsSync: (value: string) => { paths.push(value); return true } }
+        case 'node:path': return path
+        case 'node:timers/promises': return { setTimeout: delay }
+        case 'node:module': return { createRequire: () => { throw new Error('CPU wrapper must not load a window-system addon') } }
+        case './playbackDisplay': return { linuxPlaybackBackend: () => 'cpu' }
+        case './linuxPlaybackBridge': return { createLinuxPlaybackBridge: (executable: string, factory: () => void) => {
+          assert.equal(executable, '/fixture/resources/linux-texture-experimental/playback-cpu-helper'); factory(); return bridge
+        } }
+        case './linuxCpuFrames': return { createLinuxCpuFrames: (window: BrowserWindow, filename: string) => {
+          assert.equal(window, current); assert.equal(filename, '/fixture/resources/linux-texture-experimental/playback-fd.node'); copied++
+        } }
+        case './linuxSharedTexture': return { createLinuxSharedTexture: () => { throw new Error('CPU must not initialize sharedTexture') } }
+        default: throw new Error(`Unexpected dependency ${id}`)
+      }
+    }
+  })
+  assert.equal(exports.builtinPlaybackAvailability().available, true)
+  const native = exports.createLibmpvPlayback(() => current); native.create(); native.destroy()
+  assert.equal(copied, 1); assert.equal(rendererControls, true)
+  assert.equal((creates[0][0] as Buffer).length, 0)
+  assert.equal((creates[0][2] as { backend: string }).backend, 'cpu')
+  assert.ok(paths.every(value => value.includes('linux-texture-experimental')))
 })

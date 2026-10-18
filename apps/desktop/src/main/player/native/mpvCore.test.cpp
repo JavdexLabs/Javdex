@@ -104,5 +104,24 @@ int main() {
     event.reply_userdata = 0;
     core.consume(event);
     assert(core.stateJson().find("\"error\":\"\"") == std::string::npos);
+    // Old restarts and even a completed media command cannot establish new
+    // frame provenance until its subsequent timeline transition has restarted.
+    constexpr uint64_t mediaTag = uint64_t(1) << 63;
+    javdex::MpvCore timelineCore;
+    timelineCore.consume({MPV_EVENT_START_FILE, 0, 0, nullptr});
+    timelineCore.consume({MPV_EVENT_PLAYBACK_RESTART, 0, 0, nullptr});
+    assert(!timelineCore.mediaCommandReady(1));
+    timelineCore.consume({MPV_EVENT_COMMAND_REPLY, 0, mediaTag | 1, nullptr});
+    timelineCore.consume({MPV_EVENT_PLAYBACK_RESTART, 0, 0, nullptr});
+    assert(!timelineCore.mediaCommandReady(1));
+    timelineCore.consume({MPV_EVENT_SEEK, 0, 0, nullptr});
+    assert(!timelineCore.mediaCommandReady(1));
+    timelineCore.consume({MPV_EVENT_PLAYBACK_RESTART, 0, 0, nullptr});
+    assert(timelineCore.mediaCommandReady(1)); assert(!timelineCore.mediaCommandReady(2));
+    timelineCore.consume({MPV_EVENT_COMMAND_REPLY, 0, mediaTag | 2, nullptr});
+    assert(!timelineCore.mediaCommandReady(2));
+    timelineCore.consume({MPV_EVENT_START_FILE, 0, 0, nullptr});
+    timelineCore.consume({MPV_EVENT_PLAYBACK_RESTART, 0, 0, nullptr});
+    assert(timelineCore.mediaCommandReady(2));
     core.shutdown(); core.shutdown(); assert(!core.alive());
 }

@@ -59,6 +59,8 @@ export interface PlaybackSnapshot {
   rendererFullscreenControls?: boolean
   /** Experimental Linux canvas generation. Never a locator or GPU handle. */
   sharedTextureSurface?: string
+  /** Main-owned bounded CPU Canvas2D surface token; never a descriptor or locator. */
+  cpuFrameSurface?: string
   nativeVideoFocused?: boolean
   /** Changes only on native pointer/keyboard activity, never on playback ticks. */
   interactionSequence?: number
@@ -88,6 +90,15 @@ export interface PlaybackSnapshot {
     hardwareDecoder: string | null
     audioOutput: string | null
     droppedFrames: number | null
+    /** Output transport is distinct from the actual decoder above. */
+    frameTransport?: 'cpu-rgba' | 'dmabuf' | 'native'
+    canvasSubmissions?: number
+    copiedFrames?: number
+    transportDroppedFrames?: number
+    outputWidth?: number | null
+    outputHeight?: number | null
+    /** Maximum helper memfd pool only, excluding IPC copies and canvas storage. */
+    poolMemoryBudgetBytes?: number
   }
 }
 /** Main-process publication order, including stopped/null states and replacement sessions. */

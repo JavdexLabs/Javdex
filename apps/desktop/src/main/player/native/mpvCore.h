@@ -106,11 +106,14 @@ class MpvCore {
     std::deque<NativeAction> actions;
     std::string lastError;
     int lastErrorCode = 0;
+    static constexpr uint64_t mediaCommandTag = uint64_t(1) << 63;
+    bool trackMediaTimeline = false;
+    uint64_t mediaSerial = 0, completedMediaSerial = 0, timeline = 0, completedMediaTimeline = 0, restartedTimeline = 0;
     uint64_t frames = 0, presentedFrames = 0, loadedFiles = 0, restarts = 0, commandErrors = 0, subtitleCommandErrors = 0, subtitleCommandsPending = 0, subtitleCommandReplies = 0;
     uint64_t generatedSubtitleCommandErrors = 0, generatedSubtitleCommandsPending = 0, generatedSubtitleCommandReplies = 0;
     GeneratedTimeline generatedTimeline;
     bool generatedVisible = false, generatedFailed = false, generatedRefreshRequired = false;
-    std::string generatedLastText;
+    std::string generatedLastText, generatedFont = "Microsoft YaHei";
     uint64_t generatedRevision = 0;
     int generatedWidth = 0, generatedHeight = 0;
     double osdWidth = 0, osdHeight = 0, osdLeft = 0, osdRight = 0, osdTop = 0, osdBottom = 0;
@@ -130,7 +133,7 @@ class MpvCore {
                     const double center = (generatedWidth + (osdLeft - osdRight) * sx) / 2;
                     const double bottom = generatedHeight - osdBottom * sy - videoHeight * 0.05;
                     text = "{\\an2\\pos(" + std::to_string(center) + "," + std::to_string(bottom)
-                        + ")\\fnMicrosoft YaHei\\bord" + std::to_string(2 * scale) + "\\shad" + std::to_string(scale)
+                        + ")\\fn" + generatedFont + "\\bord" + std::to_string(2 * scale) + "\\shad" + std::to_string(scale)
                         + "\\1c&HFFFFFF&\\1a&H00&\\3c&H101010&\\3a&H00&\\4c&H000000&\\4a&H80&}"
                         + scaleGeneratedFonts(std::move(text), scale);
                 }
@@ -164,14 +167,22 @@ class MpvCore {
 public:
     bool alive() const { return handle && renderer; }
     uint64_t loads() const { return loadedFiles; }
+    uint64_t mediaCommandSerial() const { return mediaSerial; }
+    bool mediaCommandReady(uint64_t serial) const {
+        return serial && completedMediaSerial >= serial && restartedTimeline > completedMediaTimeline;
+    }
     double number(const char *name) const {
         const auto found = observed.find(name);
         return found == observed.end() || !std::isfinite(found->second.number) ? 0 : found->second.number;
     }
     void initialize(void *(*getProc)(void *, const char *), void *context = nullptr, bool softwareRendering = false,
-        void (*wakeup)(void *) = nullptr, void *wakeupContext = nullptr, const char *hardwareDecode = "auto") {
+        void (*wakeup)(void *) = nullptr, void *wakeupContext = nullptr, const char *hardwareDecode = "auto", bool cpuRendering = false,
+        const char *cpuFontDirectory = nullptr) {
         if (handle || renderer) throw std::runtime_error("Native session is already initialized");
         observed.clear(); actions.clear(); lastError.clear(); lastErrorCode = 0;
+        trackMediaTimeline = cpuRendering;
+        generatedFont = cpuRendering ? "Noto Sans" : "Microsoft YaHei";
+        mediaSerial = completedMediaSerial = timeline = completedMediaTimeline = restartedTimeline = 0;
         frames = presentedFrames = loadedFiles = restarts = commandErrors = subtitleCommandErrors = subtitleCommandsPending = subtitleCommandReplies = 0; requested.store(false);
         generatedSubtitleCommandErrors = generatedSubtitleCommandsPending = generatedSubtitleCommandReplies = 0;
         generatedTimeline = {}; generatedVisible = generatedFailed = generatedRefreshRequired = false; generatedLastText.clear(); generatedRevision = 0;
@@ -201,12 +212,28 @@ public:
                 if (result < 0) throw std::runtime_error(mpv_error_string(result));
             }
         }
+        if (cpuRendering) {
+            const int result = mpv_set_option_string(handle, "sws-fast", "yes");
+            if (result < 0) throw std::runtime_error(mpv_error_string(result));
+            // CPU-only app-scoped fallback; preserve ASS styling, embedded
+            // fonts and host fallback for glyphs outside the bundled font.
+            const char *fonts[][2] = {{"sub-font", "Noto Sans"}, {"osd-font", "Noto Sans"},
+                {"sub-fonts-dir", cpuFontDirectory}, {"osd-fonts-dir", cpuFontDirectory}};
+            for (const auto &option : fonts) {
+                const int status = mpv_set_option_string(handle, option[0], option[1]);
+                if (status < 0) throw std::runtime_error(mpv_error_string(status));
+            }
+        }
         int error = mpv_initialize(handle);
         if (error < 0) throw std::runtime_error(mpv_error_string(error));
         mpv_opengl_init_params gl = {getProc, context};
         mpv_render_param params[] = {{MPV_RENDER_PARAM_API_TYPE, (void *)MPV_RENDER_API_TYPE_OPENGL},
             {MPV_RENDER_PARAM_OPENGL_INIT_PARAMS, &gl}, {MPV_RENDER_PARAM_INVALID, nullptr}};
-        error = mpv_render_context_create(&renderer, handle, params);
+        // CPU rendering is a distinct libmpv backend. It creates no GL context,
+        // driver objects, or hardware decoder interop. Existing callers keep GL.
+        mpv_render_param cpuParams[] = {{MPV_RENDER_PARAM_API_TYPE, (void *)MPV_RENDER_API_TYPE_SW},
+            {MPV_RENDER_PARAM_INVALID, nullptr}};
+        error = mpv_render_context_create(&renderer, handle, cpuRendering ? cpuParams : params);
         if (error < 0) throw std::runtime_error(mpv_error_string(error));
         const char *numbers[] = {"time-pos", "duration", "volume", "speed", "width", "height", "audio-pts", "frame-drop-count", "sub-delay", "sub-font-size"};
         const char *strings[] = {"hwdec-current", "video-codec", "audio-codec", "audio-device", "current-ao", "sid", "aid"};
@@ -218,6 +245,9 @@ public:
         mpv_observe_property(handle, 0, "chapter-list", MPV_FORMAT_NODE);
         mpv_observe_property(handle, 0, "osd-dimensions", MPV_FORMAT_NODE);
         mpv_render_context_set_update_callback(renderer, request, this);
+    }
+    void initializeSoftware(const std::string &fontDirectory, void (*wakeup)(void *) = nullptr, void *context = nullptr) {
+        initialize(nullptr, nullptr, false, wakeup, context, "no", true, fontDirectory.c_str());
     }
     void shutdown() {
         renderWakeup.store(nullptr);
@@ -272,7 +302,12 @@ public:
         for (const auto &value : values) args.push_back(value.c_str());
         args.push_back(nullptr);
         // Never synchronously wait on the mpv client from the platform GL thread.
-        const int error = mpv_command_async(handle, optionalSubtitleCommand(values) ? (generatedSubtitle ? 2 : 1) : 0, args.data());
+        uint64_t tag = optionalSubtitleCommand(values) ? (generatedSubtitle ? 2 : 1) : 0;
+        if (trackMediaTimeline && (values[0] == "loadfile" || values[0] == "seek")) {
+            if (mediaSerial >= mediaCommandTag - 1) throw std::runtime_error("Playback command sequence exhausted");
+            tag = mediaCommandTag | ++mediaSerial;
+        }
+        const int error = mpv_command_async(handle, tag, args.data());
         if (error < 0) throw std::runtime_error(mpv_error_string(error));
         if (optionalSubtitleCommand(values)) subtitleCommandsPending++;
         if (generatedSubtitle && optionalSubtitleCommand(values)) generatedSubtitleCommandsPending++;
@@ -302,6 +337,22 @@ public:
         frames++;
         return true;
     }
+    bool renderSoftware(int width, int height, size_t stride, void *pixels) {
+        if (!renderer || width <= 0 || height <= 0 || !pixels || stride < size_t(width) * 4 || stride % 4) return false;
+        generatedWidth = width; generatedHeight = height;
+        drainEvents(); refreshGeneratedSubtitles();
+        mpv_render_context_update(renderer);
+        int size[] = {width, height}, block = 0;
+        // rgb0 is a documented stable SW format. The caller makes its unused
+        // fourth byte opaque before publishing RGBA to the Canvas consumer.
+        mpv_render_param params[] = {{MPV_RENDER_PARAM_SW_SIZE, size},
+            {MPV_RENDER_PARAM_SW_FORMAT, (void *)"rgb0"}, {MPV_RENDER_PARAM_SW_STRIDE, &stride},
+            {MPV_RENDER_PARAM_SW_POINTER, pixels}, {MPV_RENDER_PARAM_BLOCK_FOR_TARGET_TIME, &block},
+            {MPV_RENDER_PARAM_INVALID, nullptr}};
+        const int error = mpv_render_context_render(renderer, params);
+        if (error < 0) { lastErrorCode = error; lastError = mpv_error_string(error); return false; }
+        frames++; return true;
+    }
     bool skipRender() {
         if (!renderer) return false;
         // Hidden shared-texture surfaces must still consume frame updates so
@@ -317,6 +368,14 @@ public:
     void swapped() { if (renderer) mpv_render_context_report_swap(renderer); }
     void presented(bool visible) { if (visible && loadedFiles > 0) presentedFrames++; }
     void consume(const mpv_event &event) {
+        // CPU generations require a command reply followed by a fresh timeline
+        // transition and restart. Drained old restarts cannot unlock a new frame.
+        if (event.event_id == MPV_EVENT_COMMAND_REPLY && (event.reply_userdata & mediaCommandTag) && event.error >= 0) {
+            completedMediaSerial = event.reply_userdata & ~mediaCommandTag;
+            completedMediaTimeline = timeline;
+        }
+        if (event.event_id == MPV_EVENT_START_FILE || event.event_id == MPV_EVENT_SEEK) timeline++;
+        if (event.event_id == MPV_EVENT_PLAYBACK_RESTART) restartedTimeline = timeline;
         if (event.event_id == MPV_EVENT_COMMAND_REPLY && (event.reply_userdata == 1 || event.reply_userdata == 2)) {
             if (subtitleCommandsPending) subtitleCommandsPending--;
             subtitleCommandReplies++;

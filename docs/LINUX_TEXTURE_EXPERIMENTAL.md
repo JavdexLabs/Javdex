@@ -1,10 +1,10 @@
 # Linux shared-texture experimental AppImage
 
-This is an opt-in engineering build for Linux x86_64 Wayland GPU testing. It is not a production release or evidence of successful hardware playback. The normal release build configuration and playback inventory gates remain unchanged.
+This is an opt-in engineering build for Linux x86_64 CPU-frame and Wayland GPU testing. See [CPU software-render design and acceptance](LINUX_CPU_FRAME_EXPERIMENT.md) for the independent no-DRM path. It is not a production release or evidence of successful hardware playback. The normal release build configuration and playback inventory gates remain unchanged.
 
 ## Isolation and invocation
 
-The experimental package is version `0.9.1-linux-texture.1`, has the package marker `javdexExperimentalLinux: true`, uses its own `Javdex-Linux-Texture-Experimental` user-data directory, and disables application update checks. Do not point `JAVDEX_TEST_USER_DATA` at a production profile. Use an expendable media library or a backup copy for testing.
+The experimental package is version `0.9.1-linux-texture.2`, has the package marker `javdexExperimentalLinux: true`, uses its own `Javdex-Linux-Texture-Experimental` user-data directory, and disables application update checks. Do not point `JAVDEX_TEST_USER_DATA` at a production profile. Use an expendable media library or a backup copy for testing.
 
 Start with `--javdex-wayland` in a native Wayland desktop, or use `--javdex-x11 --javdex-dmabuf` to isolate shared-texture testing from native Wayland windowing. `--javdex-x11` alone retains the original X11 backend. See [the host test checklist](LINUX_SHARED_TEXTURE_EXPERIMENT.md). The shared-texture backend requires a usable DRM render node, GBM/EGL DMA-BUF allocation and export, and Electron shared-texture import. Unsupported capability checks must fail explicitly; they are not permission to disable Chromium sandboxing or silently claim a software fallback is a GPU result.
 
@@ -21,6 +21,7 @@ cmake -S apps/desktop/src/main/player/native -B out/native-playback-build \
   -DMPV_PREFIX="$JAVDEX_MPV_PREFIX" \
   -DPLAYBACK_OUTPUT_DIR="$PWD/out/native-playback" \
   -DJAVDEX_BUILD_LINUX_DMABUF=ON \
+  -DJAVDEX_BUILD_LINUX_CPU=ON \
   -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON '-DCMAKE_INSTALL_RPATH=$ORIGIN'
 cmake --build out/native-playback-build --parallel
 ```
@@ -33,7 +34,7 @@ node scripts/build-wayland-experimental.mjs
 
 This builds production JavaScript bundles and a local AppImage, with `--publish never`. It does not create a tag, release, pull request, or upload. `--skip-build` is available only when the JavaScript bundles were already rebuilt from the current source. The ordinary release hooks validate and stage the original `native-playback` runtime. The new helper and the N-API FD bridge are separately audited and staged under `resources/linux-texture-experimental`, with an identical copy of the reviewed libmpv. Their manifest records file hashes, dependencies, GLIBC/GLIBCXX requirements and source binding.
 
-Output is under `dist/wayland-experimental/`. Deliver the AppImage with both the ordinary playback source archive and `Javdex-Linux-Texture-Experimental-Sources-*.tar.gz`; do not distribute the binary alone. The experimental source archive contains the complete current application source, native sources/build scripts and the exact reviewed libmpv/FFmpeg third-party source archives, recipes and notices.
+Output is under `dist/cpu-frame-experimental/`. Deliver the AppImage with both the ordinary playback source archive and `Javdex-Linux-Texture-Experimental-Sources-*.tar.gz`; do not distribute the binary alone. The experimental source archive contains the complete current application source, native sources/build scripts and the exact reviewed libmpv/FFmpeg third-party source archives, recipes and notices.
 
 ## Validation boundaries
 

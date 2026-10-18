@@ -303,9 +303,14 @@ export function createPlaybackSession(deps: Dependencies) {
         ? [{ title: typeof chapter.title === 'string' ? chapter.title.slice(0, 256) : `章节 ${index + 1}`, time: chapter.time }] : [])
       state.info = { videoCodec: raw['video-codec'] ?? null, audioCodec: raw['audio-codec'] ?? null,
         width: finite(raw.width), height: finite(raw.height), hardwareDecoder: raw['hwdec-current'] ?? null,
-        audioOutput: raw['current-ao'] ?? null, droppedFrames: finite(raw['frame-drop-count']) }
+        audioOutput: raw['current-ao'] ?? null, droppedFrames: finite(raw['frame-drop-count']),
+        ...((raw.cpuFrameSurface || raw.sharedTextureSurface) ? { frameTransport: raw.cpuFrameSurface ? 'cpu-rgba' as const : 'dmabuf' as const,
+          canvasSubmissions: finite(raw.presentedFrames) ?? 0 } : {}),
+        ...(raw.cpuFrameSurface ? { copiedFrames: finite(raw.copiedFrames) ?? 0, transportDroppedFrames: finite(raw.transportDroppedFrames) ?? 0,
+          outputWidth: finite(raw.pixelWidth), outputHeight: finite(raw.pixelHeight), poolMemoryBudgetBytes: finite(raw.poolMemoryBudgetBytes) ?? undefined } : {}) }
       state.rendererFullscreenControls = raw.rendererFullscreenControls === true
       state.sharedTextureSurface = raw.sharedTextureSurface
+      state.cpuFrameSurface = raw.cpuFrameSurface
       state.nativeVideoFocused = raw.nativeVideoFocused === true
       state.interactionSequence = finite(raw.interactionSequence) ?? undefined
       state.fullscreenPointerY = finite(raw.fullscreenPointerY) ?? undefined

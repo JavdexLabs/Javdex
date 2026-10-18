@@ -149,11 +149,17 @@ export default function PlaybackPanel(): JSX.Element | null {
     return () => { disposed = true }
   }, [options, sessionId, libraryId, videoId, presentation])
   const sharedTextureSurface = state?.phase === 'error' ? undefined : state?.sharedTextureSurface
+  const cpuFrameSurface = state?.phase === 'error' ? undefined : state?.cpuFrameSurface
+  const canvasSurface = cpuFrameSurface ?? sharedTextureSurface
   useLayoutEffect(() => {
     if (!sharedTextureSurface) return
     return api.playback.bindSharedTextureSurface(sharedTextureSurface)
   }, [sharedTextureSurface])
-  useEffect(() => cancelVideoClick, [sessionId, sharedTextureSurface, presentation, cancelVideoClick])
+  useLayoutEffect(() => {
+    if (!cpuFrameSurface) return
+    return api.playback.bindCpuFrameSurface(cpuFrameSurface)
+  }, [cpuFrameSurface])
+  useEffect(() => cancelVideoClick, [sessionId, canvasSurface, presentation, cancelVideoClick])
   const presentationRevision = state?.presentationRevision
   const focusSequence = state?.focusRequest?.sequence
   const rendererFullscreen = presentation === 'fullscreen' && state?.rendererFullscreenControls === true
@@ -355,14 +361,15 @@ export default function PlaybackPanel(): JSX.Element | null {
             }
             // Native surfaces handle their own pointer gestures. The canvas uses
             // the legacy Linux 300 ms window; keyboard activation stays immediate.
-            if (sharedTextureSurface && !docked && event?.detail > 0) {
+            if (canvasSurface && !docked && event?.detail > 0) {
               if (event.detail === 1) videoClickTimer.current = window.setTimeout(activate, 300)
             } else activate()
           }}
-          onDoubleClick={sharedTextureSurface && !docked ? () => {
+          onDoubleClick={canvasSurface && !docked ? () => {
             cancelVideoClick()
             control({ kind: 'presentation', value: fullscreen ? 'expanded' : 'fullscreen' })
           } : undefined}>
+          {cpuFrameSurface && <canvas className={styles.sharedTexture} data-playback-cpu-surface={cpuFrameSurface} aria-hidden="true" />}
           {sharedTextureSurface && <canvas className={styles.sharedTexture} data-playback-surface={sharedTextureSurface} aria-hidden="true" />}
         </button>}
         {options && !docked && !nativeFullscreen && state.phase !== 'error' && <aside className={styles.options} aria-label="播放设置" id={settingsId} data-native-playback-occluder={rendererFullscreen || undefined}>
@@ -421,6 +428,11 @@ export default function PlaybackPanel(): JSX.Element | null {
           <div className={styles.optionBody} role="tabpanel" id={`${settingsId}-info`} aria-labelledby={`${settingsId}-info-tab`} hidden={optionTab !== 'info'}>
           <dl className={styles.info}><dt>来源</dt><dd>{state.source === 'remote' ? '远程原文件' : '本机文件'}</dd>
             <dt>视频</dt><dd>{state.info.videoCodec ?? '未知'} · {state.info.width ?? '?'}×{state.info.height ?? '?'}</dd>
+            {state.info.frameTransport && <><dt>画面传输</dt><dd>{state.info.frameTransport === 'cpu-rgba' ? 'CPU RGBA · Canvas2D · ≤720p / 30 fps / SDR' : state.info.frameTransport === 'dmabuf' ? 'DMA-BUF 共享纹理' : '原生画面'}</dd></>}
+            {state.info.canvasSubmissions != null && <><dt>Canvas 提交</dt><dd>{state.info.canvasSubmissions}</dd></>}
+            {state.info.copiedFrames != null && <><dt>CPU 复制 / 丢弃</dt><dd>{state.info.copiedFrames} / {state.info.transportDroppedFrames ?? 0}</dd></>}
+            {state.info.frameTransport === 'cpu-rgba' && <><dt>传输输出</dt><dd>{state.info.outputWidth ?? '?'}×{state.info.outputHeight ?? '?'}</dd></>}
+            {state.info.poolMemoryBudgetBytes != null && <><dt>帧池上限</dt><dd>{(state.info.poolMemoryBudgetBytes / (1024 * 1024)).toFixed(2)} MiB（不含 IPC / Canvas）</dd></>}
             <dt>实际硬解</dt><dd>{state.info.hardwareDecoder || '软件解码'}</dd><dt>音频</dt><dd>{state.info.audioCodec ?? '无'} / {state.info.audioOutput ?? '无输出'}</dd>
           </dl>
           <section className={styles.shortcuts} aria-label="画面快捷键">

@@ -604,3 +604,20 @@ test('an old source validation does not stop a new session or block its validati
   assert.equal(f.session.snapshot()!.target.resourceId, 4)
   assert.notEqual(f.session.snapshot()!.phase, 'error')
 })
+
+test('CPU diagnostics separate actual decoding, frame transport and canvas submissions', async () => {
+  const f = fixture()
+  await f.session.open(target)
+  f.raw({ cpuFrameSurface: 'cpu-generation', 'hwdec-current': 'vaapi', 'video-codec': 'h264', width: 1920, height: 1080,
+    pixelWidth: 1280, pixelHeight: 720, presentedFrames: 17, copiedFrames: 20, transportDroppedFrames: 3,
+    poolMemoryBudgetBytes: 11059200, 'frame-drop-count': 4 })
+  f.session.tick()
+  const state = f.session.snapshot()!
+  assert.equal(state.cpuFrameSurface, 'cpu-generation'); assert.equal(state.sharedTextureSurface, undefined)
+  assert.equal(state.info.hardwareDecoder, 'vaapi'); assert.equal(state.info.frameTransport, 'cpu-rgba')
+  assert.equal(state.info.canvasSubmissions, 17); assert.equal(state.info.copiedFrames, 20)
+  assert.equal(state.info.transportDroppedFrames, 3); assert.equal(state.info.droppedFrames, 4)
+  assert.equal(state.info.width, 1920); assert.equal(state.info.outputWidth, 1280); assert.equal(state.info.outputHeight, 720)
+  assert.equal(state.info.poolMemoryBudgetBytes, 11059200)
+  assert.equal(JSON.stringify(state).includes('server.invalid'), false, 'diagnostics never disclose the media locator')
+})

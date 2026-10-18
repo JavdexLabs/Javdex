@@ -4,6 +4,7 @@ project(JavdexNativePlayback LANGUAGES CXX)
 # Off by default: a separate experimental helper/FD bridge. The existing X11
 # helper remains available and retains its runtime and dependency contract.
 option(JAVDEX_BUILD_LINUX_DMABUF "Build experimental Linux shared-texture playback" OFF)
+option(JAVDEX_BUILD_LINUX_CPU "Build experimental Linux CPU-frame playback" OFF)
 
 # JS supplies native Windows paths; normalize before CMake interprets them as
 # target source paths (a backslash followed by P is otherwise an invalid escape).
@@ -129,6 +130,9 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND JAVDEX_BUILD_LINUX_DMABUF)
     PkgConfig::DMABUF_EGL PkgConfig::DMABUF_GBM PkgConfig::DMABUF_DRM)
   set_target_properties(playback-dmabuf-helper PROPERTIES INSTALL_RPATH "$ORIGIN")
 
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND (JAVDEX_BUILD_LINUX_DMABUF OR JAVDEX_BUILD_LINUX_CPU))
   # This thin addon owns descriptors and the socketpair only. Never link mpv or
   # graphics-driver libraries into Electron's main process.
   add_library(playback-fd MODULE linuxFdBridge.cpp)
@@ -139,10 +143,41 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND JAVDEX_BUILD_LINUX_DMABUF)
   add_executable(fd-transport-fixture linuxFdTransportFixture.cpp)
   target_compile_features(fd-transport-fixture PRIVATE cxx_std_17)
   target_compile_options(fd-transport-fixture PRIVATE -Wall -Wextra -Wpedantic)
+  set(frame_targets playback-fd fd-transport-fixture)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND JAVDEX_BUILD_LINUX_DMABUF)
   add_executable(linux-dmabuf-test linuxDmaBuf.test.cpp)
   target_compile_features(linux-dmabuf-test PRIVATE cxx_std_17)
   target_compile_options(linux-dmabuf-test PRIVATE -UNDEBUG -Wall -Wextra -Wpedantic)
-  foreach(target playback-dmabuf-helper playback-fd fd-transport-fixture linux-dmabuf-test)
+  list(APPEND frame_targets playback-dmabuf-helper linux-dmabuf-test)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND JAVDEX_BUILD_LINUX_CPU)
+  # A deterministic TTF avoids unsupported host default-font aliases. Only the
+  # opt-in CPU helper receives these app-scoped assets; no host font install.
+  get_filename_component(CPU_FONT_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/../../../../../../resources/linux-cpu-fonts" ABSOLUTE)
+  if(NOT EXISTS "${CPU_FONT_SOURCE}/NotoSans-Regular.ttf")
+    message(FATAL_ERROR "Missing Linux CPU subtitle font")
+  endif()
+  add_custom_target(playback-cpu-fonts
+    COMMAND "${CMAKE_COMMAND}" -E copy_directory "${CPU_FONT_SOURCE}" "${PLAYBACK_OUTPUT_DIR}/fonts"
+    VERBATIM)
+  add_executable(playback-cpu-helper linuxCpuPlayback.cpp)
+  add_dependencies(playback-cpu-helper playback-cpu-fonts)
+  target_compile_features(playback-cpu-helper PRIVATE cxx_std_17)
+  target_compile_options(playback-cpu-helper PRIVATE -Wall -Wextra -Wpedantic)
+  target_include_directories(playback-cpu-helper PRIVATE "${MPV_INCLUDE_DIR}")
+  target_link_libraries(playback-cpu-helper PRIVATE "${MPV_LIBRARY}")
+  set_target_properties(playback-cpu-helper PROPERTIES INSTALL_RPATH "$ORIGIN")
+  add_executable(linux-cpu-frame-test linuxCpuFrame.test.cpp)
+  target_compile_features(linux-cpu-frame-test PRIVATE cxx_std_17)
+  target_compile_options(linux-cpu-frame-test PRIVATE -UNDEBUG -Wall -Wextra -Wpedantic)
+  list(APPEND frame_targets playback-cpu-helper linux-cpu-frame-test)
+endif()
+
+if(frame_targets)
+  foreach(target ${frame_targets})
     set_target_properties(${target} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PLAYBACK_OUTPUT_DIR}"
       LIBRARY_OUTPUT_DIRECTORY "${PLAYBACK_OUTPUT_DIR}")
     foreach(config DEBUG RELEASE RELWITHDEBINFO MINSIZEREL)

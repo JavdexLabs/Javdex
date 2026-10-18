@@ -22,16 +22,21 @@ namespace {
 using namespace javdex_transport;
 constexpr int kChannelFd = 3;
 
-bool Send(const std::string& payload, std::size_t fd_count) {
+bool Send(const std::string& payload, std::size_t fd_count, bool sealed = false) {
   std::vector<int> descriptors;
   for (std::size_t i = 0; i < fd_count; ++i) {
-    int fd = ::memfd_create("javdex-transport-fixture-NOT-DMABUF", MFD_CLOEXEC);
+    int fd = ::memfd_create("javdex-transport-fixture-NOT-DMABUF", MFD_CLOEXEC | (sealed ? MFD_ALLOW_SEALING : 0));
     if (fd < 0) {
       for (int owned : descriptors) ::close(owned);
       return false;
     }
     const std::string marker = "memfd transport fixture; not a DMA-BUF\n";
     if (::write(fd, marker.data(), marker.size()) != static_cast<ssize_t>(marker.size())) {
+      ::close(fd);
+      for (int owned : descriptors) ::close(owned);
+      return false;
+    }
+    if (sealed && fcntl(fd, F_ADD_SEALS, F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_SEAL) < 0) {
       ::close(fd);
       for (int owned : descriptors) ::close(owned);
       return false;
@@ -92,6 +97,7 @@ int main(int argc, char** argv) {
     std::cout << "ACK verified; producer-owned memfd closed after SCM_RIGHTS send\n";
     return 0;
   }
+  if (mode == "cpu-sealed") return Send("sealed CPU copy test", 1, true) ? 0 : 1;
   if (mode == "missing") return Send("missing fd", 0) ? 0 : 1;
   if (mode == "empty-fd") return Send("", 1) ? 0 : 1;
   if (mode == "extra") return Send("too many fds", 2) ? 0 : 1;

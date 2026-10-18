@@ -184,3 +184,37 @@ it('rejects conflicting shared-texture display arguments without mutating config
   configurePlaybackDisplay(host(), { platform: 'linux', argv: ['electron', '--', '--javdex-wayland', '--javdex-dmabuf'] })
   assert.equal(linuxPlaybackBackend(), null)
 })
+
+it('selects explicit CPU frames with GPU disabled on either display and leaves implicit ozone unchanged', () => {
+  for (const [args, expected] of [
+    [['--javdex-cpu-frame'], []],
+    [['--javdex-cpu-frame', '--disable-gpu'], []],
+    [['--javdex-cpu-frame', '--javdex-x11', '--disable-gpu'], [['ozone-platform', 'x11']]],
+    [['--javdex-cpu-frame', '--javdex-wayland'], [['ozone-platform', 'wayland']]],
+    [['--javdex-cpu-frame', '--ozone-platform=x11'], []],
+    [['--javdex-cpu-frame', '--ozone-platform=wayland'], []]
+  ] as const) {
+    const selected = host()
+    configurePlaybackDisplay(selected, { platform: 'linux', argv: ['electron', ...args] })
+    assert.equal(linuxPlaybackBackend(), 'cpu')
+    assert.deepEqual(selected.switches, expected)
+  }
+})
+it('rejects contradictory CPU/DMA-BUF and display flags without mutating prior configuration', () => {
+  configurePlaybackDisplay(host(), { platform: 'linux', argv: ['electron', '--javdex-x11'] })
+  for (const args of [
+    ['--javdex-cpu-frame', '--javdex-dmabuf'],
+    ['--javdex-cpu-frame', '--javdex-wayland', '--javdex-x11'],
+    ['--javdex-cpu-frame', '--ozone-platform=auto'],
+    ['--javdex-cpu-frame', '--ozone-platform=headless'],
+    ['--javdex-cpu-frame', '--javdex-wayland', '--ozone-platform=x11']
+  ]) {
+    const selected = host()
+    assert.throws(() => configurePlaybackDisplay(selected, { platform: 'linux', argv: ['electron', ...args] }))
+    assert.deepEqual(selected.switches, []); assert.equal(linuxPlaybackBackend(), 'x11')
+  }
+  for (const args of [['--', '--javdex-cpu-frame'], ['--javdex-cpu-frame=false'], ['--javdex-cpu-frame-extra']]) {
+    configurePlaybackDisplay(host(), { platform: 'linux', argv: ['electron', ...args] })
+    assert.equal(linuxPlaybackBackend(), null)
+  }
+})

@@ -12,14 +12,16 @@ const digest = value => createHash('sha256').update(value).digest('hex')
 function fixture(t) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-texture-package-'))
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }))
-  const names = ['playback-fd.node', 'playback-dmabuf-helper', 'libmpv.so.2', 'LICENSE', 'libmpv-LICENSE.txt', 'SOURCE-ACCESS.txt']
+  const names = ['playback-fd.node', 'playback-dmabuf-helper', 'playback-cpu-helper', 'libmpv.so.2', 'LICENSE', 'libmpv-LICENSE.txt', 'SOURCE-ACCESS.txt',
+    'fonts/NotoSans-Regular.ttf', 'fonts/LICENSE.txt', 'fonts/SOURCE.json']
   const files = {}
+  fs.mkdirSync(path.join(directory, 'fonts'))
   for (const name of names) { fs.writeFileSync(path.join(directory, name), name); files[name] = digest(name) }
   const inspected = { dependencies: ['libc.so.6'], glibc: 'GLIBC_2.34', glibcxx: null }
   const manifest = { schemaVersion: 1, experimental: true, platform: 'linux', arch: 'x64', version: EXPERIMENTAL_VERSION,
     electronVersion: '43.8.0', mpvVersion: '0.41.0', reviewedLibmpvSha256: files['libmpv.so.2'], files,
     sourceBundle: { fileName: 'sources.tar.gz', sha256: digest('source') },
-    elf: Object.fromEntries(names.slice(0, 3).map(name => [name, inspected])) }
+    elf: Object.fromEntries(names.slice(0, 4).map(name => [name, inspected])) }
   const write = () => fs.writeFileSync(path.join(directory, 'experimental-runtime.json'), JSON.stringify(manifest))
   write()
   return { directory, manifest, write, inspect: () => inspected }
@@ -51,6 +53,20 @@ test('experimental inventory rejects extra files and symlinks', t => {
   fs.unlinkSync(path.join(f.directory, 'LICENSE'))
   fs.symlinkSync('libmpv-LICENSE.txt', path.join(f.directory, 'LICENSE'))
   assert.throws(() => verifyExperimentalRuntime(f.directory, f), /regular file/)
+})
+test('experimental font inventory rejects replacements, extra files and linked directories', t => {
+  const f = fixture(t)
+  const fonts = path.join(f.directory, 'fonts')
+  fs.appendFileSync(path.join(fonts, 'NotoSans-Regular.ttf'), 'changed')
+  assert.throws(() => verifyExperimentalRuntime(f.directory, f), /hash mismatch/)
+  fs.writeFileSync(path.join(fonts, 'NotoSans-Regular.ttf'), 'fonts/NotoSans-Regular.ttf')
+  fs.writeFileSync(path.join(fonts, 'unexpected.ttf'), 'extra')
+  assert.throws(() => verifyExperimentalRuntime(f.directory, f))
+  fs.unlinkSync(path.join(fonts, 'unexpected.ttf'))
+  const moved = fonts + '-elsewhere'
+  fs.renameSync(fonts, moved)
+  fs.symlinkSync(moved, fonts)
+  assert.throws(() => verifyExperimentalRuntime(f.directory, f))
 })
 test('experimental inventory binds libmpv to reviewed digest and ABI evidence', t => {
   const f = fixture(t)

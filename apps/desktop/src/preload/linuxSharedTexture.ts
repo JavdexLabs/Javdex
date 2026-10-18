@@ -27,7 +27,7 @@ const token = (value: unknown): value is string => typeof value === 'string' && 
 export function installLinuxSharedTextureReceiver(): (surfaceToken: string) => () => void {
   let mounted: MountedSurface | null = null
   let supported = process.platform === 'linux' && process.isMainFrame
-    && typeof sharedTexture?.setSharedTextureReceiver === 'function'
+  let registered = false
   const receive = async ({ importedSharedTexture }: ReceivedSharedTextureData, value: unknown): Promise<void> => {
     let frame: ReceivedVideoFrame | undefined
     const target = mounted
@@ -54,12 +54,13 @@ export function installLinuxSharedTextureReceiver(): (surfaceToken: string) => (
       try { frame?.close() } finally { importedSharedTexture.release() }
     }
   }
-  if (supported) {
-    try { sharedTexture.setSharedTextureReceiver(receive) }
-    catch { supported = false }
-  }
   return surfaceToken => {
     if (!token(surfaceToken)) return () => {}
+    // CPU-frame sessions must never depend on sharedTexture/GPU registration.
+    if (supported && !registered) {
+      try { sharedTexture.setSharedTextureReceiver(receive); registered = true }
+      catch { supported = false }
+    }
     const binding: SurfaceBinding = { surfaceToken, bindingToken: crypto.randomUUID() }
     const previous = mounted
     mounted = null

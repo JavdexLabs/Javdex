@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "family": "Noto Sans",
+  "style": "Regular",
+  "fileName": "NotoSans-Regular.ttf",
+  "bytes": 512672,
+  "sha256": "89c3c497f618fdaa0b2d1e98fef93582f28c71debd2c4a8cdf41f190ced2909d",
+  "license": "OFL-1.1",
+  "licenseFile": "LICENSE.txt",
+  "modifications": "None. Original Debian-distributed upstream TTF bytes; not subsetted or renamed.",
+  "upstream": "https://github.com/notofonts/noto-fonts",
+  "distribution": {
+    "name": "Debian fonts-noto-core",
+    "version": "20201225-2",
+    "url": "https://deb.debian.org/debian/pool/main/f/fonts-noto/fonts-noto-core_20201225-2_all.deb",
+    "sha256": "97978d09b68445fcf85342b106cd2e812d7813e3d5626f9884a5f344c3a55973",
+    "member": "usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+    "licenseMember": "usr/share/doc/fonts-noto-core/copyright"
+  },
+  "scope": "CPU software-render subtitle/OSD fallback. CJK glyph coverage depends on compatible host fallback fonts."
+}

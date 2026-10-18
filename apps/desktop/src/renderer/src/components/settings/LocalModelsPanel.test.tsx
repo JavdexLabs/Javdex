@@ -366,7 +366,12 @@ test('GPU detection preparation exposes its probe before detection and missing s
   assert.match(renderedText(speech()), /安装检测组件后继续识别显卡/)
   assert.match(renderedText(speech()), /文本引擎VULKAN/)
   const components = speech().findByProps({ 'aria-label': '语音GPU 加速支持组件' })
-  assert.match(renderedText(components), /VULKAN.*应用内置/)
+  const componentRows = components.findByType('tbody').findAllByType('tr')
+  assert.deepEqual(componentRows.map(component => component.children.map(cell => renderedText(cell))), [
+    ['语音引擎', 'VULKAN', '未安装', '18.1 MB', 'b5130', 'github.com'],
+    ['文本引擎', 'VULKAN', '未安装', '33.3 MB', 'b11435', 'github.com']
+  ])
+  assert.doesNotMatch(renderedText(components), /应用内置/)
   const unavailable = structuredClone(state)
   unavailable.acceleration!.devices = [{ id: 'present', name: 'RTX 4080', backend: 'cuda', index: 0, memoryMiB: 16384 }]
   unavailable.acceleration!.policy = { mode: 'gpu', device: 'removed' }

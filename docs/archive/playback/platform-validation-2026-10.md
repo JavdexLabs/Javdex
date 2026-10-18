@@ -1,18 +1,20 @@
-# 内置播放 Windows / Linux 平台适配研究
+# 内置播放平台适配与验证历史
 
-研究日期：2026-10-03。目标仍是三平台实现，主窗口展开、底栏实时视频和全屏共用一份 libmpv 会话。下列研究按当时仅查源码/资料的范围保留，后续实施记录另列；用户已追加 Windows 实际验收，2026-10-03 至 04 的 MSVC 编译、PE 检查与开发应用本地/远程回归见 [Windows 验收记录](BUILTIN_PLAYBACK_WINDOWS_ACCEPTANCE.md)。实际屏幕黑屏、暂停重绘、原生滑杆辅助技术名称及 4K/60 帧调度已修复；三种展示、真实输入、主屏四档系统 DPI、合成 4K/60 连续 10 分钟及硬退出后重启通过。后续以 MSYS2 对应源码/许可闭包及 LLVM MinGW 原生 addon 生成实际未签名 ZIP/NSIS，解压版/安装版去除开发 PATH 后的播放矩阵通过。跨屏设备、读屏朗读、人工听感、可信签名及独立干净机器关口保持。
+本记录对应 2026-10-03 的源码核查和后续平台开发验证，不是当前待实施清单。现行平台与构建合同见 [开发指南](../../DEVELOPMENT.md#内置播放运行库)，当前播放行为见 [内置播放](../../BUILTIN_PLAYBACK.md)。各平台的通过、失败与未覆盖范围按下文原日期理解。
+
+研究日期：2026-10-03。目标仍是三平台实现，主窗口展开、底栏实时视频和全屏共用一份 libmpv 会话。下列研究按当时仅查源码/资料的范围保留，后续实施记录另列；用户已追加 Windows 实际验收，2026-10-03 至 04 的 MSVC 编译、PE 检查与开发应用本地/远程回归见 [Windows 验收记录](../../BUILTIN_PLAYBACK_WINDOWS_ACCEPTANCE.md)。实际屏幕黑屏、暂停重绘、原生滑杆辅助技术名称及 4K/60 帧调度已修复；三种展示、真实输入、主屏四档系统 DPI、合成 4K/60 连续 10 分钟及硬退出后重启通过。后续以 MSYS2 对应源码/许可闭包及 LLVM MinGW 原生 addon 生成实际未签名 ZIP/NSIS，解压版/安装版去除开发 PATH 后的播放矩阵通过。跨屏设备、读屏朗读、人工听感、可信签名及独立干净机器关口保持。
 
 ## 1. 本地定位事实
 
-已先读 [AGENTS.md](../AGENTS.md)。下表是工作区观察，不能解读为完成或验收证据。
+已先读 [AGENTS.md](../../../AGENTS.md)。下表是工作区观察，不能解读为完成或验收证据。
 
 | 定位 | 读取时的状态 |
 | --- | --- |
-| [package.json](../package.json)、[package-lock.json](../package-lock.json) | Electron 均锁定 `43.4.1`；对应官方 [DEPS](https://github.com/electron/electron/blob/v43.4.1/DEPS) 锁定 Chromium `150.0.7871.224`。下文窗口 ABI 据此核对。 |
-| [libmpvPlayback.ts](../apps/desktop/src/main/player/libmpvPlayback.ts) | `Bridge` 为 create / bounds / visible / presentation / command / render / state / destroy；availability 仅放行 darwin，viewport 已乘页面 zoom。 |
-| [macPlayback.mm](../apps/desktop/src/main/player/native/macPlayback.mm) | `NSView*` + `NSOpenGLView`；handle 校验 `sizeof(void*)`；一个 core / render context；异步命令、原子更新通知、主循环 render；尚未传入 advanced-control。 |
-| 同一 [macPlayback.mm](../apps/desktop/src/main/player/native/macPlayback.mm) | `nativeFrames` 随 render 调用递增，`presentedFrames` 在更新帧、未 hidden 且已 loaded 时递增；全屏原生控件、焦点和 actions 也在此文件，不能只移植 GL 绘制便认定交互等价。 |
-| [build-playback-native.mjs](../scripts/build-playback-native.mjs)、[nativePlayback.ts](../apps/desktop/src/main/player/nativePlayback.ts) | 开发构建仅 darwin；已有私有会话 seam。共用核心、构建及现有 seam 改造由主 Agent 负责。 |
+| [package.json](../../../package.json)、[package-lock.json](../../../package-lock.json) | Electron 均锁定 `43.4.1`；对应官方 [DEPS](https://github.com/electron/electron/blob/v43.4.1/DEPS) 锁定 Chromium `150.0.7871.224`。下文窗口 ABI 据此核对。 |
+| [libmpvPlayback.ts](../../../apps/desktop/src/main/player/libmpvPlayback.ts) | `Bridge` 为 create / bounds / visible / presentation / command / render / state / destroy；availability 仅放行 darwin，viewport 已乘页面 zoom。 |
+| [macPlayback.mm](../../../apps/desktop/src/main/player/native/macPlayback.mm) | `NSView*` + `NSOpenGLView`；handle 校验 `sizeof(void*)`；一个 core / render context；异步命令、原子更新通知、主循环 render；尚未传入 advanced-control。 |
+| 同一 [macPlayback.mm](../../../apps/desktop/src/main/player/native/macPlayback.mm) | `nativeFrames` 随 render 调用递增，`presentedFrames` 在更新帧、未 hidden 且已 loaded 时递增；全屏原生控件、焦点和 actions 也在此文件，不能只移植 GL 绘制便认定交互等价。 |
+| [build-playback-native.mjs](../../../scripts/build-playback-native.mjs)、[nativePlayback.ts](../../../apps/desktop/src/main/player/nativePlayback.ts) | 开发构建仅 darwin；已有私有会话 seam。共用核心、构建及现有 seam 改造由主 Agent 负责。 |
 
 libmpv 合同引用固定的 **mpv v0.40.0** 官方头文件，便于复查；这不是对本地或未来打包运行库版本的认定，实施时须对目标实际头文件、ABI 和构建选项复核。
 
@@ -159,7 +161,7 @@ type Viewport = { contentBoundsDip: Rect; visible: boolean; presentation: Presen
 
 本次增量 `npm test` 退出 0：Electron 3487 项中 3485 通过、2 个 Windows 路径语义用例跳过、0 失败；包含全量 lint/类型/架构与打包/fixture/4 项构建命令计划测试。本机打包脚本中 Linux 实际 ELF fixture 另按平台跳过，已由上面的两个 Linux 容器执行，不能将此跳过忽略。macOS 原生及桌面重新构建通过，正常关闭回归再次通过（`close-report.json`，forced=false、code=0）；此次未重跑长片/远程媒体完整矩阵，也未做声音听感、VoiceOver 或设备输入验收。
 
-下一步仍需 Windows 实际构建/PE 检查、平台显示与输入关口以及 GPL 运行库来源/许可审核；macOS 的人工与正式运行库验收继续列为未完成。上述增量记录当时未提交、推送或发布；用户随后授权提交前检视、提交并推送功能分支，本轮修复和独立验证结果见 [提交前审查](BUILTIN_PLAYBACK_REVIEW.md)，不是发布或跨平台验收记录。
+下一步仍需 Windows 实际构建/PE 检查、平台显示与输入关口以及 GPL 运行库来源/许可审核；macOS 的人工与正式运行库验收继续列为未完成。上述增量记录当时未提交、推送或发布；用户随后授权提交前检视、提交并推送功能分支，本轮修复和独立验证结果见 [提交前审查](../../reviews/builtin-playback-2026-10-03.md)，不是发布或跨平台验收记录。
 
 ### Linux helper 进程隔离增量（2026-10-03，本机画面与控制已验证）
 

@@ -16,7 +16,7 @@ NFO 是保存在影片旁的资料文件，可包含标题、演员等信息以�
 | Javinizer | 番号、系列、演员，以及封面、背景、演员头像和额外图片目录约定 |
 | JavSP | 番号、系列、发行日期、制作商，以及 `movie.nfo`、海报和背景图约定 |
 
-验证基线记录于 **2026-09-05**，使用依据各工具固定提交版本制作的合成样例和自动化测试，不代表各版本、所有自定义配置或未知字段都完整兼容。固定版本与样例范围见 [兼容样例说明](https://github.com/JavdexLabs/Javdex/blob/main/test-fixtures/nfo/README.md)，字段与命名依据见 [原始调研](https://github.com/JavdexLabs/Javdex/blob/main/docs/NFO_IMPORT_EXPORT_RESEARCH.md)。
+验证基线记录于 **2026-09-05**，使用依据各工具固定提交版本制作的合成样例和自动化测试，不代表各版本、所有自定义配置或未知字段都完整兼容。固定版本与样例范围见 [兼容样例说明](https://github.com/JavdexLabs/Javdex/blob/main/test-fixtures/nfo/README.md)，字段与命名依据见 [原始调研](https://github.com/JavdexLabs/Javdex/blob/main/docs/references/nfo-format-sources.md)。
 
 在媒体库创建向导或该库“常规”设置中启用“自动导入本地 NFO”。扫描首次发现资源时，会尝试读取相邻 NFO，为尚未刮削成功的影片补齐空字段。
 

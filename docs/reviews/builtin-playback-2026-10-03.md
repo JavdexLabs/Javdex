@@ -2,20 +2,20 @@
 
 日期：2026-10-03。范围：`codex/libmpv-native-render-prototype` 上自 `93127dc` 起的全部未提交改动，包含原生 adapter、桌面会话与 UI、共享返回协调、GPL 声明及构建／验收脚本。基线之后没有既有提交，因此新文件与 tracked diff 一起审查，而非仅检查三点 diff。
 
-本文保留提交前审查时的验证范围。后续 Windows MSVC/PE/真实开发应用结果、屏幕黑屏/暂停全屏重绘及原生输入修复，三种展示、真实键盘鼠标的证据和剩余设备/发布关口见 [Windows 验收记录](BUILTIN_PLAYBACK_WINDOWS_ACCEPTANCE.md)，不追溯改写下文当时的“未执行”记录。
+本文保留提交前审查时的验证范围。后续 Windows MSVC/PE/真实开发应用结果、屏幕黑屏/暂停全屏重绘及原生输入修复，三种展示、真实键盘鼠标的证据和剩余设备/发布关口见 [Windows 验收记录](../BUILTIN_PLAYBACK_WINDOWS_ACCEPTANCE.md)，不追溯改写下文当时的“未执行”记录。
 
 按 `code-review` 技能并行检查仓库规范和实施方案；复核后修复本轮发现。历史协调采用 `codebase-design` 的集中所有权原则：复杂性留在共享协调器，不增加每个页面各自的返回栈。用户授权提交和推送此功能分支，不包含合并、发布或将整个实施计划标为完成。
 
 ## Standards
 
-**发现 2 项，均为 P2，均已修复。** 依据 [路由规范](ROUTING_DESIGN.md) 和 [图片预览历史合同](IMAGE_PREVIEW_HISTORY_DESIGN.md)。没有额外编码气味项升级为规范缺陷。
+**发现 2 项，均为 P2，均已修复。** 依据 [路由规范](../ROUTING_DESIGN.md) 和 [图片预览历史合同](https://github.com/JavdexLabs/Javdex/blob/50bc915a8f0ee5a72673d7f84b3bbb6fa49e6b4d/docs/IMAGE_PREVIEW_HISTORY_DESIGN.md)。没有额外编码气味项升级为规范缺陷。
 
 1. 关闭 overlay 的异步 POP 会把 React Router blocker 重置；随后调用旧 blocker 的 `proceed()` 可能抛出无效状态迁移并丢失业务导航。修复为共享协调器保存业务 intent，读取 router 当前 blocker 后决定继续或重放，保持 PUSH／REPLACE／POP、目标 state、历史游标和已确认草稿的语义。回归使用真实 `createHashRouter`，分别模拟游标移动和事件交付，也覆盖取消、卸载、重复确认及新的目标取代旧目标。
 2. fallback 已消费旧 POP 并推入新预览时，迟到的旧事件仍会关闭新预览。修复为先核对事件 marker 与实时游标 marker，旧事件不能确认当前 traversal 或关闭新的 token；增加分离游标与事件的回归。
 
 ## Spec
 
-**发现 2 项，均为 P2，均已修复。** 依据 [实施方案](BUILTIN_PLAYBACK_DESIGN_PROPOSAL.md) 的来源选择、显式外部打开及缺失／离线分类要求。
+**发现 2 项，均为 P2，均已修复。** 依据 [实施方案](https://github.com/JavdexLabs/Javdex/blob/50bc915a8f0ee5a72673d7f84b3bbb6fa49e6b4d/docs/BUILTIN_PLAYBACK_DESIGN_PROPOSAL.md) 的来源选择、显式外部打开及缺失／离线分类要求。
 
 1. 已扫描文件被移走，但授权根目录仍有效时，错误被统一映射成根目录不可用。文件检查现在只在根目录已授权、路径位于授权根内且根身份仍有效时抛出受控的 missing 类型；离线、换根、禁用和越界仍拒绝。resolve／validate 每次新建检查器，不把扫描计划的缓存沿用至整个播放会话。保留原有对调用方的通用消息和 canonical／symlink 检查。
 2. 正常播放选项缺少来源选择和外部打开。复用现有 scoped detail／资源打开接口，仅投影当前媒体库与影片的本地文件 ID 和展示名，不创建另一套来源合同。显式切换按全局续播设置记录进度，不修改主资源；外部打开成功后只停止原会话，失败保留当前播放，旧请求不能停止替换会话。查询迟到和重复提交有回归覆盖。

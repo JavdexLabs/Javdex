@@ -1,5 +1,7 @@
 # 读查询隔离落地清单（历史批次与当前剩余项）
 
+下文 AI–AR、DF 和“当前 schema 18”均指 2026-09 的批次快照，不是现行数据库版本或继续执行指令。当前结构由共享迁移维护；恢复工作前先按[性能工作索引](README.md)对照最新 reader 与调用方，剩余验收要求不因本次文档整理关闭。
+
 DF更新：高频桌面列表/年份/首页/全局搜索和Web列表/首页/分类集合已接入既有reader，详见[DF报告](large-library-high-frequency-cleanup-results.md)。下文保留历史批次及完整验收要求。
 
 PERF-10整体仍未完成。AI提供独立只读连接和本机原生worker可行性；AJ已将TAG_FILTER_OPTIONS接入生产worker并验证本机ASAR。审计读取也已有专项worker入口，不能由此推断其余IPC/Web目录读取已隔离。当前schema18，先由writer完成迁移，再允许reader打开。下面六项保留完整验收要求，不能把单入口实现视为全部完成。

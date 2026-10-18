@@ -152,6 +152,6 @@ AgentDefinition 与 ToolPack 在 composition root 静态注册，不建立 compi
 - Javdex 自研 ReAct loop、agentMessages、contextCompress、retry、compaction 和 tool-batch orchestration。
 - 让 legacy runner 实现通用 RuntimePort。
 
-## 后续
+## 迁移记录
 
-具体迁移阶段、Interface、缓存指标、风险、验收与工期见 [Agent 控制面与 Pi 数据面接入执行计划](../AGENT_PLATFORM_EXECUTION_PLAN.md)。
+具体迁移阶段、Interface、缓存指标、风险、验收与工期保留在 [历史执行计划](https://github.com/JavdexLabs/Javdex/blob/50bc915a8f0ee5a72673d7f84b3bbb6fa49e6b4d/docs/AGENT_PLATFORM_EXECUTION_PLAN.md)，不再作为待实施任务。现行实现见 [插件开发 Agent](../PLUGIN_DEV_AGENT.md)，后续恢复与模型配置取舍见 [ADR-0030](0030-simplify-agent-recovery-and-model-configuration.md)。

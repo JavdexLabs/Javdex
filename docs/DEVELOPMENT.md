@@ -4,7 +4,7 @@
 
 本文面向从源码运行、修改或打包 Javdex 的开发者。安装和日常操作见使用指南。
 
-本文对应 0.9.0 正式版准备，升级基线为已发布的 0.8.0。资料库使用 schema 21，模型管理文档使用格式 4；发布状态与验证边界见 [0.9.0 正式版准备](reviews/v0.9.0-readiness.md)。本文描述源码与分发合同，不表示正式版已发布，也不把历史 CI 或本机测试当作本轮原生产物及 GUI 验收。
+本文对应 0.9.0，升级基线为已发布的 0.8.0。资料库使用 schema 21，云端模型管理文档使用格式 4；实际正式发布、同版本替换及验证边界见 [发布记录](reviews/README.md)。本文描述当前源码与分发合同，不把历史 CI 或本机测试自动当作新一轮原生产物及 GUI 验收。
 
 ## 环境与本地启动
 
@@ -126,7 +126,7 @@ macOS 上 `npm run ai-runtime:build` 使用固定 commit 的 whisper.cpp b5130 �
 
 Windows／Linux 及 macOS 翻译工具按需下载固定发布资产；安装校验压缩包 SHA，保留 POSIX `bin/lib` 布局，把安全的库别名转为普通文件。解压在独立暂存目录，完成后替换工具目录，失败保留旧安装。模型目录迁移不需要放宽原有禁止符号链接的规则。开发构建源码、合成音频、下载权重与验收产物均从安装包排除。
 
-无 GUI 的实际推理检查：生成／提供一段公开或合成日语音频后，运行 `node --import tsx scripts/local-ai-platform-acceptance.ts --audio <音频>`。默认仅使用忽略目录 `out/ai-runtime-acceptance/`，不访问应用用户目录；首次联网下载权重，后续可用 `--offline`。Linux 验证镜像由 `scripts/local-ai-linux-acceptance.Dockerfile` 构建，只挂载此专用目录，在 `--network none` 下运行编译后的检查脚本；不是服务端或 GUI 验收。详细命令与边界见 [AI 字幕实施记录](AI_SUBTITLES_IMPLEMENTATION.md#macoslinux-运行库适配2026-10-07)。
+无 GUI 的实际推理检查：生成／提供一段公开或合成日语音频后，运行 `node --import tsx scripts/local-ai-platform-acceptance.ts --audio <音频>`。默认仅使用忽略目录 `out/ai-runtime-acceptance/`，不访问应用用户目录；首次联网下载权重，后续可用 `--offline`。Linux 验证镜像由 `scripts/local-ai-linux-acceptance.Dockerfile` 构建，只挂载此专用目录，在 `--network none` 下运行编译后的检查脚本；不是服务端或 GUI 验收。详细命令与边界见 [AI 字幕历史验证](archive/local-ai/implementation-and-validation-2026-10.md#macoslinux-运行库适配2026-10-07)。
 
 <!-- 保留历史设计记录指向本节的链接。 -->
 <a id="内置播放运行库开发分支"></a>
@@ -135,7 +135,7 @@ Windows／Linux 及 macOS 翻译工具按需下载固定发布资产；安装校
 
 Windows 与 Linux X11 adapter 通过 `rendererFullscreenControls` 能力统一使用 renderer 经典工具栏与播放设置，原生 child window 只负责画面、输入和帧提交；旧 Windows adapter 保留原生全屏控件。全屏按指针所在的顶部／底部区域分别显示标题栏／控制栏，鼠标在画面中间移动或暂停不会唤出它们；打开播放设置时同时固定显示标题栏与控制栏，关闭后恢复分区触发；键盘焦点、拖动和子菜单所有权保持操作区域可见。原生指针先由客户区像素换算为 DIP，再按网页缩放倍率换算为 CSS 像素，不能用播放时钟更新或任意鼠标活动唤出控制栏。全屏视频始终占满窗口，标题栏、控制栏和设置使用覆盖布局，显隐不改变 drawable 尺寸；renderer 报告这些表面及菜单与视频的交叠矩形，Windows 用窗口区域裁剪，Linux 用 X Shape 1.1 同时裁剪可见区域和输入区域，让 HTML 控件可见且可点击。Linux 保留圆角边缘，关闭覆盖层后恢复完整画面；视频区域的 Tab／Shift+Tab 将焦点交回共享面板。此改动同时涉及 renderer 与原生运行文件，开发调试需重建两者并完整退出、重启 Electron；仅刷新页面仍会保留旧原生实现。
 
-内置播放的设计与分阶段验收边界见 [实施计划](BUILTIN_PLAYBACK_DESIGN_PROPOSAL.md)，实际源码构建及发布证据见下文。`npm run playback:native:build` 只生成链接本机开发库的运行文件：macOS/Windows 为 addon，Linux 为独立 `playback-helper`；正式打包输入由 `npm run playback:runtime:build` 从固定源码构建。普通桌面打包明确排除 `out/native-playback`、`out/playback-acceptance`、`out/libmpv-prototype` 与 `out/playback-runtime`，审核后的运行库通过打包钩子复制到 Resources，不把构建目录、合成素材、截图或临时 Electron bundle 收入 `app.asar`。
+内置播放行为与平台边界见 [播放合同](BUILTIN_PLAYBACK.md)，实际源码构建及发布证据见下文。`npm run playback:native:build` 只生成链接本机开发库的运行文件：macOS/Windows 为 addon，Linux 为独立 `playback-helper`；正式打包输入由 `npm run playback:runtime:build` 从固定源码构建。普通桌面打包明确排除 `out/native-playback`、`out/playback-acceptance`、`out/libmpv-prototype` 与 `out/playback-runtime`，审核后的运行库通过打包钩子复制到 Resources，不把构建目录、合成素材、截图或临时 Electron bundle 收入 `app.asar`。
 
 原生核心的初始化、异步命令、事件复制、状态缓存与帧计数共用 `native/mpvCore.h`；Cocoa/WGL/X11 仅拥有平台窗口、GL context 和原生输入。macOS 构建先编译运行 C++ 的键位与核心回归，再生成 Cocoa addon；Linux CMake 构建运行共用核心与私有 X11 几何／句柄／键盘回归。`npm run test:playback:build` 检查构建命令选择，已纳入根测试；它本身不编译其它平台源码，也不证明可播放。
 
@@ -145,7 +145,7 @@ Windows 正常桌面入口检测到 `out/native-playback/playback.node`（开发
 
 默认 Windows MSVC 构建直接编入已安装 `@electron/rebuild` 所依赖的 node-gyp 延迟加载钩子，并链接 `delayimp`、`/DELAYLOAD:node.exe`；仅链接 `node.lib` 不足以在 Electron 或改名后的应用可执行文件中加载。构建器解析依赖自身的钩子路径，不下载或修改上游文件，缺少钩子时停止。CMake 也支持 LLVM MinGW/CLANG64：使用 Ninja、显式指定匹配的 `clang++.exe` 与 libmpv 前缀、Electron headers/node.lib，编入仓库的 `windowsElectronDelayHook.cpp` 并使用 `--delayload=node.exe`。npm 开发构建命令仍默认 MSVC。两条路径均重定向到当前应用宿主；MinGW 路径已在实际改名的 ZIP/NSIS 应用中加载。MSVC 钩子许可见 [第三方说明](THIRD_PARTY_NOTICES.md#node-gyp-延迟加载钩子)，宿主要求见 [Electron 原生模块说明](https://www.electronjs.org/docs/latest/tutorial/using-native-node-modules#a-note-about-win_delay_load_hook)。
 
-Linux X11／XWayland adapter 与显式启动选项已加入，原生 Wayland 后续补齐。先退出应用，再以 `--javdex-x11`（或 Electron 的 `--ozone-platform=x11`）启动；未显式选择时内置播放不可用，不依据环境变量或 Buffer 宽度猜测 backend。冲突的 ozone 选项拒绝启动；缺少 `DISPLAY` / X server 时给出不可用原因，不自动回退外部播放器。当前提供命令行选择，尚未提供设置页启动开关；不切换系统桌面、不静默强制 X11。开发构建需要 CMake、C++17 编译器、make、pkg-config、X11/Xext/GLX/OpenGL 开发库及同架构 libmpv；设置 `JAVDEX_MPV_PREFIX`（系统前缀如 `/usr`），然后运行 `npm run playback:native:build`。运行时要求 X Shape 1.1，不再绘制或链接 Xft 全屏工具栏。库路径须由开发环境提供，构建器不复制 `.so` 或安装依赖。实际源码、隔离编译及未验收项见 [平台记录](BUILTIN_PLAYBACK_PLATFORM_ADAPTERS.md#10-本轮实施记录2026-10-03)。
+Linux X11／XWayland adapter 与显式启动选项已加入，原生 Wayland 后续补齐。先退出应用，再以 `--javdex-x11`（或 Electron 的 `--ozone-platform=x11`）启动；未显式选择时内置播放不可用，不依据环境变量或 Buffer 宽度猜测 backend。冲突的 ozone 选项拒绝启动；缺少 `DISPLAY` / X server 时给出不可用原因，不自动回退外部播放器。当前提供命令行选择，尚未提供设置页启动开关；不切换系统桌面、不静默强制 X11。开发构建需要 CMake、C++17 编译器、make、pkg-config、X11/Xext/GLX/OpenGL 开发库及同架构 libmpv；设置 `JAVDEX_MPV_PREFIX`（系统前缀如 `/usr`），然后运行 `npm run playback:native:build`。运行时要求 X Shape 1.1，不再绘制或链接 Xft 全屏工具栏。库路径须由开发环境提供，构建器不复制 `.so` 或安装依赖。实际源码、隔离编译及未验收项见 [平台记录](archive/playback/platform-validation-2026-10.md#10-本轮实施记录2026-10-03)。
 
 Linux 的 `playback-helper` 在独立进程直接链接 libmpv，拥有 X11 child windows、GLX context 和播放器核心；子窗口仍嵌入原 Electron parent，不另开可见顶层播放窗口。Electron 通过私有继承管道传送带长度的命令字段并缓存返回状态，不经 shell 或监听端口。此边界用于隔离 Electron 全局导出的 FFmpeg／分配器符号；同进程的 `RTLD_DEEPBIND`、`dlmopen` 实验未通过真实播放／清理检查，未作为支持方案。独立进程不等于解码器沙箱，仍须验收异常退出、关闭／重开、输入焦点和媒体行为。
 
@@ -213,7 +213,7 @@ Release 的 `playback-sources` 任务在四个平台打包门禁之后执行 `no
 | macOS arm64 | Apple Silicon `.dmg` | 只读挂载，匹配运行库及来源绑定，校验 app 签名 |
 | Linux x64 | `.deb`、`.AppImage` | 分别提取，匹配运行库及来源绑定 |
 
-文件名映射以 [playback-source-materials.mjs](../scripts/playback-source-materials.mjs) 为准。[历史源码与产物核验](reviews/v0.9.0-beta.3-release-audit.md) 记录 Release run `38601458029` 的四目标构建、包内加载与 PCM EOF、六个最终安装产物核验，以及公开总源码包四目标恢复和摘要核对。0.9.0 正式版须对自身提交执行 [Release 工作流](../.github/workflows/release.yml)，不能沿用历史摘要或把无显示门禁记为新增 GUI、硬解或干净机器验证；当前状态见 [正式版准备](reviews/v0.9.0-readiness.md)。
+文件名映射以 [playback-source-materials.mjs](../scripts/playback-source-materials.mjs) 为准。[历史源码与产物核验](reviews/v0.9.0-beta.3-release-audit.md) 记录 Release run `38601458029` 的四目标构建、包内加载与 PCM EOF、六个最终安装产物核验，以及公开总源码包四目标恢复和摘要核对。每轮正式发布须对自身提交执行 [Release 工作流](../.github/workflows/release.yml)，不能沿用历史摘要或把无显示门禁记为新增 GUI、硬解或干净机器验证；0.9.0 原始发行及一次整套替换的实际结果见 [发布记录](reviews/README.md)。
 
 解开总包后，使用 Node.js 22+ 执行 `node restore.mjs windows-x64 <新目录路径>`（目标还包括 `macos-x64`、`macos-arm64`、`linux-x64`）；目标目录必须尚不存在。恢复工具先验证全部引用材料，再恢复原 `reviewed-runtime/`、`packaging-tools/` 和说明文件，保留文件模式。按平台 `build.json` 的工具链、补丁和配方重建；恢复工具不执行构建脚本。原单平台压缩包摘要记录来源，不能用来校验总包；总包摘要见 Release 的 SHA256SUMS。`SOURCE-ACCESS.txt` 同时说明公开总包与原 CI 绑定；分发安装包时须继续提供对应源码访问方式，不能仅提供未交付的文件名。普通用户无需下载源码包；系统 SDK、编译器和签名不由恢复工具提供。
 
@@ -328,14 +328,15 @@ Javdex 使用 Electron、React、TypeScript、Vite 和 `better-sqlite3`。主要
 | 局域网 Web 移动端 | [移动端 Web 规范](MOBILE_WEB_GUIDELINES.md) |
 | 服务端模式部署与双模式 | [服务端模式](SERVER_MODE.md)、[ADR-0029](adr/0029-server-mode-extends-root-and-web-isolation.md) |
 | 服务端模式现状与实现 | [当前状态与后续范围](SERVER_MODE_NEXT_STEPS.md)、[实现与合同](SERVER_MODE_CONTRACT_INVENTORY.md) |
-| 服务端更新与恢复 | [更新助手部署](SERVER_UPDATE.md)、[选型研究](SERVER_UPDATE_RESEARCH.md) |
+| 服务端更新与恢复 | [托管更新](SERVER_UPDATE.md)、[ADR-0031](adr/0031-manage-server-releases-inside-one-container.md) |
 | 共享用例、合同与工作存储 | [实现与合同](SERVER_MODE_CONTRACT_INVENTORY.md#共享用例与结果校验) |
 | 服务端历史研究与验收证据 | [归档索引](archive/server-mode/README.md) |
 | 路由、筛选、返回栈 | [路由设计](ROUTING_DESIGN.md) |
 | 刮削插件与沙箱 API | [刮削插件规范](SCRAPER_PLUGIN_FORMAT.md) |
 | 插件开发助手与 MCP | [插件开发 Agent](PLUGIN_DEV_AGENT.md) |
 | NFO 导出格式与验证范围 | [NFO 兼容性](NFO_COMPATIBILITY.md) |
-| 大媒体库性能与优化计划 | [性能审计](performance/large-library-performance-audit.md)、[实施计划](performance/large-library-optimization-plan.md)、[基准复跑](performance/large-library-results/README.md) |
+| 内置播放、AI 字幕与清单导入 | [播放合同](BUILTIN_PLAYBACK.md)、[本地推理](AI_SUBTITLES_IMPLEMENTATION.md)、[清单导入](PLAYLIST_IMPORT.md) |
+| 大媒体库性能与剩余范围 | [性能工作索引](performance/README.md)、[完整待办矩阵](performance/large-library-optimization-plan.md#12-收尾范围与完整待办矩阵)、[基准复跑](performance/large-library-results/README.md) |
 | 数据库结构与迁移 | [schema.ts](../packages/library/src/db/schema.ts)、[migrations.ts](../packages/library/src/db/migrations.ts) |
 | Issue、PRD 与分类标签 | [Issue 约定](agents/issue-tracker.md)、[标签约定](agents/triage-labels.md) |
 | 版本与发布 | [发布规范](VERSIONING_AND_RELEASE.md)、[更新日志](../CHANGELOG.md) |
@@ -343,7 +344,7 @@ Javdex 使用 Electron、React、TypeScript、Vite 和 `better-sqlite3`。主要
 
 提交改动时说明解决的问题、最终行为和验证结果。用户可见的功能与入口变化应同步更新使用指南；README 保持产品概览，版本细节记录在更新日志，实现约束留在对应设计文档。
 
-过程计划和回检记录完成后，将仍有效的约定并入对应设计、合同或使用文档，再删除重复记录；历史原文可从 Git 查阅。仍有未完成验收的记录、发布来源与产物核验、性能基准及第三方许可证据继续保留，不因单轮检查通过而视为全部完成。
+完整分类见[工程文档索引](README.md)。过程计划和回检记录完成后，将仍有效的约定并入对应设计、合同或使用文档，再删除重复记录；历史原文可从 Git 查阅。仍有未完成验收的记录、发布来源与产物核验、性能基准及第三方许可证据继续保留，不因单轮检查通过而视为全部完成。
 
 ### 局域网 Web 端
 

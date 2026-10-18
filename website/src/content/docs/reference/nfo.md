@@ -23,7 +23,7 @@ Plex profile 只面向官方 NFO Agent，不支持默认 Plex Movie Agent；使�
 
 选项默认关闭，演员名单始终导出。勾选后，将当前演员头像保存到 `.actors/<演员名>.<ext>`，文件名中的普通空格替换为下划线，继续处理文件名非法字符；例如 `Alice Smith` 写为 `Alice_Smith.jpg`。NFO 姓名保持原文，`actor/thumb` 指向实际文件。归一化后同名冲突按既有机制拦截，相关头像不写入且不引用；同目录相同头像去重，跨影片目录会保存副本。
 
-该布局面向 Javdex 回读和 Kodi / Emby 本地演员头像。Emby 旧库可能需要完整元数据刷新；Plex、Infuse、Jellyfin 对当前本地相对路径的兼容性尚未实机验证，不能承诺显示。依据见 [头像研究](https://github.com/JavdexLabs/Javdex/blob/main/docs/NFO_ACTOR_ARTWORK_RESEARCH.md)。Javdex 保留原文件名和下划线文件名的导入兼容，优先读取 NFO 明确引用；新导出不自动删除此前含空格的头像文件。
+该布局面向 Javdex 回读和 Kodi / Emby 本地演员头像。Emby 旧库可能需要完整元数据刷新；Plex、Infuse、Jellyfin 对当前本地相对路径的兼容性尚未实机验证，不能承诺显示。依据见 [头像研究](https://github.com/JavdexLabs/Javdex/blob/main/docs/references/nfo-actor-artwork.md)。Javdex 保留原文件名和下划线文件名的导入兼容，优先读取 NFO 明确引用；新导出不自动删除此前含空格的头像文件。
 
 ## 附带样张文件（备份/迁移）
 
@@ -35,7 +35,7 @@ Javdex 导入时优先按影片文件名前缀读取此目录中的样张，保�
 
 勾选影片封面后，JPEG/PNG 横图先校正 EXIF 方向，再从右侧裁剪最大整数 2:3 海报，完整原图以 `<stem>-landscape.<ext>` 保留。已有竖图保留原比例，只导出海报；正方形保留并提示。PNG 海报继续使用 PNG，JPEG 使用 JPEG；不放大、不拉伸，不修改数据库或原资产。详情背景仍独立使用 `fanart`。
 
-通用/Kodi、Jellyfin 和 Emby profile 增加 `aspect="landscape"` 引用；Plex 与 Infuse 沿用其 poster 合同，保留的完整横图不代表消费者一定独立展示。Kodi 推荐 16:9 landscape，而封套保留原比例。当前 Electron 43.4.1 的 nativeImage 实测不能解码 WebP：与损坏图片一样在规划阶段标为不可用，不写错误 poster 引用；未来运行时能解码时沿用 JPEG 转码。裁剪失败但横图可读取时仍保留横图。
+通用/Kodi、Jellyfin 和 Emby profile 增加 `aspect="landscape"` 引用；Plex 与 Infuse 沿用其 poster 合同，保留的完整横图不代表消费者一定独立展示。Kodi 推荐 16:9 landscape，而封套保留原比例。早期 Electron 43.4.1 的 nativeImage 实测不能解码 WebP；该记录不代表后续 Electron 版本的解码结果。导出规划以当前运行时的实际解码为准，不可解码时与损坏图片一样标为不可用，不写错误 poster 引用；可解码时转为 JPEG。裁剪失败但横图可读取时仍保留横图。
 
 本次通过合成图片的真实 Electron 编解码、八种 EXIF 方向、加密资产、不可变计划与 XML golden 回归验证。下方消费端 smoke 属于此前版本，**未重新验证此次新增双图在消费端的显示效果**。旧横版 poster 需显式选择覆盖并刷新消费者图片缓存；默认跳过不会更新它。
 

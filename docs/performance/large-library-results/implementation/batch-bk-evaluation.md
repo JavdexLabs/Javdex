@@ -17,4 +17,4 @@
 
 本次没有p95、冷盘、Windows/HDD、真实IPC、媒体解码或峰值内存结论。原始路径字符串仍直接返回，行上限不等于字节上限。metadata/编辑器完整gallery、背景首项、图片预览跨页、导入删除后刷新与选择状态需要一起迁移，不能仅在组件中slice。完整15/42计划仍进行中。
 
-复跑：`node scripts/run-electron-tests.mjs scripts/performance/actress-gallery-page-benchmark.ts`；日志、样本、EQP与源快照见[证据清单](large-library-results/implementation/batch-bk-manifest.json)。
+复跑：`node scripts/run-electron-tests.mjs scripts/performance/actress-gallery-page-benchmark.ts`；日志、样本、EQP与源快照见[证据清单](batch-bk-manifest.json)。

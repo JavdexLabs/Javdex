@@ -1,5 +1,7 @@
 # Agent 平台迁移基线与验证记录
 
+历史基线：以下数据与门槛属于 2026-08-20 的迁移记录，不是当前版本的重新验证结果。现行运行时与模型配置见 [插件开发 Agent](../PLUGIN_DEV_AGENT.md) 和 [ADR-0030](../adr/0030-simplify-agent-recovery-and-model-configuration.md)。
+
 - 冻结日期：2026-08-20
 - legacy 基点：`dev`（Electron `33.2.0`、`better-sqlite3` `11.5.x`）
 - 目标：用可重复 fixture 比较领域正确性，并把真实 provider/安装器数据与本地推测分开。

@@ -75,4 +75,3 @@ test('markdown documents have valid emphasis delimiter syntax for CommonMark', a
     assert.strictEqual(badBold, null, `Found unrendered bold syntax in ${file}: ${badBold}`);
   }
 });
-

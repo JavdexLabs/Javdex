@@ -64,3 +64,15 @@ test('legacy server authorization section points at the current server heading',
   assert.match(legacy, /server\/remote-connection\.md#启动与设备授权/);
   assert.doesNotMatch(legacy, /server\/remote-connection\.md#启动与认主/);
 });
+
+test('markdown documents have valid emphasis delimiter syntax for CommonMark', async () => {
+  const files = await readdir(content, { recursive: true });
+  for (const file of files) {
+    if (!file.endsWith('.md')) continue;
+    const body = await readFile(path.join(content, file), 'utf8');
+    // Ensure no un-spaced ** wrapping punctuation like **“ or ”** or ）** adjacent to CJK characters
+    const badBold = body.match(/[^\s\w`*]\*\*[^\s*]+[）”]\*\*[^\s\w`*]/g);
+    assert.strictEqual(badBold, null, `Found unrendered bold syntax in ${file}: ${badBold}`);
+  }
+});
+

@@ -19,8 +19,8 @@ Javdex 桌面端支持 64 位 Windows、macOS（Apple Silicon 与 Intel 芯片�
 
 ### 2. Windows Defender SmartScreen 安全提示
 由于开源版本暂未购买昂贵的商业数字证书（Authenticode），Windows SmartScreen 可能会在首次运行时弹出蓝色提示框阻断：
-1. 点击弹窗上的**“更多信息（More info）”**。
-2. 点击出现的**“仍要运行（Run anyway）”**按钮即可正常启动。
+1. 点击弹窗上的 **“更多信息（More info）”**。
+2. 点击出现的 **“仍要运行（Run anyway）”** 按钮即可正常启动。
 
 ### 3. 播放器图形渲染与 GPU 驱动
 - Javdex 的内置播放器使用 `libmpv` 原生引擎。程序会在检测到内置播放运行库时自动注入 `--disable-direct-composition` 参数，以确保在多数 Windows 显卡驱动下窗口嵌入稳定无黑屏。

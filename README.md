@@ -28,6 +28,8 @@
   <a href="https://javdexlabs.github.io/Javdex/">使用文档</a>
   &nbsp;·&nbsp;
   <a href="CHANGELOG.md">更新日志</a>
+  &nbsp;·&nbsp;
+  <a href="https://github.com/JavdexLabs/Javdex/discussions/123">功能建议</a>
 </p>
 
 <p align="center">
@@ -101,8 +103,8 @@
 
 ## 反馈与参与
 
-- 遇到问题或有功能建议：[提交 Issue](https://github.com/JavdexLabs/Javdex/issues/new)
-- 已有计划与讨论：[Issues](https://github.com/JavdexLabs/Javdex/issues)
+- 希望增加或改进功能：[参与新功能意见征集](https://github.com/JavdexLabs/Javdex/discussions/123)，分享使用场景，或为已有建议点赞。
+- 遇到故障或报错：[提交 Issue](https://github.com/JavdexLabs/Javdex/issues/new)
 - 从源码运行与打包：[开发指南](docs/DEVELOPMENT.md)
 
 ## 声明

@@ -17,7 +17,7 @@ const DRAWN = 'playback:shared-texture-drawn'
 const frame = (sequence = 1, slot = 0, extra: Record<string, unknown> = {}) => ({ protocol: 'javdex-dmabuf-v1',
   sequence, slot, width: 320, height: 180, pixelFormat: 'bgra', stride: 1280, offset: 0, size: 230400,
   modifier: '0', producerComplete: true, ...extra })
-function fixture() {
+function fixture(diagnostics = false) {
   let nextFd = 100
   let now = 0, receiveCalls = 0, ackWritable = true, importFailure = false, sendFailure = false
   let tick: () => void = () => {}
@@ -28,6 +28,7 @@ function fixture() {
   const closed: number[] = [], acknowledgements: number[] = [], errors: Error[] = []
   const incoming: Array<{ fd: number; metadata: Buffer }> = []
   const imports: Array<{ options: ImportSharedTextureOptions; releases: number }> = []
+  const diagnosticLogs: string[] = []
   const sent: Array<{ frame: unknown; metadata: { surfaceToken: string; bindingToken: string; sequence: number } }> = []
   const transport = {
     createChannel: () => ({ parentFd: 10, childFd: 11 }),
@@ -36,7 +37,8 @@ function fixture() {
     sendAck: (_fd: number, sequence: number) => { if (ackWritable) acknowledgements.push(sequence); return ackWritable }
   }
   const exports = {} as typeof import('./linuxSharedTexture')
-  runInNewContext(code, { exports, Buffer, Date: { now: () => now },
+  runInNewContext(code, { exports, Buffer, process: { env: { JAVDEX_TEXTURE_PIXEL_DIAGNOSTICS: diagnostics ? '1' : '' } },
+    console: { info: (_tag: string, data: string) => diagnosticLogs.push(data) }, Date: { now: () => now },
     setInterval: (callback: () => void) => { tick = callback; return { unref() {} } }, clearInterval: () => { tick = () => {} },
     require(id: string): unknown {
       if (id === 'node:crypto') return { randomUUID: () => '11111111-1111-4111-8111-111111111111' }
@@ -58,7 +60,7 @@ function fixture() {
   const manager = exports.createLinuxSharedTexture(window, '/fixture/playback-fd.node', error => errors.push(error))
   const binding = { surfaceToken: manager.surfaceToken, bindingToken }
   const event = { sender: contents, senderFrame: mainFrame }
-  return { manager, imports, closed, sent, errors, acknowledgements, contents, ipc, app, exports, event, binding,
+  return { manager, imports, closed, sent, errors, acknowledgements, contents, ipc, app, exports, event, binding, diagnosticLogs,
     ready: () => ipc.emit(READY, event, binding),
     packet: (sequence = 1, slot = 0, extra = {}) => incoming.push({ fd: ++nextFd, metadata: Buffer.from(JSON.stringify(frame(sequence, slot, extra))) }),
     tick: async (advance = 0) => { now += advance; tick(); await Promise.resolve(); await Promise.resolve() },
@@ -68,6 +70,22 @@ function fixture() {
     release: (index = 0) => imports[index].options.allReferencesReleased!()
   }
 }
+
+test('pixel diagnostics accept only requested sequences from the bound main frame and strip arbitrary data', async t => {
+  const f = fixture(true); t.after(f.manager.destroy)
+  f.ready(); f.manager.setVisible(true)
+  f.packet(15, 0, { width: 640, height: 360, stride: 2560, size: 921600 })
+  await f.tick()
+  const data = { ...f.binding, sequence: 15, canvas: { samples: 20, nonblack: 19, path: '/private', maximum: Infinity },
+    geometry: { width: 640, visible: true, url: 'secret' } }
+  f.ipc.emit('playback:shared-texture-pixel-diagnostic', { ...f.event, senderFrame: {} }, data)
+  assert.equal(f.diagnosticLogs.length, 0)
+  f.ipc.emit('playback:shared-texture-pixel-diagnostic', f.event, data)
+  f.ipc.emit('playback:shared-texture-pixel-diagnostic', f.event, data)
+  assert.equal(f.diagnosticLogs.length, 1)
+  assert.deepEqual(JSON.parse(f.diagnosticLogs[0]), { sequence: 15, readbackPerturbsRendering: true,
+    canvas: { samples: 20, nonblack: 19 }, geometry: { width: 640, visible: true } })
+})
 
 test('validates the complete one-plane DMA-BUF descriptor before native import', t => {
   const f = fixture(); t.after(f.manager.destroy)

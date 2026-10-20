@@ -8,6 +8,16 @@ const code = transpileModule(readFileSync(new URL('./linuxSharedTexture.ts', imp
   compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022 }
 }).outputText
 const token = '11111111-1111-4111-8111-111111111111'
+test('pixel diagnostic distinguishes opaque black from colored and transparent samples with row padding', () => {
+  const exports = {} as typeof import('./linuxSharedTexture')
+  runInNewContext(code, { exports, require: () => ({}) })
+  const data = new Uint8Array([
+    0, 0, 0, 255, 255, 0, 0, 255, 99, 99, 99, 99,
+    0, 0, 0, 0, 0, 32, 0, 255
+  ])
+  assert.deepEqual(JSON.parse(JSON.stringify(exports.summarizePixels(data, 2, 2, 12))),
+    { samples: 4, nonblack: 2, maximum: 255, opaque: 3 })
+})
 function fixture(options: { registerFails?: boolean; contextFails?: boolean } = {}) {
   let nextToken = 0, draws = 0, closes = 0, releases = 0, clears = 0, drawFails = false
   let receiver!: (data: unknown, metadata: unknown) => Promise<void>

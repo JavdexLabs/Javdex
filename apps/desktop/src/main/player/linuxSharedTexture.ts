@@ -6,6 +6,7 @@ const READY = 'playback:shared-texture-ready'
 const REMOVED = 'playback:shared-texture-removed'
 const FAILED = 'playback:shared-texture-failed'
 const DRAWN = 'playback:shared-texture-drawn'
+const PIXELS = 'playback:shared-texture-pixel-diagnostic'
 const POOL_SIZE = 3
 const RELEASE_TIMEOUT = 5000
 const READY_TIMEOUT = 10000
@@ -77,6 +78,8 @@ export function createLinuxSharedTexture(window: BrowserWindow, addonPath: strin
   let lastSequence = 0
   let lastDrawnSequence = 0
   let drawnFrames = 0
+  const pixelDiagnostics = process.env.JAVDEX_TEXTURE_PIXEL_DIAGNOSTICS === '1'
+  const diagnosticSequences = new Set<number>()
   let saturatedSince: number | null = null
   const pending = new Map<number, PendingFrame>()
   const acknowledgements: number[] = []
@@ -101,6 +104,7 @@ export function createLinuxSharedTexture(window: BrowserWindow, addonPath: strin
     ipcMain.removeListener(REMOVED, removed)
     ipcMain.removeListener(FAILED, receiverFailed)
     ipcMain.removeListener(DRAWN, drawn)
+    ipcMain.removeListener(PIXELS, pixels)
     contents.removeListener('did-start-navigation', navigation)
     contents.removeListener('render-process-gone', rendererGone)
     contents.removeListener('destroyed', rendererGone)
@@ -142,6 +146,26 @@ export function createLinuxSharedTexture(window: BrowserWindow, addonPath: strin
     // scanout. Neither helper export nor sendSharedTexture resolution counts.
     drawnFrames++
   }
+  const pixels = (event: IpcMainEvent, value: unknown): void => {
+    if (!pixelDiagnostics || stopped || !trusted(event) || !validBinding(value)
+      || value.surfaceToken !== surfaceToken || value.bindingToken !== binding?.bindingToken) return
+    const data = value as SurfaceBinding & Record<string, unknown>
+    if (typeof data.sequence !== 'number' || !diagnosticSequences.delete(data.sequence)) return
+    // Project only bounded numbers/booleans. Never log arbitrary renderer strings.
+    const result: Record<string, unknown> = { sequence: data.sequence, readbackPerturbsRendering: true }
+    for (const name of ['canvas', 'imported', 'geometry']) {
+      const input = data[name]
+      if (!input || typeof input !== 'object') continue
+      const projected: Record<string, number | boolean> = {}
+      for (const key of ['samples', 'nonblack', 'maximum', 'opaque', 'width', 'height', 'connected', 'displayed', 'visible', 'opacity']) {
+        const item = (input as Record<string, unknown>)[key]
+        if (typeof item === 'boolean' || typeof item === 'number' && Number.isFinite(item) && Math.abs(item) <= 100000) projected[key] = item
+      }
+      result[name] = projected
+    }
+    for (const key of ['canvasError', 'importedError']) if (data[key] === true) result[key] = true
+    console.info('[playback-texture-pixels]', JSON.stringify(result))
+  }
   const navigation = (_event: unknown, _url: string, isInPlace: boolean, isMainFrame: boolean): void => {
     if (isMainFrame && !isInPlace) fail('播放器页面已重新加载，请重新打开视频')
   }
@@ -177,8 +201,11 @@ export function createLinuxSharedTexture(window: BrowserWindow, addonPath: strin
           acknowledgements.push(frame.sequence)
         }
       })
+      const diagnosePixels = pixelDiagnostics && frame.width === 640 && frame.height === 360
+        && [15, 30, 45].includes(frame.sequence)
+      if (diagnosePixels) diagnosticSequences.add(frame.sequence)
       await sharedTexture.sendSharedTexture({ frame: contents.mainFrame, importedSharedTexture: imported },
-        { ...target, sequence: frame.sequence })
+        { ...target, sequence: frame.sequence, ...(diagnosePixels ? { diagnosePixels: true } : {}) })
     } catch {
       if (!imported) {
         if (entry) closeFrame(entry)
@@ -218,6 +245,7 @@ export function createLinuxSharedTexture(window: BrowserWindow, addonPath: strin
   ipcMain.on(REMOVED, removed)
   ipcMain.on(FAILED, receiverFailed)
   ipcMain.on(DRAWN, drawn)
+  ipcMain.on(PIXELS, pixels)
   contents.on('did-start-navigation', navigation)
   contents.on('render-process-gone', rendererGone)
   contents.on('destroyed', rendererGone)

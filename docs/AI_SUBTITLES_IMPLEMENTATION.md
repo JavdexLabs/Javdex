@@ -32,8 +32,12 @@ Windows x64 NVIDIA 优先 CUDA，其他通过检测的独显使用 Vulkan；macO
 
 ## 平台与验证
 
-运行要求以 [runtimeManifest.ts](../apps/desktop/src/main/services/localModels/runtimeManifest.ts) 为准：Windows x64、macOS 13.3+ arm64／x64，Linux arm64／x64 需要 glibc 2.38+、GCC 14 C++ 运行库和 xz-utils。支持文件管理不代表宿主满足推理条件；拒绝不兼容环境，不静默选择旧引擎。
+运行要求以 [runtimeManifest.ts](../apps/desktop/src/main/services/localModels/runtimeManifest.ts) 为准：Windows x64、macOS 13.3+ arm64／x64，Linux arm64／x64 需要 glibc 2.38+、GCC 14 C++ 运行库。支持文件管理不代表宿主满足推理条件；拒绝不兼容环境，不静默选择旧引擎。
 
 实现入口为 `services/localModels`、`services/aiSubtitles`、播放共用原生字幕层及对应同名测试。定向测试按目录、安装/回滚、用途、租约、取消、缓存和显示选择，重放命令与历史 CPU/GPU、Windows、macOS/Linux 证据见[实施与验收历史](archive/local-ai/implementation-and-validation-2026-10.md)。
 
 当前固定运行库与整套 0.9.0 的发布 CI、来源及替换边界见[迁移审计](reviews/whisper-vulkan-runtime-migration.md)。历史 GPU 实测只证明当时设备与分发路径，新按需发行的托管 CPU 烟测不冒充物理 GPU 通过；独立公开软件产物验收按用户要求未执行。
+
+## 固定依赖分发
+
+所有平台的语音、翻译、音频提取工具及小型 VAD 辅助模型由 Javdex Runtime 固定发行供应，客户端仍在源码中锁定附件大小和 SHA-256，不从远程清单自动换库。macOS AI 工具不再随应用打包；首次准备能力包含真实网络下载计划。原生构建、签名和对应源码移至运行库仓库，模型权重、用途、设备策略和 CPU 回退流程不变。有效旧 macOS b5130 Whisper 经完整逐文件验证后复用，损坏时下载固定发行修复。

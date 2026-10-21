@@ -32,13 +32,13 @@ Windows 原生播放 addon 的 MSVC 构建复用已安装的 [node-gyp](https://
 
 ## 本地 AI 运行库
 
-- whisper.cpp b5130 与 llama.cpp b11435：MIT；固定下载地址、大小、SHA-256 见 [资产清单](../apps/desktop/src/main/services/localModels/runtimeManifest.ts)。各系统的资产独立，不能用 Windows ZIP 代替 POSIX 运行库。安装保留上游许可文件，模型许可与运行库许可分别记录。
-- macOS 随应用分发固定源码构建的 whisper-cli、FFmpeg／ffprobe；来源与摘要见 [源码清单](../scripts/ai-runtime-sources.json)，构建步骤见 [构建器](../scripts/ai-runtime-build.mjs)。FFmpeg 8.1.3 为 LGPL-2.1-or-later 静态构建，不启用 GPL／nonfree／自动探测外部编解码依赖；bundle 内附 `COPYING.LGPLv2.1`、`SOURCE.txt` 和完整构建来源清单。
-- Windows／Linux 的 FFmpeg 按需下载 BtbN 固定日期 LGPL shared 发布资产，保留包中的许可文件，不能把 macOS 自建工具的 LGPL 版本用于判断这些上游包的全部间接依赖许可。
-- Windows 可选 CUDA 资产固定于同一 whisper／llama 发布版本，另含 NVIDIA CUDA Runtime／cuBLAS，不能以引擎的 MIT 许可覆盖这些 NVIDIA 组件；它们按需从上游下载，适用 [NVIDIA CUDA Toolkit EULA](https://docs.nvidia.com/cuda/eula/index.html)。GPU 下载地址、大小及 SHA-256 见 `localModels/gpuManifest.ts`。
+- whisper.cpp b5130 与 llama.cpp b11435：MIT；原始上游包由 Javdex Runtime 固定镜像，下载地址、大小、SHA-256 见 [资产清单](../apps/desktop/src/main/services/localModels/runtimeManifest.ts)。各系统的资产独立，不能用 Windows ZIP 代替 POSIX 运行库。安装保留上游许可文件，模型许可与运行库许可分别记录。
+- macOS Whisper b5130 及五目标 FFmpeg／ffprobe 8.1.3 由 [Javdex Runtime](https://github.com/JavdexLabs/javdex-runtime) 固定源码构建并按需下载，不再随主应用交付。FFmpeg 采用 LGPL-2.1-or-later 的静态最小音频构建，不启用 GPL／nonfree／自动探测外部编解码依赖；各目标附件同时提供对应源码及构建配方，包内保留许可和来源。主播放器的 GPL FFmpeg 9.0.2 保持独立。
+- Silero VAD v6.2 小型辅助模型以原始字节镜像到运行库仓库，保留固定摘要与 MIT 声明；其他大模型继续使用固定 Hugging Face 来源。
+- Windows 可选 CUDA 资产固定于同一 whisper／llama 发布版本，另含 NVIDIA CUDA Runtime／cuBLAS，不能以引擎的 MIT 许可覆盖这些 NVIDIA 组件；它们以原包字节经 Javdex Runtime 镜像按需下载，附 NVIDIA 条款，适用 [NVIDIA CUDA Toolkit EULA](https://docs.nvidia.com/cuda/archive/12.4.0/eula/index.html)。GPU 下载地址、大小及 SHA-256 见 `localModels/gpuManifest.ts`。
 - Windows Whisper Vulkan 从 [Javdex Runtime 固定发行](https://github.com/JavdexLabs/javdex-runtime/releases/tag/whisper-b5130-r1) 按需取得，不随主安装包分发：引擎 MIT、Vulkan headers／loader Apache-2.0，ZIP 内附各自许可、来源与完整文件摘要。固定构建配方和开发材料移至该仓库；仓库自有构建脚本的 GPL 声明不替代第三方二进制许可。shaderc、glslang、SPIR-V 与 GCC 工具 DLL 只用于构建；GPU 驱动由系统提供，不进入运行库包。
 
-分发 macOS 工具时应一并提供对应 Javdex 源码版本中的构建器、固定源码清单及可获得的完整对应源码，不以二进制哈希代替许可义务。源资料和构建来源不是正式分发验收证明；播放器 libmpv 的许可／来源闭包仍独立检查。
+运行库仓库保存原包、固定源码和配方，按引擎独立发布，不自动清理。播放器另归档四个平台从固定 Javdex 0.9.0 原安装包提取的真实运行库与对应源码总包，保留原安装包摘要、源码提交和 CI 来源；该归档不代表当前 Wayland 开发代码或新的 GUI／GPU 验收。
 
 ## MetaTube
 

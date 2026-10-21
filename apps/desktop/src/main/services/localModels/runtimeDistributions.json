@@ -1,0 +1,339 @@
+{
+  "formatVersion": 1,
+  "releases": [
+    {
+      "version": "ffmpeg-8.1.3-r1",
+      "commit": "3d550506bbb4326ecdac769e3921a5ab8fb1f569",
+      "runId": 39621089417,
+      "nativeBuild": {
+        "commit": "82d60bdf45c78141ea787f429ddc24fdd96298cc",
+        "runId": 39618483098,
+        "conclusion": "failure",
+        "verifiedJobs": [
+          "contracts",
+          "mirror",
+          "mac (macos-15, arm64)",
+          "mac (macos-15-intel, x64)",
+          "ffmpeg (ubuntu-24.04, linux-x64)",
+          "ffmpeg (ubuntu-24.04-arm, linux-arm64)",
+          "ffmpeg (windows-latest, win32-x64)",
+          "playback (ubuntu-24.04, linux-x64)",
+          "playback (windows-latest, win32-x64)",
+          "playback (macos-15, darwin-arm64)",
+          "playback (macos-15-intel, darwin-x64)"
+        ]
+      }
+    },
+    {
+      "version": "whisper-b5130-r2",
+      "commit": "3d550506bbb4326ecdac769e3921a5ab8fb1f569",
+      "runId": 39621089417,
+      "nativeBuild": {
+        "commit": "82d60bdf45c78141ea787f429ddc24fdd96298cc",
+        "runId": 39618483098,
+        "conclusion": "failure",
+        "verifiedJobs": [
+          "contracts",
+          "mirror",
+          "mac (macos-15, arm64)",
+          "mac (macos-15-intel, x64)",
+          "ffmpeg (ubuntu-24.04, linux-x64)",
+          "ffmpeg (ubuntu-24.04-arm, linux-arm64)",
+          "ffmpeg (windows-latest, win32-x64)",
+          "playback (ubuntu-24.04, linux-x64)",
+          "playback (windows-latest, win32-x64)",
+          "playback (macos-15, darwin-arm64)",
+          "playback (macos-15-intel, darwin-x64)"
+        ]
+      }
+    },
+    {
+      "version": "llama-b11435-r1",
+      "commit": "3d550506bbb4326ecdac769e3921a5ab8fb1f569",
+      "runId": 39621089417,
+      "nativeBuild": {
+        "commit": "82d60bdf45c78141ea787f429ddc24fdd96298cc",
+        "runId": 39618483098,
+        "conclusion": "failure",
+        "verifiedJobs": [
+          "contracts",
+          "mirror",
+          "mac (macos-15, arm64)",
+          "mac (macos-15-intel, x64)",
+          "ffmpeg (ubuntu-24.04, linux-x64)",
+          "ffmpeg (ubuntu-24.04-arm, linux-arm64)",
+          "ffmpeg (windows-latest, win32-x64)",
+          "playback (ubuntu-24.04, linux-x64)",
+          "playback (windows-latest, win32-x64)",
+          "playback (macos-15, darwin-arm64)",
+          "playback (macos-15-intel, darwin-x64)"
+        ]
+      }
+    },
+    {
+      "version": "silero-v6.2-r1",
+      "commit": "3d550506bbb4326ecdac769e3921a5ab8fb1f569",
+      "runId": 39621089417,
+      "nativeBuild": {
+        "commit": "82d60bdf45c78141ea787f429ddc24fdd96298cc",
+        "runId": 39618483098,
+        "conclusion": "failure",
+        "verifiedJobs": [
+          "contracts",
+          "mirror",
+          "mac (macos-15, arm64)",
+          "mac (macos-15-intel, x64)",
+          "ffmpeg (ubuntu-24.04, linux-x64)",
+          "ffmpeg (ubuntu-24.04-arm, linux-arm64)",
+          "ffmpeg (windows-latest, win32-x64)",
+          "playback (ubuntu-24.04, linux-x64)",
+          "playback (windows-latest, win32-x64)",
+          "playback (macos-15, darwin-arm64)",
+          "playback (macos-15-intel, darwin-x64)"
+        ]
+      }
+    }
+  ],
+  "assets": [
+    {
+      "release": "ffmpeg-8.1.3-r1",
+      "id": "ffmpeg",
+      "target": "darwin-arm64",
+      "backend": "common",
+      "name": "ffmpeg-8.1.3-r1-darwin-arm64.tar.gz",
+      "url": "https://github.com/JavdexLabs/javdex-runtime/releases/download/ffmpeg-8.1.3-r1/ffmpeg-8.1.3-r1-darwin-arm64.tar.gz",
+      "source": "https://ffmpeg.org/releases/ffmpeg-8.1.3.tar.xz",
+      "bytes": 17866395,
+      "sha256": "aca8df1ef9f82e8f1b145caab1d2680fca498a61cdd4f18b93dd4b3a421904d8",
+      "archivePrefix": "ffmpeg-8.1.3-r1-darwin-arm64"
+    },
+    {
+      "release": "llama-b11435-r1",
+      "id": "translator",
+      "target": "darwin-arm64",
+      "backend": "cpu",
+      "name": "llama-b11435-bin-macos-arm64.tar.gz",
+      "url": "https://github.com/JavdexLabs/javdex-runtime/releases/download/llama-b11435-r1/llama-b11435-bin-macos-arm64.tar.gz",
+      "source": "https://github.com/ggml-org/llama.cpp/releases/download/b11435/llama-b11435-bin-macos-arm64.tar.gz",
+      "bytes": 11971075,
+      "sha256": "65f564a94c328dee846a395796d060671fb64f4334a84857c222b2416f039545",
+      "archivePrefix": "llama-b11435"
+    },
+    {
+      "release": "whisper-b5130-r2",
+      "id": "whisper",
+      "target": "darwin-arm64",
+      "backend": "metal",
+      "name": "whisper-b5130-r2-darwin-arm64.tar.gz",
+      "url": "https://github.com/JavdexLabs/javdex-runtime/releases/download/whisper-b5130-r2/whisper-b5130-r2-darwin-arm64.tar.gz",
+      "source": "https://codeload.github.com/ggml-org/whisper.cpp/tar.gz/927cfce34f31707e17f2bff35c349632fb9e2c3a",
+      "bytes": 1466287,
+      "sha256": "656efeccf57a5ceb754275019414996150ae10b0175f98fc0d3d929c3ddc9f8f",
+      "archivePrefix": "whisper-b5130-r2-darwin-arm64"
+    },
+    {
+      "release": "ffmpeg-8.1.3-r1",
+      "id": "ffmpeg",
+      "target": "darwin-x64",
+      "backend": "common",
+      "name": "ffmpeg-8.1.3-r1-darwin-x64.tar.gz",
+      "url": "https://github.com/JavdexLabs/javdex-runtime/releases/download/ffmpeg-8.1.3-r1/ffmpeg-8.1.3-r1-darwin-x64.tar.gz",
+      "source": "https://ffmpeg.org/releases/ffmpeg-8.1.3.tar.xz",
+      "bytes": 18862288,
+      "sha256": "c7fda2828456a54a4eef58c0af0491ed18a278d7e4afb6654e2fe590cdb0e09f",
+      "archivePrefix": "ffmpeg-8.1.3-r1-darwin-x64"
+    },
+    {
+      "release": "llama-b11435-r1",
+      "id": "translator",
+      "target": "darwin-x64",
+      "backend": "cpu",
+      "name": "llama-b11435-bin-macos-x64.tar.gz",
+      "url": "https://github.com/JavdexLabs/javdex-runtime/releases/download/llama-b11435-r1/llama-b11435-bin-macos-x64.tar.gz",
+      "source": "https://github.com/ggml-org/llama.cpp/releases/download/b11435/llama-b11435-bin-macos-x64.tar.gz",
+      "bytes": 11487091,
+      "sha256": "41ee358ed26b426f2798f459b6b8607416db7e0fa472bae955210f1908627b1b",
+      "archivePrefix": "llama-b11435"
+    },
+    {
+      "release": "whisper-b5130-r2",
+      "id": "whisper",
+      "target": "darwin-x64",
+      "backend": "metal",
+      "name": "whisper-b5130-r2-darwin-x64.tar.gz",
+      "url": "https://github.com/JavdexLabs/javdex-runtime/releases/download/whisper-b5130-r2/whisper-b5130-r2-darwin-x64.tar.gz",
+      "source": "https://codeload.github.com/ggml-org/whisper.cpp/tar.gz/927cfce34f31707e17f2bff35c349632fb9e2c3a",
+      "bytes": 1663500,
+      "sha256": "8be99b27d9d1ec8db7cfdb92b4ff3dd308df9eca83b7b759232b5fa3b8b98996",
+      "archivePrefix": "whisper-b5130-r2-darwin-x64"
+    },
+    {
+      "release": "ffmpeg-8.1.3-r1",
+      "id": "ffmpeg",
+      "target": "linux-arm64",
+      "backend": "common",
+      "name": "ffmpeg-8.1.3-r1-linux-arm64.tar.gz",
+      "url": "https://github.com/JavdexLabs/javdex-runtime/releases/download/ffmpeg-8.1.3-r1/ffmpeg-8.1.3-r1-linux-arm64.tar.gz",
+      "source": "https://ffmpeg.org/releases/ffmpeg-8.1.3.tar.xz",
+      "bytes": 21077625,
+      "sha256": "fd5088846e8900733fb12750ca13d006a90d1946e22c368a49b49ceef6803453",
+      "archivePrefix": "ffmpeg-8.1.3-r1-linux-arm64"
+    },
+    {
+      "release": "llama-b11435-r1",
+      "id": "translator",
+      "target": "linux-arm64",
+      "backend": "cpu",
+      "name": "llama-b11435-bin-ubuntu-arm64.tar.gz",
+      "url": "https://github.com/JavdexLabs/javdex-runtime/releases/download/llama-b11435-r1/llama-b11435-bin-ubuntu-arm64.tar.gz",
+      "source": "https://github.com/ggml-org/llama.cpp/releases/download/b11435/llama-b11435-bin-ubuntu-arm64.tar.gz",
+      "bytes": 13680816,
+      "sha256": "5eecb754f61f21fd70799edb1db1d1a6d6cbdf7d1716e8781c99eb4841fd39f8",
+      "archivePrefix": "llama-b11435"
+    },
+    {
+      "release": "whisper-b5130-r2",
+      "id": "whisper",
+      "target": "linux-arm64",
+      "backend": "cpu",
+      "name": "whisper-bin-ubuntu-arm64.tar.gz",
+      "url": "https://github.com/JavdexLabs/javdex-runtime/releases/download/whisper-b5130-r2/whisper-bin-ubuntu-arm64.tar.gz",
+      "source": "https://github.com/ggml-org/whisper.cpp/releases/download/b5130/whisper-bin-ubuntu-arm64.tar.gz",
+      "bytes": 4605905,
+      "sha256": "93532a0e3777f26f041ffa358ee77dd88b1a33a86847c1990745327ff335a5d6",
+      "archivePrefix": "whisper-bin-ubuntu-arm64"
+    },
+    {
+      "release": "ffmpeg-8.1.3-r1",
+      "id": "ffmpeg",
+      "target": "linux-x64",
+      "backend": "common",
+      "name": "ffmpeg-8.1.3-r1-linux-x64.tar.gz",
+      "url": "https://github.com/JavdexLabs/javdex-runtime/releases/download/ffmpeg-8.1.3-r1/ffmpeg-8.1.3-r1-linux-x64.tar.gz",
+      "source": "https://ffmpeg.org/releases/ffmpeg-8.1.3.tar.xz",
+      "bytes": 21177765,
+      "sha256": "6582a50079baef2ef8544adfadd8ed7922b95d2b7f5359319ffe6be23963a3f7",
+      "archivePrefix": "ffmpeg-8.1.3-r1-linux-x64"
+    },
+    {
+      "release": "llama-b11435-r1",
+      "id": "translator",
+      "target": "linux-x64",
+      "backend": "cpu",
+      "name": "llama-b11435-bin-ubuntu-x64.tar.gz",
+      "url": "https://github.com/JavdexLabs/javdex-runtime/releases/download/llama-b11435-r1/llama-b11435-bin-ubuntu-x64.tar.gz",
+      "source": "https://github.com/ggml-org/llama.cpp/releases/download/b11435/llama-b11435-bin-ubuntu-x64.tar.gz",
+      "bytes": 17692966,
+      "sha256": "ee617d7af304985e268fbc33bdd8fe44110f1dc2f599ecb27bdf08890e6e6e4c",
+      "archivePrefix": "llama-b11435"
+    },
+    {
+      "release": "whisper-b5130-r2",
+      "id": "whisper",
+      "target": "linux-x64",
+      "backend": "cpu",
+      "name": "whisper-bin-ubuntu-x64.tar.gz",
+      "url": "https://github.com/JavdexLabs/javdex-runtime/releases/download/whisper-b5130-r2/whisper-bin-ubuntu-x64.tar.gz",
+      "source": "https://github.com/ggml-org/whisper.cpp/releases/download/b5130/whisper-bin-ubuntu-x64.tar.gz",
+      "bytes": 9793438,
+      "sha256": "53e7fd8b5764edad916b8848dd0af6abb1ff1d3b86c899e79c78652412536c32",
+      "archivePrefix": "whisper-bin-ubuntu-x64"
+    },
+    {
+      "release": "silero-v6.2-r1",
+      "id": "vad",
+      "target": "portable",
+      "backend": "common",
+      "name": "ggml-silero-v6.2.0.bin",
+      "url": "https://github.com/JavdexLabs/javdex-runtime/releases/download/silero-v6.2-r1/ggml-silero-v6.2.0.bin",
+      "source": "https://huggingface.co/ggml-org/whisper-vad/resolve/9ffd54a1e1ee413ddf265af9913beaf518d1639b/ggml-silero-v6.2.0.bin",
+      "bytes": 885098,
+      "sha256": "2aa269b785eeb53a82983a20501ddf7c1d9c48e33ab63a41391ac6c9f7fb6987",
+      "archivePrefix": null
+    },
+    {
+      "release": "ffmpeg-8.1.3-r1",
+      "id": "ffmpeg",
+      "target": "win32-x64",
+      "backend": "common",
+      "name": "ffmpeg-8.1.3-r1-win32-x64.zip",
+      "url": "https://github.com/JavdexLabs/javdex-runtime/releases/download/ffmpeg-8.1.3-r1/ffmpeg-8.1.3-r1-win32-x64.zip",
+      "source": "https://ffmpeg.org/releases/ffmpeg-8.1.3.tar.xz",
+      "bytes": 21702881,
+      "sha256": "21219bc5df4487801af593ce66e81c351d8f00800a21476d91b5307027a0c6f6",
+      "archivePrefix": "ffmpeg-8.1.3-r1-win32-x64"
+    },
+    {
+      "release": "llama-b11435-r1",
+      "id": "translator",
+      "target": "win32-x64",
+      "backend": "cpu",
+      "name": "llama-b11435-bin-win-cpu-x64.zip",
+      "url": "https://github.com/JavdexLabs/javdex-runtime/releases/download/llama-b11435-r1/llama-b11435-bin-win-cpu-x64.zip",
+      "source": "https://github.com/ggml-org/llama.cpp/releases/download/b11435/llama-b11435-bin-win-cpu-x64.zip",
+      "bytes": 19399527,
+      "sha256": "3ed50261147e260d80f5cdc7bdccfa13a94882be560a4438e7a69fa519c93fb7",
+      "archivePrefix": null
+    },
+    {
+      "release": "whisper-b5130-r2",
+      "id": "whisper",
+      "target": "win32-x64",
+      "backend": "cpu",
+      "name": "whisper-bin-x64.zip",
+      "url": "https://github.com/JavdexLabs/javdex-runtime/releases/download/whisper-b5130-r2/whisper-bin-x64.zip",
+      "source": "https://github.com/ggml-org/whisper.cpp/releases/download/b5130/whisper-bin-x64.zip",
+      "bytes": 8573270,
+      "sha256": "f9ec6c52a2e949b62ab51fa21d0d497958f9e41c3010c157c4e42932d5316f3c",
+      "archivePrefix": null
+    },
+    {
+      "release": "llama-b11435-r1",
+      "id": "cuda",
+      "target": "win32-x64",
+      "backend": "cuda",
+      "name": "cudart-llama-bin-win-cuda-12.4-x64.zip",
+      "url": "https://github.com/JavdexLabs/javdex-runtime/releases/download/llama-b11435-r1/cudart-llama-bin-win-cuda-12.4-x64.zip",
+      "source": "https://github.com/ggml-org/llama.cpp/releases/download/b11435/cudart-llama-bin-win-cuda-12.4-x64.zip",
+      "bytes": 391443627,
+      "sha256": "8c79a9b226de4b3cacfd1f83d24f962d0773be79f1e7b75c6af4ded7e32ae1d6",
+      "archivePrefix": null
+    },
+    {
+      "release": "llama-b11435-r1",
+      "id": "translator",
+      "target": "win32-x64",
+      "backend": "cuda",
+      "name": "llama-b11435-bin-win-cuda-12.4-x64.zip",
+      "url": "https://github.com/JavdexLabs/javdex-runtime/releases/download/llama-b11435-r1/llama-b11435-bin-win-cuda-12.4-x64.zip",
+      "source": "https://github.com/ggml-org/llama.cpp/releases/download/b11435/llama-b11435-bin-win-cuda-12.4-x64.zip",
+      "bytes": 264473456,
+      "sha256": "18ef0727457adf843fe0e6dc17da296c019c821e56b7bc5fc88db734538fbfb7",
+      "archivePrefix": null
+    },
+    {
+      "release": "whisper-b5130-r2",
+      "id": "whisper",
+      "target": "win32-x64",
+      "backend": "cuda",
+      "name": "whisper-cublas-12.4.0-bin-x64.zip",
+      "url": "https://github.com/JavdexLabs/javdex-runtime/releases/download/whisper-b5130-r2/whisper-cublas-12.4.0-bin-x64.zip",
+      "source": "https://github.com/ggml-org/whisper.cpp/releases/download/b5130/whisper-cublas-12.4.0-bin-x64.zip",
+      "bytes": 674539285,
+      "sha256": "af520ddd034d985b55dfeea3e465ed93653ba2aee1a55e865033edc548c272a7",
+      "archivePrefix": null
+    },
+    {
+      "release": "llama-b11435-r1",
+      "id": "translator",
+      "target": "win32-x64",
+      "backend": "vulkan",
+      "name": "llama-b11435-bin-win-vulkan-x64.zip",
+      "url": "https://github.com/JavdexLabs/javdex-runtime/releases/download/llama-b11435-r1/llama-b11435-bin-win-vulkan-x64.zip",
+      "source": "https://github.com/ggml-org/llama.cpp/releases/download/b11435/llama-b11435-bin-win-vulkan-x64.zip",
+      "bytes": 33337420,
+      "sha256": "631b029f7df84aa22d1b8c9c929ea3cc505a70ad091f90ac0eabdb7ef0d05563",
+      "archivePrefix": null
+    }
+  ]
+}

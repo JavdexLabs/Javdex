@@ -168,3 +168,9 @@ export function prunePackagedRuntime(context) {
     `${removedLocales.length} Electron locales`
   )
 }
+
+/** AI tools are prepared through fixed runtime downloads on every platform. */
+export function verifyNoPackagedAiRuntime(context) {
+  const directory = path.join(context.packager.getResourcesDir(context.appOutDir), 'ai-runtime')
+  if (existsSync(directory)) throw new Error('AI tools must be downloaded on demand; remove stale packaged ai-runtime resources before rebuilding')
+}

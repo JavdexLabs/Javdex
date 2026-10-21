@@ -3,7 +3,7 @@ import fs from 'node:fs/promises'
 import { createReadStream } from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
-import { AI_MAC_BUNDLE_VERSION, AI_RUNTIME_ASSET_IDS, AI_RUNTIME_PLATFORM_MESSAGE,
+import { AI_RUNTIME_ASSET_IDS, AI_RUNTIME_PLATFORM_MESSAGE,
   aiRuntimeAssets, aiRuntimeTargetSupported, currentAiRuntimeTarget, type AiRuntimeAsset, type AiRuntimeTarget } from './runtimeManifest'
 import { runLocalModelProcess } from './processRunner'
 import { atomicWrite } from '../../utils/atomicWrite'
@@ -81,7 +81,7 @@ async function runtimeFiles(directory: string, relative = ''): Promise<RuntimeFi
   return result
 }
 export function createAiRuntimeInstaller(root: string, download: typeof fetch = fetch, manifest?: readonly AiRuntimeAsset[], options: {
-  target?: AiRuntimeTarget; bundleRoot?: string
+  target?: AiRuntimeTarget
 } = {}) {
   const target = options.target ?? currentAiRuntimeTarget()
   const assets = manifest ?? aiRuntimeAssets(target)
@@ -98,8 +98,7 @@ export function createAiRuntimeInstaller(root: string, download: typeof fetch = 
     return names.map(name => windows ? `${name}.exe` : target.platform === 'linux' && id === 'ffmpeg' ? `bin/${name}` : name)
   }
   const toolPath = (id: AiRuntimeAsset['id'], index = 0): string => path.join(toolDirectory(id), requiredTools(id)[index])
-  const bundled = (id: AiRuntimeAsset['id']): boolean => target.platform === 'darwin' && ['whisper', 'ffmpeg'].includes(id)
-  const identity = (id: AiRuntimeAsset['id']): string | undefined => bundled(id) ? `${AI_MAC_BUNDLE_VERSION}:${targetId}:${id}` : assets.find(asset => asset.id === id && asset.archive)?.sha256
+  const identity = (id: AiRuntimeAsset['id']): string | undefined => assets.find(asset => asset.id === id && asset.archive)?.sha256
   const paths = (): AiRuntimePaths => ({
     whisper: toolPath('whisper'), translator: toolPath('translator'), ffmpeg: toolPath('ffmpeg'), ffprobe: toolPath('ffmpeg', 1),
     kotoba: modelFile(assets.find(asset => asset.id === 'kotoba')!),
@@ -117,11 +116,16 @@ export function createAiRuntimeInstaller(root: string, download: typeof fetch = 
       if (!(await fs.lstat(base)).isDirectory()) return false
       const marker = JSON.parse(await fs.readFile(path.join(base, 'asset.json'), 'utf8'))
       const asset = assets.find(asset => asset.id === id)
-      const legacy = id === 'whisper' && windows && target.arch === 'x64' && asset?.backend === 'vulkan'
+      const legacyVulkan = id === 'whisper' && windows && target.arch === 'x64' && asset?.backend === 'vulkan'
         && asset.runtimePackage?.version === 'whisper-b5130-r1'
         && asset.runtimePackage.upstreamCommit === '927cfce34f31707e17f2bff35c349632fb9e2c3a'
         && asset.legacyInstalledIdentity === 'whisper-b5130-vulkan-v1:win32-x64:whisper'
         && marker.sha256 === asset.legacyInstalledIdentity
+      const legacyMac = id === 'whisper' && target.platform === 'darwin'
+        && asset?.url === `https://github.com/JavdexLabs/javdex-runtime/releases/download/whisper-b5130-r2/whisper-b5130-r2-${targetId}.tar.gz`
+        && asset?.legacyInstalledIdentity === `whisper-b5130-ffmpeg-8.1.3-v1:${targetId}:whisper`
+        && marker.sha256 === asset.legacyInstalledIdentity
+      const legacy = legacyVulkan || legacyMac
       if ((!legacy && marker.sha256 !== identity(id)) || (marker.target && marker.target !== targetId)
         || !Array.isArray(marker.files) || !marker.files.length || marker.files.length > 5000) return false
       const names = new Set<string>()
@@ -147,7 +151,7 @@ export function createAiRuntimeInstaller(root: string, download: typeof fetch = 
     try {
       for (const id of ids) {
         const asset = assets.find(asset => asset.id === id)
-        if (bundled(id) || asset?.archive) {
+        if (asset?.archive) {
           if (!await validTools(id)) return false
         } else {
           if (!asset) return false
@@ -171,7 +175,7 @@ export function createAiRuntimeInstaller(root: string, download: typeof fetch = 
         await fs.writeFile(path.join(staging, 'LICENSE.txt'), AI_RUNTIME_LICENSES[id === 'whisper' ? 'Whisper-MIT.txt' : 'Llama-MIT.txt'])
       }
       if (assets.find(asset => asset.id === id)?.backend === 'cuda') {
-        await fs.writeFile(path.join(staging, 'NOTICE-CUDA.txt'), 'NVIDIA CUDA Runtime / cuBLAS components are not covered by the engine MIT license.\nLicense: https://docs.nvidia.com/cuda/eula/index.html\nSource: pinned upstream distribution in gpuManifest.ts.\n')
+        await fs.writeFile(path.join(staging, 'NOTICE-CUDA.txt'), 'NVIDIA CUDA Runtime / cuBLAS components are not covered by the engine MIT license.\nLicense: https://docs.nvidia.com/cuda/archive/12.4.0/eula/index.html\nSource: pinned Javdex Runtime distribution in runtimeDistributions.json.\n')
       }
       for (const name of requiredTools(id)) {
         if (!(await fs.lstat(path.join(staging, name))).isFile()) throw new Error('运行库缺少必需工具')
@@ -188,26 +192,6 @@ export function createAiRuntimeInstaller(root: string, download: typeof fetch = 
       if (previous) await fs.rm(backup, { recursive: true, force: true })
     } finally { await fs.rm(staging, { recursive: true, force: true }) }
   }
-  async function installBundled(id: AiRuntimeAsset['id'], signal: AbortSignal): Promise<void> {
-    if (await validTools(id, true)) return
-    const bundleRoot = options.bundleRoot ?? path.join(process.resourcesPath ?? '', 'ai-runtime')
-    const source = path.join(bundleRoot, targetId)
-    let bundle: { version: string; target: string; assets: Record<string, { files: RuntimeFile[] }> }
-    try { bundle = JSON.parse(await fs.readFile(path.join(source, 'bundle.json'), 'utf8')) }
-    catch { throw new Error('缺少 macOS AI 运行库；开发环境请先执行 npm run ai-runtime:build，正式版请重新安装应用') }
-    const entries = bundle.assets?.[id]?.files
-    if (bundle.version !== AI_MAC_BUNDLE_VERSION || bundle.target !== targetId || !Array.isArray(entries) || !entries.length || entries.length > 100) throw new Error('AI 运行库清单无效')
-    await promoteTools(id, async staging => {
-      for (const entry of entries) {
-        signal.throwIfAborted()
-        if (!safeRuntimePath(entry.name) || path.posix.basename(entry.name) !== entry.name || !/^[a-f0-9]{64}$/.test(entry.sha256)) throw new Error('AI 运行库清单不安全')
-        const filename = path.join(source, id, entry.name), stat = await fs.lstat(filename)
-        if (!stat.isFile() || stat.size !== entry.bytes || await hashFile(filename) !== entry.sha256) throw new Error('应用内置 AI 运行库完整性校验失败')
-        await fs.copyFile(filename, path.join(staging, entry.name), 1)
-      }
-      signal.throwIfAborted()
-    })
-  }
   async function install(signal: AbortSignal, progress: (bytes: number, label: string) => void,
     ids: readonly AiRuntimeAsset['id'][] = AI_RUNTIME_ASSET_IDS, onEvent?: (event: RuntimeInstallEvent) => void): Promise<void> {
     if (!supported() && ids.some(id => ['whisper', 'translator', 'ffmpeg', 'cuda'].includes(id))) throw new Error(AI_RUNTIME_PLATFORM_MESSAGE)
@@ -218,11 +202,6 @@ export function createAiRuntimeInstaller(root: string, download: typeof fetch = 
       let networkBytes = 0, networkTotal = 0
       const emit = (phase: RuntimeInstallEvent['phase']): void => onEvent?.({ phase, networkBytes, networkTotal })
       emit('checking')
-      if (bundled(id)) {
-        if (await validTools(id, true)) emit('reused')
-        else { emit('installing'); await installBundled(id, signal); emit('complete') }
-        progress(completed, id === 'whisper' ? '日语识别运行库' : '音频提取运行库'); continue
-      }
       const asset = assets.find(asset => asset.id === id)
       if (!asset) throw new Error('未知或缺失的本地模型资源')
       const targetDirectory = assetDirectory(asset)
@@ -303,9 +282,8 @@ export function createAiRuntimeInstaller(root: string, download: typeof fetch = 
   }
   async function assetPresent(id: AiRuntimeAsset['id']): Promise<boolean> {
     const asset = assets.find(asset => asset.id === id)
-    if (!asset && !bundled(id)) throw new Error('未知本地模型')
-    const locations = [asset?.archive || bundled(id) ? toolDirectory(id) : assetDirectory(asset!)]
-    if (asset && !bundled(id)) locations.push(modelDownloadDirectory(root, asset))
+    if (!asset) throw new Error('未知本地模型')
+    const locations = [asset.archive ? toolDirectory(id) : assetDirectory(asset), modelDownloadDirectory(root, asset)]
     for (const location of locations) {
       if (await directoryPresent(location) && (await fs.readdir(location)).length > 0) return true
     }
@@ -314,14 +292,14 @@ export function createAiRuntimeInstaller(root: string, download: typeof fetch = 
   return { directory, installed, assetsInstalled, assetPresent, install, paths, modelFile,
     async removeAsset(id: AiRuntimeAsset['id']): Promise<void> {
       const asset = assets.find(asset => asset.id === id)
-      if (!asset && !bundled(id)) throw new Error('未知本地模型')
-      const destination = asset?.archive || bundled(id) ? toolDirectory(id) : assetDirectory(asset!)
-      const download = asset && !bundled(id) ? modelDownloadDirectory(root, asset) : undefined
+      if (!asset) throw new Error('未知本地模型')
+      const destination = asset.archive ? toolDirectory(id) : assetDirectory(asset)
+      const download = modelDownloadDirectory(root, asset)
       // Validate every target before removing anything, including archived runtime resume data.
       await ensureStorageDirectory(root, destination)
-      if (download) await ensureStorageDirectory(root, download)
+      await ensureStorageDirectory(root, download)
       await fs.rm(destination, { recursive: true, force: true })
-      if (download) await fs.rm(download, { recursive: true, force: true })
+      await fs.rm(download, { recursive: true, force: true })
     },
     async remove(): Promise<void> {
       await ensureModelStore(root)

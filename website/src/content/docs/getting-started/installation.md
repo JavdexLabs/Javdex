@@ -92,7 +92,5 @@ Linux 下的 `libmpv` 原生窗口嵌入由独立的后台子进程 `playback-he
 若计划在 Linux 上运行本地 AI 日中字幕，宿主机需满足：
 1. **glibc 运行时版本**：要求 `glibc >= 2.38`（可通过 `ldd --version` 检查）。
 2. **GCC C++ 运行时**：安装 GCC 14 兼容的 `libstdc++6`。
-3. **解压工具**：确保系统安装了 `xz-utils`，以便解压下载的模型运行时组件：
-   ```bash
-   sudo apt-get install xz-utils
-   ```
+
+运行库从 Javdex Runtime 按需下载，POSIX 工具使用应用可直接解压的 gzip 归档，无需另装 `xz-utils`。

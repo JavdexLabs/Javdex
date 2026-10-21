@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- 本地 AI 工具与 VAD 改由 Javdex Runtime 固定发行供应，避免上游构建过期导致下载 404；macOS Whisper／FFmpeg 改为按需下载，不再随主应用打包。有效旧 macOS Whisper 继续复用，模型权重和设备设置保持不变。
+
 ## 0.9.0 — 2026-10-18
 
 ### 本次整套重建

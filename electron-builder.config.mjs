@@ -3,11 +3,11 @@ import { resolve } from 'node:path'
 import {
   MAC_ELECTRON_LANGUAGES,
   PORTABLE_ELECTRON_LANGUAGES,
-  prunePackagedRuntime
+  prunePackagedRuntime,
+  verifyNoPackagedAiRuntime
 } from './scripts/packaging-runtime.mjs'
 import { stagePackagedPlaybackRuntime, verifyPackagedPlaybackRuntime } from './scripts/playback-runtime.mjs'
 import { stageLocalPlaybackRuntime, verifyLocalPlaybackRuntime } from './scripts/local-playback-package.mjs'
-import { preparePackagedAiRuntime, stagePackagedAiRuntime, signPackagedAiTools, verifySignedAiRuntime } from './scripts/ai-runtime-build.mjs'
 
 const adHocEntitlements = resolve('build/entitlements.mac.adhoc.plist')
 
@@ -26,11 +26,6 @@ async function signMacApp(options) {
       entitlements: adHocEntitlements
     })
   }
-
-  const originalIgnore = options.ignore
-  const aiTools = await signPackagedAiTools(options.app, identity, adHocEntitlements)
-  signOptions.ignore = file => aiTools(file) || (typeof originalIgnore === 'function' ? originalIgnore(file)
-    : (Array.isArray(originalIgnore) ? originalIgnore : originalIgnore ? [originalIgnore] : []).some(pattern => file.match(pattern)))
 
   await signAsync(signOptions)
 }
@@ -165,14 +160,13 @@ export default function buildConfig() {
   // only matcher defaults to **/*, so retain the desktop allowlist here too.
   config.win.files.unshift(...config.files)
 
-  config.beforePack = async context => { verifyLocalPlaybackRuntime(context); verifyPackagedPlaybackRuntime(context); await preparePackagedAiRuntime(context) }
+  config.beforePack = async context => { verifyLocalPlaybackRuntime(context); verifyPackagedPlaybackRuntime(context) }
   config.afterPack = async context => {
     prunePackagedRuntime(context)
+    verifyNoPackagedAiRuntime(context)
     stagePackagedPlaybackRuntime(context)
     stageLocalPlaybackRuntime(context)
-    await stagePackagedAiRuntime(context)
   }
-  config.afterSign = verifySignedAiRuntime
   config.mac.sign = signMacApp
 
   if (selected?.win) config.win.target = selected.win

@@ -62,7 +62,6 @@ export function createLocalModelManager(userData: string, options: {
   installer?: typeof createAiRuntimeInstaller
   inference?: (paths: Parameters<typeof createLocalTextInference>[0]) => TextEngine
   runtimeSupported?: typeof localModelRuntimeSupported
-  bundleRoot?: string
   detectDevices?: typeof detectLocalGpuDevices
   validate?: typeof validateModelRuntime
 } = {}) {
@@ -120,9 +119,9 @@ export function createLocalModelManager(userData: string, options: {
   let subtitleLeaseInstaller: ReturnType<typeof createAiRuntimeInstaller> | null = null
   const listeners = new Set<() => void>()
   const supported = options.runtimeSupported ?? localModelRuntimeSupported
-  const installer = (selection = selected, model = translationModel) => (options.installer ?? createAiRuntimeInstaller)(directory, undefined, localModelAssets(selection, model, undefined, downloadSource), { bundleRoot: options.bundleRoot })
+  const installer = (selection = selected, model = translationModel) => (options.installer ?? createAiRuntimeInstaller)(directory, undefined, localModelAssets(selection, model, undefined, downloadSource))
   const gpuInstaller = (backend: 'cuda' | 'vulkan') => (options.installer ?? createAiRuntimeInstaller)(directory, undefined,
-    [...gpuRuntimeAssets(currentAiRuntimeTarget(), backend), ...localModelAssets(selected, translationModel).filter(asset => !asset.archive)], { bundleRoot: options.bundleRoot })
+    [...gpuRuntimeAssets(currentAiRuntimeTarget(), backend), ...localModelAssets(selected, translationModel).filter(asset => !asset.archive)])
   const runtimePaths = (runtime: ReturnType<typeof createAiRuntimeInstaller>, refs = {
     recognition: usage.subtitleRecognition.variant, translation: usage.subtitleTranslation.variant
   }) => {

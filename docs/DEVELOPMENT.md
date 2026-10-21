@@ -114,17 +114,17 @@ Windows x64 的 CUDA／Vulkan 资产见 `localModels/gpuManifest.ts`，CPU 目�
 
 Windows Whisper Vulkan 改为从 [Javdex Runtime 固定发行](https://github.com/JavdexLabs/javdex-runtime/releases/tag/whisper-b5130-r1) 按需下载，主安装包不再编译或携带可选语音 Vulkan 工具。`gpuManifest.ts` 锁定实际 ZIP 大小、SHA-256、展开上限、原生 CI 源码与 run；客户端不跟随 `latest` 或远程清单自动更换运行库。首次准备 GPU 环境时显示下载计划，经现有续传与外层摘要检查后，在隔离暂存目录核对平铺包的目标、接口、来源、逐文件摘要及精确文件集合，再原子晋升；失败保留旧安装。
 
-运行库仓库保留同一 b5130 上游提交、固定开发材料、静态 CRT 与原编译选项，以及完整 Zstandard 解码后再提取的修复；普通用户不安装编译器、SDK 或驱动。已安装且完整的旧 b5130 Windows Vulkan 工具继续复用，不改写其来源标识；缺失或损坏时下载固定新包。模型权重、计算策略、CUDA、macOS Metal 和 Linux CPU 路径保持不变。开发者构建配方与许可材料在独立运行库仓库，本仓库的 `ai-runtime:build` 仅保留现有 macOS 构建。
+运行库仓库保留同一 b5130 上游提交、固定开发材料、静态 CRT 与原编译选项，以及完整 Zstandard 解码后再提取的修复；普通用户不安装编译器、SDK 或驱动。已安装且完整的旧 b5130 Windows Vulkan 工具继续复用，不改写其来源标识；缺失或损坏时下载固定新包。模型权重、计算策略、CUDA、macOS Metal 和 Linux CPU 路径保持不变。开发者构建配方与许可材料在独立运行库仓库，本仓库不再构建或随包交付 AI 工具，包含 macOS 在内的工具均按需下载。
 
 每个运行租约冻结精度与路径，字幕使用自己的两阶段绑定，文本引擎使用文本用途绑定。文件 snapshot 区分权重存在、完整运行依赖、平台支持、配置引用和运行租约；引用文件删除在主进程阻止。用途保存通过 revision 检查避免覆盖并发更改。文件页下载／导入只维护资源，不暗改用途；用途草稿跨三个模型页签保持挂载，离开该组仍有保存保护。
 
-本地识别／翻译与模型商店共用 [运行库安装器](../apps/desktop/src/main/services/localModels/runtimeInstaller.ts)：Windows x64 保留原目录与 ZIP；macOS、Linux 的 arm64／x64 工具在 `tools/<platform>-<arch>/` 隔离，权重目录和默认精度保持。macOS 最低 13.3；Linux 当前使用固定 Ubuntu 发布资产，需 glibc 2.38+、GCC 14 C++ 运行库及 xz-utils（例如已更新的 Ubuntu 24.04）。旧 glibc／musl 仍可管理权重，但不能推理；仅检查 CPU 架构不能代表 ABI 兼容。
+本地识别／翻译与模型商店共用 [运行库安装器](../apps/desktop/src/main/services/localModels/runtimeInstaller.ts)：原包镜像保留既有摘要和安装身份；各平台工具在 `runtimes/` 中按引擎、版本、目标和后端隔离。新 FFmpeg 使用独立的 `8.1.3-r1` 目录，权重目录和默认精度保持。macOS 最低 13.3；Linux 当前使用固定 Ubuntu 发布资产，需 glibc 2.38+、GCC 14 C++ 运行库（例如已更新的 Ubuntu 24.04）。旧 glibc／musl 仍可管理权重，但不能推理；仅检查 CPU 架构不能代表 ABI 兼容。
 
-macOS 上 `npm run ai-runtime:build` 使用固定 commit 的 whisper.cpp b5130 与 FFmpeg 8.1.3 源码，验证 SHA-256 后编译静态 CLI。首次开发构建需要 Xcode Command Line Tools、CMake、make 及网络；不自动安装系统工具。`dev`、`desktop:build`、`start`／`preview` 自动准备本机产物，后续复用已验证的构建缓存。Mac 打包另按目标架构编译，输出 `out/ai-runtime/darwin-<arch>/`，支持 arm64 和 x64 单架构包，不支持 universal AI 工具包。
+macOS AI 工具也从 [Javdex Runtime](https://github.com/JavdexLabs/javdex-runtime) 固定发行按需下载。主应用的开发、构建、启动和打包不再编译、复制或签名 Whisper／FFmpeg，安装包不携带 `Resources/ai-runtime`。用户准备语音能力时，先展示包含语音引擎、音频提取工具和 VAD 的网络计划，再走统一续传、SHA-256、隔离解压和原子安装流程。完整旧 b5130 macOS Whisper 安装在逐文件摘要验证后可继续复用；损坏时下载修复，不从旧应用目录重新复制。
 
-工具只链接系统库，识别启用 Metal／Accelerate，FFmpeg 仅输出 PCM／WAV，不启用 GPL、nonfree 或自动探测的第三方编解码库。源文件、构建参数、许可证与哈希写入 bundle 清单；打包放入 `Resources/ai-runtime`，不进 asar。CLI 在外层 app 签名前单独签名并更新清单，外层签名跳过重复签 CLI；`afterSign` 只校验，不能修改已封装资源。此流程有真实 ad-hoc 签名回归，不等于正式 DMG、Developer ID 签名或公证已经验收。源码与构建资料发布要求见 [第三方说明](THIRD_PARTY_NOTICES.md#本地-ai-运行库)。
+Whisper b5130 的 macOS arm64／x64 工具保留静态运行库、Metal／Accelerate 和内嵌 Metal shader；FFmpeg 8.1.3 的五目标最小音频工具禁用 GPL、nonfree 与外部库自动发现。固定配方、完整对应源码、ad-hoc CLI 签名及原生 Kotoba/VAD CPU 检查在运行库仓库维护；托管 CI 的 CPU 检查不代表 Metal／独显推理或 Developer ID 公证已验收。
 
-Windows／Linux 及 macOS 翻译工具按需下载固定发布资产；安装校验压缩包 SHA，保留 POSIX `bin/lib` 布局，把安全的库别名转为普通文件。解压在独立暂存目录，完成后替换工具目录，失败保留旧安装。模型目录迁移不需要放宽原有禁止符号链接的规则。开发构建源码、合成音频、下载权重与验收产物均从安装包排除。
+所有平台的 AI 工具按需下载固定 Javdex Runtime 发布资产；安装校验压缩包 SHA，保留 POSIX `bin/lib` 布局，把安全的库别名转为普通文件。解压在独立暂存目录，完成后替换工具目录，失败保留旧安装。模型目录迁移不需要放宽原有禁止符号链接的规则。开发构建源码、合成音频、下载权重与验收产物均从安装包排除。
 
 无 GUI 的实际推理检查：生成／提供一段公开或合成日语音频后，运行 `node --import tsx scripts/local-ai-platform-acceptance.ts --audio <音频>`。默认仅使用忽略目录 `out/ai-runtime-acceptance/`，不访问应用用户目录；首次联网下载权重，后续可用 `--offline`。Linux 验证镜像由 `scripts/local-ai-linux-acceptance.Dockerfile` 构建，只挂载此专用目录，在 `--network none` 下运行编译后的检查脚本；不是服务端或 GUI 验收。详细命令与边界见 [AI 字幕历史验证](archive/local-ai/implementation-and-validation-2026-10.md#macoslinux-运行库适配2026-10-07)。
 

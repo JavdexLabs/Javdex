@@ -38,9 +38,9 @@ description: 汇总 Javdex 常见报错与排查指南：操作系统安全放�
 ### 2. 本地 AI 日中字幕在 macOS 或 Linux 上提示系统环境不支持
 - **原因**：`runtimeInstaller.ts` 在启动本地 AI 运行库前会检查宿主系统基线：
   - **macOS**：本地 AI 字幕与本地模型翻译要求 **macOS 13.3+（Ventura，`Darwin >= 22.4`）**（普通内置视频播放仅需 macOS 12.0+）。
-  - **Linux**：要求 **`glibc >= 2.38`**、GCC 14 兼容的 `libstdc++6` 以及用于解压运行库的 **`xz-utils`**。
+  - **Linux**：要求 **`glibc >= 2.38`**、GCC 14 兼容的 `libstdc++6`。
 - **解决方式**：
-  - Linux 用户可通过 `ldd --version` 核对 glibc 版本，并执行 `sudo apt-get install xz-utils` 安装解压工具。
+  - Linux 用户可通过 `ldd --version` 核对 glibc 版本，并检查 GCC C++ 运行库版本。工具从 Javdex Runtime 按需下载，不需要额外安装 `xz-utils`。
 
 ### 3. 开启 CUDA / Vulkan 加速后为什么实际回退到了 CPU 推理？
 - **原因**：为防止显存溢出（OOM）导致播放器或显卡驱动崩溃，`runtimeAcceleration.ts` 在每次启动推理前会计算安全显存预算：

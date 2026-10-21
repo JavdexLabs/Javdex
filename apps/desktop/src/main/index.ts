@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { SCRAPE_BROWSER_HELPER_FLAG } from './scrapers/scrapeBrowserProtocol'
 import { configurePlaybackDisplay } from './player/playbackDisplay'
+import { configureLinuxGpuImport } from './player/linuxGpuImport'
 
 const SCRAPE_BROWSER_SMOKE_FLAG = '--javdex-scraper-helper-smoke'
 
@@ -14,6 +15,8 @@ configurePlaybackDisplay(app, {
       ? path.join(process.resourcesPath, 'native-playback', 'playback.node')
       : path.join(app.getAppPath(), 'out', 'native-playback', 'playback.node'))
 })
+
+configureLinuxGpuImport(app)
 
 if (process.argv.includes(SCRAPE_BROWSER_HELPER_FLAG)) {
   void import('./scrapers/scrapeBrowserHelperEntry')

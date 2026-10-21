@@ -41,6 +41,7 @@ import { videoMaintenanceService } from './services/videoMaintenanceService'
 import { videoLifecycleService } from './services/videoLifecycleService'
 import { videoQueryService } from './services/videoQueryService'
 import { disposeBuiltinPlayback, stopBuiltinPlayback } from './player/desktopPlayback'
+import { prepareLinuxPlaybackDevice } from './player/linuxPlaybackDevice'
 import { captureInitialLocalModelMode, closeLocalModels } from './services/localModels/desktopLocalModels'
 
 let mainWindow: BrowserWindow | null = null
@@ -158,6 +159,7 @@ function registerAssetProtocol(): void {
 
 if (gotSingleInstanceLock) {
   void app.whenReady().then(async () => {
+    await prepareLinuxPlaybackDevice()
     captureInitialLocalModelMode()
     applyAppIcons()
     configureDesktopLibraryRuntime()

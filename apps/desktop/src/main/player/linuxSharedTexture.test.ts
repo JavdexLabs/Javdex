@@ -13,17 +13,17 @@ const bindingToken = '33333333-3333-4333-8333-333333333333'
 const READY = 'playback:shared-texture-ready'
 const REMOVED = 'playback:shared-texture-removed'
 const FAILED = 'playback:shared-texture-failed'
-const DRAWN = 'playback:shared-texture-drawn'
+const DRAWN = 'playback:shared-texture-submitted'
 const frame = (sequence = 1, slot = 0, extra: Record<string, unknown> = {}) => ({ protocol: 'javdex-dmabuf-v1',
   sequence, slot, width: 320, height: 180, pixelFormat: 'bgra', stride: 1280, offset: 0, size: 230400,
   modifier: '0', producerComplete: true, ...extra })
-function fixture(diagnostics = false) {
+function fixture(diagnostics = false, software = false) {
   let nextFd = 100
   let now = 0, receiveCalls = 0, ackWritable = true, importFailure = false, sendFailure = false
   let tick: () => void = () => {}
   const app = new EventEmitter(), ipc = new EventEmitter()
   const mainFrame = {}
-  const contents = Object.assign(new EventEmitter(), { mainFrame, isDestroyed: () => false })
+  const contents = Object.assign(new EventEmitter(), { mainFrame, send: (_channel: string, metadata: unknown) => sent.push({ frame: mainFrame, metadata: metadata as typeof sent[number]['metadata'] }), isDestroyed: () => false })
   const window = { webContents: contents } as unknown as BrowserWindow
   const closed: number[] = [], acknowledgements: number[] = [], errors: Error[] = []
   const incoming: Array<{ fd: number; metadata: Buffer }> = []
@@ -31,14 +31,15 @@ function fixture(diagnostics = false) {
   const diagnosticLogs: string[] = []
   const sent: Array<{ frame: unknown; metadata: { surfaceToken: string; bindingToken: string; sequence: number } }> = []
   const transport = {
+    readPixels: (_fd: number, size: number) => Buffer.alloc(size, 255),
     createChannel: () => ({ parentFd: 10, childFd: 11 }),
     close: (fd: number) => { assert.ok(!closed.includes(fd), `FD ${fd} must close exactly once`); closed.push(fd) },
     receive: () => { receiveCalls++; return incoming.shift() ?? null },
     sendAck: (_fd: number, sequence: number) => { if (ackWritable) acknowledgements.push(sequence); return ackWritable }
   }
   const exports = {} as typeof import('./linuxSharedTexture')
-  runInNewContext(code, { exports, Buffer, process: { env: { JAVDEX_TEXTURE_PIXEL_DIAGNOSTICS: diagnostics ? '1' : '' } },
-    console: { info: (_tag: string, data: string) => diagnosticLogs.push(data) }, Date: { now: () => now },
+  runInNewContext(code, { exports, Buffer, process: { hrtime: { bigint: () => BigInt(now * 1000000) }, env: { JAVDEX_TEXTURE_PIXEL_DIAGNOSTICS: diagnostics ? '1' : '' } },
+    console: { info: (tag: string, data: string) => { if (tag === '[playback-texture-pixels]') diagnosticLogs.push(data) } }, Date: { now: () => now },
     setInterval: (callback: () => void) => { tick = callback; return { unref() {} } }, clearInterval: () => { tick = () => {} },
     require(id: string): unknown {
       if (id === 'node:crypto') return { randomUUID: () => '11111111-1111-4111-8111-111111111111' }
@@ -57,7 +58,7 @@ function fixture(diagnostics = false) {
       throw new Error(`Unexpected dependency ${id}`)
     }
   })
-  const manager = exports.createLinuxSharedTexture(window, '/fixture/playback-fd.node', error => errors.push(error))
+  const manager = exports.createLinuxSharedTexture(window, '/fixture/playback-fd.node', error => errors.push(error), software)
   const binding = { surfaceToken: manager.surfaceToken, bindingToken }
   const event = { sender: contents, senderFrame: mainFrame }
   return { manager, imports, closed, sent, errors, acknowledgements, contents, ipc, app, exports, event, binding, diagnosticLogs,
@@ -97,6 +98,17 @@ test('validates the complete one-plane DMA-BUF descriptor before native import',
   ]) assert.throws(() => f.exports.decodeDmaBufFrame(Buffer.from(JSON.stringify(frame(1, 0, invalid)))))
   assert.throws(() => f.exports.decodeDmaBufFrame(Buffer.alloc(4097)))
   assert.throws(() => f.exports.decodeDmaBufFrame(Buffer.from('null')))
+})
+test('pixel diagnostics sample eligible frames after resize, with at most three requests', async t => {
+  const f = fixture(true); t.after(f.manager.destroy)
+  f.ready(); f.manager.setVisible(true)
+  // The old absolute 15/30/45 trigger could be consumed by the initial 1px viewport.
+  for (let sequence = 1; sequence <= 65; sequence++) {
+    f.packet(sequence, 0, sequence > 30 ? { width: 640, height: 360, stride: 2560, size: 921600 } : {})
+    await f.tick(); f.release(sequence - 1); await f.tick()
+  }
+  const requested = f.sent.filter(item => (item.metadata as { diagnosePixels?: boolean }).diagnosePixels)
+  assert.deepEqual(requested.map(item => item.metadata.sequence), [31, 46, 61])
 })
 test('requires a current, main-frame receiver and never ACKs merely completed sends', async t => {
   const f = fixture(); t.after(f.manager.destroy)
@@ -215,7 +227,7 @@ test('GPU loss, renderer replacement, and authenticated draw failures stop witho
 test('counts only current, visible, monotonically ordered canvas draw submissions', async t => {
   const f = fixture(); t.after(f.manager.destroy)
   f.ready(); f.manager.setVisible(true); f.packet(); await f.tick()
-  assert.equal(f.manager.presentedFrames(), 0, 'export/import/transfer do not establish a drawn frame')
+  assert.equal(f.manager.submittedFrames(), 0, 'export/import/transfer do not establish a drawn frame')
   const value = { ...f.binding, sequence: 1 }
   f.ipc.emit(DRAWN, { ...f.event, senderFrame: {} }, value)
   f.ipc.emit(DRAWN, f.event, { ...value, surfaceToken: 'obsolete' })
@@ -223,11 +235,11 @@ test('counts only current, visible, monotonically ordered canvas draw submission
   f.ipc.emit(DRAWN, f.event, { ...value, sequence: 2 })
   f.ipc.emit(DRAWN, f.event, { ...value, sequence: 0 })
   f.manager.setVisible(false); f.ipc.emit(DRAWN, f.event, value)
-  assert.equal(f.manager.presentedFrames(), 0)
+  assert.equal(f.manager.submittedFrames(), 0)
   f.manager.setVisible(true); f.ipc.emit(DRAWN, f.event, value); f.ipc.emit(DRAWN, f.event, value)
-  assert.equal(f.manager.presentedFrames(), 1)
+  assert.equal(f.manager.submittedFrames(), 1)
   f.packet(2, 1); await f.tick(); f.ipc.emit(DRAWN, f.event, { ...value, sequence: 2 })
-  assert.equal(f.manager.presentedFrames(), 2)
+  assert.equal(f.manager.submittedFrames(), 2)
   f.manager.destroy(); assert.equal(f.ipc.listenerCount(DRAWN), 0)
 })
 
@@ -257,4 +269,62 @@ test('hidden full GPU pools do not time out and resume with a fresh bounded inte
   await f.tick()
   assert.deepEqual(f.acknowledgements, [1, 2, 3])
   assert.equal(f.errors.length, 0)
+})
+
+test('CPU channel validates layout, copies only owned memory and keeps IPC bounded until authenticated draw ACK', async t => {
+  const f = fixture(false, true); t.after(f.manager.destroy)
+  f.ready(); f.manager.setVisible(true)
+  const cpu = { protocol: 'javdex-cpu-v1', pixelFormat: 'rgba' }
+  f.packet(1, 0, cpu); await f.tick()
+  assert.equal(f.imports.length, 0); assert.equal(f.sent.length, 1)
+  assert(f.closed.includes(101)); assert.deepEqual(f.acknowledgements, [])
+  f.ipc.emit(DRAWN, { ...f.event, senderFrame: {} }, { ...f.binding, sequence: 1 }); await f.tick()
+  assert.deepEqual(f.acknowledgements, [])
+  f.ipc.emit(DRAWN, f.event, { ...f.binding, sequence: 1 }); await f.tick()
+  assert.deepEqual(f.acknowledgements, [1])
+  f.packet(2, 0, cpu); f.packet(3, 1, cpu); f.packet(4, 2, cpu); f.packet(5, 0, cpu)
+  await f.tick(); await f.tick(); await f.tick(); await f.tick()
+  assert.equal(f.sent.length, 4)
+  f.ipc.emit(REMOVED, f.event, f.binding); await f.tick()
+  assert.deepEqual(f.acknowledgements, [1, 2, 3, 4], 'unmounted copied frames cannot strand helper slots')
+  assert.equal(f.errors.length, 0)
+  for (const invalid of [{ stride: 1279 }, { stride: 1281 }, { size: 1 }, { width: 8193 }])
+    assert.throws(() => f.exports.decodeCpuFrame(Buffer.from(JSON.stringify({ ...frame(), ...cpu, ...invalid }))))
+})
+
+test('adaptive budget bounds cost spikes and adjustment rate, resets to 20ms', () => {
+  const f = fixture(), b = new f.exports.FrameBudget()
+  assert.equal(b.value, 20)
+  for (let i = 0; i < 5000; i++) b.observe(90, i * 34)
+  assert.equal(b.value, 40)
+  b.observe(Infinity, 999999); b.observe(-1, 999999); b.observe(1000, 999999)
+  assert.equal(b.value, 40)
+  for (let i = 0; i < 10000; i++) b.observe(1, 200000 + i * 34)
+  assert.ok(b.value >= 8 && b.value <= 9, '1ms deadband must remain inside lower bound')
+  b.reset(); assert.equal(b.value, 20)
+  for (let i = 0; i < 30; i++) b.observe(40, 2000)
+  assert.equal(b.value, 22)
+  for (let i = 0; i < 100; i++) b.observe(40, 2001)
+  assert.equal(b.value, 22)
+  f.manager.destroy()
+})
+test('clock calibration rejects untrusted renderers and reset drops stale frames without reusing held textures', async t => {
+  const f = fixture(); t.after(f.manager.destroy)
+  f.ready(); f.manager.setVisible(true)
+  const before = f.sent.length
+  f.ipc.emit('playback:frame-clock', { ...f.event, senderFrame: {} }, { ...f.binding, sentAt: 3 })
+  assert.equal(f.sent.length, before)
+  f.ipc.emit('playback:frame-clock', f.event, { ...f.binding, sentAt: 3 })
+  assert.equal(f.sent.length, before + 1)
+  assert.equal(f.manager.resetTiming(), 1)
+  f.packet(1, 0); await f.tick(); await f.tick()
+  assert.deepEqual(f.acknowledgements, [1])
+  assert.equal(f.imports.length, 0)
+  f.packet(2, 0, { timeline: 1, targetTimeUs: 20000, renderStartUs: 1 }); await f.tick()
+  assert.equal(f.imports.length, 1)
+  f.ipc.emit(DRAWN, f.event, { ...f.binding, sequence: 2 })
+  await f.tick()
+  assert.deepEqual(f.acknowledgements, [1], 'submission never grants GPU slot reuse')
+  f.release(); await f.tick()
+  assert.deepEqual(f.acknowledgements, [1, 2])
 })

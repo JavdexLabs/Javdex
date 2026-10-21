@@ -9,6 +9,7 @@
 #include <gbm.h>
 #include <xf86drm.h>
 #include <drm_fourcc.h>
+#include "linuxVulkanModifiers.h"
 #define JAVDEX_STANDALONE_PLAYBACK
 #include "mpvCore.h"
 #include "linuxDmaBuf.h"
@@ -24,6 +25,61 @@
 namespace {
 using namespace javdex;
 using namespace javdex::dmabuf;
+// Resolve core GL calls through the same EGL implementation as libmpv. A
+// separately bundled libOpenGL forwarder can disagree with host dispatch.
+decltype(&::glBindFramebuffer) glBindFramebuffer = nullptr;
+decltype(&::glBindTexture) glBindTexture = nullptr;
+decltype(&::glCheckFramebufferStatus) glCheckFramebufferStatus = nullptr;
+decltype(&::glClear) glClear = nullptr;
+decltype(&::glClearColor) glClearColor = nullptr;
+decltype(&::glColorMask) glColorMask = nullptr;
+decltype(&::glDeleteFramebuffers) glDeleteFramebuffers = nullptr;
+decltype(&::glDeleteTextures) glDeleteTextures = nullptr;
+decltype(&::glDisable) glDisable = nullptr;
+decltype(&::glFinish) glFinish = nullptr;
+decltype(&::glFramebufferTexture2D) glFramebufferTexture2D = nullptr;
+decltype(&::glGenFramebuffers) glGenFramebuffers = nullptr;
+decltype(&::glGenTextures) glGenTextures = nullptr;
+decltype(&::glGetError) glGetError = nullptr;
+decltype(&::glGetIntegerv) glGetIntegerv = nullptr;
+decltype(&::glGetString) glGetString = nullptr;
+decltype(&::glTexParameteri) glTexParameteri = nullptr;
+void loadGlFunctions() {
+    glBindFramebuffer = reinterpret_cast<decltype(glBindFramebuffer)>(eglGetProcAddress("glBindFramebuffer"));
+    if (!glBindFramebuffer) throw std::runtime_error("Required EGL OpenGL entry point is unavailable");
+    glBindTexture = reinterpret_cast<decltype(glBindTexture)>(eglGetProcAddress("glBindTexture"));
+    if (!glBindTexture) throw std::runtime_error("Required EGL OpenGL entry point is unavailable");
+    glCheckFramebufferStatus = reinterpret_cast<decltype(glCheckFramebufferStatus)>(eglGetProcAddress("glCheckFramebufferStatus"));
+    if (!glCheckFramebufferStatus) throw std::runtime_error("Required EGL OpenGL entry point is unavailable");
+    glClear = reinterpret_cast<decltype(glClear)>(eglGetProcAddress("glClear"));
+    if (!glClear) throw std::runtime_error("Required EGL OpenGL entry point is unavailable");
+    glClearColor = reinterpret_cast<decltype(glClearColor)>(eglGetProcAddress("glClearColor"));
+    if (!glClearColor) throw std::runtime_error("Required EGL OpenGL entry point is unavailable");
+    glColorMask = reinterpret_cast<decltype(glColorMask)>(eglGetProcAddress("glColorMask"));
+    if (!glColorMask) throw std::runtime_error("Required EGL OpenGL entry point is unavailable");
+    glDeleteFramebuffers = reinterpret_cast<decltype(glDeleteFramebuffers)>(eglGetProcAddress("glDeleteFramebuffers"));
+    if (!glDeleteFramebuffers) throw std::runtime_error("Required EGL OpenGL entry point is unavailable");
+    glDeleteTextures = reinterpret_cast<decltype(glDeleteTextures)>(eglGetProcAddress("glDeleteTextures"));
+    if (!glDeleteTextures) throw std::runtime_error("Required EGL OpenGL entry point is unavailable");
+    glDisable = reinterpret_cast<decltype(glDisable)>(eglGetProcAddress("glDisable"));
+    if (!glDisable) throw std::runtime_error("Required EGL OpenGL entry point is unavailable");
+    glFinish = reinterpret_cast<decltype(glFinish)>(eglGetProcAddress("glFinish"));
+    if (!glFinish) throw std::runtime_error("Required EGL OpenGL entry point is unavailable");
+    glFramebufferTexture2D = reinterpret_cast<decltype(glFramebufferTexture2D)>(eglGetProcAddress("glFramebufferTexture2D"));
+    if (!glFramebufferTexture2D) throw std::runtime_error("Required EGL OpenGL entry point is unavailable");
+    glGenFramebuffers = reinterpret_cast<decltype(glGenFramebuffers)>(eglGetProcAddress("glGenFramebuffers"));
+    if (!glGenFramebuffers) throw std::runtime_error("Required EGL OpenGL entry point is unavailable");
+    glGenTextures = reinterpret_cast<decltype(glGenTextures)>(eglGetProcAddress("glGenTextures"));
+    if (!glGenTextures) throw std::runtime_error("Required EGL OpenGL entry point is unavailable");
+    glGetError = reinterpret_cast<decltype(glGetError)>(eglGetProcAddress("glGetError"));
+    if (!glGetError) throw std::runtime_error("Required EGL OpenGL entry point is unavailable");
+    glGetIntegerv = reinterpret_cast<decltype(glGetIntegerv)>(eglGetProcAddress("glGetIntegerv"));
+    if (!glGetIntegerv) throw std::runtime_error("Required EGL OpenGL entry point is unavailable");
+    glGetString = reinterpret_cast<decltype(glGetString)>(eglGetProcAddress("glGetString"));
+    if (!glGetString) throw std::runtime_error("Required EGL OpenGL entry point is unavailable");
+    glTexParameteri = reinterpret_cast<decltype(glTexParameteri)>(eglGetProcAddress("glTexParameteri"));
+    if (!glTexParameteri) throw std::runtime_error("Required EGL OpenGL entry point is unavailable");
+}
 MpvCore playback;
 Leases leases;
 Bounds requested;
@@ -50,7 +106,7 @@ struct Buffer {
     GLuint texture = 0, framebuffer = 0;
     int fd = -1, width = 0, height = 0;
     uint32_t stride = 0, offset = 0;
-    uint64_t size = 0;
+    uint64_t size = 0, modifier = DRM_FORMAT_MOD_INVALID;
 };
 class Gpu {
     int node = -1;
@@ -87,12 +143,15 @@ public:
         if (node >= 0) close(node);
         node = -1; createImage = nullptr; destroyImage = nullptr; imageTarget = nullptr;
     }
+    std::vector<uint64_t> consumerModifiers;
     void initialize(const char *path) {
         node = open(path, O_RDWR | O_CLOEXEC | O_NOCTTY);
         if (node < 0) throw std::runtime_error("Cannot open DRM render node (missing device or permission)");
         struct stat status{};
         if (fstat(node, &status) != 0 || !S_ISCHR(status.st_mode) || drmGetNodeTypeFromFd(node) != DRM_NODE_RENDER)
             throw std::runtime_error("Selected device is not a DRM render node");
+        if (const char *loader = std::getenv("JAVDEX_PLAYBACK_VULKAN_LOADER"))
+            consumerModifiers = javdex::vulkanDmaBufModifiers(loader, node);
         device = gbm_create_device(node);
         if (!device) throw std::runtime_error("Cannot create GBM device on DRM render node");
         auto platformDisplay = reinterpret_cast<PFNEGLGETPLATFORMDISPLAYEXTPROC>(eglGetProcAddress("eglGetPlatformDisplayEXT"));
@@ -119,6 +178,7 @@ public:
         context = eglCreateContext(display, config, EGL_NO_CONTEXT, attributes);
         if (context == EGL_NO_CONTEXT || !eglMakeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE, context))
             throw std::runtime_error("Cannot create surfaceless OpenGL 3.2 context");
+        loadGlFunctions();
         const char *renderer = reinterpret_cast<const char *>(glGetString(GL_RENDERER));
         std::string name = renderer ? renderer : "";
         std::transform(name.begin(), name.end(), name.begin(), [](unsigned char value) { return static_cast<char>(std::tolower(value)); });
@@ -142,11 +202,27 @@ public:
         // Called only for an unleased slot. Resize never frees or overwrites a
         // BO still held by Chromium; at most three BOs exist across all sizes.
         release(buffer);
-        buffer.bo = gbm_bo_create(device, width, height, GBM_FORMAT_ARGB8888, GBM_BO_USE_RENDERING | GBM_BO_USE_LINEAR);
-        if (!buffer.bo) throw std::runtime_error("Cannot allocate linear renderable GBM buffer");
-        if (gbm_bo_get_plane_count(buffer.bo) != 1 || gbm_bo_get_modifier(buffer.bo) != DRM_FORMAT_MOD_LINEAR
+        if (!consumerModifiers.empty()) {
+            // Allocate only a layout that the Vulkan consumer can import. An
+            // EGL-renderable proprietary layout need not be Vulkan-compatible.
+            for (const auto modifier : consumerModifiers) {
+                buffer.bo = gbm_bo_create_with_modifiers2(device, width, height, GBM_FORMAT_ARGB8888,
+                    &modifier, 1, GBM_BO_USE_RENDERING);
+                if (buffer.bo) break;
+            }
+        } else {
+            buffer.bo = gbm_bo_create(device, width, height, GBM_FORMAT_ARGB8888, GBM_BO_USE_RENDERING | GBM_BO_USE_LINEAR);
+            if (!buffer.bo && explicitModifiers)
+                buffer.bo = gbm_bo_create(device, width, height, GBM_FORMAT_ARGB8888, GBM_BO_USE_RENDERING);
+        }
+        if (!buffer.bo) throw std::runtime_error("Cannot allocate renderable GBM buffer");
+        buffer.modifier = gbm_bo_get_modifier(buffer.bo);
+        if (!consumerModifiers.empty() && std::find(consumerModifiers.begin(), consumerModifiers.end(), buffer.modifier) == consumerModifiers.end())
+            throw std::runtime_error("GBM allocation does not match the negotiated Vulkan layout");
+        if (gbm_bo_get_plane_count(buffer.bo) != 1 || buffer.modifier == DRM_FORMAT_MOD_INVALID
+            || (!explicitModifiers && buffer.modifier != DRM_FORMAT_MOD_LINEAR)
             || gbm_bo_get_format(buffer.bo) != GBM_FORMAT_ARGB8888)
-            throw std::runtime_error("GBM did not provide a single-plane linear BGRA buffer");
+            throw std::runtime_error("GBM did not provide a supported single-plane BGRA buffer");
         buffer.width = width; buffer.height = height;
         buffer.stride = gbm_bo_get_stride_for_plane(buffer.bo, 0); buffer.offset = gbm_bo_get_offset(buffer.bo, 0);
         buffer.size = bufferSize(width, height, buffer.stride, buffer.offset);
@@ -164,7 +240,8 @@ public:
             EGL_DMA_BUF_PLANE0_OFFSET_EXT, static_cast<EGLint>(buffer.offset),
             EGL_DMA_BUF_PLANE0_PITCH_EXT, static_cast<EGLint>(buffer.stride)};
         if (explicitModifiers) imageAttributes.insert(imageAttributes.end(),
-            {EGL_DMA_BUF_PLANE0_MODIFIER_LO_EXT, 0, EGL_DMA_BUF_PLANE0_MODIFIER_HI_EXT, 0});
+            {EGL_DMA_BUF_PLANE0_MODIFIER_LO_EXT, static_cast<EGLint>(buffer.modifier & 0xffffffff),
+                EGL_DMA_BUF_PLANE0_MODIFIER_HI_EXT, static_cast<EGLint>(buffer.modifier >> 32)});
         imageAttributes.push_back(EGL_NONE);
         buffer.image = createImage(display, EGL_NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT, nullptr, imageAttributes.data());
         if (buffer.image == EGL_NO_IMAGE_KHR) throw std::runtime_error("Cannot import GBM DMA-BUF into EGL image");
@@ -234,13 +311,24 @@ void create(const Bounds &rect) {
     // This standalone EGL context deliberately has no native compositor/display
     // decoder interop. auto-copy supports VAAPI where available, with software
     // decode fallback; the rendered output still stays in GPU shared textures.
-    playback.initialize(getProcAddress, nullptr, false, wake, nullptr, "auto-copy");
+    // Both Wayland EGL and X11 ANGLE Vulkan need rendering/completion and IPC
+    // headroom. With zero lead, mpv misses deadlines even with an immediate-ACK
+    // consumer. Keep nonblocking render and all producer/consumer fences;
+    // reserve 20ms for either DMA-BUF path, independent of modifier negotiation.
+    playback.initialize(getProcAddress, nullptr, false, wake, nullptr, "auto-copy", false, "0.02");
     publication.request();
 }
+uint64_t timeline = 0;
 bool dispatch(const std::vector<std::string> &fields) {
     const auto &op = fields.at(0);
     if (op == "create" && fields.size() == 8 && fields[1] == "0" && fields[7] == "dmabuf") create(rectangle(fields, 2));
     else if (op == "destroy" && fields.size() == 1) { destroyPlayer(); return false; }
+    else if (op == "timing-reset" && fields.size() == 2) {
+        const double value = finiteNumber(fields[1]);
+        if (value < 1 || value > maxSequence || std::floor(value) != value) throw std::runtime_error("Invalid timing epoch");
+        timeline = static_cast<uint64_t>(value);
+        preparedSlot = -1; preparedMetadata.clear(); publication.request();
+    }
     else if (!playback.alive()) throw std::runtime_error("No shared-texture playback session");
     else if (op == "bounds" && fields.size() == 6) updateBounds(rectangle(fields, 1));
     else if (op == "renderer-controls" && fields.size() == 2 && (fields[1] == "0" || fields[1] == "1")) rendererControls = fields[1] == "1";
@@ -259,11 +347,18 @@ bool dispatch(const std::vector<std::string> &fields) {
     } else throw std::runtime_error("Invalid playback operation");
     return true;
 }
+int64_t renderStartUs = 0, targetTimeUs = 0;
+int64_t monotonicUs() {
+    timespec ts{};
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) throw std::runtime_error("Cannot read frame clock");
+    return int64_t(ts.tv_sec) * 1000000 + ts.tv_nsec / 1000;
+}
 std::string metadata(const Buffer &buffer, int slot, uint64_t sequence) {
     return "{\"protocol\":\"javdex-dmabuf-v1\",\"sequence\":" + std::to_string(sequence) + ",\"slot\":" + std::to_string(slot)
         + ",\"width\":" + std::to_string(buffer.width) + ",\"height\":" + std::to_string(buffer.height)
+        + ",\"timeline\":" + std::to_string(timeline) + ",\"targetTimeUs\":" + std::to_string(targetTimeUs) + ",\"renderStartUs\":" + std::to_string(renderStartUs)
         + ",\"pixelFormat\":\"bgra\",\"stride\":" + std::to_string(buffer.stride) + ",\"offset\":" + std::to_string(buffer.offset)
-        + ",\"size\":" + std::to_string(buffer.size) + ",\"modifier\":\"0\",\"producerComplete\":true}";
+        + ",\"size\":" + std::to_string(buffer.size) + ",\"modifier\":\"" + std::to_string(buffer.modifier) + "\",\"producerComplete\":true}";
 }
 void render() {
     if (!playback.alive()) return;
@@ -277,7 +372,7 @@ void render() {
         preparedSlot = -1; preparedMetadata.clear(); publication.stalled(false, now());
         if (updated) {
             if (!playback.skipRender()) throw std::runtime_error("libmpv could not skip a hidden frame");
-            playback.swapped();
+            /* No physical swap feedback is available through Canvas. */
         }
         publication.request();
         return;
@@ -288,6 +383,9 @@ void render() {
         const int slot = leases.available();
         if (slot >= 0) {
             auto &buffer = gpu.prepare(slot, pixelWidth, pixelHeight);
+            const auto delay = playback.nextFrameDelayUs();
+            renderStartUs = monotonicUs();
+            targetTimeUs = delay ? renderStartUs + delay : 0;
             if (!playback.render(pixelWidth, pixelHeight, static_cast<int>(buffer.framebuffer), false))
                 throw std::runtime_error("libmpv could not render the shared texture");
             gpu.finish(buffer); rendered = true; preparedSlot = slot; preparedSequence = leases.next();
@@ -297,7 +395,7 @@ void render() {
     if (preparedSlot >= 0) {
         auto &buffer = gpu.prepare(preparedSlot, pixelWidth, pixelHeight);
         if (sendFrame(transportFd, preparedMetadata, buffer.fd)) {
-            leases.publish(preparedSlot, preparedSequence); playback.swapped();
+            leases.publish(preparedSlot, preparedSequence); /* No physical swap feedback is available through Canvas. */
             // Actual renderer presentation is tracked by the host. Exporting a
             // BO is not proof that Chromium displayed it.
             preparedSlot = -1; preparedMetadata.clear(); publication.stalled(false, now()); return;
@@ -308,7 +406,7 @@ void render() {
         // for socket space). Drop this queued mpv frame rather than block its
         // playback clock; redraw demand still points at the newest frame.
         if (!playback.skipRender()) throw std::runtime_error("libmpv could not skip a backpressured frame");
-        playback.swapped();
+        /* No physical swap feedback is available through Canvas. */
     }
     if (publication.stalled(true, now())) throw std::runtime_error("DMA-BUF consumer stalled waiting for frame release");
 }

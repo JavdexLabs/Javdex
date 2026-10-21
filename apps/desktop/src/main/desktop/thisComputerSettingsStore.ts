@@ -10,6 +10,7 @@ export const DEFAULT_THIS_COMPUTER_SETTINGS: ThisComputerSettings = {
   theme: 'graphite',
   playerPath: null,
   playerPreference: 'builtin',
+  linuxPlaybackMode: 'auto',
   playbackVolume: 50,
   resumePlayback: true,
   proxyUrl: '',
@@ -32,6 +33,7 @@ function normalized(value: Partial<ThisComputerSettings>): ThisComputerSettings 
     playerPath:
       typeof value.playerPath === 'string' && value.playerPath.trim() ? value.playerPath.trim() : null,
     playerPreference: value.playerPreference === 'external' ? 'external' : 'builtin',
+    linuxPlaybackMode: value.linuxPlaybackMode === 'gpu' || value.linuxPlaybackMode === 'cpu' ? value.linuxPlaybackMode : 'auto',
     playbackVolume: typeof value.playbackVolume === 'number' && Number.isFinite(value.playbackVolume)
       ? Math.max(0, Math.min(100, value.playbackVolume)) : 50,
     resumePlayback: typeof value.resumePlayback === 'boolean' ? value.resumePlayback : true,

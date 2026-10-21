@@ -9,7 +9,7 @@ import { createLinuxPlaybackBridge, encodePlaybackMessage, linuxSharedTextureFai
 const LIMIT = 1024 * 1024
 const bounds = { x: 11, y: 22, width: 333, height: 222, scale: 1.5 }
 const linuxOnly = { skip: process.platform !== 'linux' ? 'real executable helper fixtures require Linux' : false }
-const handle = (): Buffer => { const value = Buffer.alloc(4); value.writeUInt32LE(123); return value }
+const handle = (): Buffer => Buffer.alloc(0)
 function decode(frame: Buffer): string[] {
   assert.equal(frame.readUInt32LE(0), frame.length - 4)
   const count = frame.readUInt32LE(4), fields: string[] = []
@@ -31,7 +31,7 @@ async function until<T>(read: () => T, done: (value: T) => boolean, reason: stri
   }
 }
 interface Entry { pid: number; fields: string[] }
-function fixture(t: TestContext, mode = 'normal', createFrameChannel?: (onError: (error: Error) => void) => LinuxPlaybackFrameChannel) {
+function fixture(t: TestContext, mode = 'normal', createFrameChannel?: ((onError: (error: Error) => void) => LinuxPlaybackFrameChannel) | null) {
   const root = mkdtempSync(path.join(tmpdir(), 'javdex-helper-bridge-'))
   const directory = path.join(root, 'helper spaces 字幕'); mkdirSync(directory)
   const executable = path.join(directory, 'fixture helper.cjs'), log = path.join(root, 'messages.jsonl')
@@ -94,7 +94,14 @@ process.stdin.on('end', () => { if (!hanging && mode !== 'slow-destroy') process
 process.stdin.on('error', () => {});
 `)
   chmodSync(executable, 0o755)
-  const bridge = createLinuxPlaybackBridge(executable, createFrameChannel)
+  const channel = createFrameChannel === null ? undefined : createFrameChannel ?? (() => {
+    const fd = openSync('/dev/null', 'r')
+    let closed = false
+    return { surfaceToken: 'pipe-fixture', childFd: fd,
+      spawned() { closeSync(fd); closed = true }, setVisible() {}, isReady() { return true },
+      destroy() { if (!closed) { closeSync(fd); closed = true } } }
+  })
+  const bridge = createLinuxPlaybackBridge(executable, channel)
   const entries = (): Entry[] => existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line) as Entry) : []
   const alive = (pid: number): boolean => { try { process.kill(pid, 0); return true } catch { return false } }
   t.after(async () => {
@@ -107,7 +114,7 @@ process.stdin.on('error', () => {});
     }
   })
   const start = async (): Promise<number> => {
-    bridge.create(handle(), bounds, { backend: 'x11' })
+    bridge.create(handle(), bounds, { backend: 'dmabuf' })
     const state = await until(() => bridge.state(), state => state['track-list'] === '字幕🎬', 'fixture did not acknowledge create')
     assert.ok(state.loadedFiles)
     return state.loadedFiles
@@ -139,13 +146,12 @@ test('Linux protocol uses byte lengths and preserves special UTF-8 locators with
   assert.throws(() => encodePlaybackMessage(['generated-subtitles', 'update', 'x'.repeat(8 * LIMIT + 4096), '1', '30']), /过长/)
 })
 
-test('Linux bridge validates backend and XID before starting a helper', linuxOnly, t => {
+test('Linux bridge rejects native window handles and the removed X11 embedding backend', linuxOnly, t => {
   const f = fixture(t)
-  assert.throws(() => f.bridge.create(handle(), bounds), /显式/)
-  for (const size of [0, 1, 3, 5, 16]) assert.throws(() => f.bridge.create(Buffer.alloc(size), bounds, { backend: 'x11' }), /显式/)
-  assert.throws(() => f.bridge.create(Buffer.alloc(4), bounds, { backend: 'x11' }), /无效/)
-  const overflow = Buffer.alloc(8); overflow.writeBigUInt64LE(0x100000000n)
-  assert.throws(() => f.bridge.create(overflow, bounds, { backend: 'x11' }), /无效/)
+  assert.throws(() => f.bridge.create(handle(), bounds), /仅支持/)
+  for (const backend of ['dmabuf', 'software'] as const)
+    for (const size of [1, 3, 4, 8, 16]) assert.throws(() => f.bridge.create(Buffer.alloc(size), bounds, { backend }), /仅支持/)
+  assert.throws(() => f.bridge.create(Buffer.alloc(0), bounds, { backend: 'x11' as never }), /仅支持/)
   assert.deepEqual(f.entries(), [])
 })
 
@@ -153,7 +159,7 @@ test('Linux bridge exchanges real pipe messages, caches state, drains actions an
   const f = fixture(t), pid = await f.start()
   assert.deepEqual(f.entries().slice(0, 2), [
     { pid, fields: ['startup', '--stdio-v1'] },
-    { pid, fields: ['create', '123', '11', '22', '333', '222', '1.5', 'x11'] }
+    { pid, fields: ['create', '0', '11', '22', '333', '222', '1.5', 'dmabuf'] }
   ])
   const locator = '/媒体 folder/a;$(touch ignored)\n"subtitle".mkv'
   f.bridge.command(['loadfile', locator, 'replace'])
@@ -230,7 +236,7 @@ for (const command of ['invalid-json', 'invalid-state', 'invalid-actions', 'inva
 test('Linux bridge reports spawn errors without an uncaught error event', linuxOnly, async t => {
   const f = fixture(t)
   rmSync(f.executable)
-  f.bridge.create(handle(), bounds, { backend: 'x11' })
+  f.bridge.create(handle(), bounds, { backend: 'dmabuf' })
   assert.match((await failure(f.bridge)).message, /无法启动/)
   f.bridge.destroy()
   assert.equal(f.bridge.state().alive, false)
@@ -290,7 +296,7 @@ test('DMA-BUF bridge inherits a private FD, never passes a native window handle,
 })
 
 test('DMA-BUF selection fails closed without the private texture channel factory', linuxOnly, t => {
-  const f = fixture(t)
+  const f = fixture(t, 'normal', null)
   assert.throws(() => f.bridge.create(Buffer.alloc(0), bounds, { backend: 'dmabuf' }), /传输通道/)
   assert.deepEqual(f.entries(), [])
 })

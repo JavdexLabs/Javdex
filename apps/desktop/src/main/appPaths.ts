@@ -10,12 +10,13 @@ import {
 /** Configure display name and userData before the app becomes ready. */
 export function configureAppIdentity(): void {
   const experimental = isExperimentalLinuxBuild()
-  app.setName(experimental ? EXPERIMENTAL_LINUX_NAME : APP_DISPLAY_NAME)
+  const portable = experimental && isExperimentalLinuxBuild('javdex-linux-portable-phase1')
+  app.setName(portable ? 'Javdex Linux Portable Phase1' : experimental ? EXPERIMENTAL_LINUX_NAME : APP_DISPLAY_NAME)
   const testUserDataPath = readTestUserDataPath()
   app.setPath(
     'userData',
     testUserDataPath
       ? path.resolve(testUserDataPath)
-      : path.join(app.getPath('appData'), experimental ? EXPERIMENTAL_LINUX_PROFILE : APP_PACKAGE_NAME)
+      : path.join(app.getPath('appData'), portable ? 'Javdex-Linux-Portable-Phase1' : experimental ? EXPERIMENTAL_LINUX_PROFILE : APP_PACKAGE_NAME)
   )
 }

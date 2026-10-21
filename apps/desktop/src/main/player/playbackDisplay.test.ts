@@ -46,7 +46,7 @@ it('allows the Javdex opt-in to replace any implicit Electron default before rea
   for (const selected of ['', 'x11', 'wayland', 'auto', 'headless']) {
     const explicit = host(selected)
     configurePlaybackDisplay(explicit, { platform: 'linux', argv: ['electron', 'app', '--javdex-x11'] })
-    assert.equal(linuxPlaybackBackend(), 'x11')
+    assert.equal(linuxPlaybackBackend(), 'dmabuf')
     assert.deepEqual(explicit.switches, [['ozone-platform', 'x11']])
   }
 })
@@ -61,7 +61,7 @@ it('accepts explicit ozone X11 switches and uses the last duplicate value like C
   ]) {
     const standard = host('x11')
     configurePlaybackDisplay(standard, { platform: 'linux', argv: ['electron', 'app', ...args] })
-    assert.equal(linuxPlaybackBackend(), 'x11', JSON.stringify(args))
+    assert.equal(linuxPlaybackBackend(), 'dmabuf', JSON.stringify(args))
     assert.deepEqual(standard.switches, [])
   }
 })
@@ -76,8 +76,7 @@ it('does not enable playback from positional, malformed, or overridden X11 argum
     ['--other=--ozone-platform=x11'],
     ['--javdex-x11=false'],
     ['--javdex-x11-extra'],
-    ['--ozone-platform=x11', '--ozone-platform=wayland'],
-    ['--ozone-platform=x11', '-ozone-platform=auto'],
+        ['--ozone-platform=x11', '-ozone-platform=auto'],
     ['--ozone-platform=x11', '--ozone-platform'],
     ['--ozone-platform=x11', '--ozone-platform=']
   ]) {
@@ -96,8 +95,7 @@ it('honors the end-of-switches marker for both the opt-in and conflict detection
   for (const args of [
     ['--', '--javdex-x11'],
     ['--', '--ozone-platform=x11'],
-    ['--ozone-platform=wayland', '--', '--ozone-platform=x11', '--javdex-x11']
-  ]) {
+      ]) {
     const automatic = host('x11')
     configurePlaybackDisplay(automatic, { platform: 'linux', argv: ['electron', 'app', ...args] })
     assert.equal(linuxPlaybackBackend(), null, JSON.stringify(args))
@@ -105,16 +103,16 @@ it('honors the end-of-switches marker for both the opt-in and conflict detection
   }
   const standard = host('x11')
   configurePlaybackDisplay(standard, { platform: 'linux', argv: ['electron', '--ozone-platform=x11', '--', '--ozone-platform=wayland'] })
-  assert.equal(linuxPlaybackBackend(), 'x11')
+  assert.equal(linuxPlaybackBackend(), 'dmabuf')
   assert.deepEqual(standard.switches, [])
   const explicit = host()
   configurePlaybackDisplay(explicit, { platform: 'linux', argv: ['electron', '--javdex-x11', ' \t--\r\n', '--ozone-platform=wayland'] })
-  assert.equal(linuxPlaybackBackend(), 'x11')
+  assert.equal(linuxPlaybackBackend(), 'dmabuf')
   assert.deepEqual(explicit.switches, [['ozone-platform', 'x11']])
 })
 
 it('rejects explicit conflicting choices without changing switches or backend state', () => {
-  for (const backend of [null, 'x11']) {
+  for (const backend of [null, 'dmabuf']) {
     configurePlaybackDisplay(host(), { platform: 'linux', argv: ['electron', ...(backend ? ['--javdex-x11'] : [])] })
     for (const selected of ['wayland', 'auto', 'headless', '']) {
       for (const args of [
@@ -135,7 +133,7 @@ it('rejects explicit conflicting choices without changing switches or backend st
   }
   const matching = host('x11')
   configurePlaybackDisplay(matching, { platform: 'linux', argv: ['electron', '--ozone-platform=wayland', '--javdex-x11', '--ozone-platform=x11'] })
-  assert.equal(linuxPlaybackBackend(), 'x11')
+  assert.equal(linuxPlaybackBackend(), 'dmabuf')
   assert.deepEqual(matching.switches, [['ozone-platform', 'x11']])
 })
 
@@ -144,7 +142,7 @@ it('rejects late Linux selection and ignores Linux flags on other platforms', ()
   const late = host('x11', true)
   assert.throws(() => configurePlaybackDisplay(late, { platform: 'linux', argv: ['electron', '--javdex-x11'] }), /重新启动/)
   assert.deepEqual(late.switches, [])
-  assert.equal(linuxPlaybackBackend(), 'x11')
+  assert.equal(linuxPlaybackBackend(), 'dmabuf')
   for (const platform of ['darwin', 'win32'] as const) {
     const other = host()
     configurePlaybackDisplay(other, { platform, argv: ['electron', '--javdex-x11', '--ozone-platform=wayland'] })
@@ -179,8 +177,17 @@ it('rejects conflicting shared-texture display arguments without mutating config
     const selected = host()
     assert.throws(() => configurePlaybackDisplay(selected, { platform: 'linux', argv: ['electron', ...args] }))
     assert.deepEqual(selected.switches, [])
-    assert.equal(linuxPlaybackBackend(), 'x11')
+    assert.equal(linuxPlaybackBackend(), 'dmabuf')
   }
   configurePlaybackDisplay(host(), { platform: 'linux', argv: ['electron', '--', '--javdex-wayland', '--javdex-dmabuf'] })
+  assert.equal(linuxPlaybackBackend(), null)
+})
+
+it('selects CPU without changing the explicit Wayland display identity', () => {
+  const linux = host()
+  configurePlaybackDisplay(linux, { platform: 'linux', argv: ['electron', '--javdex-wayland', '--javdex-cpu'] })
+  assert.equal(linuxPlaybackBackend(), 'software')
+  assert.deepEqual(linux.switches, [['ozone-platform', 'wayland']])
+  configurePlaybackDisplay(host(), { platform: 'linux', argv: ['electron', '--', '--javdex-cpu'] })
   assert.equal(linuxPlaybackBackend(), null)
 })

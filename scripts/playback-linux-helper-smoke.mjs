@@ -27,6 +27,15 @@ function run(input, expectedStatus, args = ['--stdio-v1']) {
   assert.equal(result.status, expectedStatus, result.stderr)
   return result.stdout.trim().split('\n').filter(Boolean).map(line => JSON.parse(line))
 }
+// Current helpers require an authenticated FD 3 even before reading commands.
+// Keep the legacy branch below solely for checking preserved historical packages.
+if (path.basename(executable) !== 'playback-helper') {
+  run(Buffer.alloc(0), 2, [])
+  const states = run(Buffer.alloc(0), 1)
+  assert.ok(states.some(state => state.alive === false && state.errorKind === 'native'))
+  console.log('Shared-frame helper rejects a missing private FD channel; no display/media acceptance.')
+  process.exit(0)
+}
 run(Buffer.alloc(0), 2, [])
 run(Buffer.alloc(0), 0)
 run(message(['destroy']), 0)

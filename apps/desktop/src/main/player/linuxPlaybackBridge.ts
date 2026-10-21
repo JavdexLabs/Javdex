@@ -1,3 +1,5 @@
+import { existsSync } from 'node:fs'
+import path from 'node:path'
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import type { NativePlaybackState } from './nativePlayback'
 import type { PlaybackOcclusion } from '@shared/desktop/playback'
@@ -34,7 +36,10 @@ export interface LinuxPlaybackFrameChannel {
   spawned(): void
   setVisible(visible: boolean): void
   isReady?(): boolean
-  presentedFrames?(): number
+  submittedFrames?(): number
+  resetTiming?(): number | undefined
+  onBudget?(callback: (ms: number) => void): void
+  timingStats?(): { renderBudgetMs: number; submissionLatenessMs: number }
   destroy(): void
 }
 
@@ -42,8 +47,9 @@ export interface LinuxPlaybackFrameChannel {
 export function linuxSharedTextureFailureCode(message: string): string {
   const groups: Array<[string, string[]]> = [
     ['DRM_RENDER_NODE_UNAVAILABLE', ['No accessible DRM render node; a real GPU render node is required', 'Cannot open DRM render node (missing device or permission)', 'Selected device is not a DRM render node', 'DRM render node override must be an absolute path']],
-    ['GBM_LINEAR_BUFFER_UNAVAILABLE', ['Cannot create GBM device on DRM render node', 'Cannot allocate linear renderable GBM buffer', 'GBM did not provide a single-plane linear BGRA buffer', 'Cannot export GBM DMA-BUF descriptor', 'Cannot verify DMA-BUF allocation size']],
+    ['GBM_LINEAR_BUFFER_UNAVAILABLE', ['Cannot create GBM device on DRM render node', 'Cannot allocate linear renderable GBM buffer', 'Cannot allocate renderable GBM buffer', 'GBM did not provide a single-plane linear BGRA buffer', 'GBM did not provide a supported single-plane BGRA buffer', 'Cannot export GBM DMA-BUF descriptor', 'Cannot verify DMA-BUF allocation size']],
     ['EGL_DMABUF_UNAVAILABLE', ['EGL platform display extension is unavailable', 'Cannot initialize EGL on DRM render node', 'Required EGL DMA-BUF, image, context or surfaceless extension is unavailable', 'EGL OpenGL API is unavailable', 'No compatible EGL OpenGL configuration', 'Cannot create surfaceless OpenGL 3.2 context', 'Shared-texture playback requires a hardware EGL renderer', 'EGL image texture functions are unavailable', 'Cannot import GBM DMA-BUF into EGL image', 'DMA-BUF framebuffer is not renderable']],
+    ['VULKAN_DMABUF_UNAVAILABLE', ['Missing private Vulkan loader path', 'Cannot load Vulkan capability query', 'No Vulkan DMA-BUF device matches the render node', 'No importable single-plane Vulkan BGRA layout', 'GBM allocation does not match the negotiated Vulkan layout']],
     ['FRAME_RENDER_FAILED', ['Invalid OpenGL render limits', 'DMA-BUF viewport exceeds GPU limits', 'DMA-BUF frame rendering failed', 'libmpv could not render the shared texture', 'libmpv could not skip a hidden frame']],
     ['TEXTURE_IMPORT_FAILED', ['共享视频纹理导入或传输失败，请停止后重试', '当前 Electron 不支持共享视频纹理']],
     ['RECEIVER_NOT_READY', ['等待视频画面接收器超时，请停止后重试', '共享视频画面接收失败，请停止后重试']],
@@ -57,7 +63,7 @@ export function linuxSharedTextureFailureCode(message: string): string {
 }
 
 export function createLinuxPlaybackBridge(executable: string,
-  createFrameChannel?: (onError: (error: Error) => void) => LinuxPlaybackFrameChannel) {
+  createFrameChannel?: (onError: (error: Error) => void) => LinuxPlaybackFrameChannel, renderNode?: string, vulkanLoader?: string) {
   let child: ChildProcessWithoutNullStreams | null = null
   let frameChannel: LinuxPlaybackFrameChannel | null = null
   let generation = 0
@@ -93,15 +99,12 @@ export function createLinuxPlaybackBridge(executable: string,
     timeout.unref(); previous.once('exit', () => clearTimeout(timeout))
   }
   return {
-    create(handle: Buffer, bounds: Bounds, host?: { backend: 'x11' | 'dmabuf' }): void {
-      const shared = host?.backend === 'dmabuf'
+    create(handle: Buffer, bounds: Bounds, host?: { backend: 'dmabuf' | 'software' }): void {
+      const shared = host?.backend === 'dmabuf' || host?.backend === 'software'
       const diagnostics = shared && globalThis.process.env.JAVDEX_PLAYBACK_DIAGNOSTICS === '1'
       if (shared && !createFrameChannel) throw new Error('未提供实验共享纹理传输通道')
-      if (!shared && (host?.backend !== 'x11' || ![4, 8].includes(handle.length))) throw new Error('需要显式选择的 X11 窗口')
-      // The DMA-BUF helper is deliberately window-system neutral. Never cast a
-      // Wayland wl_surface pointer into an XID or pass it across processes.
-      const id = shared ? 0n : handle.length === 8 ? handle.readBigUInt64LE() : BigInt(handle.readUInt32LE())
-      if (!shared && (!id || id > 0xffffffffn)) throw new Error('无效的 X11 窗口')
+      if (!shared || handle.length !== 0) throw new Error('Linux 播放仅支持共享纹理或 CPU 内存帧')
+      const id = 0n
       destroy(); requestedVisible = false; lastBounds = ''; lastVisible = undefined; lastPresentation = ''; lastOcclusions = ''; lastRendererControls = undefined
       const epoch = generation
       let lastState = Date.now()
@@ -121,12 +124,19 @@ export function createLinuxPlaybackBridge(executable: string,
       }
       try {
         if (shared) frameChannel = createFrameChannel!(failed)
+        const fontConfig = path.join(path.dirname(executable), 'fonts.conf')
+        const environment = { ...globalThis.process.env,
+          JAVDEX_PLAYBACK_VULKAN_LOADER: host?.backend === 'dmabuf' ? vulkanLoader : undefined,
+          ...(shared && renderNode ? { JAVDEX_DRM_RENDER_NODE: renderNode } : {}),
+          ...(shared && existsSync(fontConfig) ? { FONTCONFIG_FILE: fontConfig } : {}) }
         process = spawn(executable, ['--stdio-v1'], { stdio: frameChannel
-          ? ['pipe', 'pipe', 'pipe', frameChannel.childFd] : ['pipe', 'pipe', 'pipe'], windowsHide: true }) as ChildProcessWithoutNullStreams
+          ? ['pipe', 'pipe', 'pipe', frameChannel.childFd] : ['pipe', 'pipe', 'pipe'], windowsHide: true,
+          env: environment }) as ChildProcessWithoutNullStreams
         frameChannel?.spawned()
       } catch (error) { failed(error instanceof Error ? error : new Error(String(error))); throw error }
       const launched = process
       child = launched; snapshot = { alive: true }
+      frameChannel?.onBudget?.(ms => { if (child === launched && !failure) send(['command', 'set', 'video-timing-offset', String(ms / 1000)]) })
       if (shared) {
         heartbeat = setInterval(() => {
           if (generation === epoch && Date.now() - lastState > 10000) failed(new Error('Shared-texture helper heartbeat timed out'))
@@ -156,7 +166,7 @@ export function createLinuxPlaybackBridge(executable: string,
             if (diagnostics && Date.now() - lastDiagnostic >= 1000) {
               lastDiagnostic = Date.now()
               console.info('[playback-dmabuf]', JSON.stringify({ alive: next.alive, nativeFrames: next.nativeFrames,
-                presentedFrames: frameChannel?.presentedFrames?.() ?? next.presentedFrames, loadedFiles: next.loadedFiles, width: next.width, height: next.height }))
+                submittedFrames: frameChannel?.submittedFrames?.() ?? next.submittedFrames, loadedFiles: next.loadedFiles, width: next.width, height: next.height }))
             }
           } catch { failed(new Error('Linux 播放状态无效')); return }
         }
@@ -168,7 +178,7 @@ export function createLinuxPlaybackBridge(executable: string,
           snapshot = { alive: false }; failure ??= new Error(`Linux 播放进程已退出（${signal ?? code ?? 'unknown'}）`)
         }
       })
-      send(['create', id.toString(), ...rectangle(bounds), shared ? 'dmabuf' : 'x11'])
+      send(['create', id.toString(), ...rectangle(bounds), host!.backend])
     },
     setBounds(bounds: Bounds): void {
       const fields = rectangle(bounds), key = fields.join(',')
@@ -190,7 +200,14 @@ export function createLinuxPlaybackBridge(executable: string,
       const key = values.join(',')
       if (key !== lastOcclusions) { send(['occlusions', ...values.map(String)]); lastOcclusions = key }
     },
-    command(args: string[], generatedSubtitle = false): void { send([generatedSubtitle ? 'generated-subtitle-command' : 'command', ...args]) },
+    command(args: string[], generatedSubtitle = false): void {
+      send([generatedSubtitle ? 'generated-subtitle-command' : 'command', ...args])
+      if (!generatedSubtitle && (['loadfile', 'seek', 'stop'].includes(args[0])
+        || args[0] === 'set' && ['pause', 'speed'].includes(args[1]))) {
+        const timeline = frameChannel?.resetTiming?.()
+        if (timeline !== undefined) send(['timing-reset', String(timeline)])
+      }
+    },
     generatedSubtitles(operation: 'update' | 'visible' | 'clear', document: string, visible: boolean, revision: number): void {
       send(['generated-subtitles', operation, document, visible ? '1' : '0', String(revision)])
     },
@@ -201,12 +218,12 @@ export function createLinuxPlaybackBridge(executable: string,
     state(): NativePlaybackState {
       if (failure) throw failure
       const value = { ...snapshot, ...(frameChannel ? { sharedTextureSurface: frameChannel.surfaceToken,
-        presentedFrames: frameChannel.presentedFrames?.() ?? 0 } : {}), actions }; actions = []; return value
+        presentedFrames: undefined, submittedFrames: frameChannel.submittedFrames?.() ?? 0, ...frameChannel.timingStats?.() } : {}), actions }; actions = []; return value
     },
     inspect(): NativePlaybackState {
       if (failure) throw failure
       return { ...snapshot, ...(frameChannel ? { sharedTextureSurface: frameChannel.surfaceToken,
-        presentedFrames: frameChannel.presentedFrames?.() ?? 0 } : {}) }
+        presentedFrames: undefined, submittedFrames: frameChannel.submittedFrames?.() ?? 0, ...frameChannel.timingStats?.() } : {}) }
     },
     destroy
   }

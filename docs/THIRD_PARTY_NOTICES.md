@@ -10,6 +10,8 @@
 
 ## 内置播放运行库
 
+Linux x86_64 AppImage 使用 [uruntime v0.8.1](https://github.com/VHSgunzo/uruntime/tree/v0.8.1) 的 SquashFS lite 静态运行时，MIT 原文见 [uruntime 声明](../LICENSES/uruntime-MIT.txt)。下载身份、上游提交和内嵌策略固定在 `build/linux-appimage-runtime.json`；包内 `resources/appimage-runtime.json` 记录配置后的摘要。原运行时内含上游固定的 squashfuse / unsquashfs 工具；其源构建入口分别见 [squashfuse-static v0.6.3.r2](https://github.com/VHSgunzo/squashfuse-static/tree/v0.6.3.r2) 与 [squashfs-tools-static v4.7.5.r2](https://github.com/VHSgunzo/squashfs-tools-static/tree/v4.7.5.r2)。运行时和工具按各自许可分发，不改变 Javdex 授权。
+
 内置播放使用固定源码构建的 mpv 0.41.0 与 FFmpeg 9.0.2；[源码清单](../build/playback-sources.json) 将二者记录为 GPL-3.0-or-later，[构建配方](../scripts/playback-source-build.mjs) 显式启用 mpv GPL 及 FFmpeg GPL/version3 选项，不是本地 AI 工具所用的 LGPL FFmpeg 构建。实际输入、包内材料与验证合同见 [开发指南](DEVELOPMENT.md#固定源码构建与分发验证)。上游许可说明见 [mpv Copyright](https://github.com/mpv-player/mpv/blob/v0.41.0/Copyright) 与 [FFmpeg 官方说明](https://ffmpeg.org/legal.html)。
 
 固定源码清单单独保留 FreeType、HarfBuzz、FriBidi、libass、libunibreak、libplacebo/fast_float/Vulkan headers、dav1d、zlib、Lua 及平台 TLS/字符转换依赖的版本、原始来源、摘要和许可文件。依赖静态嵌入 libmpv 时，原许可全文合并展示但不改写各项目许可；Node headers、Windows node-gyp 钩子及适用的 GCC runtime exception 声明一并保留。当前 SDK 固定为 Electron 43.8.0／Node headers 24.22.0，以源码清单为准；`build.json` 记录实际来源、构建选项、工具链与配方，`runtime.json` 绑定 `mpv` 和 `javdex-native` 两个二进制所有者。
@@ -39,6 +41,10 @@ Windows 原生播放 addon 的 MSVC 构建复用已安装的 [node-gyp](https://
 - Windows Whisper Vulkan 从 [Javdex Runtime 固定发行](https://github.com/JavdexLabs/javdex-runtime/releases/tag/whisper-b5130-r1) 按需取得，不随主安装包分发：引擎 MIT、Vulkan headers／loader Apache-2.0，ZIP 内附各自许可、来源与完整文件摘要。固定构建配方和开发材料移至该仓库；仓库自有构建脚本的 GPL 声明不替代第三方二进制许可。shaderc、glslang、SPIR-V 与 GCC 工具 DLL 只用于构建；GPU 驱动由系统提供，不进入运行库包。
 
 运行库仓库保存原包、固定源码和配方，按引擎独立发布，不自动清理。播放器另归档四个平台从固定 Javdex 0.9.0 原安装包提取的真实运行库与对应源码总包，保留原安装包摘要、源码提交和 CI 来源；该归档不代表当前 Wayland 开发代码或新的 GUI／GPU 验收。
+
+## Linux X11 ANGLE
+
+Linux x64 包使用与 Electron 版本匹配的 ANGLE 源码和 Electron 上游补丁序列，另应用本仓库 `build/patches/angle-x11-vulkan-visual.patch`。固定版本及摘要见 `build/angle-runtime.json`，构建参数见 `build/angle-args.gn`。ANGLE 使用 BSD 风格许可，包内保留 `ANGLE-LICENSE.txt`；完整依赖源码及其许可保留在独立的 `Javdex-ANGLE-Sources-*.tar.gz`，应随二进制交付。Vulkan loader 沿用 Electron 包，GPU 驱动仍由宿主提供。
 
 ## MetaTube
 

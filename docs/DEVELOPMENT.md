@@ -100,6 +100,8 @@ npm run dist:linux           # Linux 目标
 
 Windows 本地使用内置播放时，先完成 `playback:native:build`，再运行 `dist:win:local`。该入口显式检查 `out/native-playback/playback.node` 的 PE 架构及普通／延迟 DLL 导入闭包，只复制实际依赖，不复制旧 addon、测试程序或开发目录；缺少依赖时停止打包。包内 `local-runtime.json` 标记本地开发用途及文件摘要。正式分发继续使用 `JAVDEX_PLAYBACK_RUNTIME_DIR` 的审核清单与对应源码材料；本地入口与该配置互斥，打包不执行发布。
 
+Linux Wayland 的第一阶段可携带运行库使用独立的本地测试入口，见 [Linux portable phase 1](LINUX_PORTABLE_PHASE1.md)；普通发行构建合同保持不变。
+
 版本号、标签、数据库升级说明、Release 工作流和发布验证统一遵循 [版本与发布规范](VERSIONING_AND_RELEASE.md)。
 
 ### 本地 AI 运行库
@@ -133,7 +135,7 @@ Whisper b5130 的 macOS arm64／x64 工具保留静态运行库、Metal／Accele
 
 ### 内置播放运行库
 
-Windows 与 Linux X11 adapter 通过 `rendererFullscreenControls` 能力统一使用 renderer 经典工具栏与播放设置，原生 child window 只负责画面、输入和帧提交；旧 Windows adapter 保留原生全屏控件。全屏按指针所在的顶部／底部区域分别显示标题栏／控制栏，鼠标在画面中间移动或暂停不会唤出它们；打开播放设置时同时固定显示标题栏与控制栏，关闭后恢复分区触发；键盘焦点、拖动和子菜单所有权保持操作区域可见。原生指针先由客户区像素换算为 DIP，再按网页缩放倍率换算为 CSS 像素，不能用播放时钟更新或任意鼠标活动唤出控制栏。全屏视频始终占满窗口，标题栏、控制栏和设置使用覆盖布局，显隐不改变 drawable 尺寸；renderer 报告这些表面及菜单与视频的交叠矩形，Windows 用窗口区域裁剪，Linux 用 X Shape 1.1 同时裁剪可见区域和输入区域，让 HTML 控件可见且可点击。Linux 保留圆角边缘，关闭覆盖层后恢复完整画面；视频区域的 Tab／Shift+Tab 将焦点交回共享面板。此改动同时涉及 renderer 与原生运行文件，开发调试需重建两者并完整退出、重启 Electron；仅刷新页面仍会保留旧原生实现。
+Windows 原生 adapter 使用 rendererFullscreenControls 和覆盖区域裁剪。Linux 已移除原生子窗口，视频、控制栏与菜单均由 renderer 合成，不再使用 X Shape 裁剪、原生全屏工具栏或 X11 焦点转发。Windows/macOS 原生视图行为保留。
 
 内置播放行为与平台边界见 [播放合同](BUILTIN_PLAYBACK.md)，实际源码构建及发布证据见下文。`npm run playback:native:build` 只生成链接本机开发库的运行文件：macOS/Windows 为 addon，Linux 为独立 `playback-helper`；正式打包输入由 `npm run playback:runtime:build` 从固定源码构建。普通桌面打包明确排除 `out/native-playback`、`out/playback-acceptance`、`out/libmpv-prototype` 与 `out/playback-runtime`，审核后的运行库通过打包钩子复制到 Resources，不把构建目录、合成素材、截图或临时 Electron bundle 收入 `app.asar`。
 
@@ -145,11 +147,11 @@ Windows 正常桌面入口检测到 `out/native-playback/playback.node`（开发
 
 默认 Windows MSVC 构建直接编入已安装 `@electron/rebuild` 所依赖的 node-gyp 延迟加载钩子，并链接 `delayimp`、`/DELAYLOAD:node.exe`；仅链接 `node.lib` 不足以在 Electron 或改名后的应用可执行文件中加载。构建器解析依赖自身的钩子路径，不下载或修改上游文件，缺少钩子时停止。CMake 也支持 LLVM MinGW/CLANG64：使用 Ninja、显式指定匹配的 `clang++.exe` 与 libmpv 前缀、Electron headers/node.lib，编入仓库的 `windowsElectronDelayHook.cpp` 并使用 `--delayload=node.exe`。npm 开发构建命令仍默认 MSVC。两条路径均重定向到当前应用宿主；MinGW 路径已在实际改名的 ZIP/NSIS 应用中加载。MSVC 钩子许可见 [第三方说明](THIRD_PARTY_NOTICES.md#node-gyp-延迟加载钩子)，宿主要求见 [Electron 原生模块说明](https://www.electronjs.org/docs/latest/tutorial/using-native-node-modules#a-note-about-win_delay_load_hook)。
 
-Linux X11／XWayland adapter 与显式启动选项已加入，原生 Wayland 后续补齐。先退出应用，再以 `--javdex-x11`（或 Electron 的 `--ozone-platform=x11`）启动；未显式选择时内置播放不可用，不依据环境变量或 Buffer 宽度猜测 backend。冲突的 ozone 选项拒绝启动；缺少 `DISPLAY` / X server 时给出不可用原因，不自动回退外部播放器。当前提供命令行选择，尚未提供设置页启动开关；不切换系统桌面、不静默强制 X11。开发构建需要 CMake、C++17 编译器、make、pkg-config、X11/Xext/GLX/OpenGL 开发库及同架构 libmpv；设置 `JAVDEX_MPV_PREFIX`（系统前缀如 `/usr`），然后运行 `npm run playback:native:build`。运行时要求 X Shape 1.1，不再绘制或链接 Xft 全屏工具栏。库路径须由开发环境提供，构建器不复制 `.so` 或安装依赖。实际源码、隔离编译及未验收项见 [平台记录](archive/playback/platform-validation-2026-10.md#10-本轮实施记录2026-10-03)。
+Linux X11／XWayland 和原生 Wayland 共用 DMA-BUF／CPU 内存帧链路，原生子窗口代码及构建目标已移除。`--javdex-x11` 和 `--javdex-wayland` 只选择显示后端，冲突参数仍拒绝启动。原生开发构建需要 CMake、C++17、pkg-config、EGL/GBM/DRM 开发库及 libmpv，设置 JAVDEX_MPV_PREFIX 后运行 npm run playback:native:build，构建 GPU helper、CPU helper 和 FD addon。完整隔离双运行库构建见 LINUX_COMPATIBLE_PLAYBACK.md；旧包的验证合同仅用于历史回归。
 
-Linux 的 `playback-helper` 在独立进程直接链接 libmpv，拥有 X11 child windows、GLX context 和播放器核心；子窗口仍嵌入原 Electron parent，不另开可见顶层播放窗口。Electron 通过私有继承管道传送带长度的命令字段并缓存返回状态，不经 shell 或监听端口。此边界用于隔离 Electron 全局导出的 FFmpeg／分配器符号；同进程的 `RTLD_DEEPBIND`、`dlmopen` 实验未通过真实播放／清理检查，未作为支持方案。独立进程不等于解码器沙箱，仍须验收异常退出、关闭／重开、输入焦点和媒体行为。
+Linux 的 playback-dmabuf-helper／playback-software-helper 在独立进程链接各自 libmpv，使用私有控制管道和 FD 3 帧通道，不接收 Electron 原生窗口句柄、不创建 X11 child 或 GLX context。主进程只持有 FD 桥，renderer 使用同一个 Canvas 显示。当前 Linux 源构建默认使用 dmabuf profile，不再构建 x11 profile。
 
-检测到 OpenGL renderer 名称含 `llvmpipe` 或 `softpipe` 时，Linux helper 使用软件 OpenGL 兼容策略：亮度、色度及缩小采用 bilinear，关闭 correct-downscaling，并启用 `gpu-dumb-mode`。这会牺牲高级 shader 缩放以换取该软件渲染路径的兼容性，不是硬解或真实 GPU 通过的声明。其它 renderer 不自动应用此策略；真实 GPU／驱动及高阶画质路径仍待分别验收。
+Linux GPU 模式要求可用的硬件 EGL 设备；可检测故障按自动模式策略切换至 CPU 兼容模式。CPU 视频链路使用软件 render API，不依赖 GLX 或 X11 原生窗口。
 
 显示选择只读取启动参数，不将 Electron 在 ready 前返回的默认 `ozone-platform=x11` 当成用户选择。解析遵循最后一个 ozone 参数生效、`--` 终止选项的规则；ozone 值使用 `=`，例如 `--ozone-platform=x11`。`--javdex-x11` 与最终显式非 X11 选择冲突时拒绝启动，不静默覆盖。
 
@@ -355,3 +357,9 @@ Javdex 使用 Electron、React、TypeScript、Vite 和 `better-sqlite3`。主要
 原生播放区域、弹层遮挡和全屏指针坐标使用 Electron 当前显示器的有效 `scaleFactor`，再结合网页 `zoomFactor` 换算。不能只用 `GetDpiForWindow / 96`：Windows 辅助功能文字缩放可能让 Chromium 的有效缩放与 HWND DPI 不同，例如 175% 显示缩放加 110% 文字缩放时为 192.5%。网页 DPR 变化时，即使 CSS 矩形未变，也需重新上报播放区域。
 
 构建原生运行库后，在未设置 `ELECTRON_RUN_AS_NODE` 的环境运行 `node_modules/electron/dist/electron.exe scripts/playback-windows-geometry-acceptance.cjs`。该检查使用隔离空窗口，不读取个人资料库，核对底栏／展开／全屏模式下多档显示和网页缩放的实际 HWND 位置与尺寸；不代替真实跨屏移动和播放画面验收。更新原生运行库与主进程后须完整退出并重新启动应用。
+
+Linux x86_64 当前标准包的双播放运行库构建与验收见 [LINUX_COMPATIBLE_PLAYBACK.md](LINUX_COMPATIBLE_PLAYBACK.md)；CPU 专用源构建参数为 `--linux-software`，不修改系统驱动。旧第一阶段独立包仍可按原文档复现。
+
+### Linux AppImage 自动解包回退
+
+Linux x86_64 AppImage 的固定运行时与构建校验见 [兼容播放文档](LINUX_COMPATIBLE_PLAYBACK.md#direct-appimage-startup)。打包钩子在 electron-builder 生成更新摘要前接入 uruntime；直接双击同一个包可在 FUSE 失败时自动解包启动，不要求额外执行脚本或安装 libfuse2。`node --test scripts/linux-appimage-runtime.test.mjs scripts/linux-apprun.test.mjs` 包含本机 Linux x86_64 的运行时故障注入；需要现有 `aa-exec`、支持 seccomp-filter 的 `setpriv` 和可用的临时目录，不安装系统设置。普通用户最终包首页启动与播放验收分别记录。

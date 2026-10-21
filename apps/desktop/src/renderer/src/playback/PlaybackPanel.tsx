@@ -421,7 +421,7 @@ export default function PlaybackPanel(): JSX.Element | null {
           <div className={styles.optionBody} role="tabpanel" id={`${settingsId}-info`} aria-labelledby={`${settingsId}-info-tab`} hidden={optionTab !== 'info'}>
           <dl className={styles.info}><dt>来源</dt><dd>{state.source === 'remote' ? '远程原文件' : '本机文件'}</dd>
             <dt>视频</dt><dd>{state.info.videoCodec ?? '未知'} · {state.info.width ?? '?'}×{state.info.height ?? '?'}</dd>
-            <dt>实际硬解</dt><dd>{state.info.hardwareDecoder || '软件解码'}</dd><dt>音频</dt><dd>{state.info.audioCodec ?? '无'} / {state.info.audioOutput ?? '无输出'}</dd>
+            {state.info.playbackMode ? <><dt>播放模式</dt><dd>{state.info.playbackMode === 'cpu' ? 'CPU 兼容' : 'GPU'}{state.info.playbackFallback ? '（自动回退）' : ''}</dd></> : null}<dt>实际硬解</dt><dd>{state.info.hardwareDecoder || '软件解码'}</dd><dt>音频</dt><dd>{state.info.audioCodec ?? '无'} / {state.info.audioOutput ?? '无输出'}</dd>
           </dl>
           <section className={styles.shortcuts} aria-label="画面快捷键">
             <h3>画面快捷键</h3>

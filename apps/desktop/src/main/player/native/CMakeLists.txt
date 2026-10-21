@@ -1,10 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 project(JavdexNativePlayback LANGUAGES CXX)
 
-# Off by default: a separate experimental helper/FD bridge. The existing X11
-# helper remains available and retains its runtime and dependency contract.
-option(JAVDEX_BUILD_LINUX_DMABUF "Build experimental Linux shared-texture playback" OFF)
-
 # JS supplies native Windows paths; normalize before CMake interprets them as
 # target source paths (a backslash followed by P is otherwise an invalid escape).
 foreach(input ELECTRON_INCLUDE_DIR ELECTRON_NODE_LIBRARY ELECTRON_DELAY_LOAD_HOOK MPV_PREFIX PLAYBACK_OUTPUT_DIR)
@@ -16,7 +12,7 @@ endforeach()
 # Development adapter build. No dependency download and no runtime packaging;
 # release inputs must still pass the separate reviewed runtime inventory gate.
 if(NOT (WIN32 AND (MSVC OR MINGW)) AND NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
-  message(FATAL_ERROR "This CMake entry builds the Windows MSVC/MinGW or Linux X11 adapter only")
+  message(FATAL_ERROR "This CMake entry builds the Windows MSVC/MinGW or Linux shared-frame adapters only")
 endif()
 foreach(input ELECTRON_INCLUDE_DIR MPV_PREFIX PLAYBACK_OUTPUT_DIR)
   if(NOT DEFINED ${input} OR "${${input}}" STREQUAL "")
@@ -64,39 +60,18 @@ if(WIN32)
   foreach(config DEBUG RELEASE RELWITHDEBINFO MINSIZEREL)
     set_target_properties(slider-feedback-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY_${config} "${PLAYBACK_OUTPUT_DIR}")
   endforeach()
-else()
-  find_package(X11 REQUIRED)
-  find_package(OpenGL REQUIRED COMPONENTS OpenGL GLX)
-  add_executable(playback linuxX11Playback.cpp)
-  target_compile_options(playback PRIVATE -Wall -Wextra -Wpedantic)
-  target_link_libraries(playback PRIVATE X11::X11 X11::Xext OpenGL::OpenGL OpenGL::GLX)
-  add_executable(x11-surface-test x11SurfaceClip.test.cpp)
-  target_compile_features(x11-surface-test PRIVATE cxx_std_17)
-  target_compile_options(x11-surface-test PRIVATE -UNDEBUG -Wall -Wextra -Wpedantic)
-  target_link_libraries(x11-surface-test PRIVATE X11::X11 X11::Xext)
-  set_target_properties(x11-surface-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PLAYBACK_OUTPUT_DIR}")
-  # Compiled with every Linux build; execute only under an explicitly supplied
-  # isolated X display, not as a no-display/GL/hardware acceptance substitute.
-  add_executable(x11-focus-test x11Focus.test.cpp)
-  target_compile_features(x11-focus-test PRIVATE cxx_std_17)
-  target_compile_options(x11-focus-test PRIVATE -UNDEBUG -Wall -Wextra -Wpedantic)
-  target_include_directories(x11-focus-test PRIVATE "${ELECTRON_INCLUDE_DIR}" "${MPV_INCLUDE_DIR}")
-  target_link_libraries(x11-focus-test PRIVATE "${MPV_LIBRARY}" X11::X11 X11::Xext OpenGL::OpenGL OpenGL::GLX)
-  set_target_properties(x11-focus-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PLAYBACK_OUTPUT_DIR}")
-  add_executable(x11-controls-test x11Controls.test.cpp)
-  target_compile_features(x11-controls-test PRIVATE cxx_std_17)
-  target_compile_options(x11-controls-test PRIVATE -UNDEBUG)
-  set_target_properties(x11-controls-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PLAYBACK_OUTPUT_DIR}")
 endif()
-target_compile_features(playback PRIVATE cxx_std_17)
-target_include_directories(playback PRIVATE "${ELECTRON_INCLUDE_DIR}" "${MPV_INCLUDE_DIR}")
-target_link_libraries(playback PRIVATE "${MPV_LIBRARY}")
-set_target_properties(playback PROPERTIES PREFIX "" SUFFIX ".node"
-  RUNTIME_OUTPUT_DIRECTORY "${PLAYBACK_OUTPUT_DIR}" LIBRARY_OUTPUT_DIRECTORY "${PLAYBACK_OUTPUT_DIR}")
-foreach(config DEBUG RELEASE RELWITHDEBINFO MINSIZEREL)
-  set_target_properties(playback PROPERTIES RUNTIME_OUTPUT_DIRECTORY_${config} "${PLAYBACK_OUTPUT_DIR}"
-    LIBRARY_OUTPUT_DIRECTORY_${config} "${PLAYBACK_OUTPUT_DIR}")
-endforeach()
+if(WIN32)
+  target_compile_features(playback PRIVATE cxx_std_17)
+  target_include_directories(playback PRIVATE "${ELECTRON_INCLUDE_DIR}" "${MPV_INCLUDE_DIR}")
+  target_link_libraries(playback PRIVATE "${MPV_LIBRARY}")
+  set_target_properties(playback PROPERTIES PREFIX "" SUFFIX ".node"
+    RUNTIME_OUTPUT_DIRECTORY "${PLAYBACK_OUTPUT_DIR}" LIBRARY_OUTPUT_DIRECTORY "${PLAYBACK_OUTPUT_DIR}")
+  foreach(config DEBUG RELEASE RELWITHDEBINFO MINSIZEREL)
+    set_target_properties(playback PROPERTIES RUNTIME_OUTPUT_DIRECTORY_${config} "${PLAYBACK_OUTPUT_DIR}"
+      LIBRARY_OUTPUT_DIRECTORY_${config} "${PLAYBACK_OUTPUT_DIR}")
+  endforeach()
+endif()
 
 add_executable(mpv-core-test mpvCore.test.cpp)
 target_compile_features(mpv-core-test PRIVATE cxx_std_17)
@@ -113,21 +88,25 @@ foreach(config DEBUG RELEASE RELWITHDEBINFO MINSIZEREL)
 endforeach()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-  set_target_properties(playback PROPERTIES OUTPUT_NAME "playback-helper" SUFFIX "" INSTALL_RPATH "$ORIGIN;$ORIGIN/lib")
-endif()
-
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND JAVDEX_BUILD_LINUX_DMABUF)
   find_package(PkgConfig REQUIRED)
   pkg_check_modules(DMABUF_EGL REQUIRED IMPORTED_TARGET egl)
   pkg_check_modules(DMABUF_GBM REQUIRED IMPORTED_TARGET gbm)
   pkg_check_modules(DMABUF_DRM REQUIRED IMPORTED_TARGET libdrm)
+  find_path(VULKAN_INCLUDE_DIR vulkan/vulkan.h HINTS "${MPV_PREFIX}/include" REQUIRED)
   add_executable(playback-dmabuf-helper linuxDmaBufPlayback.cpp)
   target_compile_features(playback-dmabuf-helper PRIVATE cxx_std_17)
   target_compile_options(playback-dmabuf-helper PRIVATE -Wall -Wextra -Wpedantic)
-  target_include_directories(playback-dmabuf-helper PRIVATE "${MPV_INCLUDE_DIR}")
-  target_link_libraries(playback-dmabuf-helper PRIVATE "${MPV_LIBRARY}" OpenGL::OpenGL
-    PkgConfig::DMABUF_EGL PkgConfig::DMABUF_GBM PkgConfig::DMABUF_DRM)
+  target_include_directories(playback-dmabuf-helper PRIVATE "${MPV_INCLUDE_DIR}" "${VULKAN_INCLUDE_DIR}")
+  target_link_libraries(playback-dmabuf-helper PRIVATE "${MPV_LIBRARY}"
+    PkgConfig::DMABUF_EGL PkgConfig::DMABUF_GBM PkgConfig::DMABUF_DRM ${CMAKE_DL_LIBS})
   set_target_properties(playback-dmabuf-helper PROPERTIES INSTALL_RPATH "$ORIGIN")
+
+  add_executable(playback-software-helper linuxSoftwarePlayback.cpp)
+  target_compile_features(playback-software-helper PRIVATE cxx_std_17)
+  target_compile_options(playback-software-helper PRIVATE -Wall -Wextra -Wpedantic)
+  target_include_directories(playback-software-helper PRIVATE "${MPV_INCLUDE_DIR}")
+  target_link_libraries(playback-software-helper PRIVATE "${MPV_LIBRARY}")
+  set_target_properties(playback-software-helper PROPERTIES INSTALL_RPATH "$ORIGIN")
 
   # This thin addon owns descriptors and the socketpair only. Never link mpv or
   # graphics-driver libraries into Electron's main process.
@@ -142,7 +121,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND JAVDEX_BUILD_LINUX_DMABUF)
   add_executable(linux-dmabuf-test linuxDmaBuf.test.cpp)
   target_compile_features(linux-dmabuf-test PRIVATE cxx_std_17)
   target_compile_options(linux-dmabuf-test PRIVATE -UNDEBUG -Wall -Wextra -Wpedantic)
-  foreach(target playback-dmabuf-helper playback-fd fd-transport-fixture linux-dmabuf-test)
+  foreach(target playback-dmabuf-helper playback-software-helper playback-fd fd-transport-fixture linux-dmabuf-test)
     set_target_properties(${target} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PLAYBACK_OUTPUT_DIR}"
       LIBRARY_OUTPUT_DIRECTORY "${PLAYBACK_OUTPUT_DIR}")
     foreach(config DEBUG RELEASE RELWITHDEBINFO MINSIZEREL)

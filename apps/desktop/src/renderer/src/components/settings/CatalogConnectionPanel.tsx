@@ -74,7 +74,7 @@ export default function CatalogConnectionPanel(): JSX.Element {
     remoteBaseUrl: savedSettings?.remoteBaseUrl ?? ''
   }
   const form = useSettingsDraft(saved)
-  const playerForm = useSettingsDraft({ playerPath: savedSettings?.playerPath ?? '', playerPreference: savedSettings?.playerPreference ?? 'builtin', resumePlayback: savedSettings?.resumePlayback ?? true })
+  const playerForm = useSettingsDraft({ playerPath: savedSettings?.playerPath ?? '', playerPreference: savedSettings?.playerPreference ?? 'builtin', linuxPlaybackMode: savedSettings?.linuxPlaybackMode ?? 'auto', resumePlayback: savedSettings?.resumePlayback ?? true })
   const externalPlayer = playerForm.draft.playerPreference === 'external'
   const missingPlayerPath = externalPlayer && !playerForm.draft.playerPath.trim()
   const [clearProgress, setClearProgress] = useState(false)
@@ -310,9 +310,9 @@ export default function CatalogConnectionPanel(): JSX.Element {
     setSavingPlayer(true)
     setPickerError(null)
     try {
-      const result = await api.thisComputer.update({ playerPath: submitted.playerPath.trim() || null, playerPreference: submitted.playerPreference, resumePlayback: submitted.resumePlayback })
+      const result = await api.thisComputer.update({ playerPath: submitted.playerPath.trim() || null, playerPreference: submitted.playerPreference, linuxPlaybackMode: submitted.linuxPlaybackMode, resumePlayback: submitted.resumePlayback })
       setSavedSettings(result.settings)
-      playerForm.accept({ playerPath: result.settings.playerPath ?? '', playerPreference: result.settings.playerPreference ?? 'builtin', resumePlayback: result.settings.resumePlayback ?? true }, submitted)
+      playerForm.accept({ playerPath: result.settings.playerPath ?? '', playerPreference: result.settings.playerPreference ?? 'builtin', linuxPlaybackMode: result.settings.linuxPlaybackMode ?? 'auto', resumePlayback: result.settings.resumePlayback ?? true }, submitted)
       setPlayerDetectionHint(null)
       return true
     } catch (reason) {
@@ -541,6 +541,18 @@ export default function CatalogConnectionPanel(): JSX.Element {
               <p id={playerModeHintId} className={styles.playerNote}>{externalPlayer
                 ? '通过此电脑上的播放程序打开影片。'
                 : '内置播放支持本机与远程媒体库的影片文件。'}</p>
+            </div>
+          </div>
+          <div className={styles.playerRow}>
+            <span className={styles.playerFieldLabel}>Linux 内置播放模式</span>
+            <div className={styles.playerRowContent}>
+              <SegmentedControl variant="subtle" aria-label="Linux 内置播放模式">
+                {([['auto', '自动'], ['gpu', 'GPU'], ['cpu', 'CPU 兼容']] as const).map(([value, label]) =>
+                  <SegmentedOption key={value} selected={playerForm.draft.linuxPlaybackMode === value}
+                    disabled={savingPlayer || connectionBusy || !savedSettings}
+                    onClick={() => playerForm.setDraft(current => ({ ...current, linuxPlaybackMode: value }))}>{label}</SegmentedOption>)}
+              </SegmentedControl>
+              <p className={styles.playerNote}>自动模式在 GPU 播放失败时切换到 CPU；无报错黑屏时可手动选择 CPU 兼容。保存后重开影片生效，仅用于 Linux。</p>
             </div>
           </div>
           <div className={styles.playerRow}>

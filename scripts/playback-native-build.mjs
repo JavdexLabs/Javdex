@@ -75,9 +75,8 @@ export function playbackNativeBuild({ platform, arch, root, prefix, include, nod
         `-DELECTRON_INCLUDE_DIR=${include}`, `-DMPV_PREFIX=${prefix}`, `-DPLAYBACK_OUTPUT_DIR=${output}`] },
       { command: 'cmake', args: ['--build', build, '--config', 'Release'] },
       { command: path.join(output, 'mpv-core-test'), args: [] },
-      { command: path.join(output, 'x11-controls-test'), args: [] },
-      { command: path.join(output, 'x11-surface-test'), args: [] },
-      { command: process.execPath, args: [path.join(root, 'scripts/playback-linux-helper-smoke.mjs'), path.join(output, 'playback-helper')] }
+      { command: path.join(output, 'linux-dmabuf-test'), args: [] },
+      { command: process.execPath, args: [path.join(root, 'scripts/linux-fd-transport.test.cjs')] }
     ]
   }
   throw new Error('Native playback adapter is not implemented for this host')

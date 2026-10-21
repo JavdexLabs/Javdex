@@ -3,6 +3,8 @@ import type { PlaybackControl, PlaybackOcclusion, PlaybackSnapshot } from '@shar
 /** Private seam: renderer cannot see this interface or call native commands. */
 export interface NativePlaybackState {
   alive: boolean
+  playbackMode?: 'gpu' | 'cpu'
+  playbackFallback?: boolean
   rendererFullscreenControls?: boolean
   /** Main-owned shared-texture generation, never a media locator or native FD. */
   sharedTextureSurface?: string
@@ -12,6 +14,10 @@ export interface NativePlaybackState {
   nativeFrames?: number
   /** New-frame swaps submitted while the surface is visible; not screen capture proof. */
   presentedFrames?: number
+  /** Linux Canvas submission only; physical presentation feedback unavailable. */
+  submittedFrames?: number
+  renderBudgetMs?: number
+  submissionLatenessMs?: number
   loadedFiles?: number
   subtitleCommandErrors?: number
   generatedSubtitleCommandErrors?: number

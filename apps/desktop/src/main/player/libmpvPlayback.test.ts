@@ -95,16 +95,18 @@ function fixture(platform: 'darwin' | 'win32' | 'linux') {
         case 'node:path': return path
         case 'node:timers/promises': return { setTimeout: delay }
         case 'node:module': return { createRequire: () => () => bridge }
-        case './playbackDisplay': return { linuxPlaybackBackend: () => 'x11' }
+        case './playbackDisplay': return { linuxPlaybackBackend: () => 'dmabuf' }
         case './linuxPlaybackBridge': return { createLinuxPlaybackBridge: () => bridge }
-        case './linuxSharedTexture': return { createLinuxSharedTexture: () => { throw new Error('Legacy test must not initialize a shared-texture importer') } }
+        case './linuxSharedTexture': return { createLinuxSharedTexture: () => { throw new Error('Wrapper fixture does not materialize its deferred frame channel') } }
+        case './linuxGpuImport': return { linuxGpuImportLoader: () => undefined }
+        case './linuxPlaybackDevice': return { linuxPlaybackRenderNode: () => '/dev/dri/renderD129' }
         default: throw new Error(`Unexpected playback wrapper dependency: ${id}`)
       }
     }
   }, { filename: 'libmpvPlayback.ts' })
   const window = {
     isDestroyed: () => false,
-    getNativeWindowHandle: () => Buffer.alloc(4),
+    getNativeWindowHandle: () => { assert.notEqual(platform, 'linux', 'Linux must not request a native window handle'); return Buffer.alloc(4) },
     getBounds: () => ({ x: 0, y: 0, width: 1, height: 1 }),
     webContents: { getZoomFactor: () => 1 }
   } as unknown as BrowserWindow

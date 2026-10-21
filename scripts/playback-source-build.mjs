@@ -53,9 +53,11 @@ export function playbackSourceNativePlan(input) {
   return steps
 }
 
-export function playbackSourcePlan({ platform, arch, source, build, prefix, tools, jobs }) {
+export function playbackSourcePlan({ platform, arch, source, build, prefix, tools, jobs, linuxProfile = platform === 'linux' ? 'dmabuf' : undefined }) {
   assert.ok(['darwin', 'linux', 'win32'].includes(platform), 'Unsupported playback host')
   assert.ok(['x64', 'arm64'].includes(arch) && (platform !== 'win32' || arch === 'x64'), 'Unsupported playback architecture')
+  assert.ok(linuxProfile === undefined || ['dmabuf', 'software'].includes(linuxProfile), 'Unsupported Linux playback profile')
+  assert.ok(linuxProfile === undefined || platform === 'linux', 'DMA-BUF profile requires Linux')
   const steps = [], dir = id => path.join(source, id), output = id => path.join(build, id)
   const step = (command, args, cwd) => steps.push({ command, args, cwd })
   const make = cwd => { step('make', [`-j${jobs}`], cwd); step('make', ['install'], cwd) }
@@ -95,14 +97,16 @@ export function playbackSourcePlan({ platform, arch, source, build, prefix, tool
     '--disable-muxers', '--enable-muxer=image2', '--enable-libdav1d', '--enable-zlib', '--pkg-config-flags=--static',
     ...({ darwin: ['--enable-videotoolbox', '--enable-audiotoolbox', '--enable-securetransport'],
       win32: ['--target-os=mingw32', '--enable-schannel', '--enable-d3d11va', '--enable-dxva2', '--enable-d3d12va'],
-      linux: ['--enable-openssl', '--enable-vaapi'] }[platform])])
+      linux: ['--enable-openssl', linuxProfile === 'software' ? '--disable-vaapi' : '--enable-vaapi', ...(linuxProfile === 'software' ? ['--disable-hwaccels'] : [])] }[platform])])
   step('make', ['-C', path.join(dir('lua'), 'src'), `-j${jobs}`, 'liblua.a',
     `MYCFLAGS=-O2 -fPIC ${platform === 'win32' ? '-DLUA_DL_DLL' : '-DLUA_USE_POSIX -DLUA_USE_DLOPEN'}`])
-  meson('mpv', ['-Dlibmpv=true', '-Dcplayer=false', '-Dgpl=true', '-Dbuild-date=false', '-Dgl=enabled', '-Dplain-gl=enabled',
+  meson('mpv', ['-Dlibmpv=true', '-Dcplayer=false', '-Dgpl=true', '-Dbuild-date=false', `-Dgl=${linuxProfile === 'software' ? 'disabled' : 'enabled'}`, `-Dplain-gl=${linuxProfile === 'software' ? 'disabled' : 'enabled'}`,
     '-Diconv=enabled', '-Dzlib=enabled', '-Dlua=lua5.2',
     ...({ darwin: ['-Dcocoa=enabled', '-Dswift-build=enabled', `-Dswift-flags=-target ${arch === 'x64' ? 'x86_64' : 'arm64'}-apple-macos12.0`, '-Dgl-cocoa=enabled', '-Dcoreaudio=enabled', '-Dvideotoolbox-gl=enabled'],
       win32: ['-Dwin32-threads=enabled', '-Dgl-win32=enabled', '-Dwasapi=enabled', '-Dd3d-hwaccel=enabled', '-Dd3d9-hwaccel=enabled'],
-      linux: ['-Dalsa=enabled', '-Dx11=enabled', '-Dgl-x11=enabled', '-Dvaapi=enabled', '-Dvaapi-x11=enabled'] }[platform])], 'shared')
+      linux: linuxProfile === 'software'
+        ? ['-Dpulse=enabled', '-Dalsa=disabled', '-Dx11=disabled', '-Dgl-x11=disabled', '-Dvaapi=disabled', '-Dvaapi-x11=disabled', '-Dvaapi-drm=disabled']
+        : ['-Dpulse=enabled', '-Dalsa=disabled', '-Dx11=disabled', '-Dgl-x11=disabled', '-Dvaapi=enabled', '-Dvaapi-x11=disabled', '-Dvaapi-drm=enabled'] }[platform])], 'shared')
   return steps
 }
 
@@ -132,4 +136,12 @@ libass = declare_dependency(
     link_args: run_command(find_program(${executable}),
         '--libs-only-l', '--libs-only-other', '--static', 'libass',
         check: true).stdout().strip().split())`)
+}
+
+// libmpv's VAAPI DRM display creation needs libva-drm and a render fd, not
+// mpv's KMS window output, VT switching, EDID parser or libdisplay-info.
+export function playbackLinuxVaapiRenderDependency(text) {
+  const before = "get_option('vaapi-drm').require(libva.found() and features['drm'])"
+  assert.equal(text.split(before).length, 2, 'Pinned VAAPI DRM recipe drift')
+  return text.replace(before, "get_option('vaapi-drm').require(libva.found())")
 }

@@ -85,6 +85,8 @@ export interface PlaybackSnapshot {
     audioCodec: string | null
     width: number | null
     height: number | null
+    playbackMode?: 'gpu' | 'cpu'
+    playbackFallback?: boolean
     hardwareDecoder: string | null
     audioOutput: string | null
     droppedFrames: number | null

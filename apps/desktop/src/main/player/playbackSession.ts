@@ -303,6 +303,7 @@ export function createPlaybackSession(deps: Dependencies) {
         ? [{ title: typeof chapter.title === 'string' ? chapter.title.slice(0, 256) : `章节 ${index + 1}`, time: chapter.time }] : [])
       state.info = { videoCodec: raw['video-codec'] ?? null, audioCodec: raw['audio-codec'] ?? null,
         width: finite(raw.width), height: finite(raw.height), hardwareDecoder: raw['hwdec-current'] ?? null,
+        playbackMode: raw.playbackMode, playbackFallback: raw.playbackFallback,
         audioOutput: raw['current-ao'] ?? null, droppedFrames: finite(raw['frame-drop-count']) }
       state.rendererFullscreenControls = raw.rendererFullscreenControls === true
       state.sharedTextureSurface = raw.sharedTextureSurface
@@ -311,7 +312,7 @@ export function createPlaybackSession(deps: Dependencies) {
       state.fullscreenPointerY = finite(raw.fullscreenPointerY) ?? undefined
       deps.awake(state.phase === 'playing')
       // Rendering a paused first frame and jumping the clock cannot prove actual playback.
-      const frames = raw.presentedFrames ?? 0
+      const frames = raw.submittedFrames ?? raw.presentedFrames ?? 0
       if (!started && state.resumePosition == null && state.phase === 'playing' && !state.seeking && state.position != null) {
         if (sample && frames > sample.frames && state.position > sample.position && state.position - sample.position < 2) {
           started = true

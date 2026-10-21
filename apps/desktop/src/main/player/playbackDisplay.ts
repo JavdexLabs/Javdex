@@ -11,7 +11,7 @@ interface DisplayStartupHost {
   }
 }
 
-let linuxBackend: 'x11' | 'dmabuf' | null = null
+let linuxBackend: 'dmabuf' | 'software' | null = null
 
 export function configurePlaybackDisplay(
   host: DisplayStartupHost,
@@ -29,6 +29,7 @@ export function configurePlaybackDisplay(
   // Electron may already report an ozone default (including x11) before ready.
   // Only startup arguments prove opt-in. Match Chromium's switch rules: skip the
   // executable, trim ASCII whitespace, stop at --, and use the last = value.
+  const software = argv.slice(1, argv.indexOf('--') < 0 ? undefined : argv.indexOf('--')).includes('--javdex-cpu')
   let explicitX11 = false, explicitWayland = false, sharedTexture = false
   let selected: string | undefined
   for (const rawArg of argv.slice(1)) {
@@ -47,7 +48,7 @@ export function configurePlaybackDisplay(
   const display = explicit ?? selected ?? (sharedTexture ? 'wayland' : undefined)
   if (sharedTexture && display !== 'x11' && display !== 'wayland') throw new Error('实验共享纹理播放只支持明确选择的 X11 或 Wayland 显示后端')
   if (explicit || sharedTexture && selected === undefined) host.commandLine.appendSwitch('ozone-platform', display!)
-  linuxBackend = sharedTexture ? 'dmabuf' : display === 'x11' ? 'x11' : null
+  linuxBackend = display === 'x11' || display === 'wayland' ? software ? 'software' : 'dmabuf' : null
 }
 
-export function linuxPlaybackBackend(): 'x11' | 'dmabuf' | null { return linuxBackend }
+export function linuxPlaybackBackend(): 'dmabuf' | 'software' | null { return linuxBackend }

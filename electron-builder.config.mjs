@@ -1,3 +1,5 @@
+import { integratedLinuxPlayback, verifyIntegratedLinuxPlayback, stageIntegratedLinuxPlayback } from './scripts/linux-integrated-playback.mjs'
+import { prepareAutomaticAppImageRuntime } from './scripts/linux-appimage-runtime.mjs'
 import { signAsync } from '@electron/osx-sign'
 import { resolve } from 'node:path'
 import {
@@ -33,6 +35,8 @@ async function signMacApp(options) {
 /** @type {import('electron-builder').Configuration} */
 const base = {
   appId: 'com.javdex.app',
+  // Static toolset; Linux x64 beforePack supplies the pinned fallback runtime.
+  toolsets: { appimage: '1.0.3' },
   productName: 'Javdex',
   extraMetadata: {
     description: 'Javdex'
@@ -129,6 +133,7 @@ const base = {
     icon: 'build/icon.png',
     electronLanguages: PORTABLE_ELECTRON_LANGUAGES,
     category: 'Video',
+    executableName: 'javdex',
     maintainer: 'Javdex',
     artifactName: '${productName}-${version}-${arch}.${ext}',
     target: []
@@ -160,12 +165,20 @@ export default function buildConfig() {
   // only matcher defaults to **/*, so retain the desktop allowlist here too.
   config.win.files.unshift(...config.files)
 
-  config.beforePack = async context => { verifyLocalPlaybackRuntime(context); verifyPackagedPlaybackRuntime(context) }
+  config.beforePack = async context => {
+    if (integratedLinuxPlayback(context)) {
+      verifyIntegratedLinuxPlayback()
+      await prepareAutomaticAppImageRuntime()
+    } else {
+      verifyLocalPlaybackRuntime(context)
+      verifyPackagedPlaybackRuntime(context)
+    }
+  }
   config.afterPack = async context => {
     prunePackagedRuntime(context)
     verifyNoPackagedAiRuntime(context)
-    stagePackagedPlaybackRuntime(context)
-    stageLocalPlaybackRuntime(context)
+    if (integratedLinuxPlayback(context)) stageIntegratedLinuxPlayback(context)
+    else { stagePackagedPlaybackRuntime(context); stageLocalPlaybackRuntime(context) }
   }
   config.mac.sign = signMacApp
 

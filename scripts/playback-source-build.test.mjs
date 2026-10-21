@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
-import { playbackBuildFingerprint, playbackLinuxAssDependency, playbackPkgConfigEnvironment, playbackSourceNativePlan, playbackSourcePlan, playbackWindowsExportNames, staticPlaybackDependencies, verifyPlaybackSource } from './playback-source-build.mjs'
+import { playbackBuildFingerprint, playbackLinuxAssDependency, playbackLinuxVaapiRenderDependency, playbackPkgConfigEnvironment, playbackSourceNativePlan, playbackSourcePlan, playbackWindowsExportNames, staticPlaybackDependencies, verifyPlaybackSource } from './playback-source-build.mjs'
 import { mergeTargets } from './dist.mjs'
 import packagingConfig from '../electron-builder.config.mjs'
 
@@ -122,7 +122,7 @@ test('compiled cache identity changes with source/recipe, SDK, compiler or archi
 })
 test('recipes build codecs/subtitles from source, disable implicit downloads and enable native audio/TLS', () => {
   for (const [platform, audio, tls] of [['darwin', '-Dcoreaudio=enabled', '--enable-securetransport'],
-    ['win32', '-Dwasapi=enabled', '--enable-schannel'], ['linux', '-Dalsa=enabled', '--enable-openssl']]) {
+    ['win32', '-Dwasapi=enabled', '--enable-schannel'], ['linux', '-Dpulse=enabled', '--enable-openssl']]) {
     const plan = playbackSourcePlan({ ...input, platform })
     const commands = plan.flatMap(step => step.args)
     for (const id of ['libass', 'libplacebo', 'dav1d', 'mpv']) {
@@ -182,4 +182,28 @@ test('Debian package declares native OS prerequisites without replacing Electron
   for (const name of ['libgtk-3-0', 'libnss3', 'libsecret-1-0', 'libasound2', 'libva2', 'libva-x11-2', 'libva-drm2', 'libxpresent1', 'libopengl0'])
     assert.ok(dependencies.includes(name))
   assert.ok(!dependencies.some(name => /mpv|ffmpeg/.test(name)))
+})
+
+test('Dedicated Linux DMA-BUF profile excludes window-system outputs and uses Pulse protocol', () => {
+  const plan = playbackSourcePlan({ ...input, platform: 'linux', linuxProfile: 'dmabuf' })
+  const mpv = plan.find(s => s.args[0] === 'setup' && s.args.includes('/sources/mpv'))
+  for (const flag of ['-Dplain-gl=enabled', '-Dpulse=enabled', '-Dalsa=disabled', '-Dx11=disabled', '-Dgl-x11=disabled', '-Dvaapi=enabled', '-Dvaapi-x11=disabled', '-Dvaapi-drm=enabled']) assert.ok(mpv.args.includes(flag), flag)
+  const defaults = playbackSourcePlan({ ...input, platform: 'linux' }).find(s => s.args[0] === 'setup' && s.args.includes('/sources/mpv'))
+  assert.ok(defaults.args.includes('-Dx11=disabled'))
+  assert.throws(() => playbackSourcePlan({ ...input, platform: 'linux', linuxProfile: 'x11' }), /Unsupported Linux playback profile/)
+  assert.throws(() => playbackSourcePlan({ ...input, platform: 'darwin', linuxProfile: 'dmabuf' }), /requires Linux/)
+})
+
+test('VAAPI render dependency patch removes only the native KMS prerequisite', () => {
+  const recipe = "get_option('vaapi-drm').require(libva.found() and features['drm'])"
+  assert.equal(playbackLinuxVaapiRenderDependency(recipe), "get_option('vaapi-drm').require(libva.found())")
+  assert.throws(() => playbackLinuxVaapiRenderDependency('changed upstream recipe'), /recipe drift/)
+})
+
+test('CPU profile disables graphics rendering and hardware decoding while retaining Pulse audio', () => {
+  const steps = playbackSourcePlan({ platform: 'linux', arch: 'x64', source: '/src', build: '/build', prefix: '/prefix', tools: '/tools', jobs: 2, linuxProfile: 'software' })
+  const ff = steps.find(s => s.args.includes('/src/ffmpeg/configure')).args
+  assert(ff.includes('--disable-vaapi')); assert(ff.includes('--disable-hwaccels'))
+  const mpv = steps.find(s => s.args.includes('/src/mpv')).args
+  for (const flag of ['-Dgl=disabled', '-Dplain-gl=disabled', '-Dvaapi=disabled', '-Dpulse=enabled', '-Dx11=disabled']) assert(mpv.includes(flag))
 })

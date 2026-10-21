@@ -169,7 +169,8 @@ public:
         return found == observed.end() || !std::isfinite(found->second.number) ? 0 : found->second.number;
     }
     void initialize(void *(*getProc)(void *, const char *), void *context = nullptr, bool softwareRendering = false,
-        void (*wakeup)(void *) = nullptr, void *wakeupContext = nullptr, const char *hardwareDecode = "auto") {
+        void (*wakeup)(void *) = nullptr, void *wakeupContext = nullptr, const char *hardwareDecode = "auto", bool cpuRendering = false,
+        const char *renderTimingOffset = "0") {
         if (handle || renderer) throw std::runtime_error("Native session is already initialized");
         observed.clear(); actions.clear(); lastError.clear(); lastErrorCode = 0;
         frames = presentedFrames = loadedFiles = restarts = commandErrors = subtitleCommandErrors = subtitleCommandsPending = subtitleCommandReplies = 0; requested.store(false);
@@ -184,7 +185,7 @@ public:
             {"idle", "yes"}, {"keep-open", "yes"}, {"pause", "yes"}, {"volume", "50"}, {"terminal", "no"},
             {"input-default-bindings", "no"}, {"input-vo-keyboard", "no"}, {"osc", "no"},
             {"audio-pitch-correction", "yes"}, {"sub-auto", "no"}, {"audio-file-auto", "no"},
-            {"access-references", "no"}, {"video-timing-offset", "0"}
+            {"access-references", "no"}, {"video-timing-offset", renderTimingOffset}
         };
         for (const auto &option : options) {
             int error = mpv_set_option_string(handle, option[0], option[1]);
@@ -201,12 +202,24 @@ public:
                 if (result < 0) throw std::runtime_error(mpv_error_string(result));
             }
         }
+        if (cpuRendering) {
+            // libmpv SW defaults to single-threaded Lanczos conversion/scaling.
+            // The compatibility path favors timely frames at desktop sizes.
+            // A zero render lead makes the SW callback miss presentation
+            // deadlines even when conversion is fast. Allow 20ms for rendering
+            // and IPC; BLOCK_FOR_TARGET_TIME remains off in the helper.
+            const int timing = mpv_set_option_string(handle, "video-timing-offset", "0.02");
+            if (timing < 0) throw std::runtime_error(mpv_error_string(timing));
+            const int result = mpv_set_option_string(handle, "sws-scaler", "bilinear");
+            if (result < 0) throw std::runtime_error(mpv_error_string(result));
+        }
         int error = mpv_initialize(handle);
         if (error < 0) throw std::runtime_error(mpv_error_string(error));
         mpv_opengl_init_params gl = {getProc, context};
         mpv_render_param params[] = {{MPV_RENDER_PARAM_API_TYPE, (void *)MPV_RENDER_API_TYPE_OPENGL},
             {MPV_RENDER_PARAM_OPENGL_INIT_PARAMS, &gl}, {MPV_RENDER_PARAM_INVALID, nullptr}};
-        error = mpv_render_context_create(&renderer, handle, params);
+        mpv_render_param software[] = {{MPV_RENDER_PARAM_API_TYPE, (void *)MPV_RENDER_API_TYPE_SW}, {MPV_RENDER_PARAM_INVALID, nullptr}};
+        error = mpv_render_context_create(&renderer, handle, cpuRendering ? software : params);
         if (error < 0) throw std::runtime_error(mpv_error_string(error));
         const char *numbers[] = {"time-pos", "duration", "volume", "speed", "width", "height", "audio-pts", "frame-drop-count", "sub-delay", "sub-font-size"};
         const char *strings[] = {"hwdec-current", "video-codec", "audio-codec", "audio-device", "current-ao", "sid", "aid"};
@@ -289,6 +302,25 @@ public:
         drainEvents(); refreshGeneratedSubtitles();
         return renderer && requested.exchange(false) && (mpv_render_context_update(renderer) & MPV_RENDER_UPDATE_FRAME);
     }
+    // Render API timestamps use mpv's own epoch. Translate the delta into the
+    // Linux CLOCK_MONOTONIC domain in the helper, never into wall-clock time.
+    int64_t nextFrameDelayUs() {
+#if MPV_CLIENT_API_VERSION >= MPV_MAKE_VERSION(2, 2)
+        if (!renderer) return 0;
+        mpv_render_frame_info info{};
+        mpv_render_param param{MPV_RENDER_PARAM_NEXT_FRAME_INFO, &info};
+        if (mpv_render_context_get_info(renderer, param) < 0 || !info.target_time
+            || (info.flags & (MPV_RENDER_FRAME_INFO_REDRAW | MPV_RENDER_FRAME_INFO_REPEAT))) return 0;
+        // Pinned mpv 0.41 vo_libmpv.c exports vo_frame::pts in nanoseconds,
+        // although render.h still documents microseconds. Match the actual
+        // bundled implementation; revalidate this contract on mpv upgrades.
+        return (info.target_time - mpv_get_time_ns(handle)) / 1000;
+#else
+        // Older system libmpv is supported for development compilation only.
+        // Its clock contract is not the pinned runtime contract tested here.
+        return 0;
+#endif
+    }
     bool render(int width, int height, int framebuffer = 0, bool flipY = true) {
         if (!renderer || width <= 0 || height <= 0) return false;
         generatedWidth = width; generatedHeight = height;
@@ -301,6 +333,19 @@ public:
         if (error < 0) { lastErrorCode = error; lastError = mpv_error_string(error); return false; }
         frames++;
         return true;
+    }
+    bool renderSoftware(int width, int height, size_t stride, void *pixels) {
+        if (!renderer || width <= 0 || height <= 0) return false;
+        generatedWidth = width; generatedHeight = height;
+        drainEvents(); refreshGeneratedSubtitles(); mpv_render_context_update(renderer);
+        int dimensions[] = {width, height}, block = 0;
+        mpv_render_param params[] = {{MPV_RENDER_PARAM_SW_SIZE, dimensions},
+            {MPV_RENDER_PARAM_SW_FORMAT, (void *)"rgb0"}, {MPV_RENDER_PARAM_SW_STRIDE, &stride},
+            {MPV_RENDER_PARAM_SW_POINTER, pixels}, {MPV_RENDER_PARAM_BLOCK_FOR_TARGET_TIME, &block},
+            {MPV_RENDER_PARAM_INVALID, nullptr}};
+        const int error = mpv_render_context_render(renderer, params);
+        if (error < 0) { lastErrorCode = error; lastError = mpv_error_string(error); return false; }
+        frames++; return true;
     }
     bool skipRender() {
         if (!renderer) return false;

@@ -7,6 +7,7 @@ export interface ThisComputerSettings {
   theme: string
   playerPath: string | null
   playerPreference: 'external' | 'builtin'
+  linuxPlaybackMode?: 'auto' | 'gpu' | 'cpu'
   playbackVolume: number
   resumePlayback: boolean
   proxyUrl: string
@@ -20,6 +21,7 @@ export interface ThisComputerSettingsPatch {
   remoteBaseUrl?: string | null
   playerPath?: string | null
   playerPreference?: 'external' | 'builtin'
+  linuxPlaybackMode?: 'auto' | 'gpu' | 'cpu'
   resumePlayback?: boolean
 }
 

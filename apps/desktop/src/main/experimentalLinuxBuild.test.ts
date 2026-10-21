@@ -31,7 +31,7 @@ test('experimental default profile cannot silently open the production Javdex di
       if (id === 'electron') return { app: { setName: (name: string) => calls.push(['name', name]),
         setPath: (kind: string, value: string) => calls.push([kind, value]), getPath: () => '/config' } }
       if (id === 'node:path') return path
-      if (id === './experimentalLinuxBuild') return { isExperimentalLinuxBuild: () => experimental,
+      if (id === './experimentalLinuxBuild') return { isExperimentalLinuxBuild: (name?: string) => experimental && !name,
         EXPERIMENTAL_LINUX_NAME: 'Javdex Linux Texture Experimental', EXPERIMENTAL_LINUX_PROFILE: 'Javdex-Linux-Texture-Experimental' }
       if (id === '@shared/appIdentity') return { APP_DISPLAY_NAME: 'Javdex', APP_PACKAGE_NAME: 'Javdex', readTestUserDataPath: () => undefined }
       throw new Error(id)
@@ -57,4 +57,16 @@ test('experimental update checks and release navigation make no network or exter
   assert.equal(api.shouldRunAutomaticCheck(), false)
   assert.equal((await api.checkForLatestRelease()).errorCode, 'experimental-build')
   assert.equal(await api.openReleasePage(), false)
+})
+
+test('portable package identity requires the exact packaged experimental marker and name', () => {
+  for (const name of ['javdex-linux-portable-phase1', 'javdex-linux-texture-experimental']) {
+    const api = load<typeof import('./experimentalLinuxBuild')>('./experimentalLinuxBuild.ts', id => {
+      if (id === 'electron') return { app: { isPackaged: true, getAppPath: () => '/app' } }
+      if (id === 'node:fs') return { readFileSync: () => JSON.stringify({ javdexExperimentalLinux: true, name }) }
+      if (id === 'node:path') return path
+      throw new Error(id)
+    })
+    assert.equal(api.isExperimentalLinuxBuild('javdex-linux-portable-phase1'), name === 'javdex-linux-portable-phase1')
+  }
 })

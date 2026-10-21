@@ -39,13 +39,13 @@ test('Windows addon installs the Electron import hook directly in its delayed-lo
   assert.ok(cmake.includes('target_link_options(playback PRIVATE /DELAYLOAD:node.exe)'))
   assert.match(cmake, /target_link_libraries\(playback PRIVATE "\$\{ELECTRON_NODE_LIBRARY\}" delayimp /)
 })
-test('Linux runs core/control regressions and isolated helper protocol smoke without a display', () => {
+test('Linux runs core/frame regressions and isolated FD transport smoke without a display', () => {
   const steps = playbackNativeBuild({ ...input, platform: 'linux' })
-  assert.deepEqual(steps.map(step => step.command), ['cmake', 'cmake', path.join(input.output, 'mpv-core-test'), path.join(input.output, 'x11-controls-test'), path.join(input.output, 'x11-surface-test'), process.execPath])
+  assert.deepEqual(steps.map(step => step.command), ['cmake', 'cmake', path.join(input.output, 'mpv-core-test'), path.join(input.output, 'linux-dmabuf-test'), process.execPath])
   assert.ok(steps[0].args.includes(`-DELECTRON_INCLUDE_DIR=${input.include}`))
   assert.ok(steps[0].args.includes(`-DMPV_PREFIX=${input.prefix}`))
   assert.ok(steps.every(step => !step.args.includes('-A') && !step.args.includes('-framework')))
-  assert.deepEqual(steps[5].args, [path.join(input.root, 'scripts/playback-linux-helper-smoke.mjs'), path.join(input.output, 'playback-helper')])
+  assert.deepEqual(steps[4].args, [path.join(input.root, 'scripts/linux-fd-transport.test.cjs')])
 })
 test('unsupported backend, architecture and missing Windows linkage fail closed', () => {
   assert.throws(() => playbackNativeBuild({ ...input, platform: 'freebsd' }), /not implemented/)

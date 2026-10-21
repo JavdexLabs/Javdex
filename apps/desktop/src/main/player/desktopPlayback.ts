@@ -1,3 +1,4 @@
+import { createLinuxPlaybackFallback, type LinuxPlaybackMode } from './linuxPlaybackFallback'
 import { app, dialog, shell, powerSaveBlocker, powerMonitor, type BrowserWindow } from 'electron'
 import path from 'node:path'
 import type { CatalogBackend } from '../application/catalogBackend'
@@ -30,7 +31,8 @@ export function disposeBuiltinPlayback(): Promise<void> {
 }
 
 export function registerBuiltinPlayback(backend: CatalogBackend, getWindow: () => BrowserWindow | null, settings: DesktopSettingsStore, recentStarted?: (videoId: number) => Promise<void>): (target: PlaybackTarget) => Promise<PlayResult> {
-  const native = createLibmpvPlayback(getWindow)
+  let linuxMode: LinuxPlaybackMode = process.argv.includes('--javdex-cpu') ? 'cpu' : 'auto'
+  const native = process.platform === 'linux' ? createLinuxPlaybackFallback(createLibmpvPlayback(getWindow), createLibmpvPlayback(getWindow, 'software'), () => linuxMode) : createLibmpvPlayback(getWindow)
   const resolver = createPlaybackSourceResolver(backend)
   const volume = createPlaybackVolume(settings)
   let recordingEnabled = false
@@ -179,13 +181,18 @@ export function registerBuiltinPlayback(backend: CatalogBackend, getWindow: () =
     session.stop()
     return aiSubtitles.close()
   }
-  appCommandAdapter.register(IPC.PLAYBACK_AVAILABILITY, builtinPlaybackAvailability)
+  const availability = () => {
+    const gpu = builtinPlaybackAvailability(linuxMode === 'cpu' ? 'software' : undefined)
+    return process.platform === 'linux' && linuxMode === 'auto' && !gpu.available ? builtinPlaybackAvailability('software') : gpu
+  }
+  appCommandAdapter.register(IPC.PLAYBACK_AVAILABILITY, availability)
   appCommandAdapter.register(IPC.PLAYBACK_SNAPSHOT, () => ({ revision: observationRevision, snapshot: session.snapshot() }))
   appCommandAdapter.register(IPC.PLAYBACK_AI_SUBTITLE_SNAPSHOT, aiSubtitles.snapshot)
   appCommandAdapter.register(IPC.PLAYBACK_AI_SUBTITLE_COMMAND, aiSubtitles.command)
   const open = async (target: PlaybackTarget): Promise<PlayResult> => {
-    const availability = builtinPlaybackAvailability()
-    if (!availability.available) return { ok: false, error: availability.reason ?? '内置播放不可用' }
+    linuxMode = process.platform !== 'linux' ? 'auto' : process.argv.includes('--javdex-cpu') ? 'cpu' : (await settings.read()).linuxPlaybackMode ?? 'auto'
+    const available = availability()
+    if (!available.available) return { ok: false, error: available.reason ?? '内置播放不可用' }
     try {
       bind()
       if (!await session.open(target)) return { ok: false, error: '播放请求已更新或取消' }

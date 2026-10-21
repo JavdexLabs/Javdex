@@ -4,6 +4,8 @@
 
 #include <node_api.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 #include <unistd.h>
 
 #include <array>
@@ -246,6 +248,34 @@ napi_value Close(napi_env env, napi_callback_info info) {
   return Boolean(env, true);
 }
 
+// Copy only an addon-owned, fixed-size sealed memfd. Renderer never supplies FDs.
+napi_value ReadPixels(napi_env env, napi_callback_info info) {
+  napi_value args[2]; size_t count = 2; void* data = nullptr;
+  napi_get_cb_info(env, info, &count, args, nullptr, &data);
+  auto* state = static_cast<State*>(data);
+  int32_t fd = -1; double length = 0;
+  if (count != 2 || napi_get_value_int32(env, args[0], &fd) != napi_ok
+      || napi_get_value_double(env, args[1], &length) != napi_ok || !std::isfinite(length)
+      || length < 4 || length > 256 * 1024 * 1024 || std::floor(length) != length
+      || !state->owned.count(fd) || state->parents.count(fd))
+    return Error(env, "ERR_CPU_FRAME", "Invalid CPU frame ownership or size");
+  struct stat status{};
+  const int seals = fcntl(fd, F_GET_SEALS);
+  if (fstat(fd, &status) != 0 || !S_ISREG(status.st_mode) || status.st_size != length
+      || seals < 0 || (seals & (F_SEAL_SHRINK | F_SEAL_GROW)) != (F_SEAL_SHRINK | F_SEAL_GROW))
+    return Error(env, "ERR_CPU_FRAME", "CPU frame must have a sealed fixed size");
+  void* pixels = nullptr; napi_value result;
+  if (napi_create_buffer(env, static_cast<size_t>(length), &pixels, &result) != napi_ok) return nullptr;
+  size_t offset = 0;
+  while (offset < static_cast<size_t>(length)) {
+    const auto read = pread(fd, static_cast<char*>(pixels) + offset, static_cast<size_t>(length) - offset, offset);
+    if (read < 0 && errno == EINTR) continue;
+    if (read <= 0) return Error(env, "ERR_CPU_FRAME", "Cannot read CPU frame");
+    offset += static_cast<size_t>(read);
+  }
+  return result;
+}
+
 napi_value Init(napi_env env, napi_value exports) {
   auto* state = new (std::nothrow) State();
   if (!state) return Error(env, "ERR_FD_BRIDGE_MEMORY", "Cannot allocate bridge state");
@@ -255,8 +285,9 @@ napi_value Init(napi_env env, napi_value exports) {
     {"receive", nullptr, Receive, nullptr, nullptr, nullptr, napi_default, state},
     {"sendAck", nullptr, SendAck, nullptr, nullptr, nullptr, napi_default, state},
     {"close", nullptr, Close, nullptr, nullptr, nullptr, napi_default, state},
+      {"readPixels", nullptr, ReadPixels, nullptr, nullptr, nullptr, napi_default, state},
   };
-  if (!Check(env, napi_define_properties(env, exports, 4, properties))) return nullptr;
+  if (!Check(env, napi_define_properties(env, exports, 5, properties))) return nullptr;
   return exports;
 }
 }  // namespace

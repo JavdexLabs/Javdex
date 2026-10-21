@@ -1,0 +1,16 @@
+is_debug = false
+is_component_build = false
+symbol_level = 0
+angle_build_tests = false
+build_angle_deqp_tests = false
+angle_enable_gl = true
+angle_enable_vulkan = true
+angle_enable_wgpu = false
+angle_enable_swiftshader = false
+angle_enable_vulkan_validation_layers = false
+angle_enable_vulkan_api_dump_layer = false
+use_siso = false
+use_remoteexec = false
+use_custom_libcxx = true
+build_with_chromium = false
+enable_rust = false

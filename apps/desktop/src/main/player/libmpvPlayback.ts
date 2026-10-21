@@ -8,9 +8,11 @@ import type { NativePlayback, NativePlaybackState } from './nativePlayback'
 import { linuxPlaybackBackend } from './playbackDisplay'
 import { createLinuxPlaybackBridge } from './linuxPlaybackBridge'
 import { createLinuxSharedTexture } from './linuxSharedTexture'
+import { linuxPlaybackRenderNode } from './linuxPlaybackDevice'
+import { linuxGpuImportLoader } from './linuxGpuImport'
 
 interface Bridge {
-  create(handle: Buffer, bounds: { x: number; y: number; width: number; height: number; scale?: number }, host?: { backend: 'x11' | 'dmabuf' }): void
+  create(handle: Buffer, bounds: { x: number; y: number; width: number; height: number; scale?: number }, host?: { backend: 'dmabuf' | 'software' }): void
   setBounds(bounds: { x: number; y: number; width: number; height: number; scale?: number }): void
   setVisible(visible: boolean): void
   setPresentation(presentation: string): void
@@ -23,26 +25,25 @@ interface Bridge {
   inspect(): NativePlaybackState
   destroy(): void
 }
-function runtimePath(name?: string): string {
+function runtimePath(name?: string, backend = linuxPlaybackBackend()): string {
   const filename = name ?? (process.platform === 'linux'
-    ? linuxPlaybackBackend() === 'dmabuf' ? 'playback-dmabuf-helper' : 'playback-helper' : 'playback.node')
+    ? backend === 'software' ? 'playback-software-helper' : 'playback-dmabuf-helper' : 'playback.node')
   const experimental = filename === 'playback-dmabuf-helper' || filename === 'playback-fd.node'
-  return app.isPackaged ? path.join(process.resourcesPath, experimental ? 'linux-texture-experimental' : 'native-playback', filename)
-    : path.join(app.getAppPath(), 'out', 'native-playback', filename)
+  return app.isPackaged ? path.join(process.resourcesPath, backend === 'software' ? 'linux-software-playback' : experimental ? 'linux-texture-experimental' : 'native-playback', filename)
+    : path.join(app.getAppPath(), 'out', ...(backend === 'software' ? ['linux-software-runtime', 'linux-x64'] : ['native-playback']), filename)
 }
-export function builtinPlaybackAvailability(): PlaybackAvailability {
+export function builtinPlaybackAvailability(backend = linuxPlaybackBackend()): PlaybackAvailability {
   if (!['darwin', 'win32', 'linux'].includes(process.platform)) return { available: false, reason: '此平台的原生播放适配尚未实现，请显式使用外部播放器' }
-  if (process.platform === 'linux' && !linuxPlaybackBackend()) return { available: false, reason: '请退出后以 --javdex-x11 启动传统 X11 播放，或以 --javdex-wayland 启动实验共享纹理播放' }
-  if (process.platform === 'linux' && linuxPlaybackBackend() === 'x11' && !process.env.DISPLAY) return { available: false, reason: '未提供 X11 显示（DISPLAY）；请启用 X11／XWayland，或显式使用外部播放器' }
-  if (process.platform === 'linux' && linuxPlaybackBackend() === 'dmabuf' && !fs.existsSync(runtimePath('playback-fd.node'))) {
-    return { available: false, reason: '缺少实验共享纹理 FD 桥接运行库，请使用专用 Linux 测试包' }
+  if (process.platform === 'linux' && !backend) return { available: false, reason: '请退出后以 --javdex-x11 或 --javdex-wayland 选择显示后端' }
+  if (process.platform === 'linux' && backend !== null && !fs.existsSync(runtimePath('playback-fd.node', backend))) {
+    return { available: false, reason: '安装包缺少 Linux 视频帧传输运行库' }
   }
-  return fs.existsSync(runtimePath()) ? { available: true, reason: null }
+  return fs.existsSync(runtimePath(undefined, backend)) ? { available: true, reason: null }
     : { available: false, reason: app.isPackaged
       ? '安装包缺少内置播放运行库，请使用包含播放运行库的安装包。'
       : '未安装内置播放运行库；开发构建可运行 npm run playback:native:build' }
 }
-export function createLibmpvPlayback(getWindow: () => BrowserWindow | null): NativePlayback {
+export function createLibmpvPlayback(getWindow: () => BrowserWindow | null, backend = linuxPlaybackBackend()): NativePlayback {
   const generatedId = Number.MAX_SAFE_INTEGER
   let bridge: Bridge | null = null
   let alive = false
@@ -115,21 +116,21 @@ export function createLibmpvPlayback(getWindow: () => BrowserWindow | null): Nat
   }
   return {
     create(): void {
-      const availability = builtinPlaybackAvailability()
+      const availability = builtinPlaybackAvailability(backend)
       if (!availability.available) throw new Error(availability.reason ?? '内置播放不可用')
       const window = getWindow()
       if (!window || window.isDestroyed()) throw new Error('主窗口不可用')
-      if (!bridge) bridge = process.platform === 'linux' ? createLinuxPlaybackBridge(runtimePath(), linuxPlaybackBackend() === 'dmabuf'
+      if (!bridge) bridge = process.platform === 'linux' ? createLinuxPlaybackBridge(runtimePath(undefined, backend), backend !== null
         ? onError => {
           const current = getWindow()
           if (!current || current.isDestroyed()) throw new Error('主窗口不可用')
-          return createLinuxSharedTexture(current, runtimePath('playback-fd.node'), onError)
-        } : undefined)
-        : createRequire(path.join(app.getAppPath(), 'package.json'))(runtimePath()) as Bridge
+          return createLinuxSharedTexture(current, runtimePath('playback-fd.node', backend), onError, backend === 'software')
+        } : undefined, backend === 'dmabuf' ? linuxPlaybackRenderNode() : undefined, backend === 'dmabuf' ? linuxGpuImportLoader(app) : undefined)
+        : createRequire(path.join(app.getAppPath(), 'package.json'))(runtimePath(undefined, backend)) as Bridge
       if (process.platform === 'linux') {
-        const backend = linuxPlaybackBackend() === 'dmabuf' ? 'dmabuf' : 'x11'
-        bridge.create(backend === 'dmabuf' ? Buffer.alloc(0) : window.getNativeWindowHandle(), { x: 0, y: 0, width: 1, height: 1,
-          scale: screen.getDisplayMatching(window.getBounds()).scaleFactor }, { backend })
+        const selectedBackend = backend ?? 'dmabuf'
+        bridge.create(Buffer.alloc(0), { x: 0, y: 0, width: 1, height: 1,
+          scale: screen.getDisplayMatching(window.getBounds()).scaleFactor }, { backend: selectedBackend })
       } else bridge.create(window.getNativeWindowHandle(), { x: 0, y: 0, width: 1, height: 1 })
       if (['win32', 'linux'].includes(process.platform)) bridge.setRendererControls?.(true)
       generatedRepliesExpected = 0

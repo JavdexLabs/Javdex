@@ -2,7 +2,18 @@
 
 ## Unreleased
 
+- Linux GPU 共享帧按目标时间提交，区分 Canvas 提交与纹理释放回执，并以 20ms 为初始值进行有界渲染预算调整。
+- Linux Wayland 与 X11 GPU 播放预留渲染与传输提前量，减少零提前量导致的持续丢帧；保留直接导入修复、同步保护和 CPU 回退。
+
+- Linux X11 GPU 直接导入修正 ANGLE 的窗口 visual 选择，并按消费端 Vulkan 能力协商 DMA-BUF 布局；保留 Wayland 路径和 CPU 故障回退。
+
+- Linux X11／XWayland 在缺少直接 DMA-BUF 导入能力时，自动模式改走 CPU 兼容路径，避免 Chromium Pixmap 导入静默失败后持续黑屏。
+
 - 本地 AI 工具与 VAD 改由 Javdex Runtime 固定发行供应，避免上游构建过期导致下载 404；macOS Whisper／FFmpeg 改为按需下载，不再随主应用打包。有效旧 macOS Whisper 继续复用，模型权重和设备设置保持不变。
+
+- Linux 移除 X11 原生子窗口嵌入；X11／XWayland 与 Wayland 统一使用共享纹理或 CPU 内存帧在主窗口 Canvas 显示。
+
+- Linux x86_64 内置播放新增自动／GPU／CPU 兼容模式；自动模式在可检测的 GPU 播放故障后回退一次并恢复播放状态。双运行库随应用打包，保留手动处理无报错黑屏的入口。
 
 ## 0.9.0 — 2026-10-18
 

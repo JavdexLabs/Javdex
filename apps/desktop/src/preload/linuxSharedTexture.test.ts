@@ -18,7 +18,7 @@ test('pixel diagnostic distinguishes opaque black from colored and transparent s
   assert.deepEqual(JSON.parse(JSON.stringify(exports.summarizePixels(data, 2, 2, 12))),
     { samples: 4, nonblack: 2, maximum: 255, opaque: 3 })
 })
-function fixture(options: { registerFails?: boolean; contextFails?: boolean } = {}) {
+function fixture(options: { registerFails?: boolean; contextFails?: boolean; probePixels?: 'valid' | 'black' | 'throw' } = {}) {
   let nextToken = 0, draws = 0, closes = 0, releases = 0, clears = 0, drawFails = false
   const listeners = new Map<string, (_event: unknown, value: unknown) => void>()
   let cpuReceiver!: (_event: unknown, value: unknown) => void
@@ -28,7 +28,7 @@ function fixture(options: { registerFails?: boolean; contextFails?: boolean } = 
   const canvas = { width: 0, height: 0, isConnected: true, dataset: { playbackSurface: token },
     getContext: () => {
       if (options.contextFails) throw new Error('Canvas context unavailable')
-      return { createImageData: (w: number, h: number) => ({ data: new Uint8ClampedArray(w * h * 4) }), putImageData: (image: { data: Uint8ClampedArray }) => { cpuPixels = image.data; draws++ }, drawImage: () => { if (drawFails) throw new Error('draw failed'); draws++ }, clearRect: () => { clears++ } }
+      return { getImageData: () => { if (options.probePixels === 'throw') throw Error('readback'); const data = new Uint8ClampedArray(640 * 360 * 4); if (options.probePixels === 'valid') for (let i = 0; i < data.length; i += 4) data.set([64, 191, 128, 255], i); return { data } }, createImageData: (w: number, h: number) => ({ data: new Uint8ClampedArray(w * h * 4) }), putImageData: (image: { data: Uint8ClampedArray }) => { cpuPixels = image.data; draws++ }, drawImage: () => { if (drawFails) throw new Error('draw failed'); draws++ }, clearRect: () => { clears++ } }
     } }
   const exports = {} as typeof import('./linuxSharedTexture')
   runInNewContext(code, { exports, Uint8Array, performance, setTimeout, clearTimeout, process: { platform: 'linux', isMainFrame: true },
@@ -44,7 +44,7 @@ function fixture(options: { registerFails?: boolean; contextFails?: boolean } = 
     } }
   )
   const bind = exports.installLinuxSharedTextureReceiver()
-  const packet = { importedSharedTexture: { getVideoFrame: () => ({ displayWidth: 320, displayHeight: 180, close: () => { closes++ } }),
+  const packet = { importedSharedTexture: { getVideoFrame: () => ({ displayWidth: options.probePixels ? 640 : 320, displayHeight: options.probePixels ? 360 : 180, close: () => { closes++ } }),
     release: () => { releases++ } } }
   return { bind, messages, listeners, canvas, cpu: (value: unknown) => cpuReceiver(null, value), cpuPixels: () => cpuPixels, counts: () => ({ draws, closes, releases, clears }),
     failDraw: () => { drawFails = true },
@@ -155,4 +155,13 @@ test('new immediate frame cannot be overwritten by an older scheduled frame', as
   await delayed
   assert.equal(f.counts().draws, 1)
   assert.equal(f.counts().releases, 2)
+})
+
+for (const probePixels of ['valid', 'black', 'throw'] as const) test('fixed probe reads then clears without media submission: ' + probePixels, async () => {
+  const f = fixture({ probePixels }); f.bind(token)
+  await f.receive(1, undefined, { selfTest: 'solid-v1', timeline: 0 })
+  const result = f.messages.at(-1) as unknown as { channel: string; data: { samples: number[] } }
+  assert.equal(result.channel, 'playback:shared-texture-self-test')
+  assert.deepEqual(Array.from(result.data.samples), probePixels === 'valid' ? Array(5).fill([64, 191, 128, 255]).flat() : probePixels === 'black' ? Array(20).fill(0) : [])
+  assert.deepEqual(f.counts(), { draws: 1, closes: 1, releases: 1, clears: 1 })
 })

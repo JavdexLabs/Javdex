@@ -7,6 +7,8 @@ export type LinuxPlaybackMode = 'auto' | 'gpu' | 'cpu'
  * recoverable; media/format errors are not evidence of GPU failure. */
 export function createLinuxPlaybackFallback(gpu: NativePlayback, cpu: NativePlayback, preference: () => LinuxPlaybackMode): NativePlayback {
   let current = gpu, mode: LinuxPlaybackMode = 'auto', retried = false, active = false
+  let fallbackReason: string | undefined
+  let hadHardwareDecoder = false, decoderFallback = false, restoreStarted = 0
   let pauseIntent: boolean | undefined
   let source: { locator: string; paused: boolean } | null = null
   let last: NativePlaybackState = { alive: false }
@@ -21,9 +23,16 @@ export function createLinuxPlaybackFallback(gpu: NativePlayback, cpu: NativePlay
   const fallback = (error: unknown = new Error('播放内核不可用')): void => {
     if (!active || mode !== 'auto' || current !== gpu || retried) throw error
     retried = true
+    const code = (error as { playbackFailureCode?: unknown } | null)?.playbackFailureCode
+    const knownCodes = new Set(['DISPLAY_SELF_TEST_FAILED', 'DISPLAY_SELF_TEST_TIMEOUT', 'DRM_RENDER_NODE_UNAVAILABLE',
+      'GBM_LINEAR_BUFFER_UNAVAILABLE', 'EGL_DMABUF_UNAVAILABLE', 'VULKAN_DMABUF_UNAVAILABLE', 'FRAME_RENDER_FAILED',
+      'TEXTURE_IMPORT_FAILED', 'RECEIVER_NOT_READY', 'FRAME_RELEASE_TIMEOUT', 'HELPER_HEARTBEAT_TIMEOUT',
+      'GPU_PROCESS_EXITED', 'RENDERER_REPLACED', 'FRAME_CHANNEL_FAILED'])
+    fallbackReason = typeof code === 'string' && knownCodes.has(code) ? code : source ? 'GPU_RUNTIME_FAILED' : 'GPU_INITIALIZATION_FAILED'
+    restoreStarted = Date.now()
     const saved = { ...last, pause: pauseIntent ?? last.pause ?? source?.paused ?? false }
     gpu.destroy(); current = cpu
-    console.info('[playback] switching to CPU compatibility mode after GPU failure')
+    console.info('[playback] CPU recovery reason=' + fallbackReason)
     cpu.create()
     if (source) {
       restore = saved
@@ -38,12 +47,13 @@ export function createLinuxPlaybackFallback(gpu: NativePlayback, cpu: NativePlay
   return {
     create() {
       mode = preference(); current = mode === 'cpu' ? cpu : gpu; retried = false; active = true
-      pauseIntent = undefined
+      pauseIntent = undefined; fallbackReason = undefined; hadHardwareDecoder = false; decoderFallback = false
       epoch++; generated = null; restoring = false; restoreFailure = undefined
       source = null; restore = null; last = { alive: false }; viewport = null; controls.clear(); subtitles.length = 0
       try { current.create() } catch (error) { fallback(error) }
     },
     load(locator, options) {
+      hadHardwareDecoder = false; decoderFallback = false
       source = { locator, paused: options?.paused ?? false }
       pauseIntent = source.paused; last.pause = source.paused
       attempt(() => current.load(locator, options))
@@ -60,9 +70,15 @@ export function createLinuxPlaybackFallback(gpu: NativePlayback, cpu: NativePlay
     },
     read() {
       if (restoreFailure) throw restoreFailure
+      if (restore && Date.now() - restoreStarted > 15000) throw new Error('CPU 回退恢复超时')
       let value = attempt(() => current.read())
       if (current === gpu && (!value.alive || value.error && ['native', 'video'].includes(value.errorKind ?? ''))) {
         fallback(new Error(value.error || '播放内核不可用')); value = cpu.read()
+      }
+      if (current === gpu) {
+        const decoder = value['hwdec-current']
+        if (decoder && decoder !== 'no') hadHardwareDecoder = true
+        if (decoder === 'no' && hadHardwareDecoder && !value.seeking && !value['eof-reached']) decoderFallback = true
       }
       if (restore && !restoring && value.loadedFiles && typeof value.seekable === 'boolean') {
         const saved = restore, revision = epoch
@@ -94,7 +110,7 @@ export function createLinuxPlaybackFallback(gpu: NativePlayback, cpu: NativePlay
         })().catch(error => { if (revision === epoch) restoreFailure = error })
       }
       last = restore ? { ...value, pause: restore.pause, 'time-pos': restore['time-pos'] } : value
-      return { ...last, playbackMode: current === cpu ? 'cpu' : 'gpu', playbackFallback: retried }
+      return { ...last, playbackMode: current === cpu ? 'cpu' : 'gpu', playbackFallback: retried, playbackFallbackReason: fallbackReason, decoderFallback }
     },
     viewport(...args) { viewport = args; attempt(() => current.viewport(...args)) },
     render() { if (active) attempt(() => current.render()) },

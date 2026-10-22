@@ -86,3 +86,33 @@ it('keeps a newer seek while CPU recovery is awaiting the previous position', as
   assert.deepEqual(cpu.calls.at(-1), ['command', { kind: 'pause', paused: false }])
   p.destroy()
 })
+
+it('records fixed display failure reasons without copying arbitrary error text', () => {
+  const gpu = fixture(), cpu = fixture()
+  gpu.player.create = () => { throw Object.assign(new Error('/private/media?token=secret'), { playbackFailureCode: 'DISPLAY_SELF_TEST_FAILED' }) }
+  const p = createLinuxPlaybackFallback(gpu.player, cpu.player, () => 'auto'); p.create()
+  assert.equal(p.read().playbackFallbackReason, 'DISPLAY_SELF_TEST_FAILED')
+  p.destroy()
+})
+it('software decoding stays on the GPU display path and tracks observed hardware loss separately', () => {
+  const gpu = fixture(), cpu = fixture()
+  const p = createLinuxPlaybackFallback(gpu.player, cpu.player, () => 'auto'); p.create(); p.load('/fixture')
+  gpu.state({ alive: true, 'hwdec-current': 'no' }); assert.equal(p.read().decoderFallback, false)
+  gpu.state({ alive: true, 'hwdec-current': 'nvdec-copy' }); p.read()
+  gpu.state({ alive: true, 'hwdec-current': 'no' }); const state = p.read()
+  assert.equal(state.decoderFallback, true); assert.equal(state.playbackFallback, false); assert.equal(state.playbackMode, 'gpu')
+  assert.equal(cpu.calls.length, 0)
+  p.load('/next'); assert.equal(p.read().decoderFallback, false); p.destroy()
+})
+
+it('bounds CPU recovery when the replacement never finishes loading', t => {
+  const gpu = fixture(), cpu = fixture()
+  const p = createLinuxPlaybackFallback(gpu.player, cpu.player, () => 'auto')
+  t.after(() => p.destroy())
+  p.create(); p.load('/fixture'); p.read(); gpu.break()
+  cpu.state({ alive: true, loadedFiles: 0 }); p.read()
+  const started = Date.now()
+  t.mock.method(Date, 'now', () => started + 15001)
+  assert.throws(() => p.read(), /CPU 回退恢复超时/)
+  assert.equal(cpu.calls.filter(c => c[0] === 'create').length, 1)
+})

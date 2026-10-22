@@ -22,6 +22,15 @@ import { useAiSubtitles } from './useAiSubtitles'
 import { settingsPath } from '../settings/settingsRoutes'
 import { mediaLibraryVideoDetailPath } from '../listView/mediaLibraryRoutes'
 
+function recoveryLabel(reason: string): string {
+  if (reason === 'DISPLAY_SELF_TEST_FAILED') return 'GPU 画面通道检查未通过'
+  if (reason === 'DISPLAY_SELF_TEST_TIMEOUT' || reason === 'RECEIVER_NOT_READY') return '等待 GPU 画面超时'
+  if (reason === 'TEXTURE_IMPORT_FAILED' || reason === 'FRAME_CHANNEL_FAILED') return '共享画面传输失败'
+  if (reason === 'GPU_PROCESS_EXITED') return 'GPU 进程退出'
+  if (reason === 'HELPER_HEARTBEAT_TIMEOUT' || reason === 'FRAME_RELEASE_TIMEOUT') return 'GPU 播放通道未响应'
+  return '当前 GPU 播放路径不可用'
+}
+
 let viewportSequence = 0
 
 export default function PlaybackPanel(): JSX.Element | null {
@@ -421,7 +430,9 @@ export default function PlaybackPanel(): JSX.Element | null {
           <div className={styles.optionBody} role="tabpanel" id={`${settingsId}-info`} aria-labelledby={`${settingsId}-info-tab`} hidden={optionTab !== 'info'}>
           <dl className={styles.info}><dt>来源</dt><dd>{state.source === 'remote' ? '远程原文件' : '本机文件'}</dd>
             <dt>视频</dt><dd>{state.info.videoCodec ?? '未知'} · {state.info.width ?? '?'}×{state.info.height ?? '?'}</dd>
-            {state.info.playbackMode ? <><dt>播放模式</dt><dd>{state.info.playbackMode === 'cpu' ? 'CPU 兼容' : 'GPU'}{state.info.playbackFallback ? '（自动回退）' : ''}</dd></> : null}<dt>实际硬解</dt><dd>{state.info.hardwareDecoder || '软件解码'}</dd><dt>音频</dt><dd>{state.info.audioCodec ?? '无'} / {state.info.audioOutput ?? '无输出'}</dd>
+            {state.info.playbackMode ? <><dt>播放模式</dt><dd>{state.info.playbackMode === 'cpu' ? 'CPU 兼容' : 'GPU'}{state.info.playbackFallback ? '（自动回退）' : ''}</dd></> : null}<dt>实际硬解</dt><dd>{state.info.hardwareDecoder && state.info.hardwareDecoder !== 'no' ? state.info.hardwareDecoder : '软件解码'}{state.info.playbackDiagnostics?.decoderFallback ? '（已从硬解切换）' : ''}</dd><dt>音频</dt><dd>{state.info.audioCodec ?? '无'} / {state.info.audioOutput ?? '无输出'}</dd>
+            {state.info.playbackDiagnostics?.displayProbe !== 'not-applicable' && state.info.playbackDiagnostics ? <><dt>画面通道</dt><dd>{state.info.playbackDiagnostics.displayProbe === 'passed' ? '导入与画布检查通过' : '正在检查'}</dd></> : null}
+            {state.info.playbackDiagnostics?.fallbackReason ? <><dt>回退原因</dt><dd>{recoveryLabel(state.info.playbackDiagnostics.fallbackReason)}</dd></> : null}
           </dl>
           <section className={styles.shortcuts} aria-label="画面快捷键">
             <h3>画面快捷键</h3>

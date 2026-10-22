@@ -304,6 +304,11 @@ export function createPlaybackSession(deps: Dependencies) {
       state.info = { videoCodec: raw['video-codec'] ?? null, audioCodec: raw['audio-codec'] ?? null,
         width: finite(raw.width), height: finite(raw.height), hardwareDecoder: raw['hwdec-current'] ?? null,
         playbackMode: raw.playbackMode, playbackFallback: raw.playbackFallback,
+        ...(raw.playbackMode ? { playbackDiagnostics: {
+          decoding: raw['hwdec-current'] ? raw['hwdec-current'] === 'no' ? 'software' as const : 'hardware' as const : 'unknown' as const,
+          decoderFallback: raw.decoderFallback ?? false, displayProbe: raw.displayProbe ?? 'not-applicable' as const,
+          fallbackReason: raw.playbackFallbackReason ?? null
+        } } : {}),
         audioOutput: raw['current-ao'] ?? null, droppedFrames: finite(raw['frame-drop-count']) }
       state.rendererFullscreenControls = raw.rendererFullscreenControls === true
       state.sharedTextureSurface = raw.sharedTextureSurface

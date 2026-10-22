@@ -24,3 +24,5 @@
 - 其余 UI、HTTP 与构建专项记录按各自标题、日期和源码范围理解。删除已落地的准备清单或计划不删除实际发布与失败证据。
 
 [Linux NVDEC / Intel VA-API 验证（2026-10-22）](linux-hardware-decode-2026-10-22.md)记录硬解构建、宿主驱动 ABI 修正及新包验收边界。
+
+[Linux 画面自检与恢复验证（2026-10-22）](linux-display-probe-recovery-2026-10-22.md)记录 XWayland 微小纹理对照、硬解操作、自检与运行中故障恢复及新包验收边界。

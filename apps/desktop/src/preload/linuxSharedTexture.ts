@@ -1,7 +1,7 @@
 import { ipcRenderer, sharedTexture, type ReceivedSharedTextureData } from 'electron'
 
 interface SurfaceBinding { surfaceToken: string; bindingToken: string }
-interface FrameMetadata extends SurfaceBinding { sequence: number; targetTime?: number; timeline?: number; diagnosePixels?: boolean }
+interface FrameMetadata extends SurfaceBinding { sequence: number; targetTime?: number; timeline?: number; diagnosePixels?: boolean; selfTest?: 'solid-v1' }
 // The node preload compilation intentionally excludes the full DOM library.
 // Keep this isolated-world drawing seam narrow instead of adding DOM globals.
 interface ReceivedVideoFrame {
@@ -96,11 +96,29 @@ export function installLinuxSharedTextureReceiver(): (surfaceToken: string) => (
     try {
       const metadata = value as FrameMetadata | null
       if (!target || !metadata || metadata.surfaceToken !== target.surfaceToken || metadata.bindingToken !== target.bindingToken
-        || (metadata.timeline ?? 0) !== target.timeline
+        || !metadata.selfTest && (metadata.timeline ?? 0) !== target.timeline
         || !Number.isSafeInteger(metadata.sequence) || metadata.sequence <= target.sequence
         || !target.canvas.isConnected || target.canvas.dataset.playbackSurface !== target.surfaceToken) return
       frame = importedSharedTexture.getVideoFrame() as ReceivedVideoFrame
       if (!frame.displayWidth || !frame.displayHeight) throw new Error('Empty video frame')
+      if (metadata.selfTest === 'solid-v1') {
+        // Same mounted Canvas/texture path, cleared synchronously before paint.
+        // One tiny readback; never examine film pixels or claim physical scanout.
+        let samples: number[] = []
+        try {
+          if (frame.displayWidth !== 640 || frame.displayHeight !== 360) throw new Error('Invalid self-test dimensions')
+          target.canvas.width = 640; target.canvas.height = 360
+          target.context.drawImage(frame, 0, 0)
+          const pixels = target.context.getImageData(0, 0, 640, 360).data
+          for (const [x, y] of [[80, 45], [559, 45], [320, 180], [80, 314], [559, 314]])
+            samples.push(...pixels.slice((y * 640 + x) * 4, (y * 640 + x) * 4 + 4))
+        } catch { samples = [] }
+        finally { target.context.clearRect(0, 0, 640, 360) }
+        target.sequence = metadata.sequence
+        ipcRenderer.send('playback:shared-texture-self-test', { surfaceToken: target.surfaceToken,
+          bindingToken: target.bindingToken, sequence: metadata.sequence, samples })
+        return
+      }
       const arrivedAt = performance.now()
       const timed = typeof metadata.targetTime === 'number' && metadata.targetTime > 0
       if (metadata.targetTime !== undefined && (!Number.isFinite(metadata.targetTime) || metadata.targetTime < 0)) throw new Error('Invalid target time')

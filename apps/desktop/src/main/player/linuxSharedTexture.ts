@@ -8,6 +8,8 @@ const FAILED = 'playback:shared-texture-failed'
 const DRAWN = 'playback:shared-texture-submitted'
 const CLOCK = 'playback:frame-clock'
 const monoMs = (): number => Number(process.hrtime.bigint()) / 1e6
+const SELF_TEST = 'playback:shared-texture-self-test'
+const SELF_TEST_TIMEOUT = 8000
 const PIXELS = 'playback:shared-texture-pixel-diagnostic'
 const POOL_SIZE = 3
 const RELEASE_TIMEOUT = 5000
@@ -22,6 +24,7 @@ interface FdBridge {
 }
 interface DmaBufFrame {
   protocol: 'javdex-dmabuf-v1'
+  selfTest?: 'solid-v1'
   sequence: number
   slot: number
   width: number
@@ -47,6 +50,7 @@ export function decodeDmaBufFrame(metadata: Buffer): DmaBufFrame {
   if (!Buffer.isBuffer(metadata) || metadata.length > 4096) throw new Error('无效的共享视频帧元数据')
   const value = JSON.parse(metadata.toString('utf8')) as DmaBufFrame | null
   if (!value || value.protocol !== 'javdex-dmabuf-v1'
+    || value.selfTest !== undefined && (value.selfTest !== 'solid-v1' || value.width !== 640 || value.height !== 360)
     || !integer(value.sequence, 1, Number.MAX_SAFE_INTEGER) || !integer(value.slot, 0, POOL_SIZE - 1)
     || !integer(value.width, 1, 8192) || !integer(value.height, 1, 8192)
     || !['bgra', 'rgba'].includes(value.pixelFormat)
@@ -118,6 +122,10 @@ export function createLinuxSharedTexture(window: BrowserWindow, addonPath: strin
   let lastSequence = 0
   let lastDrawnSequence = 0
   let drawnFrames = 0
+  let probe: 'pending' | 'passed' = 'pending'
+  let probeSequence: number | undefined
+  let probeBinding: string | undefined
+  let probeSince: number | null = null
   const budget = new FrameBudget()
   let setBudget: ((ms: number) => void) | undefined
   const timings = new Map<number, { start: number; target: number; binding: string }>()
@@ -159,6 +167,7 @@ export function createLinuxSharedTexture(window: BrowserWindow, addonPath: strin
     ipcMain.removeListener(DRAWN, drawn)
     ipcMain.removeListener(CLOCK, clock)
     ipcMain.removeListener(PIXELS, pixels)
+    ipcMain.removeListener(SELF_TEST, selfTest)
     contents.removeListener('did-start-navigation', navigation)
     contents.removeListener('render-process-gone', rendererGone)
     contents.removeListener('destroyed', rendererGone)
@@ -223,6 +232,20 @@ export function createLinuxSharedTexture(window: BrowserWindow, addonPath: strin
       entry.released = true; entry.since = Date.now(); acknowledgements.push(sequence)
     }
   }
+  const selfTest = (event: IpcMainEvent, value: unknown): void => {
+    if (software || stopped || probe !== 'pending' || !trusted(event) || !validBinding(value)
+      || value.surfaceToken !== surfaceToken || value.bindingToken !== binding?.bindingToken || value.bindingToken !== probeBinding) return
+    const data = value as SurfaceBinding & { sequence?: unknown; samples?: unknown }
+    if (probeSequence === undefined || data.sequence !== probeSequence) return
+    const samples = data.samples
+    // Fixed pattern only, never classify black scenes from arbitrary media.
+    if (!Array.isArray(samples) || samples.length !== 20 || !samples.every((v, i) =>
+      integer(v, 0, 255) && Math.abs(v - [64, 191, 128, 255][i % 4]) <= 8)) {
+      fail('共享视频合成色块自检失败'); return
+    }
+    probe = 'passed'; probeSince = null
+    console.info('[playback-display-self-test] passed (readback; not scanout proof)')
+  }
   const pixels = (event: IpcMainEvent, value: unknown): void => {
     if (!pixelDiagnostics || stopped || !trusted(event) || !validBinding(value)
       || value.surfaceToken !== surfaceToken || value.bindingToken !== binding?.bindingToken) return
@@ -282,10 +305,14 @@ export function createLinuxSharedTexture(window: BrowserWindow, addonPath: strin
       entry = { slot: frame.slot, fd: packet.fd, since: Date.now(), released: false }
       const owner = entry
       pending.set(frame.sequence, owner)
-      if ((frame.timeline ?? 0) !== timeline) {
+      if (!frame.selfTest && (frame.timeline ?? 0) !== timeline) {
         timings.delete(frame.sequence); closeFrame(owner); owner.released = true
         acknowledgements.push(frame.sequence)
         return
+      }
+      if (frame.selfTest) {
+        if (probeSequence !== undefined) throw new Error('Duplicate self-test frame')
+        probeSequence = frame.sequence; probeBinding = target.bindingToken
       }
       imported = sharedTexture.importSharedTexture({
         textureInfo: { pixelFormat: frame.pixelFormat, codedSize: { width: frame.width, height: frame.height },
@@ -307,7 +334,7 @@ export function createLinuxSharedTexture(window: BrowserWindow, addonPath: strin
         && [1, 16, 31].includes(++diagnosticFrames)
       if (diagnosePixels) diagnosticSequences.add(frame.sequence)
       await sharedTexture.sendSharedTexture({ frame: contents.mainFrame, importedSharedTexture: imported },
-        { ...target, sequence: frame.sequence, timeline, targetTime: (frame.targetTimeUs ?? 0) / 1000, ...(diagnosePixels ? { diagnosePixels: true } : {}) })
+        { ...target, sequence: frame.sequence, timeline, targetTime: (frame.targetTimeUs ?? 0) / 1000, ...(frame.selfTest ? { selfTest: frame.selfTest } : {}), ...(diagnosePixels ? { diagnosePixels: true } : {}) })
     } catch {
       if (!imported) {
         if (entry) closeFrame(entry)
@@ -336,6 +363,10 @@ export function createLinuxSharedTexture(window: BrowserWindow, addonPath: strin
       if (visible && !binding && waitingSince !== null && now - waitingSince > READY_TIMEOUT) {
         fail('等待视频画面接收器超时，请停止后重试'); return
       }
+      if (!software && visible && binding && probe === 'pending') {
+        probeSince ??= now
+        if (now - probeSince > SELF_TEST_TIMEOUT) { fail('共享视频合成色块自检超时'); return }
+      }
       if (visible && binding && pending.size < POOL_SIZE) {
         const packet = transport.receive(parentFd)
         if (packet) void importFrame(packet, binding)
@@ -349,6 +380,7 @@ export function createLinuxSharedTexture(window: BrowserWindow, addonPath: strin
   ipcMain.on(DRAWN, drawn)
   ipcMain.on(CLOCK, clock)
   ipcMain.on(PIXELS, pixels)
+  ipcMain.on(SELF_TEST, selfTest)
   contents.on('did-start-navigation', navigation)
   contents.on('render-process-gone', rendererGone)
   contents.on('destroyed', rendererGone)
@@ -360,13 +392,14 @@ export function createLinuxSharedTexture(window: BrowserWindow, addonPath: strin
       if (binding) contents.send('playback:frame-flush', { ...binding, timeline })
       return timeline
     },
+    displayProbe: () => software ? 'not-applicable' as const : probe,
     timingStats: () => ({ renderBudgetMs: budget.value, submissionLatenessMs: lastLatenessMs }),
     onBudget(callback: (ms: number) => void): void { setBudget = callback },
     isReady: (): boolean => !stopped && binding !== null,
     setVisible(value: boolean): void {
       if (stopped) return
       if (value && !visible && !binding) waitingSince = Date.now()
-      if (!value) { waitingSince = null; saturatedSince = null }
+      if (!value) { waitingSince = null; saturatedSince = null; probeSince = null }
       visible = value
     } }
 }

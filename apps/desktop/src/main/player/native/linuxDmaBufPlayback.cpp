@@ -84,6 +84,7 @@ MpvCore playback;
 Leases leases;
 Bounds requested;
 bool rendererControls = true;
+bool selfTestRequested = false, selfTestSent = false;
 PublicationState publication;
 std::string presentation = "expanded";
 int wakeFd = -1, pixelWidth = 1, pixelHeight = 1;
@@ -258,6 +259,12 @@ public:
         glBindFramebuffer(GL_FRAMEBUFFER, 0); glBindTexture(GL_TEXTURE_2D, 0);
         return buffer;
     }
+    void testPattern(Buffer &buffer) {
+        glBindFramebuffer(GL_FRAMEBUFFER, buffer.framebuffer); glDisable(GL_SCISSOR_TEST);
+        glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+        glClearColor(64.0f / 255, 191.0f / 255, 128.0f / 255, 1); glClear(GL_COLOR_BUFFER_BIT);
+        finish(buffer);
+    }
     void finish(Buffer &buffer) {
         // libmpv may leave arbitrary GL state and does not promise opaque alpha.
         // Force only alpha to one; RGB remains exactly the rendered video/OSD.
@@ -330,6 +337,7 @@ bool dispatch(const std::vector<std::string> &fields) {
         preparedSlot = -1; preparedMetadata.clear(); publication.request();
     }
     else if (!playback.alive()) throw std::runtime_error("No shared-texture playback session");
+    else if (op == "self-test" && fields.size() == 1 && !selfTestSent) selfTestRequested = true;
     else if (op == "bounds" && fields.size() == 6) updateBounds(rectangle(fields, 1));
     else if (op == "renderer-controls" && fields.size() == 2 && (fields[1] == "0" || fields[1] == "1")) rendererControls = fields[1] == "1";
     else if (op == "occlusions" && fields.size() <= 257 && (fields.size() - 1) % 8 == 0) {
@@ -353,10 +361,11 @@ int64_t monotonicUs() {
     if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) throw std::runtime_error("Cannot read frame clock");
     return int64_t(ts.tv_sec) * 1000000 + ts.tv_nsec / 1000;
 }
-std::string metadata(const Buffer &buffer, int slot, uint64_t sequence) {
+std::string metadata(const Buffer &buffer, int slot, uint64_t sequence, bool selfTest = false) {
     return "{\"protocol\":\"javdex-dmabuf-v1\",\"sequence\":" + std::to_string(sequence) + ",\"slot\":" + std::to_string(slot)
         + ",\"width\":" + std::to_string(buffer.width) + ",\"height\":" + std::to_string(buffer.height)
         + ",\"timeline\":" + std::to_string(timeline) + ",\"targetTimeUs\":" + std::to_string(targetTimeUs) + ",\"renderStartUs\":" + std::to_string(renderStartUs)
+        + (selfTest ? ",\"selfTest\":\"solid-v1\"" : "")
         + ",\"pixelFormat\":\"bgra\",\"stride\":" + std::to_string(buffer.stride) + ",\"offset\":" + std::to_string(buffer.offset)
         + ",\"size\":" + std::to_string(buffer.size) + ",\"modifier\":\"" + std::to_string(buffer.modifier) + "\",\"producerComplete\":true}";
 }
@@ -376,6 +385,22 @@ void render() {
         }
         publication.request();
         return;
+    }
+    // Known pixels, independent of media. One leased 640x360 buffer per helper;
+    // normal release fencing applies. The host bounds validation time.
+    if (selfTestRequested && !selfTestSent) {
+        const int slot = leases.available();
+        if (slot >= 0) {
+            auto &buffer = gpu.prepare(slot, 640, 360);
+            gpu.testPattern(buffer);
+            renderStartUs = monotonicUs(); targetTimeUs = 0;
+            const auto sequence = leases.next();
+            if (sendFrame(transportFd, metadata(buffer, slot, sequence, true), buffer.fd)) {
+                leases.publish(slot, sequence); selfTestSent = true;
+            }
+        }
+        if (updated && !playback.skipRender()) throw std::runtime_error("libmpv could not skip a hidden frame");
+        publication.request(); return;
     }
     if (!publication.pending() && preparedSlot < 0) { publication.stalled(false, now()); return; }
     bool rendered = false;

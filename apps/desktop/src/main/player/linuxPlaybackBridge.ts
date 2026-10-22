@@ -35,6 +35,7 @@ export interface LinuxPlaybackFrameChannel {
   childFd: number
   spawned(): void
   setVisible(visible: boolean): void
+  displayProbe?(): 'pending' | 'passed' | 'not-applicable'
   isReady?(): boolean
   submittedFrames?(): number
   resetTiming?(): number | undefined
@@ -46,6 +47,8 @@ export interface LinuxPlaybackFrameChannel {
 /** Fixed diagnostics only: never reflect helper strings, media URLs or paths. */
 export function linuxSharedTextureFailureCode(message: string): string {
   const groups: Array<[string, string[]]> = [
+    ['DISPLAY_SELF_TEST_FAILED', ['共享视频合成色块自检失败']],
+    ['DISPLAY_SELF_TEST_TIMEOUT', ['共享视频合成色块自检超时']],
     ['DRM_RENDER_NODE_UNAVAILABLE', ['No accessible DRM render node; a real GPU render node is required', 'Cannot open DRM render node (missing device or permission)', 'Selected device is not a DRM render node', 'DRM render node override must be an absolute path']],
     ['GBM_LINEAR_BUFFER_UNAVAILABLE', ['Cannot create GBM device on DRM render node', 'Cannot allocate linear renderable GBM buffer', 'Cannot allocate renderable GBM buffer', 'GBM did not provide a single-plane linear BGRA buffer', 'GBM did not provide a supported single-plane BGRA buffer', 'Cannot export GBM DMA-BUF descriptor', 'Cannot verify DMA-BUF allocation size']],
     ['EGL_DMABUF_UNAVAILABLE', ['EGL platform display extension is unavailable', 'Cannot initialize EGL on DRM render node', 'Required EGL DMA-BUF, image, context or surfaceless extension is unavailable', 'EGL OpenGL API is unavailable', 'No compatible EGL OpenGL configuration', 'Cannot create surfaceless OpenGL 3.2 context', 'Shared-texture playback requires a hardware EGL renderer', 'EGL image texture functions are unavailable', 'Cannot import GBM DMA-BUF into EGL image', 'DMA-BUF framebuffer is not renderable']],
@@ -112,7 +115,7 @@ export function createLinuxPlaybackBridge(executable: string,
       const failed = (error: Error): void => {
         if (generation !== epoch || failure) return
         clearInterval(heartbeat); heartbeat = undefined
-        failure = error; snapshot = { alive: false }
+        failure = Object.assign(error, { playbackFailureCode: linuxSharedTextureFailureCode(error.message) }); snapshot = { alive: false }
         if (shared) console.warn('[playback-dmabuf] failure=' + linuxSharedTextureFailureCode(error.message))
         frameChannel?.destroy(); frameChannel = null
         if (process) {
@@ -179,6 +182,7 @@ export function createLinuxPlaybackBridge(executable: string,
         }
       })
       send(['create', id.toString(), ...rectangle(bounds), host!.backend])
+      if (host?.backend === 'dmabuf' && launched.pid) send(['self-test'])
     },
     setBounds(bounds: Bounds): void {
       const fields = rectangle(bounds), key = fields.join(',')
@@ -218,12 +222,12 @@ export function createLinuxPlaybackBridge(executable: string,
     state(): NativePlaybackState {
       if (failure) throw failure
       const value = { ...snapshot, ...(frameChannel ? { sharedTextureSurface: frameChannel.surfaceToken,
-        presentedFrames: undefined, submittedFrames: frameChannel.submittedFrames?.() ?? 0, ...frameChannel.timingStats?.() } : {}), actions }; actions = []; return value
+        displayProbe: frameChannel.displayProbe?.(), presentedFrames: undefined, submittedFrames: frameChannel.submittedFrames?.() ?? 0, ...frameChannel.timingStats?.() } : {}), actions }; actions = []; return value
     },
     inspect(): NativePlaybackState {
       if (failure) throw failure
       return { ...snapshot, ...(frameChannel ? { sharedTextureSurface: frameChannel.surfaceToken,
-        presentedFrames: undefined, submittedFrames: frameChannel.submittedFrames?.() ?? 0, ...frameChannel.timingStats?.() } : {}) }
+        displayProbe: frameChannel.displayProbe?.(), presentedFrames: undefined, submittedFrames: frameChannel.submittedFrames?.() ?? 0, ...frameChannel.timingStats?.() } : {}) }
     },
     destroy
   }

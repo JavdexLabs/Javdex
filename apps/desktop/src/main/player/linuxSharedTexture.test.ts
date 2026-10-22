@@ -94,6 +94,7 @@ test('validates the complete one-plane DMA-BUF descriptor before native import',
   for (const invalid of [
     { width: 0 }, { width: 8193 }, { stride: 1279 }, { stride: 131073 }, { offset: -1 }, { size: 1 },
     { sequence: 0 }, { sequence: 1.5 }, { slot: 3 }, { producerComplete: false }, { pixelFormat: 'nv12' },
+    { selfTest: 'other' }, { selfTest: 'solid-v1' }, { selfTest: 'solid-v1', width: 64, height: 64 },
     { modifier: '-1' }, { modifier: '18446744073709551616' }, { modifier: 0 }, { protocol: 'other' }
   ]) assert.throws(() => f.exports.decodeDmaBufFrame(Buffer.from(JSON.stringify(frame(1, 0, invalid)))))
   assert.throws(() => f.exports.decodeDmaBufFrame(Buffer.alloc(4097)))
@@ -147,9 +148,12 @@ test('bounds the total outstanding pool and keeps slot ownership through a block
 })
 test('a paused canvas may retain a frame without failing the session', async t => {
   const f = fixture(); t.after(f.manager.destroy)
-  f.ready(); f.manager.setVisible(true); f.packet(); await f.tick(); await f.tick(60000)
+  f.ready(); f.manager.setVisible(true)
+  f.packet(1, 0, { selfTest: 'solid-v1', width: 640, height: 360, stride: 2560, size: 921600 }); await f.tick()
+  f.ipc.emit('playback:shared-texture-self-test', f.event, { ...f.binding, sequence: 1, samples: Array(5).fill([64, 191, 128, 255]).flat() })
+  f.release(); await f.tick(); f.packet(2, 1); await f.tick(); await f.tick(60000)
   assert.equal(f.errors.length, 0)
-  assert.equal(f.imports.length, 1)
+  assert.equal(f.imports.length, 2)
 })
 test('a saturated unreleased GPU pool fails closed rather than recycling textures', async t => {
   const f = fixture(); t.after(f.manager.destroy)
@@ -327,4 +331,44 @@ test('clock calibration rejects untrusted renderers and reset drops stale frames
   assert.deepEqual(f.acknowledgements, [1], 'submission never grants GPU slot reuse')
   f.release(); await f.tick()
   assert.deepEqual(f.acknowledgements, [1, 2])
+})
+
+test('synthetic import test accepts only the issued sequence and current trusted binding', async t => {
+  const f = fixture(); t.after(f.manager.destroy); f.ready(); f.manager.setVisible(true)
+  const samples = Array(5).fill([64, 191, 128, 255]).flat()
+  const report = { ...f.binding, sequence: 1, samples, media: 'never log this' }
+  f.ipc.emit('playback:shared-texture-self-test', f.event, report)
+  assert.equal(f.manager.displayProbe(), 'pending')
+  f.packet(1, 0, { selfTest: 'solid-v1', width: 640, height: 360, stride: 2560, size: 921600 }); await f.tick()
+  f.ipc.emit('playback:shared-texture-self-test', { ...f.event, senderFrame: {} }, report)
+  f.ipc.emit('playback:shared-texture-self-test', f.event, { ...report, sequence: 2 })
+  f.ipc.emit('playback:shared-texture-self-test', f.event, { ...report, bindingToken: 'old' })
+  assert.equal(f.manager.displayProbe(), 'pending')
+  f.ipc.emit('playback:shared-texture-self-test', f.event, report)
+  assert.equal(f.manager.displayProbe(), 'passed')
+  assert.equal(f.manager.submittedFrames(), 0, 'self-test does not count as a media submission')
+  f.ipc.emit('playback:shared-texture-self-test', f.event, { ...report, samples: [] })
+  assert.equal(f.errors.length, 0, 'duplicate results cannot undo a completed test')
+})
+for (const samples of [[], Array(20).fill(0), Array(20).fill(255), Array(5).fill([128, 191, 64, 255]).flat(),
+  [64, 191, 128, 255, 0, 0, 0, 255, 0, 0, 0, 255, 64, 191, 128, 255, 0, 0, 0, 255]])
+  test('synthetic import fails closed on corrupt/black/swapped pixels ' + samples.slice(0, 4), async t => {
+    const f = fixture(); t.after(f.manager.destroy); f.ready(); f.manager.setVisible(true)
+    f.packet(1, 0, { selfTest: 'solid-v1', width: 640, height: 360, stride: 2560, size: 921600 }); await f.tick()
+    f.ipc.emit('playback:shared-texture-self-test', f.event, { ...f.binding, sequence: 1, samples })
+    assert.match(f.errors[0]?.message, /自检失败/)
+    assert(f.closed.includes(10))
+  })
+test('self-test timeout is bounded while visible, and hidden time is excluded', async t => {
+  const f = fixture(); t.after(f.manager.destroy); f.ready(); f.manager.setVisible(true); await f.tick()
+  f.manager.setVisible(false); await f.tick(60000); assert.equal(f.errors.length, 0)
+  f.manager.setVisible(true); await f.tick(); await f.tick(8001)
+  assert.match(f.errors[0]?.message, /自检超时/)
+})
+
+test('CPU transport never waits for the GPU display probe', async t => {
+  const f = fixture(false, true); t.after(f.manager.destroy)
+  f.ready(); f.manager.setVisible(true); await f.tick(); await f.tick(60000)
+  assert.equal(f.manager.displayProbe(), 'not-applicable')
+  assert.equal(f.errors.length, 0)
 })

@@ -5,6 +5,9 @@ export interface NativePlaybackState {
   alive: boolean
   playbackMode?: 'gpu' | 'cpu'
   playbackFallback?: boolean
+  playbackFallbackReason?: string
+  decoderFallback?: boolean
+  displayProbe?: 'pending' | 'passed' | 'not-applicable'
   rendererFullscreenControls?: boolean
   /** Main-owned shared-texture generation, never a media locator or native FD. */
   sharedTextureSurface?: string

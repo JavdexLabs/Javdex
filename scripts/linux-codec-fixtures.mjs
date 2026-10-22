@@ -15,9 +15,10 @@ const plans=[
 ]
 const manifest={ffmpeg,toolSha256:createHash('sha256').update(fs.readFileSync(ffmpeg)).digest('hex'),media:[]}
 for(const [name,seconds,encoding] of plans) {
-  const args=['-hide_banner','-loglevel','error','-f','lavfi','-i','testsrc2=size=1920x1080:rate=30','-f','lavfi','-i','sine=frequency=880:sample_rate=48000','-t',String(seconds),...encoding,'-n',path.join(output,name)]
+  const args=['-hide_banner','-loglevel','error','-f','lavfi','-i',"testsrc2=size=1920x1080:rate=30,drawbox=x=iw-160:y=40:w=120:h=120:color=white:t=fill:enable='lt(mod(t,5),0.1)'",'-f','lavfi','-i',"aevalsrc=if(lt(mod(t\\,5)\\,0.1)\\,0.35*sin(2*PI*880*t)\\,0):s=48000",'-t',String(seconds),...encoding,'-n',path.join(output,name)]
   const result=spawnSync(ffmpeg,args,{stdio:'inherit',timeout:600000})
   assert.equal(result.status,0,String(result.error || 'FFmpeg failed'))
+  fs.writeFileSync(path.join(output, name.replace(/\.[^.]+$/, '.srt')), '1\n00:00:00,000 --> 00:00:04,000\nJAVDEX hardware subtitle ONE\n\n2\n00:00:04,000 --> 00:01:10,000\nJAVDEX hardware subtitle TWO\n')
   manifest.media.push({name,args,sha256:createHash('sha256').update(fs.readFileSync(path.join(output,name))).digest('hex')})
   fs.writeFileSync(path.join(output,'manifest.json'),JSON.stringify(manifest,null,2))
 }

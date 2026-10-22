@@ -67,7 +67,7 @@ The generic CMake/Debian development compile fixture accepts older system libmpv
 
 ## Compatibility improvement plan (2026-10-22)
 
-The following sequence is recorded for follow-up; only step 1 is currently authorized. Its initial packaged inventory and nine-case local codec matrix are complete; the cross-hardware matrix remains open:
+The initial inventory and local NVDEC / VA-API matrix are complete; cross-hardware coverage remains open. Follow-up work now covers hardware-decoder controls and step 2 diagnostics/recovery. Steps 3–4 remain future work:
 
 1. Inventory the **final packaged** GPU/CPU libmpv decoders and compiled hardware APIs; test H.264, HEVC Main10 and AV1 with synthetic media. Record actual `hwdec-current` separately from GPU presentation. Establish a matrix covering Intel/AMD/NVIDIA, GNOME/KDE Wayland/native Xorg, codec/profile/resolution/frame rate and audio/subtitles. Missing hardware is pending, never a pass inferred from this workstation.
 2. Improve diagnostics and bounded synthetic import self-tests. Keep decoding, display and fallback reasons distinct; do not detect black output by interpreting arbitrary film pixels. Consider version/device-scoped failure history with explicit retry.
@@ -103,3 +103,17 @@ Evidence motivating the boundary: on this Ubuntu 26.04 host, the old bundled lib
 On this UHD 770, Ubuntu's `intel-media-va-driver` Free-Kernel build decoded H.264/HEVC but lacked AV1 capability. The full-feature `intel-media-va-driver-non-free` enabled AV1. This distinction is documented by [Intel's driver feature matrix](https://github.com/intel/media-driver#media-features); do not instruct every Intel machine to install the same variant without checking hardware/distribution support. The installed packages and final-package acceptance are recorded separately from portable binary capabilities.
 
 Local hardware/visible-frame results, installed driver versions and package hashes: [NVDEC / Intel VA-API review (2026-10-22)](reviews/linux-hardware-decode-2026-10-22.md).
+
+## Bounded synthetic display check and recovery diagnostics
+
+New GPU helpers receive a private `self-test` startup command and export one 640×360 fixed-color DMA-BUF before media frames. The sandboxed preload draws it through the mounted Canvas, reads five RGBA samples and clears it synchronously before returning; it does not read arbitrary video pixels. Main validates the issued sequence, current surface/binding and sender main frame, with an 8-second visible/bound timeout. Hidden time does not consume that timeout. Imports and probe buffers retain the normal release/ACK ownership rules.
+
+The probe uses 640×360 rather than 64×64: on the tested NVIDIA/XWayland ANGLE Vulkan path, a valid 64×64 producer buffer read back with black regions, while 640×360 and normal playback sizes passed. This is a bounded startup compatibility workaround, not a repair or certification of all small-size driver imports. Partial-color results still fail validation.
+
+This checks a small DMA-BUF import and Canvas readback. Readback can alter synchronization and Canvas behavior; a passing check does **not** certify physical scanout, every later frame, every size/modifier, or absence of driver defects. It is not a black-scene detector. Existing opt-in media pixel diagnostics remain separate and disabled by default.
+
+Auto mode retries once with the independent CPU helper on a failed/timed-out check or a native display/channel failure. Explicit GPU mode reports failure; explicit CPU mode needs no GPU probe. Recovery preserves source position, pause intent, controls and subtitles, and now bounds the entire CPU restore to 15 seconds. Stop/reopen retries a fresh GPU session; no persistent hardware blacklist or system setting is added.
+
+`info.playbackDiagnostics` separates current hardware/software/unknown decoding, an observed hardware-to-software decoder transition, display probe status, and a fixed allowlisted CPU fallback reason. Software decoding alone does not trigger CPU presentation fallback. An observed decoder transition is not proof of its underlying cause. The playback information panel exposes the import/Canvas check and a plain-language recovery reason; logs exclude media paths and arbitrary renderer/helper strings.
+
+Hardware control acceptance uses `JAVDEX_CODEC_CONTROLS=1` and `JAVDEX_EXPECT_HWDEC=nvdec-copy` (or `vaapi-copy`). `JAVDEX_ACCEPTANCE_HWDEC=vaapi-copy` selects the Intel decoder in the isolated test process. Generated fixtures include a white flash and a short tone every five seconds, plus SRT captions. Inspector-based fault injection exists only in the acceptance runner (`JAVDEX_ACCEPTANCE_PROBE_FAULT=black|timeout`, `JAVDEX_ACCEPTANCE_RUNTIME_FAILURE=1`), not in application flags or production IPC.

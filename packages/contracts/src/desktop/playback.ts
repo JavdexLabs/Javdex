@@ -87,6 +87,13 @@ export interface PlaybackSnapshot {
     height: number | null
     playbackMode?: 'gpu' | 'cpu'
     playbackFallback?: boolean
+    playbackDiagnostics?: {
+      decoding: 'hardware' | 'software' | 'unknown'
+      /** Observed hardware-to-software transition, not a diagnosis of its cause. */
+      decoderFallback: boolean
+      displayProbe: 'pending' | 'passed' | 'not-applicable'
+      fallbackReason: string | null
+    }
     hardwareDecoder: string | null
     audioOutput: string | null
     droppedFrames: number | null

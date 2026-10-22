@@ -5,9 +5,9 @@ import path from 'node:path'
 export const playbackPackagingFiles = ['scripts/playback-runtime.mjs', 'scripts/playback-source-materials.mjs',
   'scripts/packaging-runtime.mjs', 'scripts/dist.mjs', 'electron-builder.config.mjs',
   'build/packaging.targets.json', 'package.json', 'package-lock.json', 'LICENSE', 'NOTICE']
-export function playbackPackagingDigest(directory) {
+export function playbackPackagingDigest(directory, names = playbackPackagingFiles) {
   const hash = createHash('sha256')
-  for (const name of playbackPackagingFiles) hash.update(name + '\0').update(readFileSync(path.join(directory, name)))
+  for (const name of names) hash.update(name + '\0').update(readFileSync(path.join(directory, name)))
   return hash.digest('hex')
 }
 export function playbackInstallers(version) {

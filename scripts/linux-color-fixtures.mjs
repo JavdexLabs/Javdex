@@ -1,4 +1,5 @@
 import {pqCode as pq, hlgCode as hlg} from './linux-color-reference.mjs'
+import {inspectColorFixture} from './linux-color-fixture-validation.mjs'
 // Analytically generated YUV patches; no user media or system dependencies.
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -28,9 +29,15 @@ for(const [name,full,trc,primaries,values] of [
   raw.writeUInt16LE(Math.max(0,Math.min(1023,value)),width*height*2+(plane-1)*width*height/2+2*(y*width/2+x))
  }
  const input=path.join(directory,name+'.yuv'),file=path.join(directory,name+'.mkv');fs.writeFileSync(input,raw)
- const args=['-hide_banner','-loglevel','error','-stream_loop','-1','-f','rawvideo','-pixel_format','yuv420p10le','-video_size',`${width}x${height}`,'-framerate','30','-i',input,'-t','12','-c:v','libx265','-preset','ultrafast','-x265-params','lossless=1:pools=2:frame-threads=1:log-level=error'+(name==='hdr10'?':master-display=G(8500,39850)B(6550,2300)R(35400,14600)WP(15635,16450)L(10000000,1):max-cll=1000,400':''),'-color_range',full?'pc':'tv','-color_trc',trc,'-color_primaries',primaries,'-colorspace',primaries==='bt709'?'bt709':'bt2020nc','-n',file]
+ const tags=['-color_range',full?'pc':'tv','-color_trc',trc,'-color_primaries',primaries,'-colorspace',primaries==='bt709'?'bt709':'bt2020nc']
+ // Raw input has no metadata. Tag both sides of the filter/encoder boundary;
+ // lossless x265 must also carry VUI tags in the actual HEVC bitstream.
+ const vui=`:range=${full?'full':'limited'}:colorprim=${primaries==='bt709'?1:9}:transfer=${trc==='bt709'?1:trc==='smpte2084'?16:18}:colormatrix=${primaries==='bt709'?1:9}`
+ const args=['-hide_banner','-loglevel','error','-stream_loop','-1','-f','rawvideo','-pixel_format','yuv420p10le','-video_size',`${width}x${height}`,'-framerate','30',...tags,'-i',input,'-t','12','-c:v','libx265','-preset','ultrafast','-x265-params','lossless=1:pools=2:frame-threads=1:log-level=error'+vui+(name==='hdr10'?':master-display=G(8500,39850)B(6550,2300)R(35400,14600)WP(15635,16450)L(10000000,1):max-cll=1000,400':''),...tags,'-n',file]
  const result=spawnSync(binary,args,{encoding:'utf8',timeout:120000});assert.equal(result.status,0,result.stderr)
  fs.unlinkSync(input)
- manifest.cases.push({name,file:path.resolve(file),trc,primaries,colors:name.startsWith('sdr')?colors:null,range:full?'full':'limited',codes,levels:name.startsWith('sdr')?levels:null,nits:name.startsWith('sdr')?null:nits,sha256:createHash('sha256').update(fs.readFileSync(file)).digest('hex'),args})
+ const fixture={name,file:path.resolve(file),trc,primaries,colors:name.startsWith('sdr')?colors:null,range:full?'full':'limited',codes,levels:name.startsWith('sdr')?levels:null,nits:name.startsWith('sdr')?null:nits,sha256:createHash('sha256').update(fs.readFileSync(file)).digest('hex'),args}
+ fixture.validation=inspectColorFixture(binary,fixture,width,height)
+ manifest.cases.push(fixture)
  fs.writeFileSync(path.join(directory,'manifest.json'),JSON.stringify(manifest,null,2))
 }

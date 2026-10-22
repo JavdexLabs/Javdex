@@ -16,7 +16,10 @@ const image=path.resolve(imageArg),output=path.resolve(outputArg)
 fs.mkdirSync(output)
 const manifest=JSON.parse(fs.readFileSync(path.join(mediaArg,'manifest.json')))
 assert.equal(manifest.cases.length,4)
-for (const fixture of manifest.cases) assert.equal(createHash('sha256').update(fs.readFileSync(fixture.file)).digest('hex'),fixture.sha256,'Fixture hash mismatch')
+for (const fixture of manifest.cases) {
+ assert.equal(createHash('sha256').update(fs.readFileSync(fixture.file)).digest('hex'),fixture.sha256,'Fixture hash mismatch')
+ assert.equal(fixture.validation?.passed,true,'Regenerate color fixtures with encoded-tag and reference-pixel validation')
+}
 const profile=fs.mkdtempSync(path.join(os.tmpdir(),'javdex-playback-acceptance-colors-'))
 const targets=seedAcceptanceCatalog(profile,manifest.cases.map(c=>c.file))
 fs.writeFileSync(path.join(profile,'this-computer.json'),JSON.stringify({mode:'local',closeToTray:false,linuxPlaybackMode:mode,resumePlayback:false,playbackVolume:0}))

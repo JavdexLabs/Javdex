@@ -51,7 +51,9 @@ if '--prepared' not in sys.argv:
     (angle / 'out/Javdex').mkdir(parents=True, exist_ok=True)
     shutil.copy2(root / 'build/angle-args.gn', angle / 'out/Javdex/args.gn')
     run(['buildtools/linux64/gn', 'gen', 'out/Javdex'], angle)
-    run(['third_party/ninja/ninja', '-C', 'out/Javdex', '-j8', 'libEGL', 'libGLESv2'], angle)
+    jobs = int(os.environ.get('JAVDEX_ANGLE_JOBS', min(os.cpu_count() or 1, 4)))
+    assert 1 <= jobs <= 8, 'ANGLE jobs must be between 1 and 8'
+    run(['third_party/ninja/ninja', '-C', 'out/Javdex', '-j' + str(jobs), 'libEGL', 'libGLESv2'], angle)
 
 assert subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=angle, text=True).strip() == lock['angleRevision']
 assert (angle / 'out/Javdex/args.gn').read_bytes() == (root / 'build/angle-args.gn').read_bytes()
@@ -71,8 +73,11 @@ def source_filter(info):
     parts = pathlib.PurePosixPath(info.name).parts
     if any(p in {'.git', 'out', '__pycache__', '.cipd', 'node_modules', 'llvm-build'} or p.endswith('_sysroot') for p in parts):
         return None
+    if parts[0] == 'angle':
+        assert (angle / pathlib.Path(*parts[1:])).resolve().is_relative_to(angle.resolve()), 'ANGLE source link escapes checkout'
+    assert info.isfile() or info.isdir(), 'Only regular ANGLE source materials are delivered'
     return info
-with tarfile.open(bundle, 'w:gz', compresslevel=3) as archive:
+with tarfile.open(bundle, 'w:gz', compresslevel=3, dereference=True) as archive:
     archive.add(angle, arcname='angle', filter=source_filter)
     for name in ['scripts/build-linux-angle.py', 'build/angle-args.gn', 'build/angle-runtime.json', 'build/angle-electron-patches', 'build/patches/angle-x11-vulkan-visual.patch']:
         archive.add(root / name, arcname='recipe/' + name)

@@ -87,7 +87,13 @@ export function createLinuxPlaybackBridge(executable: string,
   }
   const syncNativeVisibility = (): void => {
     const visible = requestedVisible && (!frameChannel || frameChannel.isReady?.() === true)
-    if (visible !== lastVisible) { send(['visible', visible ? '1' : '0']); lastVisible = visible }
+    if (visible !== lastVisible) {
+      if (lastVisible !== undefined) {
+        const timeline = frameChannel?.resetTiming?.()
+        if (timeline !== undefined) send(['timing-reset', String(timeline)])
+      }
+      send(['visible', visible ? '1' : '0']); lastVisible = visible
+    }
   }
   const destroy = (): void => {
     generation++

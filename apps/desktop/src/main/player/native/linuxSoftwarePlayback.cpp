@@ -2,6 +2,7 @@
 #define JAVDEX_STANDALONE_PLAYBACK
 #include "mpvCore.h"
 #include "linuxDmaBuf.h"
+#include "linuxFrameTiming.h"
 #include <algorithm>
 #include <chrono>
 #include <cstdlib>
@@ -84,6 +85,7 @@ public:
 int preparedSlot = -1;
 std::string preparedMetadata;
 uint64_t preparedSequence = 0;
+LinuxFrameTiming frameTiming;
 void destroyPlayer() {
     // Destroy never reuses outstanding memory. The host owns its copied pixels.
     playback.shutdown(); buffers.shutdown();
@@ -109,6 +111,12 @@ bool dispatch(const std::vector<std::string> &fields) {
     const auto &op = fields.at(0);
     if (op == "create" && fields.size() == 8 && fields[1] == "0" && fields[7] == "software") create(rectangle(fields, 2));
     else if (op == "destroy" && fields.size() == 1) { destroyPlayer(); return false; }
+    else if (op == "timing-reset" && fields.size() == 2) {
+        const double value = finiteNumber(fields[1]);
+        if (value < 1 || value > maxSequence || std::floor(value) != value) throw std::runtime_error("Invalid timing epoch");
+        frameTiming.reset(static_cast<uint64_t>(value));
+        preparedSlot = -1; preparedMetadata.clear(); publication.request();
+    }
     else if (!playback.alive()) throw std::runtime_error("No CPU playback session");
     else if (op == "bounds" && fields.size() == 6) updateBounds(rectangle(fields, 1));
     else if (op == "renderer-controls" && fields.size() == 2 && (fields[1] == "0" || fields[1] == "1")) rendererControls = fields[1] == "1";
@@ -130,7 +138,8 @@ bool dispatch(const std::vector<std::string> &fields) {
 std::string metadata(const Buffer &buffer, int slot, uint64_t sequence) {
     return "{\"protocol\":\"javdex-cpu-v1\",\"sequence\":" + std::to_string(sequence) + ",\"slot\":" + std::to_string(slot)
         + ",\"width\":" + std::to_string(buffer.width) + ",\"height\":" + std::to_string(buffer.height)
-        + ",\"pixelFormat\":\"rgba\",\"stride\":" + std::to_string(buffer.stride)
+        + frameTiming.metadata()
+        + ",\"pixelFormat\":\"rgba\",\"colorContract\":\"bt709-sdr-rgb-full\",\"stride\":" + std::to_string(buffer.stride)
         + ",\"size\":" + std::to_string(buffer.size) + '}';
 }
 void render() {
@@ -145,7 +154,7 @@ void render() {
         preparedSlot = -1; preparedMetadata.clear(); publication.stalled(false, now());
         if (updated) {
             if (!playback.skipRender()) throw std::runtime_error("libmpv could not skip a hidden frame");
-            playback.swapped();
+            // Skipping does not supply optional physical swap feedback.
         }
         publication.request();
         return;
@@ -156,6 +165,8 @@ void render() {
         const int slot = leases.available();
         if (slot >= 0) {
             auto &buffer = buffers.prepare(slot, pixelWidth, pixelHeight);
+            const auto delay = playback.nextFrameDelayUs();
+            frameTiming.sample(linuxFrameClockUs(), delay);
             if (!playback.renderSoftware(pixelWidth, pixelHeight, buffer.stride, buffer.data))
                 throw std::runtime_error("libmpv could not render CPU pixels");
             buffers.finish(buffer); rendered = true; preparedSlot = slot; preparedSequence = leases.next();
@@ -165,7 +176,7 @@ void render() {
     if (preparedSlot >= 0) {
         auto &buffer = buffers.prepare(preparedSlot, pixelWidth, pixelHeight);
         if (sendFrame(transportFd, preparedMetadata, buffer.fd)) {
-            leases.publish(preparedSlot, preparedSequence); playback.swapped();
+            leases.publish(preparedSlot, preparedSequence);
             // Publication is not proof that the canvas reached the display.
             preparedSlot = -1; preparedMetadata.clear(); publication.stalled(false, now()); return;
         }
@@ -175,7 +186,7 @@ void render() {
         // for socket space). Drop this queued mpv frame rather than block its
         // playback clock; redraw demand still points at the newest frame.
         if (!playback.skipRender()) throw std::runtime_error("libmpv could not skip a backpressured frame");
-        playback.swapped();
+        // No display swap occurred; keep the mpv render clock independent of IPC.
     }
     if (publication.stalled(true, now())) throw std::runtime_error("CPU frame consumer stalled waiting for frame release");
 }

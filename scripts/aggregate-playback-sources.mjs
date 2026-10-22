@@ -2,10 +2,12 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { t as listTar, x as extractTar, c as createTar } from 'tar'
+import { c as createTar } from 'tar'
 import { playbackFileSha256 } from './playback-runtime.mjs'
 import { sha256, safePath, materialBytes } from './restore-playback-sources.mjs'
 import { playbackPackagingDigest, playbackInstallers } from './playback-source-materials.mjs'
+import { unpackPlaybackSources as unpack } from './playback-source-archive.mjs'
+import { verifyLinuxSourceMaterials } from './linux-release-materials.mjs'
 
 const targets = { 'win32-x64': 'windows-x64', 'darwin-x64': 'macos-x64',
   'darwin-arm64': 'macos-arm64', 'linux-x64': 'linux-x64' }
@@ -18,27 +20,6 @@ function files(directory, prefix = '') {
     assert.ok(entry.isFile(), 'Source materials must be regular files')
     return [name]
   })
-}
-async function unpack(archive, destination) {
-  const seen = new Set()
-  let total = 0
-  const filter = function (name, entry) {
-    try {
-      assert.ok(['File', 'Directory'].includes(entry.type), 'Source archive contains links/special files')
-      const clean = name.replace(/^\.\//, '').replace(/\/$/, '')
-      if (clean && clean !== '.') {
-        safePath(clean)
-        assert.ok(!seen.has(clean), 'Duplicate source archive entry')
-        seen.add(clean)
-      }
-      total += entry.size
-      assert.ok(total <= 2 * 1024 ** 3 && seen.size <= 50000, 'Source archive exceeds bounds')
-      return true
-    } catch (error) { this.abort(error); return false }
-  }
-  await listTar({ file: archive, strict: true, filter })
-  fs.mkdirSync(destination)
-  await extractTar({ file: archive, cwd: destination, strict: true, preserveOwner: false })
 }
 
 // libmpv-sources.tar wraps pristine upstream archives. Split at tar entry
@@ -121,6 +102,21 @@ export async function aggregatePlaybackSources(directory, version) {
       assert.deepEqual(Object.keys(installerProof.installers).sort(), Object.entries(playbackInstallers(version)).filter(([, value]) => value === target).map(([name]) => name).sort(), 'Installer verification matrix mismatch')
       const projectionSha256 = playbackFileSha256(path.join(directory, archive + '.runtime.json'))
       for (const proof of Object.values(installerProof.installers)) assert.equal(proof.runtimeInventorySha256, projectionSha256, 'Final installer inventory binding mismatch')
+      if (runtime.kind === 'linux-integrated') {
+        assert.equal(target, 'linux-x64')
+        assert.equal(runtime.version, version)
+        assert.deepEqual(projection, { ...runtime, sourceBundle: binding }, 'Linux distribution inventory mismatch')
+        await verifyLinuxSourceMaterials(input, projection, temporary)
+        const materials = {}
+        for (const name of files(input)) {
+          const bytes = fs.readFileSync(path.join(input, name)), { bytes: ignored, ...record } = store(bytes, name.includes('/sources/') ? 'dependencies' : 'linux')
+          materials[name] = { ...record, bytes: bytes.length, mode: fs.statSync(path.join(input, name)).mode & 0o777 }
+          materialBytes(root, materials[name])
+        }
+        manifests.push({ schemaVersion: 1, target, version, originalBundle: binding, runtime, materials, installerProof, installers: [] })
+        fs.rmSync(input, { recursive: true })
+        continue
+      }
       assert.ok(runtime.components.some(c => c.name === 'javdex-native' && c.version === version), 'Wrong native source version')
       for (const name of Object.keys(runtime.files).filter(binary)) assert.equal(projection.files[name], runtime.files[name], 'Runtime binary binding mismatch')
       for (const component of runtime.components) for (const field of ['licenseFile', 'sourceArchive', 'buildRecipe']) {
@@ -210,7 +206,7 @@ export async function aggregatePlaybackSources(directory, version) {
       `# Playback corresponding sources — ${version}`,
       'This is not needed to install or play media. Each manifests/<platform>.json binds installers, pre-sign playback binary hashes, original platform bundle hashes and all source/build materials.',
       'sources/ and LICENSES/ are content-addressed: only identical SHA-256 contents share storage, never names. Pristine upstream archives remain intact. Uncompressed tar containers are stored as ordered header/payload parts, deduplicating shared files while preserving exact original bytes. Different versions or contents remain distinct.',
-      'Restore on Node.js 22+: `node restore.mjs windows-x64 /path/to/new-directory` (also macos-x64, macos-arm64, linux-x64). All bytes are verified before restoration; an existing destination is refused. The restored reviewed-runtime/build.json records source pins, patches, compiler/SDK requirements and commands. Follow its recipe and README.txt, using restored packaging-tools/ with the native source snapshot. System compilers/SDKs and platform ABIs are prerequisites, not shipped binaries; signatures and byte-identical compiler output are not promised.',
+      'Restore on Node.js 22+: `node restore.mjs windows-x64 /path/to/new-directory` (also macos-x64, macos-arm64, linux-x64). All bytes are verified before restoration; an existing destination is refused. Follow the restored README.txt and build recipes with packaging-tools/. Integrated Linux restores three exact component archives for the GPU helper, CPU helper and ANGLE; extract each into a separate new directory. Other targets retain reviewed-runtime/build.json. System compilers/SDKs and platform ABIs are prerequisites; signatures and byte-identical compiler output are not promised.',
       'Original per-platform companion archives are CI-only. Input inventories and nested archives restore exactly; compressed outer archive hashes remain provenance records, not hashes of this combined archive. SHA256SUMS.txt alongside this download verifies the combined archive. Never trust a source package as an update signing root.', ''
     ].join('\n\n'))
     await createTar({ cwd: temporary, file: path.join(temporary, 'combined.tar.gz'), gzip: true, portable: true }, ['Playback-Sources'])

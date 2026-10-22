@@ -6,6 +6,7 @@ const READY = 'playback:shared-texture-ready'
 const REMOVED = 'playback:shared-texture-removed'
 const FAILED = 'playback:shared-texture-failed'
 const DRAWN = 'playback:shared-texture-submitted'
+const CPU_RELEASED = 'playback:cpu-frame-released'
 const CLOCK = 'playback:frame-clock'
 const monoMs = (): number => Number(process.hrtime.bigint()) / 1e6
 const SELF_TEST = 'playback:shared-texture-self-test'
@@ -38,11 +39,18 @@ interface DmaBufFrame {
   targetTimeUs?: number
   renderStartUs?: number
   producerComplete: true
+  colorContract?: 'mpv-gpu-rgb-untagged'
 }
 interface SurfaceBinding { surfaceToken: string; bindingToken: string }
 interface PendingFrame { slot: number; fd: number | null; since: number; released: boolean }
 const integer = (value: unknown, min: number, max: number): value is number =>
   typeof value === 'number' && Number.isSafeInteger(value) && value >= min && value <= max
+function validTiming(value: { timeline?: unknown; targetTimeUs?: unknown; renderStartUs?: unknown }): boolean {
+  return (value.timeline === undefined || integer(value.timeline, 0, Number.MAX_SAFE_INTEGER))
+    && ((value.targetTimeUs === undefined && value.renderStartUs === undefined)
+      || integer(value.timeline, 0, Number.MAX_SAFE_INTEGER) && integer(value.targetTimeUs, 0, Number.MAX_SAFE_INTEGER)
+        && integer(value.renderStartUs, 1, Number.MAX_SAFE_INTEGER))
+}
 
 /** Only the helper's one-plane RGBA/BGRA protocol is supported. No arbitrary
  * native handles, pixel layouts or GPU commands are accepted from a renderer. */
@@ -58,8 +66,8 @@ export function decodeDmaBufFrame(metadata: Buffer): DmaBufFrame {
     || !integer(value.offset, 0, 1073741824) || !integer(value.size, 1, 1073741824)
     || value.offset + value.stride * value.height > value.size
     || typeof value.modifier !== 'string' || !/^[0-9]{1,20}$/.test(value.modifier)
-    || (value.targetTimeUs !== undefined || value.renderStartUs !== undefined)
-      && (!integer(value.timeline, 0, Number.MAX_SAFE_INTEGER) || !integer(value.targetTimeUs, 0, Number.MAX_SAFE_INTEGER) || !integer(value.renderStartUs, 1, Number.MAX_SAFE_INTEGER))
+    || !validTiming(value)
+    || value.colorContract !== undefined && value.colorContract !== 'mpv-gpu-rgb-untagged'
     || BigInt(value.modifier) > 0xffffffffffffffffn || value.producerComplete !== true) {
     throw new Error('无效的共享视频帧元数据')
   }
@@ -72,9 +80,11 @@ export function decodeCpuFrame(metadata: Buffer) {
     || !integer(v.sequence, 1, Number.MAX_SAFE_INTEGER) || !integer(v.slot, 0, 2)
     || !integer(v.width, 1, 8192) || !integer(v.height, 1, 8192)
     || !integer(v.stride, v.width * 4, 32768) || v.stride % 64 !== 0
-    || !integer(v.size, 4, 256 * 1024 * 1024) || v.size !== v.stride * v.height)
+    || !integer(v.size, 4, 256 * 1024 * 1024) || v.size !== v.stride * v.height || !validTiming(v)
+    || v.colorContract !== undefined && v.colorContract !== 'bt709-sdr-rgb-full')
     throw new Error('无效的 CPU 帧元数据')
-  return v as { sequence: number; slot: number; width: number; height: number; stride: number; size: number }
+  return v as { sequence: number; slot: number; width: number; height: number; stride: number; size: number;
+    timeline?: number; targetTimeUs?: number; renderStartUs?: number; colorContract?: 'bt709-sdr-rgb-full' }
 }
 function validBinding(value: unknown): value is SurfaceBinding {
   if (!value || typeof value !== 'object') return false
@@ -139,7 +149,13 @@ export function createLinuxSharedTexture(window: BrowserWindow, addonPath: strin
   }
   const pixelDiagnostics = process.env.JAVDEX_TEXTURE_PIXEL_DIAGNOSTICS === '1'
   let diagnosticFrames = 0
-  if (pixelDiagnostics) console.info('[playback-texture-pixels-enabled]')
+  if (pixelDiagnostics) {
+    console.info('[playback-texture-pixels-enabled]')
+    // Describes the existing producer, not a claim of calibrated output. Do not
+    // label unspecified libmpv GPU output or BT.709 transfer bytes as sRGB.
+    console.info('[playback-color-contract]', software ? 'BT.709 SDR/full-range RGBA -> Canvas sRGB (transfer agreement unverified)'
+      : 'libmpv GPU/full-range BGRA -> untagged VideoFrame -> Canvas sRGB (transfer/gamut unverified)')
+  }
   const diagnosticSequences = new Set<number>()
   let saturatedSince: number | null = null
   const pending = new Map<number, PendingFrame>()
@@ -160,11 +176,13 @@ export function createLinuxSharedTexture(window: BrowserWindow, addonPath: strin
   const destroy = (): void => {
     if (stopped) return
     stopped = true
+    if (binding && !contents.isDestroyed()) contents.send('playback:frame-flush', { ...binding, timeline: ++timeline })
     clearInterval(timer)
     ipcMain.removeListener(READY, ready)
     ipcMain.removeListener(REMOVED, removed)
     ipcMain.removeListener(FAILED, receiverFailed)
     ipcMain.removeListener(DRAWN, drawn)
+    ipcMain.removeListener(CPU_RELEASED, cpuReleased)
     ipcMain.removeListener(CLOCK, clock)
     ipcMain.removeListener(PIXELS, pixels)
     ipcMain.removeListener(SELF_TEST, selfTest)
@@ -204,8 +222,10 @@ export function createLinuxSharedTexture(window: BrowserWindow, addonPath: strin
     }
   }
   const drawn = (event: IpcMainEvent, value: unknown): void => {
-    if (stopped || !software && !visible || !trusted(event) || !validBinding(value) || value.surfaceToken !== surfaceToken
+    if (stopped || !visible || !trusted(event) || !validBinding(value) || value.surfaceToken !== surfaceToken
       || value.bindingToken !== binding?.bindingToken) return
+    const receiptTimeline = (value as SurfaceBinding & { timeline?: unknown }).timeline ?? 0
+    if (receiptTimeline !== timeline) return
     const sequence = (value as SurfaceBinding & { sequence?: unknown }).sequence
     if (!integer(sequence, lastDrawnSequence + 1, lastSequence)) return
     lastDrawnSequence = sequence
@@ -226,10 +246,22 @@ export function createLinuxSharedTexture(window: BrowserWindow, addonPath: strin
         if (next !== undefined) setBudget?.(next)
       }
     }
-    if (software) {
-      const entry = pending.get(sequence)
-      if (!entry || entry.released) return
-      entry.released = true; entry.since = Date.now(); acknowledgements.push(sequence)
+  }
+  const cpuReleased = (event: IpcMainEvent, value: unknown): void => {
+    if (!software || stopped || !trusted(event) || !validBinding(value) || value.surfaceToken !== surfaceToken
+      || value.bindingToken !== binding?.bindingToken) return
+    const sequence = (value as SurfaceBinding & { sequence?: unknown }).sequence
+    if (!integer(sequence, 1, lastSequence)) return
+    const entry = pending.get(sequence)
+    if (!entry || entry.released) return
+    entry.released = true; entry.since = Date.now(); timings.delete(sequence); acknowledgements.push(sequence)
+  }
+  const recordTiming = (frame: { sequence: number; targetTimeUs?: number; renderStartUs?: number }, target: SurfaceBinding): void => {
+    const now = monoMs()
+    if (frame.targetTimeUs && (frame.targetTimeUs / 1000 > now + 100 || frame.renderStartUs! / 1000 > now + 10)) throw new Error('Invalid frame clock')
+    if (frame.targetTimeUs) {
+      if (timings.size >= 120) timings.delete(timings.keys().next().value!)
+      timings.set(frame.sequence, { start: frame.renderStartUs! / 1000, target: frame.targetTimeUs / 1000, binding: target.bindingToken })
     }
   }
   const selfTest = (event: IpcMainEvent, value: unknown): void => {
@@ -282,25 +314,22 @@ export function createLinuxSharedTexture(window: BrowserWindow, addonPath: strin
         if (frame.sequence <= lastSequence || pending.size >= POOL_SIZE || [...pending.values()].some(v => v.slot === frame.slot))
           throw new Error('CPU 帧池所有权无效')
         entry = { slot: frame.slot, fd: packet.fd, since: Date.now(), released: false }
-        const pixels = transport.readPixels(packet.fd, frame.size)
-        closeFrame(entry)
         lastSequence = frame.sequence
         pending.set(frame.sequence, entry)
-        contents.send('playback:cpu-frame', { ...target, ...frame, pixels })
+        if ((frame.timeline ?? 0) !== timeline) {
+          closeFrame(entry); entry.released = true; acknowledgements.push(frame.sequence); return
+        }
+        recordTiming(frame, target)
+        const pixels = transport.readPixels(packet.fd, frame.size)
+        closeFrame(entry)
+        contents.send('playback:cpu-frame', { ...target, ...frame, timeline, targetTime: (frame.targetTimeUs ?? 0) / 1000, pixels })
         return
       }
       const frame = decodeDmaBufFrame(packet.metadata)
       if (frame.sequence <= lastSequence || pending.size >= POOL_SIZE || [...pending.values()].some(value => value.slot === frame.slot)) {
         throw new Error('共享视频帧池所有权无效')
       }
-      const now = monoMs()
-      if (frame.targetTimeUs && (frame.targetTimeUs / 1000 > now + 100 || frame.renderStartUs! / 1000 > now + 10))
-        throw new Error('Invalid frame clock')
-      if (frame.targetTimeUs) {
-        // Separate from texture lifetime: release may precede submission IPC.
-        if (timings.size >= 120) timings.delete(timings.keys().next().value!)
-        timings.set(frame.sequence, { start: frame.renderStartUs! / 1000, target: frame.targetTimeUs / 1000, binding: target.bindingToken })
-      }
+      recordTiming(frame, target)
       lastSequence = frame.sequence
       entry = { slot: frame.slot, fd: packet.fd, since: Date.now(), released: false }
       const owner = entry
@@ -334,7 +363,8 @@ export function createLinuxSharedTexture(window: BrowserWindow, addonPath: strin
         && [1, 16, 31].includes(++diagnosticFrames)
       if (diagnosePixels) diagnosticSequences.add(frame.sequence)
       await sharedTexture.sendSharedTexture({ frame: contents.mainFrame, importedSharedTexture: imported },
-        { ...target, sequence: frame.sequence, timeline, targetTime: (frame.targetTimeUs ?? 0) / 1000, ...(frame.selfTest ? { selfTest: frame.selfTest } : {}), ...(diagnosePixels ? { diagnosePixels: true } : {}) })
+        { ...target, sequence: frame.sequence, timeline, targetTime: (frame.targetTimeUs ?? 0) / 1000, colorContract: frame.colorContract,
+          ...(frame.selfTest ? { selfTest: frame.selfTest } : {}), ...(diagnosePixels ? { diagnosePixels: true } : {}) })
     } catch {
       if (!imported) {
         if (entry) closeFrame(entry)
@@ -378,6 +408,7 @@ export function createLinuxSharedTexture(window: BrowserWindow, addonPath: strin
   ipcMain.on(REMOVED, removed)
   ipcMain.on(FAILED, receiverFailed)
   ipcMain.on(DRAWN, drawn)
+  ipcMain.on(CPU_RELEASED, cpuReleased)
   ipcMain.on(CLOCK, clock)
   ipcMain.on(PIXELS, pixels)
   ipcMain.on(SELF_TEST, selfTest)
@@ -387,7 +418,7 @@ export function createLinuxSharedTexture(window: BrowserWindow, addonPath: strin
   app.on('child-process-gone', childGone)
   return { surfaceToken, childFd: channel.childFd, spawned, destroy, submittedFrames: (): number => drawnFrames,
     resetTiming(): number | undefined {
-      if (software || stopped) return
+      if (stopped) return
       timeline++; timings.clear(); budget.reset(); setBudget?.(20)
       if (binding) contents.send('playback:frame-flush', { ...binding, timeline })
       return timeline

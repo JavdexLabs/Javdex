@@ -1,7 +1,7 @@
-// Dedicated Linux DMA-BUF test runtime. Never changes the release runtime contract.
+// Isolated Linux GPU/CPU runtimes, each with its own source and ABI contract.
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { playbackFileSha256 } from './playback-runtime.mjs'
 
@@ -17,6 +17,25 @@ export const portableHostLibraries = new Set([...legacyPortableHostLibraries,
 ])
 export const softwareHostLibraries = new Set([...legacyPortableHostLibraries].filter(n => !/^(libEGL|libGL|libgbm|libdrm)/.test(n)))
 const entries = ['playback-dmabuf-helper', 'playback-fd.node', 'libmpv.so.2']
+export function copyPortableRecipe(root, destination) {
+  assert.ok(!existsSync(destination), 'Recipe snapshot requires a new directory')
+  const listName = '.javdex-source-files.json', saved = path.join(root, listName)
+  const names = existsSync(saved) ? JSON.parse(readFileSync(saved))
+    : command('git', ['-C', root, 'ls-files', '-z']).split('\0').filter(Boolean)
+  assert.ok(Array.isArray(names) && names.length > 0 && names.length <= 50000, 'Missing preferred application source list')
+  assert.equal(new Set(names).size, names.length, 'Duplicate preferred source file')
+  for (const name of names) {
+    assert.ok(typeof name === 'string' && !/[\\:\0]/.test(name) && name.split('/').every(part => part && part !== '.' && part !== '..'
+      && !['node_modules', '.git', 'out', 'dist'].includes(part)), 'Unsafe preferred source file')
+    assert.ok(lstatSync(path.join(root, name)).isFile() && !lstatSync(path.join(root, name)).isSymbolicLink(), 'Preferred source must be a regular file')
+  }
+  mkdirSync(destination, { recursive: true })
+  for (const name of names) {
+    mkdirSync(path.dirname(path.join(destination, name)), { recursive: true })
+    cpSync(path.join(root, name), path.join(destination, name))
+  }
+  writeFileSync(path.join(destination, listName), JSON.stringify(names, null, 2) + '\n')
+}
 function command(command, args) {
   const r = spawnSync(command, args, { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 })
   assert.equal(r.status, 0, `${command}: ${r.stderr}`)
@@ -108,7 +127,9 @@ export async function buildPortablePlaybackRuntime(input) {
     ['c++', ['-std=c++17', '-O2', '-Wall', '-Wextra', `-I${prefix}/include`, ...(software ? [] : ['-I/usr/include/libdrm']), path.join(native, software ? 'linuxSoftwarePlayback.cpp' : 'linuxDmaBufPlayback.cpp'), `-L${prefix}/lib`, '-lmpv', ...(software ? [] : ['-lEGL', '-lgbm', '-ldrm']), '-o', path.join(staged, entries[0])]],
     ['c++', ['-std=c++17', '-O2', '-shared', '-fPIC', `-I${include}`, path.join(native, 'linuxFdBridge.cpp'), '-o', path.join(staged, entries[1])]],
     ['c++', ['-std=c++17', '-O2', '-UNDEBUG', path.join(native, 'linuxDmaBuf.test.cpp'), '-o', path.join(buildRoot, 'linux-dmabuf-test')]],
-    [path.join(buildRoot, 'linux-dmabuf-test'), []]
+    [path.join(buildRoot, 'linux-dmabuf-test'), []],
+    ['c++', ['-std=c++17', '-O2', '-UNDEBUG', path.join(native, 'linuxFrameTiming.test.cpp'), '-o', path.join(buildRoot, 'linux-frame-timing-test')]],
+    [path.join(buildRoot, 'linux-frame-timing-test'), []]
   ]
   for (const [cmd, args] of nativePlan) run(cmd, args)
   cpSync(realpathSync(path.join(prefix, 'lib/libmpv.so.2')), path.join(staged, entries[2]))
@@ -177,7 +198,7 @@ export async function buildPortablePlaybackRuntime(input) {
   rmSync(path.join(delivery, 'runtime'), { recursive: true, force: true })
   rmSync(path.join(delivery, 'recipe'), { recursive: true, force: true })
   cpSync(staged, path.join(delivery, 'runtime'), { recursive: true })
-  for (const file of readdirSync(root).filter(f => !['node_modules', 'out', 'dist', '.git'].includes(f))) cpSync(path.join(root, file), path.join(delivery, 'recipe', file), { recursive: true })
+  copyPortableRecipe(root, path.join(delivery, 'recipe'))
   const decode = path.join(buildRoot, 'runtime-decode-test')
   run('c++', ['-std=c++17', `-I${prefix}/include`, path.join(native, 'runtimeDecode.test.cpp'), '-ldl', '-o', decode])
   run(decode, [path.join(staged, 'libmpv.so.2'), path.join(buildRoot, 'smoke.wav')])
@@ -192,5 +213,8 @@ export async function buildPortablePlaybackRuntime(input) {
   if (existsSync(destination)) renameSync(destination, destination + '.previous-' + Date.now())
   renameSync(staged, destination)
   cpSync(archive, path.join(path.dirname(destination), path.basename(archive)))
+  // Compile the final-installer PCM fixture against the exact pinned headers,
+  // without shipping SDK headers inside either helper's runtime directory.
+  cpSync(path.join(prefix, 'include/mpv'), path.join(path.dirname(destination), 'smoke-headers/mpv'), { recursive: true })
   console.log(`Portable runtime ready: ${destination}`)
 }

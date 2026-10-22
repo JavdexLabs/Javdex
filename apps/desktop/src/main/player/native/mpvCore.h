@@ -367,6 +367,8 @@ public:
         if (error < 0) { lastErrorCode = error; lastError = mpv_error_string(error); return false; }
         return true;
     }
+    // Optional native swapchain feedback only. Shared-frame IPC publication,
+    // skipped rendering and consumer resource release are not display swaps.
     void swapped() { if (renderer) mpv_render_context_report_swap(renderer); }
     void presented(bool visible) { if (visible && loadedFiles > 0) presentedFrames++; }
     void consume(const mpv_event &event) {

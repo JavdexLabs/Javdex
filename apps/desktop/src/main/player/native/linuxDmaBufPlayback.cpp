@@ -13,6 +13,7 @@
 #define JAVDEX_STANDALONE_PLAYBACK
 #include "mpvCore.h"
 #include "linuxDmaBuf.h"
+#include "linuxFrameTiming.h"
 #include <algorithm>
 #include <chrono>
 #include <cstdlib>
@@ -326,7 +327,7 @@ void create(const Bounds &rect) {
     playback.initialize(getProcAddress, nullptr, false, wake, nullptr, "auto-copy", false, "0.02");
     publication.request();
 }
-uint64_t timeline = 0;
+LinuxFrameTiming frameTiming;
 bool dispatch(const std::vector<std::string> &fields) {
     const auto &op = fields.at(0);
     if (op == "create" && fields.size() == 8 && fields[1] == "0" && fields[7] == "dmabuf") create(rectangle(fields, 2));
@@ -334,7 +335,7 @@ bool dispatch(const std::vector<std::string> &fields) {
     else if (op == "timing-reset" && fields.size() == 2) {
         const double value = finiteNumber(fields[1]);
         if (value < 1 || value > maxSequence || std::floor(value) != value) throw std::runtime_error("Invalid timing epoch");
-        timeline = static_cast<uint64_t>(value);
+        frameTiming.reset(static_cast<uint64_t>(value));
         preparedSlot = -1; preparedMetadata.clear(); publication.request();
     }
     else if (!playback.alive()) throw std::runtime_error("No shared-texture playback session");
@@ -356,18 +357,12 @@ bool dispatch(const std::vector<std::string> &fields) {
     } else throw std::runtime_error("Invalid playback operation");
     return true;
 }
-int64_t renderStartUs = 0, targetTimeUs = 0;
-int64_t monotonicUs() {
-    timespec ts{};
-    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) throw std::runtime_error("Cannot read frame clock");
-    return int64_t(ts.tv_sec) * 1000000 + ts.tv_nsec / 1000;
-}
 std::string metadata(const Buffer &buffer, int slot, uint64_t sequence, bool selfTest = false) {
     return "{\"protocol\":\"javdex-dmabuf-v1\",\"sequence\":" + std::to_string(sequence) + ",\"slot\":" + std::to_string(slot)
         + ",\"width\":" + std::to_string(buffer.width) + ",\"height\":" + std::to_string(buffer.height)
-        + ",\"timeline\":" + std::to_string(timeline) + ",\"targetTimeUs\":" + std::to_string(targetTimeUs) + ",\"renderStartUs\":" + std::to_string(renderStartUs)
+        + frameTiming.metadata()
         + (selfTest ? ",\"selfTest\":\"solid-v1\"" : "")
-        + ",\"pixelFormat\":\"bgra\",\"stride\":" + std::to_string(buffer.stride) + ",\"offset\":" + std::to_string(buffer.offset)
+        + ",\"pixelFormat\":\"bgra\",\"colorContract\":\"mpv-gpu-rgb-untagged\",\"stride\":" + std::to_string(buffer.stride) + ",\"offset\":" + std::to_string(buffer.offset)
         + ",\"size\":" + std::to_string(buffer.size) + ",\"modifier\":\"" + std::to_string(buffer.modifier) + "\",\"producerComplete\":true}";
 }
 void render() {
@@ -394,7 +389,7 @@ void render() {
         if (slot >= 0) {
             auto &buffer = gpu.prepare(slot, 640, 360);
             gpu.testPattern(buffer);
-            renderStartUs = monotonicUs(); targetTimeUs = 0;
+            frameTiming.sample(linuxFrameClockUs(), 0);
             const auto sequence = leases.next();
             if (sendFrame(transportFd, metadata(buffer, slot, sequence, true), buffer.fd)) {
                 leases.publish(slot, sequence); selfTestSent = true;
@@ -410,8 +405,7 @@ void render() {
         if (slot >= 0) {
             auto &buffer = gpu.prepare(slot, pixelWidth, pixelHeight);
             const auto delay = playback.nextFrameDelayUs();
-            renderStartUs = monotonicUs();
-            targetTimeUs = delay ? renderStartUs + delay : 0;
+            frameTiming.sample(linuxFrameClockUs(), delay);
             if (!playback.render(pixelWidth, pixelHeight, static_cast<int>(buffer.framebuffer), false))
                 throw std::runtime_error("libmpv could not render the shared texture");
             gpu.finish(buffer); rendered = true; preparedSlot = slot; preparedSequence = leases.next();

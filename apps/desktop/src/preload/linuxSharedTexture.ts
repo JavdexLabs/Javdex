@@ -21,7 +21,7 @@ interface PlaybackCanvas {
   height: number
   isConnected: boolean
   dataset: { playbackSurface?: string }
-  getContext(kind: '2d', options: { alpha: boolean }): CanvasContext | null
+  getContext(kind: '2d', options: { alpha: boolean; colorSpace: 'srgb' }): CanvasContext | null
   getBoundingClientRect(): { width: number; height: number }
 }
 declare const document: { querySelectorAll(selector: string): Iterable<PlaybackCanvas> }
@@ -90,6 +90,26 @@ export function installLinuxSharedTextureReceiver(): (surfaceToken: string) => (
       || !Number.isSafeInteger(v.timeline) || v.timeline <= target.timeline) return
     target.timeline = v.timeline; cancel(target)
   })
+  const current = (target: MountedSurface, metadata: FrameMetadata): boolean => mounted === target
+    && (metadata.timeline ?? 0) === target.timeline && metadata.sequence > target.sequence
+    && target.canvas.isConnected && target.canvas.dataset.playbackSurface === target.surfaceToken
+  const waitForTarget = async (target: MountedSurface, metadata: FrameMetadata, arrivedAt: number): Promise<boolean> => {
+    if (metadata.targetTime !== undefined && (!Number.isFinite(metadata.targetTime) || metadata.targetTime < 0)) throw new Error('Invalid target time')
+    if (metadata.targetTime) {
+      while (target.clockOffset === undefined || target.bestRtt > 20) {
+        if (!current(target, metadata)) return false
+        if (performance.now() - arrivedAt > 1000) throw new Error('Frame clock calibration failed')
+        await delay(target, 2)
+      }
+      const due = metadata.targetTime + target.clockOffset
+      if (due - performance.now() > 100) throw new Error('Frame target too far ahead')
+      while (due - performance.now() > 0.5) {
+        await delay(target, Math.max(1, due - performance.now()))
+        if (!current(target, metadata)) return false
+      }
+    }
+    return current(target, metadata)
+  }
   const receive = async ({ importedSharedTexture }: ReceivedSharedTextureData, value: unknown): Promise<void> => {
     let frame: ReceivedVideoFrame | undefined
     const target = mounted
@@ -121,29 +141,24 @@ export function installLinuxSharedTextureReceiver(): (surfaceToken: string) => (
       }
       const arrivedAt = performance.now()
       const timed = typeof metadata.targetTime === 'number' && metadata.targetTime > 0
-      if (metadata.targetTime !== undefined && (!Number.isFinite(metadata.targetTime) || metadata.targetTime < 0)) throw new Error('Invalid target time')
-      if (timed) {
-        while (target.clockOffset === undefined || target.bestRtt > 20) {
-          if (mounted !== target || (metadata.timeline ?? 0) !== target.timeline) return
-          if (performance.now() - arrivedAt > 1000) throw new Error('Frame clock calibration failed')
-          await delay(target, 2)
-        }
-        const due = metadata.targetTime! + target.clockOffset
-        if (due - performance.now() > 100) throw new Error('Frame target too far ahead')
-        // Timer wakeups can be early. Recheck the absolute target and binding.
-        while (due - performance.now() > 0.5) {
-          await delay(target, Math.max(1, due - performance.now()))
-          if (mounted !== target || (metadata.timeline ?? 0) !== target.timeline || metadata.sequence <= target.sequence) return
-        }
-      }
-      if (mounted !== target || (metadata.timeline ?? 0) !== target.timeline || metadata.sequence <= target.sequence || !target.canvas.isConnected
-        || target.canvas.dataset.playbackSurface !== target.surfaceToken) return
+      if (!await waitForTarget(target, metadata, arrivedAt)) return
       // Changing intrinsic size clears the context, so do it only on resize.
       if (target.canvas.width !== frame.displayWidth) target.canvas.width = frame.displayWidth
       if (target.canvas.height !== frame.displayHeight) target.canvas.height = frame.displayHeight
       const submissionStarted = performance.now()
       target.context.drawImage(frame, 0, 0)
       const submissionCompleted = performance.now()
+      // Commit the submission before an opt-in asynchronous readback. A newer
+      // frame/epoch may arrive while copyTo is pending; it must not be undone.
+      target.sequence = metadata.sequence
+      ipcRenderer.send('playback:shared-texture-submitted', {
+        surfaceToken: target.surfaceToken, bindingToken: target.bindingToken, sequence: metadata.sequence,
+        timeline: metadata.timeline ?? 0,
+        ...(timed && target.clockOffset !== undefined ? {
+          readyTime: arrivedAt - target.clockOffset, submissionStartedTime: submissionStarted - target.clockOffset,
+          submittedTime: submissionCompleted - target.clockOffset
+        } : {})
+      })
       // Explicit, bounded synthetic-fixture diagnostic. Readback can change
       // synchronization/Canvas acceleration; it is never enabled by default.
       if (metadata.diagnosePixels === true && frame.displayWidth === 640 && frame.displayHeight === 360) {
@@ -167,14 +182,6 @@ export function installLinuxSharedTextureReceiver(): (surfaceToken: string) => (
           surfaceToken: target.surfaceToken, bindingToken: target.bindingToken, ...result
         })
       }
-      target.sequence = metadata.sequence
-      ipcRenderer.send('playback:shared-texture-submitted', {
-        surfaceToken: target.surfaceToken, bindingToken: target.bindingToken, sequence: metadata.sequence,
-        ...(timed && target.clockOffset !== undefined ? {
-          readyTime: arrivedAt - target.clockOffset, submissionStartedTime: submissionStarted - target.clockOffset,
-          submittedTime: submissionCompleted - target.clockOffset
-        } : {})
-      })
     } catch {
       if (target === mounted && target) ipcRenderer.send('playback:shared-texture-failed', {
         surfaceToken: target.surfaceToken, bindingToken: target.bindingToken
@@ -183,12 +190,16 @@ export function installLinuxSharedTextureReceiver(): (surfaceToken: string) => (
       try { frame?.close() } finally { importedSharedTexture.release() }
     }
   }
-  ipcRenderer.on('playback:cpu-frame', (_event, value: unknown) => {
+  const receiveCpu = async (value: unknown): Promise<void> => {
     const target = mounted
     const v = value as FrameMetadata & { width: number; height: number; stride: number; size: number; pixels: Uint8Array }
     if (!target || !v || v.surfaceToken !== target.surfaceToken || v.bindingToken !== target.bindingToken
       || !Number.isSafeInteger(v.sequence) || v.sequence <= target.sequence) return
     try {
+      const arrivedAt = performance.now()
+      if (v.targetTime !== undefined && (!Number.isFinite(v.targetTime) || v.targetTime < 0)) throw new Error('Invalid CPU target')
+      if (v.targetTime && !await waitForTarget(target, v, arrivedAt)) return
+      if (!current(target, v)) return
       if (!target.canvas.isConnected || target.canvas.dataset.playbackSurface !== target.surfaceToken) throw new Error('Detached CPU canvas')
       if (![v.width, v.height, v.stride, v.size].every(Number.isSafeInteger)
         || v.width < 1 || v.width > 8192 || v.height < 1 || v.height > 8192
@@ -200,13 +211,22 @@ export function installLinuxSharedTextureReceiver(): (surfaceToken: string) => (
       if (!target.image || target.image.data.length !== v.width * v.height * 4) target.image = target.context.createImageData(v.width, v.height)
       const image = target.image
       for (let y = 0; y < v.height; y++) image.data.set(v.pixels.subarray(y * v.stride, y * v.stride + v.width * 4), y * v.width * 4)
+      const submissionStarted = performance.now()
       target.context.putImageData(image, 0, 0)
+      const submissionCompleted = performance.now()
       target.sequence = v.sequence
-      ipcRenderer.send('playback:shared-texture-submitted', { surfaceToken: target.surfaceToken, bindingToken: target.bindingToken, sequence: v.sequence })
+      ipcRenderer.send('playback:shared-texture-submitted', { surfaceToken: target.surfaceToken, bindingToken: target.bindingToken, sequence: v.sequence,
+        timeline: v.timeline ?? 0, ...(v.targetTime && target.clockOffset !== undefined ? { readyTime: arrivedAt - target.clockOffset,
+          submissionStartedTime: submissionStarted - target.clockOffset, submittedTime: submissionCompleted - target.clockOffset } : {}) })
     } catch {
       ipcRenderer.send('playback:shared-texture-failed', { surfaceToken: target.surfaceToken, bindingToken: target.bindingToken })
+    } finally {
+      // The pixels were copied by main. Drawing and discarding both release
+      // the CPU lease; neither is physical presentation feedback to libmpv.
+      ipcRenderer.send('playback:cpu-frame-released', { surfaceToken: target.surfaceToken, bindingToken: target.bindingToken, sequence: v.sequence })
     }
-  })
+  }
+  ipcRenderer.on('playback:cpu-frame', (_event, value: unknown) => { void receiveCpu(value) })
   if (supported) {
     try { sharedTexture.setSharedTextureReceiver(receive) }
     catch { supported = false }
@@ -225,7 +245,9 @@ export function installLinuxSharedTextureReceiver(): (surfaceToken: string) => (
     try {
       canvas = [...document.querySelectorAll('canvas[data-playback-surface]')]
         .find(element => element.dataset.playbackSurface === surfaceToken)
-      context = canvas?.getContext('2d', { alpha: false })
+      // Make the browser default explicit; this does not convert untagged
+      // producer bytes from BT.709 transfer or certify GPU color management.
+      context = canvas?.getContext('2d', { alpha: false, colorSpace: 'srgb' })
     } catch { /* Treat context creation failure like an unavailable receiver. */ }
     if ((!supported && !(surfaceToken.startsWith('cpu:') && process.platform === 'linux' && process.isMainFrame)) || !canvas || !context) {
       ipcRenderer.send('playback:shared-texture-failed', binding)
@@ -233,7 +255,7 @@ export function installLinuxSharedTextureReceiver(): (surfaceToken: string) => (
     }
     const target: MountedSurface = { ...binding, canvas, context, sequence: 0, timeline: 0, bestRtt: Infinity, clockSamples: 0, cancellations: new Set() }
     mounted = target
-    if (!surfaceToken.startsWith('cpu:')) requestClock(target)
+    requestClock(target)
     return () => {
       if (mounted !== target) return
       mounted = null

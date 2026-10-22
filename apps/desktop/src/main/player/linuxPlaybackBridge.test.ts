@@ -301,6 +301,31 @@ test('DMA-BUF selection fails closed without the private texture channel factory
   assert.deepEqual(f.entries(), [])
 })
 
+test('CPU bridge invalidates scheduled work on hide/restore, pause and continuous seeks', linuxOnly, async t => {
+  let timeline = 0
+  const f = fixture(t, 'normal', () => {
+    const fd = openSync('/dev/null', 'r')
+    let closed = false
+    return { surfaceToken: 'cpu:timing-fixture', childFd: fd,
+      spawned() { closeSync(fd); closed = true }, setVisible() {}, isReady() { return true },
+      resetTiming() { return ++timeline },
+      destroy() { if (!closed) { closeSync(fd); closed = true } } }
+  })
+  f.bridge.create(handle(), bounds, { backend: 'software' })
+  await until(() => f.bridge.state(), state => Boolean(state.loadedFiles), 'CPU helper create missing')
+  f.bridge.setVisible(true); f.bridge.setVisible(false); f.bridge.setVisible(true)
+  f.bridge.command(['set', 'pause', 'yes'])
+  f.bridge.command(['seek', '10', 'absolute']); f.bridge.command(['seek', '20', 'absolute'])
+  await until(f.entries, entries => entries.filter(entry => entry.fields[0] === 'command').length === 3, 'timing commands missing')
+  const fields = f.entries().map(entry => entry.fields).filter(entry => ['visible', 'timing-reset', 'command'].includes(entry[0]))
+  assert.deepEqual(fields, [
+    ['visible', '1'], ['timing-reset', '1'], ['visible', '0'], ['timing-reset', '2'], ['visible', '1'],
+    ['command', 'set', 'pause', 'yes'], ['timing-reset', '3'],
+    ['command', 'seek', '10', 'absolute'], ['timing-reset', '4'],
+    ['command', 'seek', '20', 'absolute'], ['timing-reset', '5']
+  ])
+})
+
 
 test('Shared-texture diagnostics expose only fixed capability codes', () => {
   assert.equal(linuxSharedTextureFailureCode('No accessible DRM render node; a real GPU render node is required'), 'DRM_RENDER_NODE_UNAVAILABLE')

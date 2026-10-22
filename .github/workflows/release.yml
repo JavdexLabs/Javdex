@@ -100,7 +100,7 @@ jobs:
   package:
     name: Package ${{ matrix.platform }}-${{ matrix.arch }}
     needs: test
-    timeout-minutes: 90
+    timeout-minutes: ${{ matrix.platform == 'linux' && 180 || 90 }}
     strategy:
       fail-fast: false
       matrix:
@@ -135,8 +135,12 @@ jobs:
       - name: Install Linux packaging dependencies
         if: matrix.platform == 'linux'
         run: |
+          # The private helper closures deliver the exact Ubuntu source packages.
+          # Enable matching source repositories only on this ephemeral runner.
+          sudo sed -n 's/^deb /deb-src /p' /etc/apt/sources.list | sudo tee /etc/apt/sources.list.d/javdex-sources.list >/dev/null
+          test -s /etc/apt/sources.list.d/javdex-sources.list
           sudo apt-get update
-          sudo apt-get install -y rpm build-essential cmake nasm patchelf pkg-config xz-utils libx11-dev libxft-dev libxext-dev libxrandr-dev libxss-dev libxpresent-dev libgl1-mesa-dev libfontconfig1-dev libasound2-dev libva-dev
+          sudo apt-get install -y rpm build-essential cmake nasm patchelf pkg-config xz-utils python3-venv libx11-dev libxft-dev libxext-dev libxrandr-dev libxss-dev libxpresent-dev libgl1-mesa-dev libegl1-mesa-dev libgbm-dev libdrm-dev libfontconfig1-dev libpulse-dev libva-dev fonts-dejavu-core
 
       - uses: actions/setup-python@v5
         with:
@@ -169,12 +173,14 @@ jobs:
         run: npm ci
 
       - name: Identify playback source/toolchain cache
+        if: matrix.platform != 'linux'
         id: playback_fingerprint
         run: npm run playback:runtime:build -- --fingerprint
         env:
           JAVDEX_PLAYBACK_MSYS2_ROOT: ${{ steps.msys2.outputs.msys2-location }}
 
       - name: Cache source-built playback inputs
+        if: matrix.platform != 'linux'
         # The exact compiler/SDK/options fingerprint is calculated before restore,
         # so hosted-image updates can save a fresh cache instead of reusing an
         # immutable stale key and rebuilding on every run.
@@ -186,9 +192,43 @@ jobs:
           key: playback-source-v1-${{ matrix.os }}-${{ matrix.arch }}-${{ steps.playback_fingerprint.outputs.fingerprint }}
 
       - name: Build playback runtime from pinned source
+        if: matrix.platform != 'linux'
         run: npm run playback:runtime:build
         env:
           JAVDEX_PLAYBACK_MSYS2_ROOT: ${{ steps.msys2.outputs.msys2-location }}
+
+      - name: Cache verified Linux source downloads
+        if: matrix.platform == 'linux'
+        uses: actions/cache@v4
+        with:
+          path: |
+            out/linux-portable-build/sources
+            out/linux-software-build/sources
+          key: linux-playback-downloads-${{ hashFiles('build/playback-sources.json') }}
+
+      - name: Build both isolated Linux playback runtimes
+        if: matrix.platform == 'linux'
+        run: |
+          npm run playback:runtime:build -- --linux-portable
+          npm run playback:runtime:build -- --linux-software
+
+      - name: Cache pinned Linux ANGLE and corresponding sources
+        if: matrix.platform == 'linux'
+        id: linux_angle
+        uses: actions/cache@v4
+        with:
+          path: out/linux-angle-runtime
+          key: linux-angle-ubuntu22-v1-${{ hashFiles('scripts/build-linux-angle.py', 'build/angle-runtime.json', 'build/angle-args.gn', 'build/angle-electron-patches/**', 'build/patches/angle-x11-vulkan-visual.patch') }}
+
+      - name: Build Electron-matched patched ANGLE
+        if: matrix.platform == 'linux' && steps.linux_angle.outputs.cache-hit != 'true'
+        run: python3 scripts/build-linux-angle.py "$GITHUB_WORKSPACE/out/linux-angle-build"
+        env:
+          JAVDEX_ANGLE_JOBS: '2'
+
+      - name: Verify Linux ANGLE cache provenance and source delivery
+        if: matrix.platform == 'linux'
+        run: node --input-type=module -e "import { verifyLinuxAngleRuntime } from './scripts/linux-angle-runtime.mjs'; verifyLinuxAngleRuntime()"
 
       - name: Package
         run: npm run setup:desktop && npm run dist -- --platform ${{ matrix.platform }} --arch ${{ matrix.arch }}

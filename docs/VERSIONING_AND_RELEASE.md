@@ -74,7 +74,7 @@ npm run build
 npm run packaging:list
 ```
 
-6. 确认 `build/packaging.targets.json` 中 Windows x64、macOS x64、macOS arm64、Linux x64 四个目标已启用，产出第 6 节规定的六个桌面包。各原生 runner 从固定源码构建播放运行库，打包后运行 `packaging:verify-playback-runtime`、`packaging:verify-agent-runtime`，macOS 另核对应用签名。四份平台源码包及对应 `.runtime.json` 留作 CI 汇总输入；总源码包校验成功后才允许发布服务端镜像。`verify_only` 也执行桌面验证与源码汇总，但不发布镜像或 Release。
+6. 确认 `build/packaging.targets.json` 中 Windows x64、macOS x64、macOS arm64、Linux x64 四个目标已启用，产出第 6 节规定的六个桌面包。各原生 runner 从固定源码构建播放运行库；Linux 在 Ubuntu 22.04 分别构建 GPU／CPU helper 及匹配 Electron 的 ANGLE，保留三套对应源码材料。打包后运行 `packaging:verify-playback-runtime`、`packaging:verify-agent-runtime`，macOS 另核对应用签名。四份平台源码包及对应 `.runtime.json` 留作 CI 汇总输入；Linux 的同一投影同时绑定两套运行库与 ANGLE。总源码包校验成功后才允许发布服务端镜像。`verify_only` 也执行桌面验证与源码汇总，但不发布镜像或 Release。
 7. 检查数据库迁移、设置兼容和插件格式变化是否有升级说明。
 8. 核对发布正文提供与本次源码提交对应的 Compose 示例、JSON 配置和部署说明链接；不将示例或公钥作为附件。所有发布都需通过 Ed25519 签名配置检查，私钥和 key ID 缺失时不得上传镜像；镜像内置公钥必须与生成升级包的签名配置一致。
 
@@ -107,6 +107,8 @@ git push origin v0.9.0
 4. 仅在桌面打包和总源码包校验成功后，Linux amd64 / arm64 原生 runner 分别验证签名配置、构建服务端、运行容器烟测并上传 GHCR，合成固定版本的多架构镜像。
 5. 从已验证镜像取得各架构的完整程序闭包，封装签名清单和程序归档为两个 `.javdex-update`，读回验证内层字节；生成覆盖六个桌面包、总源码包和两个升级文件的 `SHA256SUMS.txt`。
 6. 创建 GitHub Release，上传第 6 节规定的 10 个附件；正文提供与本次源码提交对应的 Compose 示例、JSON 配置和部署说明链接。
+
+Linux 的包内与最终安装器门禁验证两个独立 ELF 闭包、ANGLE、启动器和 AppImage 运行时前缀，并在实际包内 Electron 加载 FD addon、分别解码 GPU／CPU libmpv 的 PCM 至 EOF。总源码汇总另检查两份 helper 材料的固定依赖、Ubuntu `.dsc` 与源码摘要、原生源码及 SDK，以及 ANGLE 源码和补丁。它们不能替代真机画面、硬解、音画同步或长播验收，详细合同见 [Linux 播放](LINUX_COMPATIBLE_PLAYBACK.md#validation-and-release-boundary)。
 
 正式版进入 GitHub 最新正式 Release，供应用更新提醒与官网读取；服务镜像仍使用固定版本标签，当前工作流不创建 `latest` 滚动镜像标签。发布后核验默认分支包含发布代码，并检查 Pages 工作流生成的下载信息。
 

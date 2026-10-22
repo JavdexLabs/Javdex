@@ -7,6 +7,7 @@ import { c as createTar, x as extractTar } from 'tar'
 import test from 'node:test'
 import { aggregatePlaybackSources, splitSourceTar } from './aggregate-playback-sources.mjs'
 import { restorePlatform, sha256, safePath } from './restore-playback-sources.mjs'
+import { linuxReleaseFixture } from './test-support/linux-release-fixture.mjs'
 
 const version = '0.9.0'
 const targetNames = ['win32-x64', 'darwin-x64', 'darwin-arm64', 'linux-x64']
@@ -218,4 +219,30 @@ test('opaque native blob is rejected even when all outer digests and receipts ag
   fs.writeFileSync(sidecar, JSON.stringify(value)); refreshProof(f, index)
   await assert.rejects(aggregatePlaybackSources(f.directory, version), /archive|TAR|gzip/i)
   assert.ok(!fs.readdirSync(f.directory).some(name => name.startsWith('.playback-source-aggregate-')))
+})
+
+test('integrated Linux and three native targets share one public source archive with exact restoration', async t => {
+  const f = await fixture(t), linuxRoot = path.join(f.root, 'integrated-linux')
+  fs.mkdirSync(linuxRoot)
+  const linux = await linuxReleaseFixture(linuxRoot, version)
+  for (const suffix of ['', '.runtime.json', '.installers.json']) fs.unlinkSync(path.join(f.directory, f.inputs[3].archive + suffix))
+  const name = linux.manifest.sourceBundle.fileName
+  for (const suffix of ['', '.runtime.json']) fs.copyFileSync(path.join(linux.output, name + suffix), path.join(f.directory, name + suffix))
+  const installers = [`Javdex-${version}-amd64.deb`, `Javdex-${version}-x86_64.AppImage`]
+  write(f.directory, name + '.installers.json', JSON.stringify({ schemaVersion: 1, target: 'linux-x64', version,
+    sourceBundle: linux.manifest.sourceBundle, installers: Object.fromEntries(installers.map(n => [n, {
+      sha256: sha256(fs.readFileSync(path.join(f.directory, n))), runtimeInventorySha256: sha256(fs.readFileSync(path.join(f.directory, name + '.runtime.json')))
+    }])) }))
+  const combined = await aggregatePlaybackSources(f.directory, version)
+  const extracted = path.join(f.root, 'integrated-combined'); fs.mkdirSync(extracted)
+  await extractTar({ cwd: extracted, file: combined })
+  const restored = path.join(f.root, 'restored-integrated-linux')
+  restorePlatform(path.join(extracted, 'Playback-Sources'), 'linux-x64', restored)
+  for (const id of ['gpu', 'cpu', 'angle']) assert.deepEqual(fs.readFileSync(path.join(restored, 'reviewed-runtime/sources', id + '.tar.gz')), fs.readFileSync(linux.archives[id]))
+  const manifest = JSON.parse(fs.readFileSync(path.join(extracted, 'Playback-Sources/manifests/linux-x64.json')))
+  assert.equal(manifest.runtime.kind, 'linux-integrated'); assert.equal(manifest.installers.length, 2)
+  assert.ok(fs.existsSync(path.join(restored, 'packaging-tools/scripts/linux-integrated-playback.mjs')))
+  fs.writeFileSync(path.join(f.directory, installers[1]), 'changed installer')
+  fs.rmSync(path.dirname(combined), { recursive: true })
+  await assert.rejects(aggregatePlaybackSources(f.directory, version), /Final installer digest/)
 })

@@ -102,7 +102,7 @@ npm run dist:linux           # Linux 目标
 
 Windows 本地使用内置播放时，先完成 `playback:native:build`，再运行 `dist:win:local`。该入口显式检查 `out/native-playback/playback.node` 的 PE 架构及普通／延迟 DLL 导入闭包，只复制实际依赖，不复制旧 addon、测试程序或开发目录；缺少依赖时停止打包。包内 `local-runtime.json` 标记本地开发用途及文件摘要。正式分发继续使用 `JAVDEX_PLAYBACK_RUNTIME_DIR` 的审核清单与对应源码材料；本地入口与该配置互斥，打包不执行发布。
 
-Linux Wayland 的第一阶段可携带运行库使用独立的本地测试入口，见 [Linux portable phase 1](LINUX_PORTABLE_PHASE1.md)；普通发行构建合同保持不变。
+Linux x64 普通打包与 Release 使用 GPU／CPU 双 helper 及匹配 Electron 的 ANGLE，构建和来源校验见 [Linux 播放](LINUX_COMPATIBLE_PLAYBACK.md)。[Linux portable phase 1](LINUX_PORTABLE_PHASE1.md) 仅保留为独立历史测试入口，不代替当前发行合同。
 
 版本号、标签、数据库升级说明、Release 工作流和发布验证统一遵循 [版本与发布规范](VERSIONING_AND_RELEASE.md)。
 
@@ -143,7 +143,7 @@ Windows 原生 adapter 使用 rendererFullscreenControls 和覆盖区域裁剪�
 
 内置播放行为与平台边界见 [播放合同](BUILTIN_PLAYBACK.md)，实际源码构建及发布证据见下文。`npm run playback:native:build` 只生成链接本机开发库的运行文件：macOS/Windows 为 addon，Linux 为独立 `playback-helper`；正式打包输入由 `npm run playback:runtime:build` 从固定源码构建。普通桌面打包明确排除 `out/native-playback`、`out/playback-acceptance`、`out/libmpv-prototype` 与 `out/playback-runtime`，审核后的运行库通过打包钩子复制到 Resources，不把构建目录、合成素材、截图或临时 Electron bundle 收入 `app.asar`。
 
-原生核心的初始化、异步命令、事件复制、状态缓存与帧计数共用 `native/mpvCore.h`；Cocoa/WGL/X11 仅拥有平台窗口、GL context 和原生输入。macOS 构建先编译运行 C++ 的键位与核心回归，再生成 Cocoa addon；Linux CMake 构建运行共用核心与私有 X11 几何／句柄／键盘回归。`npm run test:playback:build` 检查构建命令选择，已纳入根测试；它本身不编译其它平台源码，也不证明可播放。
+原生核心的初始化、异步命令、事件复制、状态缓存与帧计数共用 `native/mpvCore.h`；Cocoa/WGL 拥有各自平台窗口、GL context 和原生输入，Linux 使用独立 helper。macOS 构建先编译运行 C++ 的键位与核心回归，再生成 Cocoa addon；Linux CMake 构建运行共用核心与 DMA-BUF 协议／槽位回归。`npm run test:playback:build` 检查构建命令选择，已纳入根测试；它本身不编译其它平台源码，也不证明可播放。
 
 Windows WGL 适配已在 Windows 11 x64 用 MSVC 实际编译，并在 Electron 中加载、播放本地与 loopback 远程合成素材；范围及剩余关口见 [Windows 验收记录](BUILTIN_PLAYBACK_WINDOWS_ACCEPTANCE.md)。开发构建需要 Windows 本机的 MSVC、Visual Studio CMake generator、同架构 libmpv headers/import library/DLL，以及对应 Electron 的 headers 和 `node.lib`。设置 `JAVDEX_MPV_PREFIX` 为已安装开发前缀；默认 Electron 输入为 `~/.electron-gyp/<version>/include/node` 与 `<arch>/node.lib`，可分别用 `JAVDEX_ELECTRON_HEADERS` / `JAVDEX_ELECTRON_NODE_LIBRARY` 覆盖。Windows 开发构建完成后按实际 PE 导入闭包，从该前缀的 `bin` 复制所需 DLL 到 `out/native-playback`，普通 `npm run dev` / `npm start` 无需额外配置 libmpv PATH；缺失依赖或架构不匹配会拒绝构建，前缀中的 Mesa `opengl32.dll` 不复制，以保留系统 WGL。旧的 addon-only 开发产物需重新构建并正常退出、重启应用。构建器不下载依赖、不修改用户系统环境；这些开发文件仍排除在正式安装包之外。WGL 不等于 ANGLE 直接硬解，本轮 H.264/HEVC Main10 的实际内核状态为 `d3d11va-copy`。
 
@@ -165,15 +165,15 @@ Linux GPU 模式要求可用的硬件 EGL 设备；可检测故障按自动模�
 
 对该目录运行 `docker build -t <本轮专用标签> <该目录>`。镜像内安装 Debian 开发依赖，运行 C++ 回归及独立的真实 ELF 搬移测试；该 Docker 检查要求 Linux ELF 测试实际运行，跳过不能代替成功。完整安装包／源码绑定测试仍在仓库根的 `test:packaging` 中执行，不塞入最小编译 context。随后 `docker run --rm --init --network none <本轮专用标签>` 仅验证 helper 加载、私有协议、EOF／destroy、无效 backend／句柄及无显示时的受控失败。此 helper 协议检查也由 Linux 开发构建调用，不创建 GL context，不播放素材。镜像中的系统 libmpv 没有来源闭包清单，检查必须拒绝将该 helper 单独作为正式运行库。
 
-经审核的运行库通过 `JAVDEX_PLAYBACK_RUNTIME_DIR` 显式指定矩阵目录，每个目标在 `<platform>-<arch>/` 下独立提供入口、依赖库及 `runtime.json`，例如 `darwin-arm64/`、`win32-x64/` 和 `linux-x64/`。macOS/Windows 的入口为 `playback.node`；Linux 必须为有执行权限的 `playback-helper`，不接受旧的同进程 `playback.node`。未指定时不加入运行库；已指定但目录、架构、版本或文件不匹配时停止打包，不静默生成缺少运行库的内置播放包。技术检查覆盖 macOS Mach-O、Windows PE 与 Linux ELF；Windows 本地 ZIP/NSIS 的合成媒体播放回归见 [Windows 验收记录](BUILTIN_PLAYBACK_WINDOWS_ACCEPTANCE.md)，四目标源码构建与最终安装产物的验证合同见下文。独立干净机器、可信分发签名、公证与 GUI／硬解等验收须按具体记录判断，不能由清单或命令选择测试推定。
+Windows/macOS 经审核的运行库通过 `JAVDEX_PLAYBACK_RUNTIME_DIR` 显式指定矩阵目录，每个目标在 `<platform>-<arch>/` 下独立提供 `playback.node`、依赖库及 `runtime.json`，例如 `darwin-arm64/` 和 `win32-x64/`。这些目标在本机未指定时可不加入运行库；已指定但目录、架构、版本或文件不匹配时停止打包，不静默生成缺少运行库的内置播放包。历史 `linux-x64/playback-helper` 清单仅用于旧包检查；当前 Linux x64 普通打包始终要求双运行库和 ANGLE，不读取该旧矩阵作为替代。技术检查覆盖 macOS Mach-O、Windows PE 与 Linux ELF；Windows 本地 ZIP/NSIS 的合成媒体播放回归见 [Windows 验收记录](BUILTIN_PLAYBACK_WINDOWS_ACCEPTANCE.md)，四目标源码构建与最终安装产物的验证合同见下文。独立干净机器、可信分发签名、公证与 GUI／硬解等验收须按具体记录判断，不能由清单或命令选择测试推定。
 
-上述“未指定时不加入”仅适用于普通本机开发打包。CI／GitHub Actions 必须提供完整运行库矩阵，否则 `beforePack` 立即报错；本地开发专用目录不能替代 CI 的来源清单。打包后运行 `npm run packaging:verify-playback-runtime`，逐个检查应用 Resources 的 `native-playback`、平台／架构、准确文件集合、动态依赖、许可材料及配套源码归档。macOS 验证外层 app 与每个原生文件的真实签名，保留输入 `pre-sign` 摘要，不把签名改变的字节误判为输入损坏，也不在资源封装后改写清单；非二进制仍核对原摘要。其它平台继续核对全部文件摘要。各平台配套源码归档留存为 CI 产物；Release 交付下述总源码包，并将总包加入 SHA256SUMS。
+上述“未指定时不加入”仅适用于 Windows/macOS 普通本机开发打包。CI／GitHub Actions 必须提供完整运行库输入，否则 `beforePack` 立即报错；本地开发专用目录不能替代 CI 的来源清单。打包后运行 `npm run packaging:verify-playback-runtime`，Windows/macOS 检查 Resources 的 `native-playback`，Linux 检查 `linux-playback-release.json` 绑定的两个 helper 闭包与 ANGLE，均核对平台／架构、准确文件集合、动态依赖、许可材料及配套源码归档。macOS 验证外层 app 与每个原生文件的真实签名，保留输入 `pre-sign` 摘要，不把签名改变的字节误判为输入损坏，也不在资源封装后改写清单；非二进制仍核对原摘要。其它平台继续核对全部文件摘要。各平台配套源码归档留存为 CI 产物；Release 交付下述总源码包，并将总包加入 SHA256SUMS。
 
 历史上曾有未传入运行库矩阵的公开安装包，后续源码构建与打包门禁的完成不追溯改变这些旧附件。已公开版本的标签、镜像与安装包不覆盖；改变分发内容须使用新版本。
 
 ### 固定源码构建与分发验证
 
-`npm run playback:runtime:build` 从 [固定源码清单](../build/playback-sources.json) 构建正式打包输入，输出到 `out/playback-runtime/<platform>-<arch>`。下载前后的大小与 SHA-256 必须匹配；清单包含 libmpv、FFmpeg、字幕/字体、AV1、TLS 依赖及 libplacebo 的固定子模块，也锁定 Electron headers 的 Node 版本和许可来源。Meson 禁止自动下载或探测未声明的可选依赖，不复制 Homebrew／系统 FFmpeg。源码和配方变化后使用新空前缀；pkgconf 保留私有 `-I/-L`，避免从系统静态库解析 FFmpeg。工具安装在任务自己的 Python venv，不改本机系统 Python。
+`npm run playback:runtime:build` 从 [固定源码清单](../build/playback-sources.json) 构建正式打包输入。Windows/macOS 输出到 `out/playback-runtime/<platform>-<arch>`；Linux x64 默认构建 dmabuf GPU profile 到 `out/linux-portable-runtime/linux-x64`，另以 `--linux-software` 构建 `out/linux-software-runtime/linux-x64`，并由 `scripts/build-linux-angle.py` 生成 `out/linux-angle-runtime/linux-x64`。下载前后的大小与 SHA-256 必须匹配；清单包含 libmpv、FFmpeg、字幕/字体、AV1、TLS 依赖及 libplacebo 的固定子模块，也锁定 Electron headers 的 Node 版本和许可来源。Meson 禁止自动下载或探测未声明的可选依赖，不复制 Homebrew／系统 FFmpeg。源码和配方变化后使用新空前缀；pkgconf 保留私有 `-I/-L`，避免从系统静态库解析 FFmpeg。工具安装在任务自己的 Python venv，不改本机系统 Python。
 
 当前清单固定 mpv 0.41.0、FFmpeg 9.0.2、Electron 43.8.0 和 Node SDK headers 24.22.0；其余来源、版本、字节数、摘要与工具版本以清单及 [构建配方](../scripts/playback-source-build.mjs) 为准。这套播放 FFmpeg 与本地 AI 使用的 FFmpeg 8.1.3 是独立构建，不能混用版本或许可说明。
 
@@ -193,7 +193,7 @@ Linux 构建基线为 Ubuntu 22.04：libass 等自建依赖保持 PIC 静态库�
 
 `packaging:verify-playback-runtime` 除静态合同与签名检查，还在清除开发库搜索路径后实际加载包内 addon（Electron ABI）／helper，再从包内相对位置加载 libmpv，初始化核心所需的安全选项并解码原创 PCM WAV 到正常 EOF。不会以 `require` 成功代替解码，也不把无显示检查称作 GUI/GL、硬解、多格式、网络或独立干净机器验收。Linux `.deb` 声明保留 Electron 默认依赖，加上 X11/Xft、GL、ALSA、VA-API 的宿主包；AppImage 不安装系统包，宿主须具备这些显示/音频/驱动 ABI，不需要系统安装 mpv/FFmpeg。早期 verify-only CI 的实际验证及当时边界见 [源码构建复核](reviews/playback-ci-source-build.md)。
 
-`runtime.json` v1 的输入合同如下；清单由实际运行库构建生成，不手工填入虚假的摘要：
+Windows/macOS 及历史 Linux 单运行库的 `runtime.json` v1 输入合同如下；清单由实际运行库构建生成，不手工填入虚假的摘要。当前 Linux 双运行库使用各自的 `portable-runtime.json` 与 ANGLE 的 `javdex-angle.json`，发行时由独立初版 `linux-playback-release.json` 统一绑定，不伪装成旧 `playback-helper` 合同：
 
 | 字段 | 要求 |
 | --- | --- |
@@ -217,7 +217,7 @@ Release 的 `playback-sources` 任务在四个平台打包门禁之后执行 `no
 | Windows x64 | NSIS `.exe`、`.zip` | 静默安装 EXE、提取 ZIP，匹配运行库及来源绑定 |
 | macOS x64 | Intel `.dmg` | 只读挂载，匹配运行库及来源绑定，校验 app 签名 |
 | macOS arm64 | Apple Silicon `.dmg` | 只读挂载，匹配运行库及来源绑定，校验 app 签名 |
-| Linux x64 | `.deb`、`.AppImage` | 分别提取，匹配运行库及来源绑定 |
+| Linux x64 | `.deb`、`.AppImage` | 分别提取，匹配 GPU／CPU／ANGLE 统一投影，实际包内 FD 加载与双 libmpv PCM EOF；AppImage 另核对 uruntime 前缀 |
 
 文件名映射以 [playback-source-materials.mjs](../scripts/playback-source-materials.mjs) 为准。[历史源码与产物核验](reviews/v0.9.0-beta.3-release-audit.md) 记录 Release run `38601458029` 的四目标构建、包内加载与 PCM EOF、六个最终安装产物核验，以及公开总源码包四目标恢复和摘要核对。每轮正式发布须对自身提交执行 [Release 工作流](../.github/workflows/release.yml)，不能沿用历史摘要或把无显示门禁记为新增 GUI、硬解或干净机器验证；0.9.0 原始发行及一次整套替换的实际结果见 [发布记录](reviews/README.md)。
 

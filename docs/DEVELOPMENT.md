@@ -18,7 +18,9 @@ npm run setup:desktop
 npm run dev
 ```
 
-`npm ci` 安装锁定的 workspace 依赖，根安装不再自动触发 Electron rebuild。桌面开发/测试随后显式运行 `npm run setup:desktop`；如原生模块构建失败，按日志补齐开发环境后重试。服务端产物使用独立的生产依赖安装，不运行该桌面准备命令。
+`npm ci` 安装锁定的 workspace 依赖，并通过 `scripts/patch-sharp-electron.mjs` 为固定版本 Sharp 选择 Linux Electron 专用 WASM 后端；安装不自动触发 Electron rebuild。桌面开发/测试随后显式运行 `npm run setup:desktop`；如原生模块构建失败，按日志补齐开发环境后重试。服务端产物使用独立的生产依赖安装，不运行该桌面准备命令。
+
+Linux Electron 图片元数据读取和缩略图使用 Sharp 官方 WASM 后端，避免 Electron 系统 GLib 与原生 libvips 的符号冲突；普通 Node（含独立服务器）和其他桌面平台继续使用原生后端。补丁绑定 Sharp 0.35.5 的 loader 摘要，升级不匹配时中止，禁止静默退回冲突后端。跳过安装脚本后需运行 `npm run prepare:sharp`；测试和打包入口会检查补丁。`node scripts/check-sharp-runtime.cjs` 验证 Node，`ELECTRON_RUN_AS_NODE=1 <Electron或已解包的Javdex可执行文件> scripts/check-sharp-runtime.cjs [resources/app.asar]` 验证实际桌面运行库及 PNG/JPEG/WebP/GIF/AVIF 像素处理。WASM 不支持原生文字渲染和瓦片输出，现有服务图片/缩略图路径不使用这些功能。
 
 开发启动使用应用的用户数据目录，测试隔离机制见 [appIdentity.ts](../packages/contracts/src/appIdentity.ts) 与相关测试。调试数据库、扫描或删除行为前，使用测试资料与独立测试目录。
 

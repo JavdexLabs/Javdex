@@ -258,6 +258,10 @@ test('Linux glibc packaging excludes foreign binaries but retains native loaders
       'node_modules/@mariozechner/clipboard/index.js',
       'node_modules/sharp/dist/sharp.cjs',
       'node_modules/@img/colour/index.cjs',
+      'node_modules/@img/sharp-wasm32/index.cjs',
+      'node_modules/@img/sharp-wasm32/lib/sharp-wasm32-0.35.5.node.js',
+      'node_modules/@img/sharp-wasm32/lib/sharp-wasm32-0.35.5.node.wasm',
+      'node_modules/@emnapi/runtime/dist/index.js',
       'node_modules/@img/sharp-linuxmusl-x64/LICENSE',
       'node_modules/@img/sharp-libvips-linuxmusl-x64/package.json',
       'node_modules/@mariozechner/clipboard-darwin-arm64/LICENSE'

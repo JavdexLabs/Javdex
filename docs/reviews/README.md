@@ -14,6 +14,8 @@
 
 ## Linux 本地验证
 
+[Linux Electron 图片运行库修复](linux-sharp-runtime-2026-10-22.md)记录 12 项已有测试失败的同源崩溃、WASM 后端选择和本地验证边界。
+
 [Linux 解码兼容性检查（2026-10-22）](linux-codec-compatibility-2026-10-22.md)记录当前本地 AppImage 的包内解码能力、真实画面矩阵与硬解缺口，不代表公开发行版或全部 Linux 环境。
 
 ## 其他历史证据

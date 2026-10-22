@@ -57,3 +57,7 @@ Linux x64 包使用与 Electron 版本匹配的 ANGLE 源码和 Electron 上游�
 - 字段约定：MetaTube 的 `actors` 全部按女性演员导入；`label` 近似映射为 Javdex 的发行方。该语义差异同时在插件说明与设置界面披露。
 
 Javdex 中的 MetaTube 适配代码为本项目实现；上述说明用于标明所对接 API、上游来源和许可边界。
+
+## 图片处理
+
+Sharp 0.35.5 使用 Apache-2.0；Linux Electron 采用官方 `@img/sharp-wasm32` 0.35.5（Apache-2.0、LGPL-3.0-or-later、MIT），包含 libvips 及图片编解码库，版本清单随包保留。后端选择补丁见 `scripts/patch-sharp-electron.mjs`。上游源码和构建入口见 [Sharp v0.35.5](https://github.com/lovell/sharp/tree/v0.35.5) 和 [sharp-libvips](https://github.com/lovell/sharp-libvips)；上游 [Electron/Linux 兼容性说明](https://sharp.pixelplumbing.com/install/#electron-and-linux) 记录 GLib 符号冲突。

@@ -1,3 +1,4 @@
+import { prepareSharp } from './scripts/patch-sharp-electron.mjs'
 import { integratedLinuxPlayback, verifyIntegratedLinuxPlayback, stageIntegratedLinuxPlayback } from './scripts/linux-integrated-playback.mjs'
 import { prepareAutomaticAppImageRuntime } from './scripts/linux-appimage-runtime.mjs'
 import { signAsync } from '@electron/osx-sign'
@@ -10,6 +11,8 @@ import {
 } from './scripts/packaging-runtime.mjs'
 import { stagePackagedPlaybackRuntime, verifyPackagedPlaybackRuntime } from './scripts/playback-runtime.mjs'
 import { stageLocalPlaybackRuntime, verifyLocalPlaybackRuntime } from './scripts/local-playback-package.mjs'
+
+prepareSharp(process.cwd(), { check: true })
 
 const adHocEntitlements = resolve('build/entitlements.mac.adhoc.plist')
 

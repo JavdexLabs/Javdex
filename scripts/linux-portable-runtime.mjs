@@ -6,12 +6,16 @@ import path from 'node:path'
 import { playbackFileSha256 } from './playback-runtime.mjs'
 
 // These interfaces must match the running kernel, compositor and GPU driver.
-// Ordinary audio/font/codec/C++ libraries must resolve inside this runtime.
-export const portableHostLibraries = new Set([
+// Audio/font/codec libraries stay private. GPU driver ABIs and their C++ runtime
+// must follow the host: old libva cannot load newer vendor driver entry points.
+const legacyPortableHostLibraries = new Set([
   'libc.so.6', 'libm.so.6', 'libresolv.so.2', 'libutil.so.1', 'libdl.so.2', 'libpthread.so.0', 'librt.so.1', 'ld-linux-x86-64.so.2',
   'libEGL.so.1', 'libGL.so.1', 'libGLdispatch.so.0', 'libGLX.so.0', 'libgbm.so.1', 'libdrm.so.2'
 ])
-export const softwareHostLibraries = new Set([...portableHostLibraries].filter(n => !/^(libEGL|libGL|libgbm|libdrm)/.test(n)))
+export const portableHostLibraries = new Set([...legacyPortableHostLibraries,
+  'libva.so.2', 'libva-drm.so.2', 'libva-x11.so.2', 'libstdc++.so.6', 'libgcc_s.so.1'
+])
+export const softwareHostLibraries = new Set([...legacyPortableHostLibraries].filter(n => !/^(libEGL|libGL|libgbm|libdrm)/.test(n)))
 const entries = ['playback-dmabuf-helper', 'playback-fd.node', 'libmpv.so.2']
 function command(command, args) {
   const r = spawnSync(command, args, { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 })
@@ -53,7 +57,8 @@ export function validatePortableRuntime(directory) {
   assert.equal(manifest.schemaVersion, 1)
   assert.ok(['linux-x64-dmabuf-pulse', 'linux-x64-software-pulse'].includes(manifest.profile))
   const software = manifest.profile === 'linux-x64-software-pulse'
-  const hostLibraries = software ? softwareHostLibraries : portableHostLibraries
+  assert.ok(manifest.driverAbi === undefined || (!software && manifest.driverAbi === 'host-vaapi-cxx-v1'), 'Unknown driver ABI policy')
+  const hostLibraries = software ? softwareHostLibraries : manifest.driverAbi ? portableHostLibraries : legacyPortableHostLibraries
   const entries = [software ? 'playback-software-helper' : 'playback-dmabuf-helper', 'playback-fd.node', 'libmpv.so.2']
   assert.deepEqual(manifest.hostLibraries, [...hostLibraries].sort())
   assert.deepEqual(walk(directory).filter(f => f !== 'portable-runtime.json'), Object.keys(manifest.files).sort(), 'Unlisted or missing portable files')
@@ -69,6 +74,7 @@ export function validatePortableRuntime(directory) {
     return c.binaries
   }))
   for (const file of Object.keys(manifest.elf)) {
+    if (manifest.driverAbi) assert.ok(!hostLibraries.has(path.basename(file)), `Host driver ABI must not be shadowed: ${file}`)
     assert.ok(accounted.has(file), `Unattributed ELF: ${file}`)
     assert.ok(entries.includes(file) || /^lib\/[\w+.-]+\.so(?:\.\d+)*$/.test(file), `Unsafe ELF destination: ${file}`)
     assert.ok(!/(?:nvidia|_dri|vulkan|libEGL_|libGLX_)/i.test(file), `Vendor driver must stay on host: ${file}`)
@@ -106,7 +112,7 @@ export async function buildPortablePlaybackRuntime(input) {
   ]
   for (const [cmd, args] of nativePlan) run(cmd, args)
   cpSync(realpathSync(path.join(prefix, 'lib/libmpv.so.2')), path.join(staged, entries[2]))
-  const manifest = { schemaVersion: 1, profile: software ? 'linux-x64-software-pulse' : 'linux-x64-dmabuf-pulse', baseline: 'Ubuntu 22.04 / glibc 2.35', electronVersion: lock.sdk.electronVersion,
+  const manifest = { schemaVersion: 1, ...(!software ? { driverAbi: 'host-vaapi-cxx-v1' } : {}), profile: software ? 'linux-x64-software-pulse' : 'linux-x64-dmabuf-pulse', baseline: 'Ubuntu 22.04 / glibc 2.35', electronVersion: lock.sdk.electronVersion,
     hostLibraries: [...hostLibraries].sort(), files: {}, elf: {}, components: [] }
   mkdirSync(path.join(staged, 'licenses/common'))
   for (const name of readdirSync('/usr/share/common-licenses')) writeFileSync(path.join(staged, 'licenses/common', name), readFileSync(path.join('/usr/share/common-licenses', name)))

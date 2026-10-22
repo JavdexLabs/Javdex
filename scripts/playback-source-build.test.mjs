@@ -207,3 +207,21 @@ test('CPU profile disables graphics rendering and hardware decoding while retain
   const mpv = steps.find(s => s.args.includes('/src/mpv')).args
   for (const flag of ['-Dgl=disabled', '-Dplain-gl=disabled', '-Dvaapi=disabled', '-Dpulse=enabled', '-Dx11=disabled']) assert(mpv.includes(flag))
 })
+
+test('Linux GPU enables NVDEC copy support from pinned headers without contaminating CPU or other platforms', () => {
+  for (const profile of ['dmabuf', 'software']) {
+    const steps = playbackSourcePlan({ ...input, platform: 'linux', linuxProfile: profile })
+    const ff = steps.find(s => s.args.includes('/sources/ffmpeg/configure')).args
+    const mpv = steps.find(s => s.args[0] === 'setup' && s.args.includes('/sources/mpv')).args
+    const install = steps.find(s => s.cwd === '/sources/nv_codec_headers')
+    assert.equal(Boolean(install), profile === 'dmabuf')
+    assert(ff.includes(profile === 'dmabuf' ? '--enable-nvdec' : '--disable-nvdec'))
+    assert(ff.includes(profile === 'dmabuf' ? '--enable-ffnvcodec' : '--disable-ffnvcodec'))
+    assert(mpv.includes(profile === 'dmabuf' ? '-Dcuda-hwaccel=enabled' : '-Dcuda-hwaccel=disabled'))
+    assert(mpv.includes(profile === 'dmabuf' ? '-Dcuda-interop=enabled' : '-Dcuda-interop=disabled'))
+  }
+  for (const platform of ['darwin', 'win32']) {
+    const steps = playbackSourcePlan({ ...input, platform })
+    assert(!steps.some(s => s.cwd === '/sources/nv_codec_headers'))
+  }
+})

@@ -1,10 +1,10 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, writeFileSync, cpSync, readFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, cpSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
-import { inspectPortableElf, portableHostLibraries, validatePortableRuntime } from './linux-portable-runtime.mjs'
+import { inspectPortableElf, portableHostLibraries, softwareHostLibraries, validatePortableRuntime } from './linux-portable-runtime.mjs'
 import { playbackFileSha256 } from './playback-runtime.mjs'
 
 function fixture(extra = []) {
@@ -15,7 +15,7 @@ function fixture(extra = []) {
   writeFileSync(path.join(root, 'LICENSE'), 'fixture\n')
   const files = Object.fromEntries(['entry.c', 'LICENSE', 'playback-dmabuf-helper', 'playback-fd.node', 'libmpv.so.2'].map(f => [f, playbackFileSha256(path.join(root, f))]))
   const elf = Object.fromEntries(['playback-dmabuf-helper', 'playback-fd.node', 'libmpv.so.2'].map(f => [f, inspectPortableElf(path.join(root, f))]))
-  const manifest = { schemaVersion: 1, profile: 'linux-x64-dmabuf-pulse', hostLibraries: [...portableHostLibraries].sort(), files, elf,
+  const manifest = { schemaVersion: 1, driverAbi: 'host-vaapi-cxx-v1', profile: 'linux-x64-dmabuf-pulse', hostLibraries: [...portableHostLibraries].sort(), files, elf,
     components: [{ name: 'fixture', sourceLock: 'fixture', licenseFile: 'LICENSE', binaries: Object.keys(elf) }] }
   const save = () => writeFileSync(path.join(root, 'portable-runtime.json'), JSON.stringify(manifest))
   save(); return { root, manifest, save }
@@ -62,4 +62,31 @@ test('portable helper rejects a separate GL forwarding runtime', () => {
   execFileSync('cc', ['-shared', '-fPIC', path.join(build, 'gl.c'), '-Wl,-soname,libOpenGL.so.0', '-o', path.join(build, 'libGLForwarder.so')])
   const f = fixture(['-Wl,--no-as-needed', '-L' + build, '-lGLForwarder'])
   assert.throws(() => validatePortableRuntime(f.root), /must use EGL GL entry points/)
+})
+
+
+test('GPU driver ABI uses host VA-API and C++ while CPU retains its private closure', () => {
+  for (const name of ['libva.so.2', 'libva-drm.so.2', 'libva-x11.so.2', 'libstdc++.so.6', 'libgcc_s.so.1']) {
+    assert(portableHostLibraries.has(name))
+    assert(!softwareHostLibraries.has(name))
+  }
+  const f = fixture()
+  f.manifest.driverAbi = 'unknown'; f.save()
+  assert.throws(() => validatePortableRuntime(f.root), /Unknown driver ABI/)
+  delete f.manifest.driverAbi
+  f.manifest.hostLibraries = f.manifest.hostLibraries.filter(n => !/^(libva|libstdc\+\+|libgcc_s)/.test(n))
+  f.save(); validatePortableRuntime(f.root) // Preserved pre-policy packages remain inspectable.
+})
+
+
+test('GPU closure rejects a bundled library that shadows the selected host driver ABI', () => {
+  const f = fixture()
+  mkdirSync(path.join(f.root, 'lib'))
+  const file = 'lib/libva.so.2'
+  cpSync(path.join(f.root, 'playback-fd.node'), path.join(f.root, file))
+  f.manifest.files[file] = playbackFileSha256(path.join(f.root, file))
+  f.manifest.elf[file] = f.manifest.elf['playback-fd.node']
+  f.manifest.components[0].binaries.push(file)
+  f.save()
+  assert.throws(() => validatePortableRuntime(f.root), /Host driver ABI must not be shadowed/)
 })

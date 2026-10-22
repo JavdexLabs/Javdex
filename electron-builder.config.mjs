@@ -131,6 +131,15 @@ const base = {
   },
   linux: {
     icon: 'build/icon.png',
+    // Electron Linux packages target glibc. Filter binaries before ASAR creation;
+    // keep loaders, metadata and licenses, including notices for optional packages.
+    files: [
+      '!node_modules/@img/sharp-!(linux-${arch})/**/*.node',
+      '!node_modules/@img/sharp-libvips-!(linux-${arch})/**/*.so*',
+      '!node_modules/@mariozechner/clipboard-!(linux-${arch}-gnu)/**/*.node',
+      '!node_modules/@earendil-works/pi-tui/native/!(linux)/**/*.node',
+      '!node_modules/@earendil-works/pi-tui/native/linux/prebuilds/linux-!(${arch})/**/*.node'
+    ],
     electronLanguages: PORTABLE_ELECTRON_LANGUAGES,
     category: 'Video',
     executableName: 'javdex',
@@ -164,6 +173,7 @@ export default function buildConfig() {
   // Platform files form a separate matcher in electron-builder. An exclusions-
   // only matcher defaults to **/*, so retain the desktop allowlist here too.
   config.win.files.unshift(...config.files)
+  config.linux.files.unshift(...config.files)
 
   config.beforePack = async context => {
     if (integratedLinuxPlayback(context)) {

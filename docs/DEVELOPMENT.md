@@ -104,6 +104,8 @@ Linux Wayland 的第一阶段可携带运行库使用独立的本地测试入口
 
 版本号、标签、数据库升级说明、Release 工作流和发布验证统一遵循 [版本与发布规范](VERSIONING_AND_RELEASE.md)。
 
+Linux glibc 桌面包在创建 ASAR 前按目标架构过滤 Sharp/libvips、剪贴板及终端辅助模块的其他平台二进制；保留加载代码、元数据和许可证。此过滤不涉及 GPU/CPU 播放运行库、ANGLE 或 Electron 的图形兼容组件。`node --test scripts/packaging-runtime.test.mjs` 检查平台选择，`scripts/check-linux-integrated-appimage.mjs` 检查最终 x64 AppImage 的原生模块及播放闭包。
+
 ### 本地 AI 运行库
 
 本地模型是独立底层能力，默认存储于 Windows 标准用户配置的 `%LOCALAPPDATA%/Javdex/local-ai`，其他平台及隔离配置使用 `<userData>/local-ai`，由 `main/services/localModels` 管理目录、文件、运行依赖及文本推理。该服务层不依赖播放器或字幕模块；AI 字幕通过注入的模型运行接口调用它，字幕缓存位于同级 `cache/ai-subtitles`，抽取音频和任务日志位于 `cache/local-ai/work/ai-subtitles`。普通文本翻译直接调用共用文本引擎，不创建字幕引擎或字幕工作目录。文件管理和各功能的用途绑定保持独立。权重路径为 `models/<family>/<publisher>/<revision>/<precision>/<upstream-filename>`，各精度附来源、哈希、大小与许可；引擎使用 `runtimes/<engine>/<version>/<platform-arch[-cpu]>`，不与模型家族版本绑在一起。`downloads/<sha256>` 保留续传数据七天，`staging/install-<uuid>` 与 `staging/import-<uuid>` 保留遗留文件一天；启动与下载前清理过期项，操作期间持有排他锁。迁移仅复制并逐文件校验模型、运行库、下载和存储标识，配置提交后清理原副本，保留无关文件；缓存不迁移。

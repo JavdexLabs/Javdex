@@ -200,13 +200,13 @@ test('desktop packaging keeps bundled Photon WASM and LAN web while excluding th
   }
 })
 
-test('normalized Windows desktop matchers do not default to including the repository', () => {
+for (const platform of ['win', 'linux']) test(`normalized ${platform} desktop matchers do not default to including the repository`, () => {
   const root = process.cwd()
   const config = doMergeConfigs([buildConfig()])
   const debugLogger = { isEnabled: false }
   const packager = { config, projectDir: root, buildResourcesDir: 'build', debugLogger }
   const matchers = getMainFileMatchers(root, '/unused-package-output', value => value.replaceAll('${arch}', 'x64'),
-    config.win, { info: packager, config, debugLogger }, path.join(root, 'dist'), false)
+    config[platform], { info: packager, config, debugLogger }, path.join(root, 'dist'), false)
   const selected = file => matchers.some(matcher => matcher.createFilter()(path.join(root, file), { isDirectory: () => false }))
   for (const file of ['out/playback-acceptance/build/large.dll', 'out/server/index.js', 'scripts/dist.mjs', 'docs/DEVELOPMENT.md']) {
     assert.equal(selected(file), false, `${file} must be excluded by every app file set`)
@@ -241,5 +241,38 @@ test('desktop packages exclude playback acceptance fixtures and development nati
   ]) assert.equal(selected(file), false, `${file} is a development artifact, not an audited packaged runtime`)
   for (const file of ['out/main/index.js', 'out/preload/index.js', 'out/renderer/index.html']) {
     assert.equal(selected(file), true, `${file} remains in the application archive`)
+  }
+})
+
+test('Linux glibc packaging excludes foreign binaries but retains native loaders and notices', () => {
+  const root = process.cwd()
+  for (const arch of ['x64', 'arm64']) {
+    const config = buildConfig()
+    const filter = new FileMatcher(root, '/unused-package-output', value => value.replaceAll('${arch}', arch),
+      ['node_modules/**/*', ...config.files, ...config.linux.files]).createFilter()
+    const selected = file => filter(path.join(root, file), { isDirectory: () => false })
+    for (const file of [
+      `node_modules/@img/sharp-linux-${arch}/lib/sharp.node`,
+      `node_modules/@img/sharp-libvips-linux-${arch}/lib/libvips-cpp.so.8`,
+      `node_modules/@mariozechner/clipboard-linux-${arch}-gnu/clipboard.node`,
+      'node_modules/@mariozechner/clipboard/index.js',
+      'node_modules/sharp/dist/sharp.cjs',
+      'node_modules/@img/colour/index.cjs',
+      'node_modules/@img/sharp-linuxmusl-x64/LICENSE',
+      'node_modules/@img/sharp-libvips-linuxmusl-x64/package.json',
+      'node_modules/@mariozechner/clipboard-darwin-arm64/LICENSE'
+    ]) assert.equal(selected(file), true, `${arch} must retain ${file}`)
+    const otherArch = arch === 'x64' ? 'arm64' : 'x64'
+    for (const file of [
+      `node_modules/@img/sharp-linux-${otherArch}/lib/sharp.node`,
+      `node_modules/@img/sharp-libvips-linux-${otherArch}/lib/libvips-cpp.so.8`,
+      'node_modules/@img/sharp-linuxmusl-x64/lib/sharp.node',
+      'node_modules/@img/sharp-libvips-linuxmusl-x64/lib/libvips-cpp.so.8.18.7',
+      `node_modules/@mariozechner/clipboard-linux-${otherArch}-gnu/clipboard.node`,
+      'node_modules/@mariozechner/clipboard-linux-x64-musl/clipboard.node',
+      'node_modules/@mariozechner/clipboard-win32-x64-msvc/clipboard.node',
+      'node_modules/@mariozechner/clipboard-darwin-universal/clipboard.node',
+      'node_modules/@earendil-works/pi-tui/native/darwin/prebuilds/darwin-arm64/modifiers.node'
+    ]) assert.equal(selected(file), false, `${arch} must exclude ${file}`)
   }
 })

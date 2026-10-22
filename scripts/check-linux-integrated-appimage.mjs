@@ -22,6 +22,17 @@ assert.deepEqual(JSON.parse(readFileSync(path.join(extracted, 'javdex-angle.json
 for (const [file, hash] of Object.entries(angle.files)) assert.equal(playbackFileSha256(path.join(extracted, file)), hash, `Packaged ANGLE mismatch: ${file}`)
 assert.equal(readFileSync(path.join(extracted, 'AppRun'), 'utf8'), readFileSync('build/linux-AppRun.sh', 'utf8'))
 assert.equal(JSON.parse(asar.extractFile(archive, 'package.json')).name, JSON.parse(readFileSync('package.json')).name)
+// Verify the archive index too: filtering must happen before ASAR creation.
+const nativeEntries = asar.listPackage(archive).map(entry => entry.replace(/^\//, ''))
+for (const entry of nativeEntries) {
+  const foreignSharp = /^node_modules\/@img\/(sharp-[^/]+)\/.*(?:\.node|\.so[^/]*)$/.exec(entry)
+  if (foreignSharp) assert(['sharp-linux-x64', 'sharp-libvips-linux-x64'].includes(foreignSharp[1]), `Foreign Sharp binary: ${entry}`)
+  const clipboard = /^node_modules\/@mariozechner\/(clipboard-[^/]+)\/.*\.node$/.exec(entry)
+  if (clipboard) assert.equal(clipboard[1], 'clipboard-linux-x64-gnu', `Foreign clipboard binary: ${entry}`)
+}
+for (const prefix of ['@img/sharp-linux-x64/', '@img/sharp-libvips-linux-x64/', '@mariozechner/clipboard-linux-x64-gnu/']) {
+  assert(nativeEntries.some(entry => entry.startsWith(`node_modules/${prefix}`) && /\.(?:node|so[^/]*)$/.test(entry)), `Missing required native package: ${prefix}`)
+}
 const runtimes = []
 for (const [directory, target] of [['out/linux-portable-runtime/linux-x64', 'linux-texture-experimental'], ['out/linux-software-runtime/linux-x64', 'linux-software-playback']]) {
   const actual = validatePortableRuntime(path.join(extracted, 'resources', target)), expected = validatePortableRuntime(directory)

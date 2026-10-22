@@ -64,3 +64,42 @@ Before GPU playback, X11/XWayland requires the actual Chromium EGL display to ad
 The local AppImage build path above is implemented. The historical release workflow and installer/source aggregation still target the old single-runtime inventory and have **not** been migrated or validated for this integrated Linux package. Do not publish this branch through that workflow until both runtime builds, ANGLE, source delivery and final-installer checks are integrated. A passing local package check is not release-pipeline acceptance.
 
 The generic CMake/Debian development compile fixture accepts older system libmpv headers; APIs older than 2.2 disable target-time metadata. The distributed runtime remains pinned to mpv 0.41 and must pass the real-helper timing check. The development fixture does not prove portable ABI or playback support.
+
+## Compatibility improvement plan (2026-10-22)
+
+The following sequence is recorded for follow-up; only step 1 is currently authorized. Its initial packaged inventory and nine-case local codec matrix are complete; the cross-hardware matrix remains open:
+
+1. Inventory the **final packaged** GPU/CPU libmpv decoders and compiled hardware APIs; test H.264, HEVC Main10 and AV1 with synthetic media. Record actual `hwdec-current` separately from GPU presentation. Establish a matrix covering Intel/AMD/NVIDIA, GNOME/KDE Wayland/native Xorg, codec/profile/resolution/frame rate and audio/subtitles. Missing hardware is pending, never a pass inferred from this workstation.
+2. Improve diagnostics and bounded synthetic import self-tests. Keep decoding, display and fallback reasons distinct; do not detect black output by interpreting arbitrary film pixels. Consider version/device-scoped failure history with explicit retry.
+3. Validate SDR range/BT.709, HDR10/HLG-to-SDR and GPU/CPU color consistency. Optimize CPU copies/scaling only after measuring real high-resolution workloads. Native HDR remains a separate, unproven contract.
+4. Investigate decoder-to-renderer direct interop and physical presentation feedback on validated devices. Keep auto-copy as a compatibility option; do not enable display-resample without a suitable presentation feedback path or report Canvas submission as swap.
+
+Retain unified Canvas presentation and CPU recovery. The release pipeline/source aggregation and AppImage sandbox fallback tradeoff must also be resolved before broad release; neither is silently included in this phase.
+
+Step 1 tools:
+
+```sh
+# Run separately for each libmpv; never load both isolated runtimes into one process.
+python3 scripts/linux-playback-capabilities.py /absolute/extracted/resources/linux-texture-experimental/libmpv.so.2
+python3 scripts/linux-playback-capabilities.py /absolute/extracted/resources/linux-software-playback/libmpv.so.2
+# Generate synthetic media with a task-local, caller-provided FFmpeg (no system installation).
+node scripts/linux-codec-fixtures.mjs /absolute/ffmpeg /absolute/new-fixtures
+node scripts/linux-codec-acceptance.mjs /absolute/Javdex.AppImage /absolute/fixtures /absolute/new-evidence wayland gpu
+# Repeat with x11 gpu and wayland cpu. This runner seeds a disposable catalog.
+```
+
+The inventory queries actual packaged libmpv and its linked FFmpeg, including the compiled hardware device list. Compiled VA-API does not prove a driver/device can decode a particular stream; hardware initialization, active decoder and visible output are separate evidence. The GUI runner records package/media hashes, Chromium GPU details, per-second playback states, screenshots and end-of-run pixel checks. A successful run still requires screenshot review and does not establish human audio sync, native Xorg coverage, HDR or 4K/60 performance. Test tools/fixtures stay outside the distribution payload. Results and remaining matrix cells: [2026-10-22 codec review](reviews/linux-codec-compatibility-2026-10-22.md).
+
+Design references: [mpv hardware decoding and auto-copy](https://mpv.io/manual/stable/#options-hwdec), [display synchronization requirements](https://mpv.io/manual/stable/#options-video-sync), [libmpv render API](https://raw.githubusercontent.com/mpv-player/mpv/v0.41.0/include/mpv/render.h). These explain the design tradeoffs; they are not acceptance evidence for Javdex.
+
+## NVIDIA NVDEC and host VA-API driver ABI
+
+The Linux GPU source profile now installs pinned `nv-codec-headers` 12.1.14.0 into its private build prefix and explicitly enables FFmpeg CUDA/NVDEC and mpv CUDA support. No CUDA Toolkit or NVIDIA driver is distributed. The runtime still selects `hwdec=auto-copy`: enabling mpv's CUDA interop code satisfies its OpenGL build linkage, but does not change the selected playback path to zero-copy. The CPU profile explicitly disables these features and retains its independent software-only closure.
+
+New GPU manifests declare `driverAbi: host-vaapi-cxx-v1`. VA-API loader libraries (`libva`, `libva-drm`, `libva-x11`) and libstdc++/libgcc must come from the host alongside the vendor driver, rather than shadowing a new driver with Ubuntu 22.04's old private libraries. The CPU runtime retains its private C++ libraries. Existing manifest-v1 packages without this policy remain inspectable under their original allowlist. New-policy validation rejects bundled copies of host ABI libraries. This is scoped to the GPU helper and does not add global loader overrides or modify Chromium's environment.
+
+Evidence motivating the boundary: on this Ubuntu 26.04 host, the old bundled libva 1.14 could not load iHD's newer `__vaDriverInit_1_22`; the installed Intel memory manager also needs `GLIBCXX_3.4.32`. Host libva/C++ enables initialization without copying host drivers into AppImage. Linux desktop driver/client libraries remain host prerequisites; Auto mode can use the independent CPU helper if GPU initialization fails.
+
+On this UHD 770, Ubuntu's `intel-media-va-driver` Free-Kernel build decoded H.264/HEVC but lacked AV1 capability. The full-feature `intel-media-va-driver-non-free` enabled AV1. This distinction is documented by [Intel's driver feature matrix](https://github.com/intel/media-driver#media-features); do not instruct every Intel machine to install the same variant without checking hardware/distribution support. The installed packages and final-package acceptance are recorded separately from portable binary capabilities.
+
+Local hardware/visible-frame results, installed driver versions and package hashes: [NVDEC / Intel VA-API review (2026-10-22)](reviews/linux-hardware-decode-2026-10-22.md).

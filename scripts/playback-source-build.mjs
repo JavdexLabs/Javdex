@@ -91,13 +91,17 @@ export function playbackSourcePlan({ platform, arch, source, build, prefix, tool
       '--openssldir=/etc/ssl', '--libdir=lib', 'no-shared', 'no-tests', 'no-module', '-fPIC'], output('openssl'))
     step('make', [`-j${jobs}`], output('openssl')); step('make', ['install_sw'], output('openssl'))
   }
+  // Header-only API shim: the NVIDIA driver stays on the host. No CUDA toolkit.
+  if (platform === 'linux' && linuxProfile === 'dmabuf') {
+    step('make', [`PREFIX=${prefix}`, 'install'], dir('nv_codec_headers'))
+  }
   configure('ffmpeg', ['--enable-static', '--disable-shared', '--enable-pic', '--enable-gpl', '--enable-version3', '--disable-autodetect',
     `--pkg-config=${path.join(prefix, 'bin', platform === 'win32' ? 'pkgconf.exe' : 'pkgconf')}`,
     '--disable-programs', '--disable-doc', '--disable-debug', '--disable-avdevice', '--disable-encoders', '--enable-encoder=png,mjpeg',
     '--disable-muxers', '--enable-muxer=image2', '--enable-libdav1d', '--enable-zlib', '--pkg-config-flags=--static',
     ...({ darwin: ['--enable-videotoolbox', '--enable-audiotoolbox', '--enable-securetransport'],
       win32: ['--target-os=mingw32', '--enable-schannel', '--enable-d3d11va', '--enable-dxva2', '--enable-d3d12va'],
-      linux: ['--enable-openssl', linuxProfile === 'software' ? '--disable-vaapi' : '--enable-vaapi', ...(linuxProfile === 'software' ? ['--disable-hwaccels'] : [])] }[platform])])
+      linux: ['--enable-openssl', linuxProfile === 'software' ? '--disable-vaapi' : '--enable-vaapi', ...(linuxProfile === 'dmabuf' ? ['--enable-ffnvcodec', '--enable-nvdec', '--enable-cuda', '--disable-nvenc'] : ['--disable-ffnvcodec', '--disable-nvdec', '--disable-cuda']), ...(linuxProfile === 'software' ? ['--disable-hwaccels'] : [])] }[platform])])
   step('make', ['-C', path.join(dir('lua'), 'src'), `-j${jobs}`, 'liblua.a',
     `MYCFLAGS=-O2 -fPIC ${platform === 'win32' ? '-DLUA_DL_DLL' : '-DLUA_USE_POSIX -DLUA_USE_DLOPEN'}`])
   meson('mpv', ['-Dlibmpv=true', '-Dcplayer=false', '-Dgpl=true', '-Dbuild-date=false', `-Dgl=${linuxProfile === 'software' ? 'disabled' : 'enabled'}`, `-Dplain-gl=${linuxProfile === 'software' ? 'disabled' : 'enabled'}`,
@@ -105,8 +109,8 @@ export function playbackSourcePlan({ platform, arch, source, build, prefix, tool
     ...({ darwin: ['-Dcocoa=enabled', '-Dswift-build=enabled', `-Dswift-flags=-target ${arch === 'x64' ? 'x86_64' : 'arm64'}-apple-macos12.0`, '-Dgl-cocoa=enabled', '-Dcoreaudio=enabled', '-Dvideotoolbox-gl=enabled'],
       win32: ['-Dwin32-threads=enabled', '-Dgl-win32=enabled', '-Dwasapi=enabled', '-Dd3d-hwaccel=enabled', '-Dd3d9-hwaccel=enabled'],
       linux: linuxProfile === 'software'
-        ? ['-Dpulse=enabled', '-Dalsa=disabled', '-Dx11=disabled', '-Dgl-x11=disabled', '-Dvaapi=disabled', '-Dvaapi-x11=disabled', '-Dvaapi-drm=disabled']
-        : ['-Dpulse=enabled', '-Dalsa=disabled', '-Dx11=disabled', '-Dgl-x11=disabled', '-Dvaapi=enabled', '-Dvaapi-x11=disabled', '-Dvaapi-drm=enabled'] }[platform])], 'shared')
+        ? ['-Dcuda-hwaccel=disabled', '-Dcuda-interop=disabled', '-Dpulse=enabled', '-Dalsa=disabled', '-Dx11=disabled', '-Dgl-x11=disabled', '-Dvaapi=disabled', '-Dvaapi-x11=disabled', '-Dvaapi-drm=disabled']
+        : ['-Dcuda-hwaccel=enabled', '-Dcuda-interop=enabled', '-Dpulse=enabled', '-Dalsa=disabled', '-Dx11=disabled', '-Dgl-x11=disabled', '-Dvaapi=enabled', '-Dvaapi-x11=disabled', '-Dvaapi-drm=enabled'] }[platform])], 'shared')
   return steps
 }
 

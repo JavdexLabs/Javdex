@@ -212,6 +212,14 @@ public:
             if (timing < 0) throw std::runtime_error(mpv_error_string(timing));
             const int result = mpv_set_option_string(handle, "sws-scaler", "bilinear");
             if (result < 0) throw std::runtime_error(mpv_error_string(result));
+            // The SW render API uses legacy sws_scale: RGB conversion alone
+            // leaves HDR transfer functions/gamut unchanged. FFmpeg 9's scale
+            // filter uses the frame API and its perceptual color mapper, so
+            // produce tagged BT.709 SDR before the final viewport conversion.
+            // SDR BT.709 remains a no-op; no GL or additional library is needed.
+            const int color = mpv_set_option_string(handle, "vf",
+                "lavfi=[scale=out_primaries=bt709:out_transfer=bt709:out_color_matrix=bt709:intent=perceptual]");
+            if (color < 0) throw std::runtime_error(std::string("CPU SDR conversion: ") + mpv_error_string(color));
         }
         int error = mpv_initialize(handle);
         if (error < 0) throw std::runtime_error(mpv_error_string(error));

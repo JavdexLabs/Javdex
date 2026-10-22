@@ -24,6 +24,21 @@ constexpr uint64_t stallTimeoutMs = 5000;
 constexpr int maxDimension = 8192;
 constexpr size_t maxMessage = 8 * 1024 * 1024 + 4096;
 constexpr int transportFd = 3;
+// NVIDIA block-linear GBM/EGL and Vulkan imports can disagree when the
+// requested block is taller than the image. Select a smaller advertised
+// layout before allocation; never rewrite an allocated buffer's modifier.
+// This is an interop selection policy, not a DRM modifier validity check.
+inline bool compatibleVulkanBlockHeight(uint64_t modifier, int height) {
+    if (height < 1) return false;
+    if ((modifier >> 56) != 0x03 || !(modifier & 0x10)) return true;
+    const unsigned generation = (modifier >> 20) & 3;
+    const unsigned logHeight = modifier & 0xf;
+    if (generation == 3 || logHeight > 5) return true; // Unknown layout: do not reinterpret it.
+    const unsigned gobHeight = generation == 1 ? 4 : 8;
+    const unsigned blockHeight = gobHeight << logHeight;
+    return logHeight == 0 || blockHeight <= static_cast<unsigned>(height);
+}
+
 struct Bounds { double x = 0, y = 0, width = 1, height = 1, scale = 1; };
 inline uint32_t read32(const std::string &bytes, size_t offset) {
     if (offset > bytes.size() || bytes.size() - offset < 4) throw std::runtime_error("Truncated playback command");

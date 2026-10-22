@@ -10,7 +10,7 @@ import { createRequire } from 'node:module'
 import { availableParallelism } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { playbackBuildFingerprint, playbackLinuxAssDependency, playbackLinuxVaapiRenderDependency, playbackPkgConfigEnvironment, playbackSourceNativePlan, playbackSourcePlan, playbackWindowsExportNames, staticPlaybackDependencies, verifyPlaybackSource } from './playback-source-build.mjs'
+import { playbackBuildFingerprint, playbackMpvRenderFenceFix, playbackLinuxAssDependency, playbackLinuxVaapiRenderDependency, playbackPkgConfigEnvironment, playbackSourceNativePlan, playbackSourcePlan, playbackWindowsExportNames, staticPlaybackDependencies, verifyPlaybackSource } from './playback-source-build.mjs'
 import { playbackFileSha256, validatePlaybackRuntime } from './playback-runtime.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'), require = createRequire(import.meta.url)
@@ -131,6 +131,12 @@ if (platform === 'linux') cpSync(path.join(sourceRoot, 'vulkan_headers/include')
 cpSync(path.join(sourceRoot, 'fast_float'), path.join(sourceRoot, 'libplacebo/3rdparty/fast_float'), { recursive: true })
 cpSync(path.join(sourceRoot, 'vulkan_headers'), path.join(sourceRoot, 'libplacebo/3rdparty/Vulkan-Headers'), { recursive: true })
 const patches = []
+// Keep upstream's native swapchain fences; libmpv render API owns no swapchain.
+if (!software) {
+  const file = path.join(sourceRoot, 'mpv/video/out/opengl/context.c')
+  writeFileSync(file, playbackMpvRenderFenceFix(readFileSync(file, 'utf8')))
+  patches.push({ id: 'mpv', operation: 'Require native swap_buffers before allocating vsync fences', upstream: 'f74adc4243bd9e1a8ee96d187c939e6232510650' })
+}
 for (const [id, dependencies] of [['mpv', ['libavcodec', 'libavfilter', 'libavformat', 'libavutil', 'libswresample', 'libswscale', 'libplacebo', 'libass', 'zlib']],
   ['libass', ['freetype2', 'fribidi', 'harfbuzz', 'libunibreak']]]) {
   if (platform === 'win32') dependencies.push('iconv')

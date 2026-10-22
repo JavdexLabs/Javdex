@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
-import { playbackBuildFingerprint, playbackLinuxAssDependency, playbackLinuxVaapiRenderDependency, playbackPkgConfigEnvironment, playbackSourceNativePlan, playbackSourcePlan, playbackWindowsExportNames, staticPlaybackDependencies, verifyPlaybackSource } from './playback-source-build.mjs'
+import { playbackMpvRenderFenceFix, playbackBuildFingerprint, playbackLinuxAssDependency, playbackLinuxVaapiRenderDependency, playbackPkgConfigEnvironment, playbackSourceNativePlan, playbackSourcePlan, playbackWindowsExportNames, staticPlaybackDependencies, verifyPlaybackSource } from './playback-source-build.mjs'
 import { mergeTargets } from './dist.mjs'
 import packagingConfig from '../electron-builder.config.mjs'
 
@@ -224,4 +224,11 @@ test('Linux GPU enables NVDEC copy support from pinned headers without contamina
     const steps = playbackSourcePlan({ ...input, platform })
     assert(!steps.some(s => s.cwd === '/sources/nv_codec_headers'))
   }
+})
+
+test('mpv fence backport preserves native swapchain and rejects source drift', () => {
+  const source = '    if (gl->FenceSync) {\n        GLsync fence = gl->FenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);\n        if (fence) append(fence);\n    }'
+  const fixed = playbackMpvRenderFenceFix(source)
+  assert.equal(fixed, source.replace('if (gl->FenceSync)', 'if (gl->FenceSync && p->params.swap_buffers)'))
+  for (const changed of ['', source + source, fixed]) assert.throws(() => playbackMpvRenderFenceFix(changed), /source drift/)
 })

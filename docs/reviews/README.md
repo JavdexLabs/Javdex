@@ -14,6 +14,10 @@
 
 ## Linux 本地验证
 
+[Linux 小尺寸纹理导入修复](linux-small-texture-2026-10-22.md)记录独立 EGL／ANGLE／Vulkan 对照与尺寸相关 modifier 选择修复。
+
+[Linux 色彩与高分辨率验收](linux-color-load-2026-10-22.md)记录 CPU HDR 转 SDR 修复、参考色块、设备/缺库隔离及性能验证边界。
+
 [Linux Electron 图片运行库修复](linux-sharp-runtime-2026-10-22.md)记录 12 项已有测试失败的同源崩溃、WASM 后端选择和本地验证边界。
 
 [Linux 解码兼容性检查（2026-10-22）](linux-codec-compatibility-2026-10-22.md)记录当前本地 AppImage 的包内解码能力、真实画面矩阵与硬解缺口，不代表公开发行版或全部 Linux 环境。
@@ -28,3 +32,5 @@
 [Linux NVDEC / Intel VA-API 验证（2026-10-22）](linux-hardware-decode-2026-10-22.md)记录硬解构建、宿主驱动 ABI 修正及新包验收边界。
 
 [Linux 画面自检与恢复验证（2026-10-22）](linux-display-probe-recovery-2026-10-22.md)记录 XWayland 微小纹理对照、硬解操作、自检与运行中故障恢复及新包验收边界。
+
+- [Linux GPU helper 长播内存调查（2026-10-22）](linux-gpu-memory-2026-10-22.md)

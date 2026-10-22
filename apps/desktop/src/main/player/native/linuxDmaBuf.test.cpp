@@ -60,6 +60,21 @@ ChildResult helperFailure(const char *helper, bool socket, const std::vector<std
 }
 }
 int main(int argc, char **argv) {
+    constexpr uint64_t nvidia = 0x0300000000606010ULL;
+    assert(!compatibleVulkanBlockHeight(nvidia, 0));
+    assert(compatibleVulkanBlockHeight(nvidia, 1));
+    assert(!compatibleVulkanBlockHeight(nvidia | 5, 64));
+    assert(!compatibleVulkanBlockHeight(nvidia | 4, 64));
+    assert(compatibleVulkanBlockHeight(nvidia | 3, 64));
+    assert(!compatibleVulkanBlockHeight(nvidia | 3, 63));
+    assert(compatibleVulkanBlockHeight(nvidia | 5, 256));
+    assert(compatibleVulkanBlockHeight(nvidia | 5, 360));
+    assert(compatibleVulkanBlockHeight(0, 1)); // Linear and other vendors are unchanged.
+    assert(compatibleVulkanBlockHeight(0x0100000000000010ULL, 1));
+    assert(compatibleVulkanBlockHeight(0x0300000000100011ULL, 8)); // Older 4-line GOB.
+    assert(!compatibleVulkanBlockHeight(0x0300000000100011ULL, 7));
+    assert(compatibleVulkanBlockHeight(0x0300000000300015ULL, 1)); // Unknown generation.
+
     assert(pixels(100.25, 2) == 201); assert(pixels(1, 1) == 1);
     assert(rejects([] { pixels(8192, 2); })); assert(rejects([] { pixels(0.1, 1); }));
     assert(rejects([] { pixels(std::numeric_limits<double>::infinity(), 1); }));

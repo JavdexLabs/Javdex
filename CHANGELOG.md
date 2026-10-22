@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Linux GPU 专用 libmpv 回移植上游 OpenGL fence 泄漏修复，避免长时间播放时同步对象逐帧累积；保留 DMA-BUF 完成/释放同步和 CPU 回退。
+
+- Linux X11 GPU 按实际图像高度选择兼容的 NVIDIA 分块布局，修复小尺寸 DMA-BUF 成功导入后出现部分黑块的问题，保留正常尺寸 GPU 播放和 CPU 回退。
+
+- Linux CPU 兼容播放为 HDR10／HLG 增加显式 SDR 色彩转换，避免直接把 HDR 编码值当作 SDR 显示；保留独立的软件运行库和 GPU 播放路径。
+
 - 修复 Linux 桌面读取图片和生成缩略图时因 Electron 与 libvips 的 GLib 符号冲突而崩溃；该平台使用随包提供的 Sharp WASM 后端，其他平台和独立服务器保留原生后端。
 
 - Linux GPU 播放增加独立合成色块自检；自动模式在检测失败或超时后回退 CPU 并恢复播放状态，播放信息新增画面检查和回退原因。自检避开本机 XWayland 对微小纹理的导入兼容问题，不以影片黑色画面判定故障。

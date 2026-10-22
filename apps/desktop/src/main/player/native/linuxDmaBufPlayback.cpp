@@ -207,6 +207,7 @@ public:
             // Allocate only a layout that the Vulkan consumer can import. An
             // EGL-renderable proprietary layout need not be Vulkan-compatible.
             for (const auto modifier : consumerModifiers) {
+                if (!compatibleVulkanBlockHeight(modifier, height)) continue;
                 buffer.bo = gbm_bo_create_with_modifiers2(device, width, height, GBM_FORMAT_ARGB8888,
                     &modifier, 1, GBM_BO_USE_RENDERING);
                 if (buffer.bo) break;

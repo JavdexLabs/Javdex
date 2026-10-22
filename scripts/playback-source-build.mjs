@@ -149,3 +149,12 @@ export function playbackLinuxVaapiRenderDependency(text) {
   assert.equal(text.split(before).length, 2, 'Pinned VAAPI DRM recipe drift')
   return text.replace(before, "get_option('vaapi-drm').require(libva.found())")
 }
+
+// Backport mpv f74adc4243bd9e1a8ee96d187c939e6232510650 (#17217).
+// Render API clients have no native swap_buffers callback to retire this queue.
+export function playbackMpvRenderFenceFix(source) {
+  const before = '    if (gl->FenceSync) {\n        GLsync fence = gl->FenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);'
+  const after = before.replace('if (gl->FenceSync)', 'if (gl->FenceSync && p->params.swap_buffers)')
+  assert.equal(source.split(before).length, 2, 'Pinned mpv render fence source drift')
+  return source.replace(before, after)
+}

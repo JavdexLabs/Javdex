@@ -10,6 +10,7 @@ interface ReceivedVideoFrame {
   copyTo(data: Uint8Array, options: { format: 'RGBA' }): Promise<Array<{ offset: number; stride: number }>>
 }
 interface CanvasContext {
+  globalCompositeOperation: 'copy'
   createImageData(width: number, height: number): { data: Uint8ClampedArray }
   putImageData(image: { data: Uint8ClampedArray }, x: number, y: number): void
   drawImage(frame: ReceivedVideoFrame, x: number, y: number): void
@@ -56,9 +57,9 @@ export function summarizePixels(data: Uint8Array | Uint8ClampedArray, width: num
 
 /** Runs in the isolated, sandboxed preload. Page code receives only a binding
  * function for its fixed player canvas, never a VideoFrame, FD or Electron API. */
-export function installLinuxSharedTextureReceiver(): (surfaceToken: string) => () => void {
+export function installSharedTextureReceiver(): (surfaceToken: string) => () => void {
   let mounted: MountedSurface | null = null
-  let supported = process.platform === 'linux' && process.isMainFrame
+  let supported = ['linux', 'darwin'].includes(process.platform) && process.isMainFrame
     && typeof sharedTexture?.setSharedTextureReceiver === 'function'
   // Monotonic-clock calibration: no wall clock, no synchronous renderer IPC.
   // Midpoint mapping has bounded RTT uncertainty; choose the best of 3 probes.
@@ -145,6 +146,9 @@ export function installLinuxSharedTextureReceiver(): (surfaceToken: string) => (
       // Changing intrinsic size clears the context, so do it only on resize.
       if (target.canvas.width !== frame.displayWidth) target.canvas.width = frame.displayWidth
       if (target.canvas.height !== frame.displayHeight) target.canvas.height = frame.displayHeight
+      // The producer supplies a complete opaque frame. Replacement avoids
+      // keeping older externally-backed images as source-over underlayers.
+      target.context.globalCompositeOperation = 'copy'
       const submissionStarted = performance.now()
       target.context.drawImage(frame, 0, 0)
       const submissionCompleted = performance.now()
@@ -227,6 +231,28 @@ export function installLinuxSharedTextureReceiver(): (surfaceToken: string) => (
     }
   }
   ipcRenderer.on('playback:cpu-frame', (_event, value: unknown) => { void receiveCpu(value) })
+  if (process.platform === 'darwin' && process.isMainFrame) ipcRenderer.on('playback:mac-texture-transfer', (_event, value: unknown) => {
+    const metadata = value as FrameMetadata & { transfer: Electron.SharedTextureTransfer }
+    if (!metadata || typeof metadata.surfaceToken !== 'string' || typeof metadata.bindingToken !== 'string'
+      || !Number.isSafeInteger(metadata.sequence) || metadata.sequence < 1) return
+    let imported: Electron.SharedTextureImportedSubtle | undefined
+    let released = false
+    const acknowledge = (): void => ipcRenderer.send('playback:mac-texture-released', {
+      surfaceToken: metadata.surfaceToken, bindingToken: metadata.bindingToken, sequence: metadata.sequence
+    })
+    try {
+      imported = sharedTexture.subtle.finishTransferSharedTexture(metadata.transfer)
+      const source = imported
+      void receive({ importedSharedTexture: {
+        textureId: '', subtle: source, getVideoFrame: source.getVideoFrame,
+        release: () => { if (!released) { released = true; source.release(acknowledge) } }
+      } }, metadata)
+    } catch {
+      if (imported && !released) { released = true; imported.release(acknowledge) }
+      else if (!imported) acknowledge()
+      ipcRenderer.send('playback:shared-texture-failed', { surfaceToken: metadata.surfaceToken, bindingToken: metadata.bindingToken })
+    }
+  })
   if (supported) {
     try { sharedTexture.setSharedTextureReceiver(receive) }
     catch { supported = false }
@@ -261,6 +287,10 @@ export function installLinuxSharedTextureReceiver(): (surfaceToken: string) => (
       mounted = null
       cancel(target)
       target.context.clearRect(0, 0, target.canvas.width, target.canvas.height)
+      // clearRect can leave the last VideoFrame in a deferred Canvas display
+      // list after DOM removal. Discard that backing store on final unbind so
+      // GPU-complete release callbacks need not wait for incidental GC/paint.
+      target.canvas.width = 0; target.canvas.height = 0
       ipcRenderer.send('playback:shared-texture-removed', binding)
     }
   }

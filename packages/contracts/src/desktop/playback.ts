@@ -55,9 +55,9 @@ export interface PlaybackSnapshot {
   phase: 'opening' | 'playing' | 'paused' | 'buffering' | 'ended' | 'error'
   /** Transient native-to-HTML keyboard handoff; never persisted. */
   focusRequest?: { sequence: number; backwards: boolean }
-  /** Windows native drawable hands chrome and keyboard traversal to the renderer. */
+  /** Renderer-owned chrome and keyboard traversal, independent of the video backend. */
   rendererFullscreenControls?: boolean
-  /** Experimental Linux canvas generation. Never a locator or GPU handle. */
+  /** Shared Canvas generation. Never a locator or platform GPU handle. */
   sharedTextureSurface?: string
   nativeVideoFocused?: boolean
   /** Changes only on native pointer/keyboard activity, never on playback ticks. */

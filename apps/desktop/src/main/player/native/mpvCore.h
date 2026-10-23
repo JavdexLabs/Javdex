@@ -170,7 +170,7 @@ public:
     }
     void initialize(void *(*getProc)(void *, const char *), void *context = nullptr, bool softwareRendering = false,
         void (*wakeup)(void *) = nullptr, void *wakeupContext = nullptr, const char *hardwareDecode = "auto", bool cpuRendering = false,
-        const char *renderTimingOffset = "0") {
+        const char *renderTimingOffset = "0", bool srgbOutput = false) {
         if (handle || renderer) throw std::runtime_error("Native session is already initialized");
         observed.clear(); actions.clear(); lastError.clear(); lastErrorCode = 0;
         frames = presentedFrames = loadedFiles = restarts = commandErrors = subtitleCommandErrors = subtitleCommandsPending = subtitleCommandReplies = 0; requested.store(false);
@@ -190,6 +190,15 @@ public:
         for (const auto &option : options) {
             int error = mpv_set_option_string(handle, option[0], option[1]);
             if (error < 0) throw std::runtime_error(std::string(option[0]) + ": " + mpv_error_string(error));
+        }
+        if (srgbOutput) {
+            // Only the opt-in macOS Canvas producer uses this display contract.
+            // Other native/platform renderers keep their existing color policy.
+            const char *display[][2] = {{"target-prim", "bt.709"}, {"target-trc", "srgb"}, {"video-output-levels", "full"}};
+            for (const auto &option : display) {
+                const int error = mpv_set_option_string(handle, option[0], option[1]);
+                if (error < 0) throw std::runtime_error(std::string(option[0]) + ": " + mpv_error_string(error));
+            }
         }
         if (softwareRendering) {
             // Mesa llvmpipe/softpipe can misrender libmpv's convolution scaling

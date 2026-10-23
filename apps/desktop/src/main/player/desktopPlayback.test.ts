@@ -29,6 +29,7 @@ function fixture(t: TestContext, pause: 'recent' | 'playlist') {
   const entered = deferred(), release = deferred(), finished = deferred()
   const removals: Array<{ catalog: string; videoId: number }> = []
   const released: PlaybackSource[] = []
+  const timers = new Map<number, () => void>()
   let resolutions = 0, validations = 0, subtitleStops = 0
   let subtitleDependencies!: Parameters<typeof createAiSubtitleController>[0]
   let generation = 1
@@ -73,13 +74,13 @@ function fixture(t: TestContext, pause: 'recent' | 'playlist') {
   }
   const exports = {} as typeof import('./desktopPlayback')
   runInNewContext(code, { exports, Buffer, process, console,
-    setInterval: () => ({ unref() {} }), clearInterval() {},
+    setInterval: (callback: () => void, ms: number) => { timers.set(ms, callback); return { unref() {} } }, clearInterval() {},
     require: (name: string) => Object.hasOwn(mocks, name) ? mocks[name] : requireDependency(name)
   }, { filename: 'desktopPlayback.ts' })
   const open = exports.registerBuiltinPlayback(backend, () => null, { read: async () => ({ resumePlayback: false, playbackVolume: 50 }) } as never,
     async () => { if (pause === 'recent') { entered.resolve(); await release.promise } })
   t.after(async () => { release.resolve(); await exports.disposeBuiltinPlayback(); rmSync(root, { recursive: true, force: true }) })
-  return { removals, entered, release, finished, open, source, released, subtitles: () => subtitleDependencies,
+  return { removals, entered, release, finished, open, source, released, native, timers, snapshot: () => session.snapshot(), subtitles: () => subtitleDependencies,
     resolutions: () => resolutions, validations: () => validations, subtitleStops: () => subtitleStops,
     restore: () => { identity.catalogId = 'catalog-B'; generation++; exports.stopBuiltinPlayback() },
     start: async () => {
@@ -89,6 +90,24 @@ function fixture(t: TestContext, pause: 'recent' | 'playlist') {
       session.tick()
       await entered.promise
     } }
+}
+
+for (const interval of [16, 200]) {
+  for (const restart of [false, true]) {
+    test(`${interval}ms playback observer preserves restart-required failures without exposing native details: ${restart}`, async t => {
+      const f = fixture(t, 'recent')
+      assert.equal((await f.open(f.source.target)).ok, true)
+      const error = Object.assign(new Error('/private/movie.mp4?token=secret'), restart ? { code: 'PLAYBACK_RESTART_REQUIRED' } : {})
+      if (interval === 16) f.native.render = () => { throw error }
+      else f.native.read = () => { throw error }
+      f.timers.get(interval)!()
+      const state = f.snapshot()!
+      assert.equal(state.phase, 'error')
+      assert.equal(state.error!.includes('重启应用'), restart)
+      assert.ok(!state.error!.includes('/private'))
+      assert.ok(!state.error!.includes('secret'))
+    })
+  }
 }
 
 for (const pause of ['recent', 'playlist'] as const) {

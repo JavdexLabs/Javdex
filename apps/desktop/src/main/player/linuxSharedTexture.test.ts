@@ -5,6 +5,7 @@ import { test } from 'node:test'
 import { runInNewContext } from 'node:vm'
 import { ModuleKind, ScriptTarget, transpileModule } from 'typescript'
 import type { BrowserWindow, ImportSharedTextureOptions } from 'electron'
+import { FrameBudget } from './frameBudget'
 
 const code = transpileModule(readFileSync(new URL('./linuxSharedTexture.ts', import.meta.url), 'utf8'), {
   compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022 }
@@ -42,6 +43,7 @@ function fixture(diagnostics = false, software = false) {
     console: { info: (tag: string, data: string) => { if (tag === '[playback-texture-pixels]') diagnosticLogs.push(data) } }, Date: { now: () => now },
     setInterval: (callback: () => void) => { tick = callback; return { unref() {} } }, clearInterval: () => { tick = () => {} },
     require(id: string): unknown {
+      if (id === './frameBudget') return { FrameBudget }
       if (id === 'node:crypto') return { randomUUID: () => '11111111-1111-4111-8111-111111111111' }
       if (id === 'node:module') return { createRequire: () => () => transport }
       if (id === 'electron') return { app, ipcMain: ipc, sharedTexture: {

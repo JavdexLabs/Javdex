@@ -4,12 +4,12 @@ import { test } from 'node:test'
 import { runInNewContext } from 'node:vm'
 import { ModuleKind, ScriptTarget, transpileModule } from 'typescript'
 
-const code = transpileModule(readFileSync(new URL('./linuxSharedTexture.ts', import.meta.url), 'utf8'), {
+const code = transpileModule(readFileSync(new URL('./sharedTextureReceiver.ts', import.meta.url), 'utf8'), {
   compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022 }
 }).outputText
 const token = '11111111-1111-4111-8111-111111111111'
 test('pixel diagnostic distinguishes opaque black from colored and transparent samples with row padding', () => {
-  const exports = {} as typeof import('./linuxSharedTexture')
+  const exports = {} as typeof import('./sharedTextureReceiver')
   runInNewContext(code, { exports, require: () => ({}) })
   const data = new Uint8Array([
     0, 0, 0, 255, 255, 0, 0, 255, 99, 99, 99, 99,
@@ -18,8 +18,10 @@ test('pixel diagnostic distinguishes opaque black from colored and transparent s
   assert.deepEqual(JSON.parse(JSON.stringify(exports.summarizePixels(data, 2, 2, 12))),
     { samples: 4, nonblack: 2, maximum: 255, opaque: 3 })
 })
-function fixture(options: { registerFails?: boolean; contextFails?: boolean; probePixels?: 'valid' | 'black' | 'throw'; clockShift?: number; copyWait?: Promise<void> } = {}) {
+function fixture(options: { platform?: 'linux' | 'darwin'; registerFails?: boolean; contextFails?: boolean; probePixels?: 'valid' | 'black' | 'throw'; clockShift?: number; copyWait?: Promise<void> } = {}) {
   let nextToken = 0, draws = 0, closes = 0, releases = 0, clears = 0, drawFails = false
+  let gpuReleased: (() => void) | undefined
+  let compositeOperation = 'source-over'
   const listeners = new Map<string, (_event: unknown, value: unknown) => void>()
   let cpuReceiver!: (_event: unknown, value: unknown) => void
   let cpuPixels: Uint8ClampedArray = new Uint8ClampedArray()
@@ -30,10 +32,10 @@ function fixture(options: { registerFails?: boolean; contextFails?: boolean; pro
   const canvas = { width: 0, height: 0, isConnected: true, dataset: { playbackSurface: token },
     getContext: () => {
       if (options.contextFails) throw new Error('Canvas context unavailable')
-      return { getImageData: () => { if (options.probePixels === 'throw') throw Error('readback'); const data = new Uint8ClampedArray(640 * 360 * 4); if (options.probePixels === 'valid') for (let i = 0; i < data.length; i += 4) data.set([64, 191, 128, 255], i); return { data } }, createImageData: (w: number, h: number) => ({ data: new Uint8ClampedArray(w * h * 4) }), putImageData: (image: { data: Uint8ClampedArray }) => { cpuPixels = image.data; draws++ }, drawImage: () => { if (drawFails) throw new Error('draw failed'); draws++ }, clearRect: () => { clears++ } }
+      return { set globalCompositeOperation(value: string) { compositeOperation = value }, getImageData: () => { if (options.probePixels === 'throw') throw Error('readback'); const data = new Uint8ClampedArray(640 * 360 * 4); if (options.probePixels === 'valid') for (let i = 0; i < data.length; i += 4) data.set([64, 191, 128, 255], i); return { data } }, createImageData: (w: number, h: number) => ({ data: new Uint8ClampedArray(w * h * 4) }), putImageData: (image: { data: Uint8ClampedArray }) => { cpuPixels = image.data; draws++ }, drawImage: () => { if (drawFails) throw new Error('draw failed'); draws++ }, clearRect: () => { clears++ } }
     } }
-  const exports = {} as typeof import('./linuxSharedTexture')
-  runInNewContext(code, { exports, Uint8Array, performance, setTimeout, clearTimeout, process: { platform: 'linux', isMainFrame: true },
+  const exports = {} as typeof import('./sharedTextureReceiver')
+  runInNewContext(code, { exports, Uint8Array, performance, setTimeout, clearTimeout, process: { platform: options.platform ?? 'linux', isMainFrame: true },
     crypto: { randomUUID: () => `33333333-3333-4333-8333-${String(++nextToken).padStart(12, '0')}` },
     document: { querySelectorAll: () => [canvas] },
     require(id: string) {
@@ -43,14 +45,17 @@ function fixture(options: { registerFails?: boolean; contextFails?: boolean; pro
           messages.push({ channel, data })
           if (channel === 'playback:cpu-frame-released') { cpuReleases.get(cpuKey(data))?.(); cpuReleases.delete(cpuKey(data)) }
         } },
-        sharedTexture: { setSharedTextureReceiver: (callback: typeof receiver) => { if (options.registerFails) throw new Error('Receiver unavailable'); receiver = callback } } }
+        sharedTexture: { subtle: { finishTransferSharedTexture: () => ({
+          getVideoFrame: packet.importedSharedTexture.getVideoFrame,
+          release: (callback: () => void) => { releases++; gpuReleased = callback }
+        }) }, setSharedTextureReceiver: (callback: typeof receiver) => { if (options.registerFails) throw new Error('Receiver unavailable'); receiver = callback } } }
     } }
   )
-  const bind = exports.installLinuxSharedTextureReceiver()
+  const bind = exports.installSharedTextureReceiver()
   const packet = { importedSharedTexture: { getVideoFrame: () => ({ displayWidth: options.probePixels ? 640 : 320, displayHeight: options.probePixels ? 360 : 180, close: () => { closes++ },
     allocationSize: () => 640 * 360 * 4, copyTo: async () => { await options.copyWait; return [{ offset: 0, stride: 640 * 4 }] } }),
     release: () => { releases++ } } }
-  return { bind, messages, listeners, canvas, cpu: (value: unknown) => {
+  return { bind, messages, listeners, canvas, composite: () => compositeOperation, gpuRelease: () => gpuReleased?.(), cpu: (value: unknown) => {
     const key = cpuKey(value as { bindingToken: string; sequence: number })
     const done = new Promise<void>(resolve => {
       if (messages.some(m => m.channel === 'playback:cpu-frame-released' && cpuKey(m.data) === key)) resolve()
@@ -66,11 +71,32 @@ test('draws on the mounted canvas and releases VideoFrame and imported texture i
   const f = fixture(); const unbind = f.bind(token)
   await f.receive(1)
   assert.equal(f.canvas.width, 320); assert.equal(f.canvas.height, 180)
+  assert.equal(f.composite(), 'copy', 'each complete video frame replaces the prior Canvas content')
   assert.deepEqual(f.counts(), { draws: 1, closes: 1, releases: 1, clears: 0 })
   assert.equal(f.messages.at(-1)?.channel, 'playback:shared-texture-submitted')
   unbind(); unbind()
   assert.equal(f.counts().clears, 1)
+  assert.equal(f.canvas.width, 0, 'unbind discards the Canvas backing store, not just its visible pixels')
+  assert.equal(f.canvas.height, 0)
   assert.equal(f.messages.at(-1)?.channel, 'playback:shared-texture-removed')
+})
+test('macOS subtle transfer ACK waits for the consumer GPU release callback, not drawImage', async () => {
+  const f = fixture({ platform: 'darwin' }), unbind = f.bind(token)
+  const binding = f.messages.find(m => m.channel.endsWith('ready'))!.data
+  f.listeners.get('playback:mac-texture-transfer')!(null, { ...binding, sequence: 1, transfer: { transfer: 'opaque' } })
+  await Promise.resolve(); await Promise.resolve()
+  assert.equal(f.counts().draws, 1)
+  assert.equal(f.messages.filter(m => m.channel === 'playback:mac-texture-released').length, 0)
+  f.gpuRelease()
+  assert.equal(f.messages.filter(m => m.channel === 'playback:mac-texture-released').length, 1)
+  unbind()
+})
+test('macOS uses the same Canvas submission and reference-release interface', async () => {
+  const f = fixture({ platform: 'darwin' }); const stop = f.bind(token)
+  await f.receive(1)
+  assert.deepEqual(f.counts(), { draws: 1, closes: 1, releases: 1, clears: 0 })
+  assert.equal(f.messages.at(-1)?.channel, 'playback:shared-texture-submitted')
+  stop()
 })
 test('stale sessions, duplicate frames, detached canvases and old mount tokens cannot draw', async () => {
   const f = fixture(); const firstCleanup = f.bind(token)

@@ -17,8 +17,9 @@ export interface NativePlaybackState {
   nativeFrames?: number
   /** New-frame swaps submitted while the surface is visible; not screen capture proof. */
   presentedFrames?: number
-  /** Linux Canvas submission only; physical presentation feedback unavailable. */
+  /** Shared Canvas submission only; physical presentation feedback unavailable. */
   submittedFrames?: number
+  frameTimeline?: number
   renderBudgetMs?: number
   submissionLatenessMs?: number
   loadedFiles?: number

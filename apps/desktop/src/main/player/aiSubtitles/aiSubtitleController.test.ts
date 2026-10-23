@@ -110,6 +110,8 @@ test('changing audio during preparation cancels the old probe and starts the lat
     await delay(20)
     assert.equal(oldSignal!.aborted, true, 'preparing must not suppress an audio-track restart')
     await until(() => f.recognizes() === 1 && f.controller.snapshot().translatedSeconds === 15)
+    // Scheduler completion precedes the async ASS write/player publication.
+    await until(() => f.updates.length > 0)
     assert.match(await fs.readFile(f.updates.at(-1)!.filename, 'utf8'), /音轨2/)
   } finally { release?.(); await starting; await f.cleanup() }
 })

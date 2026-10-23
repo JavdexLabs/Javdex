@@ -10,6 +10,9 @@ import { createLinuxPlaybackBridge } from './linuxPlaybackBridge'
 import { createLinuxSharedTexture } from './linuxSharedTexture'
 import { linuxPlaybackRenderNode } from './linuxPlaybackDevice'
 import { linuxGpuImportLoader } from './linuxGpuImport'
+import { createMacSharedTextureBridge } from './macSharedTexture'
+
+const macSharedTextureEnabled = (): boolean => process.platform === 'darwin' && app.commandLine?.hasSwitch('javdex-mac-shared-texture') === true
 
 interface Bridge {
   create(handle: Buffer, bounds: { x: number; y: number; width: number; height: number; scale?: number }, host?: { backend: 'dmabuf' | 'software' }): void
@@ -27,7 +30,7 @@ interface Bridge {
 }
 function runtimePath(name?: string, backend = linuxPlaybackBackend()): string {
   const filename = name ?? (process.platform === 'linux'
-    ? backend === 'software' ? 'playback-software-helper' : 'playback-dmabuf-helper' : 'playback.node')
+    ? backend === 'software' ? 'playback-software-helper' : 'playback-dmabuf-helper' : macSharedTextureEnabled() ? 'playback-shared.node' : 'playback.node')
   const experimental = filename === 'playback-dmabuf-helper' || filename === 'playback-fd.node'
   return app.isPackaged ? path.join(process.resourcesPath, backend === 'software' ? 'linux-software-playback' : experimental ? 'linux-texture-experimental' : 'native-playback', filename)
     : path.join(app.getAppPath(), 'out', ...(backend === 'software' ? ['linux-software-runtime', 'linux-x64'] : ['native-playback']), filename)
@@ -120,6 +123,8 @@ export function createLibmpvPlayback(getWindow: () => BrowserWindow | null, back
       if (!availability.available) throw new Error(availability.reason ?? '内置播放不可用')
       const window = getWindow()
       if (!window || window.isDestroyed()) throw new Error('主窗口不可用')
+      if (macSharedTextureEnabled()) bridge = createMacSharedTextureBridge(
+        createRequire(path.join(app.getAppPath(), 'package.json'))(runtimePath(undefined, backend)), window)
       if (!bridge) bridge = process.platform === 'linux' ? createLinuxPlaybackBridge(runtimePath(undefined, backend), backend !== null
         ? onError => {
           const current = getWindow()
@@ -127,12 +132,14 @@ export function createLibmpvPlayback(getWindow: () => BrowserWindow | null, back
           return createLinuxSharedTexture(current, runtimePath('playback-fd.node', backend), onError, backend === 'software')
         } : undefined, backend === 'dmabuf' ? linuxPlaybackRenderNode() : undefined, backend === 'dmabuf' ? linuxGpuImportLoader(app) : undefined)
         : createRequire(path.join(app.getAppPath(), 'package.json'))(runtimePath(undefined, backend)) as Bridge
-      if (process.platform === 'linux') {
+      if (macSharedTextureEnabled()) bridge.create(Buffer.alloc(0), { x: 0, y: 0, width: 1, height: 1,
+        scale: screen.getDisplayMatching(window.getBounds()).scaleFactor })
+      else if (process.platform === 'linux') {
         const selectedBackend = backend ?? 'dmabuf'
         bridge.create(Buffer.alloc(0), { x: 0, y: 0, width: 1, height: 1,
           scale: screen.getDisplayMatching(window.getBounds()).scaleFactor }, { backend: selectedBackend })
       } else bridge.create(window.getNativeWindowHandle(), { x: 0, y: 0, width: 1, height: 1 })
-      if (['win32', 'linux'].includes(process.platform)) bridge.setRendererControls?.(true)
+      if (['win32', 'linux'].includes(process.platform) || macSharedTextureEnabled()) bridge.setRendererControls?.(true)
       generatedRepliesExpected = 0
       overlayRevision = 0; generated = null
       alive = true
@@ -181,7 +188,7 @@ export function createLibmpvPlayback(getWindow: () => BrowserWindow | null, back
       bridge.setBounds({ x: rect.x * zoom, y: rect.y * zoom, width: rect.width * zoom, height: rect.height * zoom,
         // Chromium's effective scale can include Windows accessibility text
         // scaling, which GetDpiForWindow alone does not include.
-        ...(['linux', 'win32'].includes(process.platform) ? { scale: screen.getDisplayMatching(window.getBounds()).scaleFactor } : {}) })
+        ...(['linux', 'win32'].includes(process.platform) || macSharedTextureEnabled() ? { scale: screen.getDisplayMatching(window.getBounds()).scaleFactor } : {}) })
       bridge.setOcclusions?.(occlusions.map(area => ({ x: area.x * zoom, y: area.y * zoom, width: area.width * zoom, height: area.height * zoom,
         ...(area.radii ? { radii: area.radii.map(radius => radius * zoom) as PlaybackOcclusion['radii'] } : {}) })))
       bridge.setPresentation(state.presentation)

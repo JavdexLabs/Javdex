@@ -8,7 +8,7 @@ import type { PendingAuditIds, PendingScanQueueQuery } from '../../../../package
 import type { WebAccessInput } from '../../../../packages/contracts/src/webTypes'
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { IPC } from '../../../../packages/contracts/src/ipc-channels'
-import { installLinuxSharedTextureReceiver } from './linuxSharedTexture'
+import { installSharedTextureReceiver } from './sharedTextureReceiver'
 import type { UpdateCheckState } from '../../../../packages/contracts/src/updateTypes'
 import type {
   AppIpcArgs,
@@ -221,7 +221,7 @@ function onScrapeEvent<Channel extends ScrapeIpcEventChannel>(
   return () => ipcRenderer.removeListener(channel, listener)
 }
 
-const bindSharedTextureSurface = installLinuxSharedTextureReceiver()
+const bindSharedTextureSurface = installSharedTextureReceiver()
 
 const api = {
   nfoExport: {

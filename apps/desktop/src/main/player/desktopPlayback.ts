@@ -13,7 +13,7 @@ import type { PlayResult } from '@shared/libraryTypes'
 import type { DesktopSettingsStore } from '../application/desktopPorts'
 import { createPlaybackVolume } from './playbackVolume'
 import { createPlaybackResumeStore } from './playbackResumeStore'
-import { PlaybackFailure, playbackFailure } from './playbackFailure'
+import { playbackFailure } from './playbackFailure'
 import { navigateWindowHistory } from '../desktop/windowNavigation'
 import fs from 'node:fs/promises'
 import { localAiDirectories } from '../services/localModels/modelStorage'
@@ -159,10 +159,10 @@ export function registerBuiltinPlayback(backend: CatalogBackend, getWindow: () =
   })
   const stopSubtitles = aiSubtitles.stop
   const renderTimer = setInterval(() => {
-    try { native.render() } catch { session.fail(new PlaybackFailure('video').message) }
+    try { native.render() } catch (error) { session.fail(playbackFailure(error, 'video').message) }
   }, 16)
   const stateTimer = setInterval(() => {
-    try { session.tick() } catch { session.fail(new PlaybackFailure('native').message) }
+    try { session.tick() } catch (error) { session.fail(playbackFailure(error, 'native').message) }
     try { aiSubtitles.tick(session.snapshot()) } catch { /* Optional subtitles cannot fail the video decoder. */ }
   }, 200)
   renderTimer.unref(); stateTimer.unref()

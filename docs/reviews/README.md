@@ -24,6 +24,8 @@
 
 ## 其他历史证据
 
+[macOS 共享视频帧实验验证](macos-shared-texture-2026-10-23.md)记录 IOSurface 到 Canvas 的真实窗口、控制、色彩和新旧短时对照；默认仍为旧原生视图，正式分发未迁移。
+
 - `v0.8.0-*` 与 `v0.9.0-beta.*` 对应各自发行，不能替代后续版本的结果。
 - [Agent 迁移基线](agent-platform-baseline-2026-08-20.md)保留旧平台对照，不代表当前配置或固定不变的工具数量。
 - [内置播放审查](builtin-playback-2026-10-03.md)、[实施记录](builtin-playback-implementation-2026-10.md)与[观看历史回归](viewing-history-2026-10.md)保留实际发现、修复和未覆盖范围。

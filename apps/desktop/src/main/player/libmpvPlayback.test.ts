@@ -17,7 +17,7 @@ const wrapperCode = transpileModule(readFileSync(new URL('./libmpvPlayback.ts', 
 const subtitleFile = path.resolve('fixture-subtitles', 'AI 日中字幕.ass')
 const newSubtitleFile = path.resolve('fixture-subtitles', 'new.ass')
 
-function fixture(platform: 'darwin' | 'win32' | 'linux') {
+function fixture(platform: 'darwin' | 'win32' | 'linux', macShared = false) {
   const commands: string[][] = []
   let actions: NonNullable<NativePlaybackState['actions']> = []
   let created = false
@@ -88,7 +88,7 @@ function fixture(platform: 'darwin' | 'win32' | 'linux') {
     require(id: string): unknown {
       switch (id) {
         case 'electron': return {
-          app: { isPackaged: false, getAppPath: () => path.resolve('fixture-app') },
+          app: { isPackaged: false, getAppPath: () => path.resolve('fixture-app'), commandLine: { hasSwitch: () => macShared } },
           screen: { getDisplayMatching: () => ({ scaleFactor: 1 }) }
         }
         case 'node:fs': return { existsSync: () => true }
@@ -99,6 +99,7 @@ function fixture(platform: 'darwin' | 'win32' | 'linux') {
         case './linuxPlaybackBridge': return { createLinuxPlaybackBridge: () => bridge }
         case './linuxSharedTexture': return { createLinuxSharedTexture: () => { throw new Error('Wrapper fixture does not materialize its deferred frame channel') } }
         case './linuxGpuImport': return { linuxGpuImportLoader: () => undefined }
+        case './macSharedTexture': return { createMacSharedTextureBridge: () => bridge }
         case './linuxPlaybackDevice': return { linuxPlaybackRenderNode: () => '/dev/dri/renderD129' }
         default: throw new Error(`Unexpected playback wrapper dependency: ${id}`)
       }
@@ -106,7 +107,7 @@ function fixture(platform: 'darwin' | 'win32' | 'linux') {
   }, { filename: 'libmpvPlayback.ts' })
   const window = {
     isDestroyed: () => false,
-    getNativeWindowHandle: () => { assert.notEqual(platform, 'linux', 'Linux must not request a native window handle'); return Buffer.alloc(4) },
+    getNativeWindowHandle: () => { assert.ok(platform !== 'linux' && !macShared, 'Canvas backends must not request a native window handle'); return Buffer.alloc(4) },
     getBounds: () => ({ x: 0, y: 0, width: 1, height: 1 }),
     webContents: { getZoomFactor: () => 1 }
   } as unknown as BrowserWindow
@@ -131,6 +132,15 @@ test('Linux and Windows enable the shared accessible fullscreen controls and pas
       { presentation: 'fullscreen' } as PlaybackSnapshot, [area])
     assert.deepEqual(JSON.parse(JSON.stringify(f.occlusions)), [[area]], 'the native surface must expose renderer popup geometry')
     assert.deepEqual(JSON.parse(JSON.stringify(f.viewports)), [{ x: 10, y: 12, width: 640, height: 360, scale: 1 }])
+  }
+})
+
+test('macOS shared Canvas is opt-in and the original native controls remain the default rollback', t => {
+  for (const shared of [false, true]) {
+    const f = fixture('darwin', shared); t.after(f.native.destroy)
+    assert.equal(f.native.read().rendererFullscreenControls, shared)
+    f.native.viewport({ x: 0, y: 0, width: 640, height: 360 }, true, { presentation: 'expanded' } as PlaybackSnapshot)
+    assert.equal((f.viewports[0] as { scale?: number }).scale, shared ? 1 : undefined)
   }
 })
 

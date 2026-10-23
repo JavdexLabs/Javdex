@@ -20,3 +20,13 @@ test('playback failures distinguish controlled causes without forwarding third-p
   const controlled = new PlaybackFailure('missing')
   assert.equal(playbackFailure(controlled), controlled)
 })
+
+test('restart-required native failures retain their controlled recovery instruction for every fallback', () => {
+  const error = Object.assign(new Error('/private/movie.mp4?token=secret'), { code: 'PLAYBACK_RESTART_REQUIRED' })
+  for (const fallback of ['load', 'video', 'native', 'runtime'] as const) {
+    const failure = playbackFailure(error, fallback)
+    assert.match(failure.message, /重启应用/)
+    assert.ok(!failure.message.includes('/private'))
+    assert.ok(!failure.message.includes('secret'))
+  }
+})

@@ -32,6 +32,12 @@ test('Windows command plan selects installed inputs and CMake, without macOS fla
     assert.ok(steps.every(step => !step.args.includes('-framework')))
   }
 })
+test('macOS shared-texture producer is an explicit development build, preserving the native rollback addon', () => {
+  const steps = playbackNativeBuild({ ...input, platform: 'darwin', macSharedTexture: true })
+  assert.ok(steps.some(step => step.args.includes(path.join(input.root, 'apps/desktop/src/main/player/native/macSharedTexture.mm'))))
+  assert.ok(steps.some(step => step.args.includes(path.join(input.output, 'playback.node'))))
+  assert.ok(steps.some(step => step.args.includes(path.join(input.output, 'playback-shared.node'))))
+})
 test('Windows addon installs the Electron import hook directly in its delayed-load module', () => {
   const cmake = readFileSync(new URL('../apps/desktop/src/main/player/native/CMakeLists.txt', import.meta.url), 'utf8')
   assert.ok(cmake.includes('add_library(playback MODULE windowsPlayback.cpp "${ELECTRON_DELAY_LOAD_HOOK}")'))

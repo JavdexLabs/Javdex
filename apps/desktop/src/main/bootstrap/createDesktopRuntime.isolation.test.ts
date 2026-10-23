@@ -85,6 +85,12 @@ function chmodCatalogClosed(catalogPath: string): () => void {
   }
 }
 
+function waitForParentTeardown(): Promise<void> {
+  // A pending Promise alone does not keep Node alive. The parent owns shutdown
+  // after inspecting descriptors or interrupting the isolated copy process.
+  return new Promise(() => { setInterval(() => { /* fixture lifetime only */ }, 1000) })
+}
+
 if (process.env.JAVDEX_D03_CHILD === '1') {
   const root = process.env.JAVDEX_TEST_USER_DATA
   if (!root) {
@@ -104,7 +110,7 @@ if (process.env.JAVDEX_D03_CHILD === '1') {
       copyAgentWorkTables(catalog, store.database())
       store.markReady()
       process.stdout.write('ready\n')
-      await new Promise<void>(() => undefined)
+      await waitForParentTeardown()
     } catch (error: unknown) {
       process.stderr.write(`${error instanceof Error ? error.stack ?? error.message : String(error)}\n`)
       process.exit(1)
@@ -132,7 +138,7 @@ if (process.env.JAVDEX_D03_CHILD === '1') {
           fds: listLibraryDbFds(process.pid, catalogPath)
         })}\n`
       )
-      return new Promise<void>(() => undefined)
+      return waitForParentTeardown()
     })
     .catch((error: unknown) => {
       process.stderr.write(`${error instanceof Error ? error.stack ?? error.message : String(error)}\n`)
@@ -223,7 +229,7 @@ if (process.env.JAVDEX_D03_CHILD === '1') {
           playlistApply
         })}\n`
       )
-      return new Promise<void>(() => undefined)
+      return waitForParentTeardown()
     })
     .catch((error: unknown) => {
       process.stderr.write(`${error instanceof Error ? error.stack ?? error.message : String(error)}\n`)
@@ -569,6 +575,10 @@ if (process.env.JAVDEX_D03_CHILD === '1') {
         assert.equal(report.state, 'available')
         assert.equal(report.scanRecovery, null)
         assert.deepEqual(report.fds, [])
+        // The report is not the end of the fixture lifetime: the parent still
+        // needs a live process for external descriptor enumeration.
+        await new Promise(resolve => setTimeout(resolve, 250))
+        assert.equal(child.exitCode, null, 'reported remote child must stay alive until parent teardown')
         assert.deepEqual(listLibraryDbFds(child.pid ?? 0, catalogPath), [])
         await stopChild(child)
       } finally {

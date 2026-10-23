@@ -1,5 +1,22 @@
 import assert from 'node:assert/strict'
 
+export async function revealFullscreenControls(page) {
+  const state = await page.evaluate(() => window.api.playback.snapshot())
+  if (state?.presentation !== 'fullscreen' || !state.rendererFullscreenControls) return
+  const size = await page.evaluate(() => ({ width: innerWidth, height: innerHeight }))
+  await page.mouse.move(size.width / 2, size.height - 2)
+  await page.getByRole('slider', { name: '播放进度', exact: true }).waitFor({ state: 'visible' })
+}
+
+export async function hideFullscreenControls(page) {
+  const state = await page.evaluate(() => window.api.playback.snapshot())
+  if (state?.presentation !== 'fullscreen' || !state.rendererFullscreenControls) return
+  const size = await page.evaluate(() => ({ width: innerWidth, height: innerHeight }))
+  await page.mouse.move(size.width / 2, size.height / 2)
+  await page.getByRole('button', { name: '视频画面，单击播放或暂停，双击全屏', exact: true }).focus()
+  await page.locator('[data-playback-session][data-controls-visible="false"][data-header-visible="false"]').waitFor()
+}
+
 // Shared interactions for the real playback settings used by local/remote
 // development smoke scripts. These helpers never command the playback API.
 export async function openPlaybackSettings(page, tab = '播放') {

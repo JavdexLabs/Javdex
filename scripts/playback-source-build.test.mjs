@@ -10,6 +10,16 @@ import { mergeTargets } from './dist.mjs'
 import packagingConfig from '../electron-builder.config.mjs'
 
 const input = { arch: 'x64', source: '/sources', build: '/build', prefix: '/prefix', tools: '/tools', jobs: 2 }
+test('macOS release source plan builds the same sole Canvas producer as normal development', () => {
+  for (const arch of ['x64', 'arm64']) {
+    const steps = playbackSourceNativePlan({ ...input, platform: 'darwin', arch, root: '/repo', include: '/sdk', output: '/output' })
+    const addon = steps.filter(step => step.command === 'clang++' && step.args.includes('-shared'))
+    assert.equal(addon.length, 1)
+    assert.ok(addon[0].args.includes('/repo/apps/desktop/src/main/player/native/macSharedTexture.mm'))
+    assert.equal(addon[0].args.at(-1), '/output/playback.node')
+    assert.ok(addon[0].args.includes('Foundation') && addon[0].args.includes('IOSurface'))
+  }
+})
 test('Windows import library reads old and current GNU export name tables with LF or CRLF', () => {
   // Binutils peXXigen.c prints ordinal/base/hint columns in the current format.
   const tables = [

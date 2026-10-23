@@ -160,7 +160,9 @@ export function createLinuxSharedTexture(window: BrowserWindow, addonPath: strin
   const destroy = (): void => {
     if (stopped) return
     stopped = true
-    if (binding && !contents.isDestroyed()) contents.send('playback:frame-flush', { ...binding, timeline: ++timeline })
+    try {
+      if (binding && !contents.isDestroyed()) contents.send('playback:frame-flush', { ...binding, timeline: ++timeline })
+    } catch { /* A disposed frame must not prevent descriptor cleanup or owner notification. */ }
     clearInterval(timer)
     ipcMain.removeListener(READY, ready)
     ipcMain.removeListener(REMOVED, removed)

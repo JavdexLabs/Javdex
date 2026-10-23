@@ -4,7 +4,7 @@ import path from 'node:path'
 import { captureAcceptanceFrame, closeAcceptance, recordAcceptanceCleanup, createAcceptanceDirectory, launchAcceptance, nativeEvidence, seedAcceptanceCatalog, waitForState, waitForValue } from './playback-acceptance-support.mjs'
 import { prepareMediaFixtures } from './playback-media-fixtures.mjs'
 import { checkBitmapSubtitlePixels, checkComplexSubtitlePixels } from './playback-subtitle-checks.mjs'
-import { openPlaybackSettings, closePlaybackSettings, selectPlaybackSetting, playbackSettingLabels } from './playback-settings-ui.mjs'
+import { openPlaybackSettings, closePlaybackSettings, selectPlaybackSetting, playbackSettingLabels, revealFullscreenControls, hideFullscreenControls } from './playback-settings-ui.mjs'
 import { prepareNonRecordingPlayback } from './playback-acceptance-settings.mjs'
 
 assert.ok(['darwin', 'win32'].includes(process.platform), 'this runner accepts macOS and Windows only')
@@ -34,9 +34,10 @@ try {
     assert.equal(result.ok, true, result.error)
     const state = await waitForState(page, state => state?.phase === 'playing' && state.position > 0.6
       && state.info.videoCodec?.includes(codec), `fixture ${index} did not play`)
-    const native = await nativeEvidence(application)
+    const native = await waitForValue(() => nativeEvidence(application), value => value.alive && value.renderedFrames > 0,
+      `fixture ${index} did not produce a video frame`)
     assert.equal(native.loadedFiles, 1)
-    assert.ok(native.presentedFrames > 0)
+    assert.ok(native.renderedFrames > 0)
     assert.equal(state.recordingProgress, false)
     return state
   }
@@ -69,7 +70,7 @@ try {
       && state.info.audioOutput === (process.platform === 'win32' ? 'wasapi' : 'coreaudio') && decodedCodec[track.codec].test(state.info.audioCodec ?? ''), `switch ${track.codec}`)
     const before = await waitForValue(() => nativeEvidence(application), value => Number.isFinite(value.audioPosition), `${track.codec} audio clock missing`)
     const after = await waitForValue(() => nativeEvidence(application), value => value.audioPosition > before.audioPosition + 0.4
-      && value.presentedFrames > before.presentedFrames, `${track.codec} clock/frames did not advance`)
+      && value.renderedFrames > before.renderedFrames, `${track.codec} clock/frames did not advance`)
     assert.equal(after.commandErrors, 0)
     assert.equal(after.loadedFiles, 1)
     assert.equal((await page.evaluate(() => window.api.playback.snapshot())).sessionId, multi.sessionId)
@@ -108,6 +109,7 @@ try {
   await page.getByRole('button', { name: '全屏', exact: true }).click()
   await waitForState(page, state => state.presentation === 'fullscreen' && state.paused, 'ASS fullscreen')
   await page.waitForTimeout(1500)
+  await revealFullscreenControls(page)
   // An options pane changes geometry, so take a fresh baseline in native fullscreen.
   const sid = multi.tracks.find(track => track.codec === 'ass').id
   await page.evaluate(id => window.api.playback.control(id, { kind: 'track', type: 'sub', id: null }), multi.sessionId)
@@ -173,6 +175,7 @@ try {
     await page.getByRole('button', { name: '暂停', exact: true }).click()
     await waitForState(page, state => state.paused, 'pause aspect fixture')
     const measure = async presentation => {
+      if (presentation === 'fullscreen') await hideFullscreenControls(page)
       const viewport = await page.evaluate(() => {
         const video = document.querySelector('[data-playback-session] button[aria-label="视频画面，单击播放或暂停，双击全屏"], [data-playback-session] button[aria-label="恢复展开播放器"]')
         const bounds = video.getBoundingClientRect()
@@ -185,7 +188,7 @@ try {
           || presentation !== 'fullscreen' && Math.abs(image.height - viewport.height) > 2) return false
         // The native view already reserves the fullscreen controls outside its
         // render surface; controlsTop can therefore be below the captured image.
-        const height = Math.min(image.controlsTop ?? image.height, image.height)
+        const height = image.rendererFullscreen ? image.height : Math.min(image.controlsTop ?? image.height, image.height)
         const width = Math.min(image.width, height * ratio), expectedHeight = Math.min(height, image.width / ratio)
         return Math.abs(bounds.width - width) <= 4 && Math.abs(bounds.height - expectedHeight) <= 4
           && Math.abs(bounds.x - (image.width - bounds.width) / 2) <= 3

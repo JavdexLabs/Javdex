@@ -52,7 +52,7 @@ type WorkerReply =
   | { kind: 'error'; message: string }
 
 /**
- * Repository-only fixture; run the esbuild prototype from the repository root.
+ * Repository-only remote playback fixture; run tests from the repository root.
  * A separate Worker owns the library globals, DB, HTTP server and grant listener.
  * Uses production WebServer/manage/catalog/play, not startJavdexServer: therefore
  * this does not certify independent Node deployment, query workers or scheduling.
@@ -71,8 +71,8 @@ export async function createRemotePlaybackFixture(
     return real
   })
   const repository = process.cwd()
-  const entry = path.join(repository, 'apps/desktop/src/main/player/libmpvPrototype/remoteFixtureWorker.ts')
-  if (!fs.existsSync(entry)) throw new Error('Run the libmpv prototype from the repository root')
+  const entry = path.join(repository, 'apps/desktop/src/main/player/testFixtures/remoteFixtureWorker.ts')
+  if (!fs.existsSync(entry)) throw new Error('Run remote playback tests from the repository root')
   const metadata = JSON.parse(fs.readFileSync(path.join(repository, 'package.json'), 'utf8')) as { version: string }
   fs.mkdirSync(tempRoot, { recursive: true })
   const directory = fs.mkdtempSync(path.join(tempRoot, 'javdex-remote-playback-'))

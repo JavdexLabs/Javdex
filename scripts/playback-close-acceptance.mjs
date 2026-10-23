@@ -25,7 +25,7 @@ try {
   await waitForState(page, state => state?.phase === 'playing' && state.position > 0.5, 'play before normal close')
   report.before = await nativeEvidence(application)
   assert.equal(report.before.alive, true)
-  assert.ok(report.before.presentedFrames > 0)
+  assert.ok(report.before.renderedFrames > 0)
   if (process.platform === 'win32') {
     // Windows quits on last-window close. Persist observations while the main
     // inspector is still alive instead of keeping the process open artificially.

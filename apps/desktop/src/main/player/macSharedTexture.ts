@@ -1,5 +1,6 @@
 import { app, ipcMain, sharedTexture, type BrowserWindow, type IpcMainEvent } from 'electron'
 import { randomUUID } from 'node:crypto'
+import { channel } from 'node:diagnostics_channel'
 import type { NativePlaybackState } from './nativePlayback'
 import { FrameBudget } from './frameBudget'
 
@@ -11,6 +12,7 @@ interface MacProducer {
   setVisible(visible: boolean): void
   resetTiming(timeline: number): void
   setRenderBudget(ms: number): void
+  setWakeup(callback: (() => void) | null): void
   nextFrame(): unknown
   releaseFrame(sequence: number): void
   command(args: string[], generated?: boolean): void
@@ -32,6 +34,7 @@ interface Lease {
   acknowledged: boolean
 }
 const monotonicMs = (): number => Number(process.hrtime.bigint()) / 1e6
+const statistics = channel('javdex.playback.mac-shared-texture.statistics')
 
 /** Main-process-only IOSurface adapter. No pointer, FD, decoder setting or
  * native command is exposed through the renderer binding interface. */
@@ -43,6 +46,14 @@ export function createMacSharedTextureBridge(native: MacProducer, window: Browse
   const pending = new Map<number, Lease>()
   const targets = new Map<number, { start: number; target: number }>()
   const budget = new FrameBudget()
+  // Main-process pull-only diagnostics. Reuse the normal counters; no extra
+  // per-frame IPC/listener, native handle or media locator enters this seam.
+  const reportStatistics = (request: unknown): void => {
+    if (!request || typeof request !== 'object') return
+    try { Object.assign(request, { submittedFrames: submitted, pendingFrames: pending.size,
+      frameTimeline: timeline, renderBudgetMs: budget.value, submissionLatenessMs: lateness }) }
+    catch { /* Diagnostics cannot fail playback, including frozen requests. */ }
+  }
   const trusted = (event: IpcMainEvent): boolean => !contents.isDestroyed() && event.sender === contents && event.senderFrame === contents.mainFrame
   const matches = (event: IpcMainEvent, value: unknown): value is Binding => {
     const v = value as Binding | null
@@ -94,6 +105,7 @@ export function createMacSharedTextureBridge(native: MacProducer, window: Browse
   const destroy = (): void => {
     if (stopped) return
     stopped = true; clearInterval(timer)
+    statistics.unsubscribe(reportStatistics)
     try {
       if (binding && !contents.isDestroyed()) contents.send('playback:frame-flush', { ...binding, timeline: ++timeline })
     } catch { /* A disposed/crashed frame must not prevent native teardown. */ }
@@ -101,7 +113,8 @@ export function createMacSharedTextureBridge(native: MacProducer, window: Browse
     contents.removeListener('did-start-navigation', navigation)
     contents.removeListener('render-process-gone', gone); contents.removeListener('destroyed', gone)
     app.removeListener('child-process-gone', childGone)
-    native.destroy(); binding = null; targets.clear()
+    try { native.setWakeup(null) } finally { native.destroy() }
+    binding = null; targets.clear()
     if (pending.size === 0) ipcMain.removeListener('playback:mac-texture-released', consumerReleased)
     // Do not release/recycle consumer-held IOSurfaces here. Each callback below
     // retains its original ticket, including after destroy or another create.
@@ -200,12 +213,18 @@ export function createMacSharedTextureBridge(native: MacProducer, window: Browse
   return {
     create(_handle: Buffer, bounds: Bounds): void {
       if (typeof sharedTexture?.importSharedTexture !== 'function') throw new Error('Electron 不支持 macOS 共享纹理')
+      if (typeof native.setWakeup !== 'function') throw new Error('macOS 播放运行库需更新，请重新构建并重启应用')
       native.create({ ...bounds, scale: bounds.scale ?? 1 }); stopped = false; startedAt = Date.now()
+      statistics.subscribe(reportStatistics)
       for (const [name, listener] of listeners) ipcMain.on(name, listener)
       ipcMain.on('playback:mac-texture-released', consumerReleased)
       contents.on('did-start-navigation', navigation); contents.on('render-process-gone', gone); contents.on('destroyed', gone)
       app.on('child-process-gone', childGone)
-      timer = setInterval(poll, 5); timer.unref()
+      native.setWakeup(poll)
+      // Frames, non-video events and released slots wake the main loop. This
+      // low-rate fallback also keeps fault/deadline checks alive while idle;
+      // it never sets a maximum video frame cadence.
+      timer = setInterval(poll, 250); timer.unref()
     },
     setBounds(bounds: Bounds): void {
       const next = `${Math.ceil(bounds.width * (bounds.scale ?? 1))}:${Math.ceil(bounds.height * (bounds.scale ?? 1))}`

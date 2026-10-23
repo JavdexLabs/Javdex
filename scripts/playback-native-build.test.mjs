@@ -7,14 +7,17 @@ import { playbackNativeBuild } from './playback-native-build.mjs'
 const input = { arch: 'x64', root: '/repo with spaces', prefix: '/mpv development', include: '/Electron headers',
   nodeLibrary: '/Electron x64/node.lib', delayHook: '/installed node-gyp/src/win_delay_load_hook.cc', output: '/repo with spaces/out/native-playback' }
 
-test('macOS build executes shared-core and navigation regressions before its Cocoa adapter', () => {
+test('macOS normal build executes shared-core regression then its sole IOSurface addon', () => {
   const steps = playbackNativeBuild({ ...input, platform: 'darwin' })
-  assert.equal(steps.length, 5)
-  assert.ok(steps[2].args.includes(path.join(input.root, 'apps/desktop/src/main/player/native/mpvCore.test.cpp')))
-  assert.equal(steps[3].command, path.join(input.output, 'mpv-core-test'))
-  assert.ok(steps[4].args.includes('-fobjc-arc'))
-  assert.ok(steps[4].args.includes(`-I${input.include}`), 'paths remain one argument, not shell-quoted/interpreted')
-  assert.ok(steps[4].args.includes('OpenGL'))
+  assert.equal(steps.length, 3)
+  assert.ok(steps[0].args.includes(path.join(input.root, 'apps/desktop/src/main/player/native/mpvCore.test.cpp')))
+  assert.equal(steps[1].command, path.join(input.output, 'mpv-core-test'))
+  assert.ok(steps[2].args.includes('-fobjc-arc'))
+  assert.ok(steps[2].args.includes(`-I${input.include}`), 'paths remain one argument, not shell-quoted/interpreted')
+  assert.ok(steps[2].args.includes('OpenGL'))
+  assert.ok(steps[2].args.includes('IOSurface'))
+  assert.ok(steps[2].args.includes(path.join(input.root, 'apps/desktop/src/main/player/native/macSharedTexture.mm')))
+  assert.equal(steps[2].args.at(-1), path.join(input.output, 'playback.node'))
   for (const [arch, compilerArch] of [['x64', 'x86_64'], ['arm64', 'arm64']]) {
     for (const step of playbackNativeBuild({ ...input, platform: 'darwin', arch }).filter(step => step.command === 'clang++'))
       assert.equal(step.args[step.args.indexOf('-arch') + 1], compilerArch, 'compile for the running Electron architecture, not compiler defaults')
@@ -31,12 +34,6 @@ test('Windows command plan selects installed inputs and CMake, without macOS fla
     assert.deepEqual(steps[1].args.slice(-2), ['--config', 'Release'])
     assert.ok(steps.every(step => !step.args.includes('-framework')))
   }
-})
-test('macOS shared-texture producer is an explicit development build, preserving the native rollback addon', () => {
-  const steps = playbackNativeBuild({ ...input, platform: 'darwin', macSharedTexture: true })
-  assert.ok(steps.some(step => step.args.includes(path.join(input.root, 'apps/desktop/src/main/player/native/macSharedTexture.mm'))))
-  assert.ok(steps.some(step => step.args.includes(path.join(input.output, 'playback.node'))))
-  assert.ok(steps.some(step => step.args.includes(path.join(input.output, 'playback-shared.node'))))
 })
 test('Windows addon installs the Electron import hook directly in its delayed-load module', () => {
   const cmake = readFileSync(new URL('../apps/desktop/src/main/player/native/CMakeLists.txt', import.meta.url), 'utf8')

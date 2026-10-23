@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- macOS 内置播放器默认改用 IOSurface 共享纹理到 Canvas2D，与 HTML 控件共同合成，无需试验参数；移除旧原生显示及全屏控件，保留三槽完成/释放同步与故障隔离。此迁移不代表播放态性能提升，硬件解码策略保持不变。
+
 - Linux GPU 专用 libmpv 回移植上游 OpenGL fence 泄漏修复，避免长时间播放时同步对象逐帧累积；保留 DMA-BUF 完成/释放同步和 CPU 回退。
 
 - Linux X11 GPU 按实际图像高度选择兼容的 NVIDIA 分块布局，修复小尺寸 DMA-BUF 成功导入后出现部分黑块的问题，保留正常尺寸 GPU 播放和 CPU 回退。

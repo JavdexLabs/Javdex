@@ -167,7 +167,7 @@ export async function aggregatePlaybackSources(directory, version) {
         'scripts/playback-source-materials.mjs', 'scripts/packaging-runtime.mjs', 'scripts/playback-native-build.mjs',
         'scripts/check-playback-load.mjs', 'scripts/playback-linux-helper-smoke.mjs',
         'apps/desktop/src/main/player/native/CMakeLists.txt', 'apps/desktop/src/main/player/native/mpvCore.h',
-        `apps/desktop/src/main/player/native/${{ win32: 'windowsPlayback.cpp', darwin: 'macPlayback.mm', linux: 'linuxX11Playback.cpp' }[runtime.platform]}`,
+        `apps/desktop/src/main/player/native/${{ win32: 'windowsPlayback.cpp', darwin: 'macSharedTexture.mm', linux: 'linuxX11Playback.cpp' }[runtime.platform]}`,
         'electron-sdk/include/node/node.h', 'electron-sdk/include/node/node_version.h',
         ...(runtime.platform === 'win32' ? ['win_delay_load_hook.cc', 'node-gyp-LICENSE'] : [])]
       for (const name of requiredNative) assert.ok(fs.statSync(path.join(native, name)).size > 0, 'Missing preferred native source/SDK: ' + name)

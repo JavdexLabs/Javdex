@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
-import { closeAcceptance, recordAcceptanceCleanup, createAcceptanceDirectory, launchAcceptance, output, seedAcceptanceCatalog, waitForState } from './playback-acceptance-support.mjs'
+import { captureAcceptanceFrame, captureAcceptanceImage, closeAcceptance, recordAcceptanceCleanup, createAcceptanceDirectory, launchAcceptance, output, seedAcceptanceCatalog, waitForState } from './playback-acceptance-support.mjs'
 import { prepareNonRecordingPlayback } from './playback-acceptance-settings.mjs'
 
 if (!['darwin', 'win32'].includes(process.platform)) throw new Error('This acceptance runner covers macOS and Windows only')
@@ -134,16 +134,25 @@ try {
     await page.mouse.move(viewport.width / 2, viewport.height / 2)
     await page.waitForFunction(() => document.querySelector('[data-playback-session]').dataset.headerVisible === 'false')
     assert.deepEqual(await videoBounds(), fullscreenVideo, 'closing settings restores hover chrome without resizing video')
-    await clickChrome('快捷字幕')
+    await clickChrome('播放设置')
+    await page.getByRole('tab', { name: '字幕', exact: true }).click()
+    await page.getByRole('button', { name: '字幕', exact: true }).click()
     await page.waitForFunction(() => document.querySelector('[role="listbox"]'))
     await page.waitForTimeout(200)
     const clipped = await application.evaluate(({ app }) => {
       const require = process.getBuiltinModule('module').createRequire(app.getAppPath() + '/package.json')
       return require(app.isPackaged ? process.resourcesPath + '/native-playback/playback.node' : app.getAppPath() + '/out/native-playback/playback.node').inspect()
     })
-    assert.ok(clipped.occlusionRegions > 0, 'HTML quick menu clips only its own native video intersection')
-    assert.ok(clipped.alive && clipped.presentedFrames > 0, 'native video keeps rendering with the quick menu open')
+    if (process.platform === 'win32') {
+      assert.ok(clipped.occlusionRegions > 0, 'HTML quick menu clips only its own native video intersection')
+      assert.ok(clipped.alive && clipped.presentedFrames > 0, 'native video keeps rendering with the quick menu open')
+    } else {
+      assert.ok(clipped.alive && clipped.nativeFrames > 0, 'Canvas remains composed under the HTML menu')
+      await page.locator('canvas[data-playback-surface]').waitFor()
+    }
     await page.getByRole('option', { name: '关闭字幕', exact: true }).click()
+    await page.getByRole('button', { name: '关闭播放设置', exact: true }).click()
+    await page.mouse.move(viewport.width / 2, viewport.height - 2)
     const fullSlider = page.getByRole('slider', { name: '播放进度', exact: true })
     const fullBox = await fullSlider.boundingBox()
     await page.mouse.click(fullBox.x + 6 + (fullBox.width - 12) * 0.7, fullBox.y + fullBox.height / 2)
@@ -182,13 +191,18 @@ try {
     await window.api.playback.control(id, { kind: 'subtitle-size', value: 70 })
   }, withSubtitles.sessionId)
   await waitForState(page, state => state?.paused && state.subtitleDelay === 1.5 && state.subtitleSize === 70, 'subtitle property roundtrip')
+  // The old exact-time form was removed; exercise the actual progress control.
+  const progress = page.getByRole('slider', { name: '播放进度', exact: true })
+  await progress.focus()
+  await page.keyboard.press('Home')
+  await page.keyboard.press('Shift+ArrowRight')
+  await page.keyboard.press('Shift+ArrowRight')
+  await waitForState(page, state => state?.paused && !state.seeking && Math.abs(state.position - 60) < 0.2, 'precise progress seek preserves pause')
+  await progress.focus()
+  await page.keyboard.press('ArrowRight')
+  await page.keyboard.press('Shift+ArrowLeft')
+  await waitForState(page, state => state?.paused && !state.seeking && Math.abs(state.position - 35) < 0.2, 'progress keyboard steps preserve pause')
   await clickChrome('播放设置')
-  await page.getByRole('textbox', { name: '指定时间', exact: true }).fill('00:99:00')
-  await page.getByRole('button', { name: '跳转到指定时间', exact: true }).click()
-  assert.match(await page.getByRole('alert').innerText(), /请输入/)
-  await page.getByRole('textbox', { name: '指定时间', exact: true }).fill('00:01:00')
-  await page.getByRole('button', { name: '跳转到指定时间', exact: true }).click()
-  await waitForState(page, state => state?.paused && Math.abs(state.position - 60) < 0.2, 'exact time form preserves pause')
   await page.getByRole('tab', { name: '字幕', exact: true }).click()
   await page.getByRole('button', { name: '字幕字号', exact: true }).click()
   await page.getByRole('option', { name: '40', exact: true }).click()
@@ -202,22 +216,19 @@ try {
   await page.evaluate(id => window.api.playback.control(id, { kind: 'track', type: 'sub', id: null }), withSubtitles.sessionId)
   await waitForState(page, state => !state.tracks.some(track => track.type === 'sub' && track.selected), 'subtitle baseline')
   await page.waitForTimeout(300)
-  await application.evaluate(({ app }) => {
-    const require = process.getBuiltinModule('module').createRequire(app.getAppPath() + '/package.json')
-    globalThis.subtitleBaseline = require(app.isPackaged ? process.resourcesPath + '/native-playback/playback.node' : app.getAppPath() + '/out/native-playback/playback.node').capture()
-  })
+  await captureAcceptanceFrame(application, output, 'baseline', { baseline: true })
   await page.evaluate(({ id, subtitleId }) => window.api.playback.control(id, { kind: 'track', type: 'sub', id: subtitleId }), { id: withSubtitles.sessionId, subtitleId })
   await waitForState(page, state => state.tracks.some(track => track.type === 'sub' && track.selected), 'subtitle clearance')
   await page.evaluate(id => window.api.playback.control(id, { kind: 'seek', seconds: 65 }), withSubtitles.sessionId)
   await page.waitForTimeout(300)
-  const subtitleClearance = await application.evaluate(({ app, nativeImage }, outputDirectory) => {
+  const capturedSubtitles = await captureAcceptanceImage(application)
+  const subtitleClearance = await application.evaluate(({ app, nativeImage }, { frame, outputDirectory }) => {
     const require = process.getBuiltinModule('module').createRequire(app.getAppPath() + '/package.json')
-    const frame = require(app.isPackaged ? process.resourcesPath + '/native-playback/playback.node' : app.getAppPath() + '/out/native-playback/playback.node').capture()
-    const baseline = globalThis.subtitleBaseline
-    delete globalThis.subtitleBaseline
+    const baseline = globalThis.playbackAcceptanceBaseline
+    delete globalThis.playbackAcceptanceBaseline
     for (const [name, image] of [['baseline', baseline], ['subtitles', frame]]) {
       require('node:fs').writeFileSync(require('node:path').join(outputDirectory, name + '.png'),
-        nativeImage.createFromBitmap(image.data, { width: image.width, height: image.height }).toPNG())
+        nativeImage.createFromBitmap(Buffer.from(image.data), { width: image.width, height: image.height }).toPNG())
     }
     if (frame.width !== baseline.width || frame.height !== baseline.height) throw new Error('Subtitle capture geometry changed')
     let count = 0, bottom = -1
@@ -231,7 +242,7 @@ try {
       }
     }
     return { count, bottom, controlsTop: frame.controlsTop, width: frame.width, height: frame.height }
-  }, output)
+  }, { frame: capturedSubtitles, outputDirectory: output })
   if (fullscreenState.rendererFullscreenControls) {
     const geometry = await page.evaluate(() => {
       const root = document.querySelector('[data-playback-session]')
@@ -255,11 +266,8 @@ try {
     await page.mouse.move(size.width / 2, size.height / 2)
   }
   await page.waitForTimeout(3500)
-  const hiddenControls = await application.evaluate(({ app }) => {
-    const require = process.getBuiltinModule('module').createRequire(app.getAppPath() + '/package.json')
-    const { width, height, controlsTop } = require(app.isPackaged ? process.resourcesPath + '/native-playback/playback.node' : app.getAppPath() + '/out/native-playback/playback.node').capture()
-    return { width, height, controlsTop }
-  })
+  const { width, height, controlsTop } = await captureAcceptanceImage(application)
+  const hiddenControls = { width, height, controlsTop }
   assert.equal(hiddenControls.controlsTop, undefined, 'fullscreen controls auto-hide while playing')
   if (fullscreenState.rendererFullscreenControls) {
     assert.equal(await page.getByRole('slider', { name: '播放进度', exact: true }).isVisible(), false, 'renderer toolbar auto-hides while playing')
@@ -373,13 +381,18 @@ try {
   await waitForState(page, state => state?.presentation === 'fullscreen', 'detail fullscreen')
   const transitionFailure = await enteredFullscreen
   if (transitionFailure) throw transitionFailure
-  const focusDeadline = Date.now() + 5000
-  while (!await application.evaluate(({ app }) => {
-    const require = process.getBuiltinModule('module').createRequire(app.getAppPath() + '/package.json')
-    return require(app.isPackaged ? process.resourcesPath + '/native-playback/playback.node' : app.getAppPath() + '/out/native-playback/playback.node').inspect().focusedControl === 'video'
-  })) {
-    if (Date.now() > focusDeadline) throw new Error('Fullscreen did not acquire native video focus')
-    await page.waitForTimeout(100)
+  if (process.platform === 'darwin') {
+    await page.locator('button[aria-label^="视频画面"]').focus()
+    assert.ok(await page.evaluate(() => document.activeElement?.matches('button[aria-label^="视频画面"]')), 'normal macOS fullscreen keeps focus in HTML')
+  } else {
+    const focusDeadline = Date.now() + 5000
+    while (!await application.evaluate(({ app }) => {
+      const require = process.getBuiltinModule('module').createRequire(app.getAppPath() + '/package.json')
+      return require(app.isPackaged ? process.resourcesPath + '/native-playback/playback.node' : app.getAppPath() + '/out/native-playback/playback.node').inspect().focusedControl === 'video'
+    })) {
+      if (Date.now() > focusDeadline) throw new Error('Fullscreen did not acquire native video focus')
+      await page.waitForTimeout(100)
+    }
   }
   assert.equal(await application.evaluate(({ app }) => {
     const require = process.getBuiltinModule('module').createRequire(app.getAppPath() + '/package.json')
@@ -394,7 +407,7 @@ try {
     'stopping releases the native fullscreen presentation')
   assert.equal(await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.isFocused()), true,
     'stopping fullscreen must return the native responder to HTML without losing the detail trigger')
-  const focusChecks = { nativeFullscreenFocus: true, stoppedDetailTriggerRestored: true, htmlResponderRestored: true }
+  const focusChecks = { rendererFullscreenFocus: process.platform === 'darwin', nativeFullscreenFocus: process.platform === 'win32', stoppedDetailTriggerRestored: true, htmlResponderRestored: true }
   const detailRoute = await page.evaluate(() => window.location.hash)
   await page.waitForFunction(() => !window.history.state?.avOverlay)
   await detailPlay.click()
@@ -452,30 +465,48 @@ try {
   await page.getByRole('button', { name: /^PLAYBACK-1 未刮削/ }).click()
   await page.getByRole('button', { name: '恢复展开', exact: true }).click()
   await page.waitForFunction(() => window.history.state?.avOverlay?.kind === 'playback-expanded')
-  await page.reload()
-  await page.getByRole('button', { name: '收起到底栏', exact: true }).waitFor({ state: 'visible' })
-  await page.evaluate(() => window.history.back())
-  await waitForState(page, state => state?.presentation === 'docked', 'reloaded renderer reclaims the live viewing marker')
-  assert.equal(await page.evaluate(() => window.location.hash), detailRoute)
-  assert.equal((await page.evaluate(() => window.api.playback.snapshot())).sessionId, historyId)
-  await page.getByRole('button', { name: '恢复展开', exact: true }).click()
-  await page.waitForFunction(() => window.history.state?.avOverlay?.kind === 'playback-expanded')
+  if (process.platform === 'win32') {
+    await page.reload()
+    await page.getByRole('button', { name: '收起到底栏', exact: true }).waitFor({ state: 'visible' })
+    await page.evaluate(() => window.history.back())
+    await waitForState(page, state => state?.presentation === 'docked', 'reloaded renderer reclaims the live viewing marker')
+    assert.equal(await page.evaluate(() => window.location.hash), detailRoute)
+    assert.equal((await page.evaluate(() => window.api.playback.snapshot())).sessionId, historyId)
+    await page.getByRole('button', { name: '恢复展开', exact: true }).click()
+    await page.waitForFunction(() => window.history.state?.avOverlay?.kind === 'playback-expanded')
+  }
   await clickChrome('停止播放', true)
   await waitForState(page, state => state === null, 'history explicit stop')
   await page.waitForFunction(() => !window.history.state?.avOverlay)
   assert.equal(await page.evaluate(() => window.location.hash), detailRoute)
   const historyChecks = { optionsBackDocks: true, fullscreenBackDocks: true, expandedBack: true, retiredViewingSlotReused: true,
-    rendererReloadReclaimsMarker: true, dockedPageBack: true, explicitStopConsumesMarker: true,
+    rendererReloadReclaimsMarker: process.platform === 'win32', dockedPageBack: true, explicitStopConsumesMarker: true,
     samePausedSession: historyId, loadedFiles: 1 }
   // Reopen with recording off to preserve a live application for manual UI acceptance.
   assert.equal((await page.evaluate(target => window.api.player.play(target.libraryId, target.videoId), target)).ok, true)
   await waitForState(page, state => state?.phase === 'playing' && state.position > 0.5 && state.resumePosition === null, 'disabled resume starts from zero')
+  let reloadChecks
+  if (process.platform === 'darwin' && !process.argv.includes('--keep-open')) {
+    // Navigation invalidates consumer ownership; never demand unsafe recovery.
+    await page.reload()
+    const invalidated = await waitForState(page, state => state?.phase === 'error', 'reload fails closed')
+    assert.match(invalidated.error, /完全退出并重启应用/)
+    assert.match(await page.getByRole('alert').innerText(), /完全退出并重启应用/)
+    const native = await application.evaluate(({ app }) => {
+      const require = process.getBuiltinModule('module').createRequire(app.getAppPath() + '/package.json')
+      return require(app.getAppPath() + '/out/native-playback/playback.node').inspect()
+    })
+    assert.equal(native.alive, false, 'navigation must stop the producer')
+    assert.ok(Number.isInteger(native.outstandingSurfaces) && native.outstandingSurfaces >= 0 && native.outstandingSurfaces <= 3,
+      'unknown ownership remains bounded, never forcibly recycled')
+    reloadChecks = { controlledError: invalidated.error, native }
+  }
   const resumeChecks = { savedPosition: savedPoint.position, preparedPosition: waitingResume.resumePosition, narrowResume, privateEofPreserved: true, globalOffPreserved: true }
   const errorChecks = { controlledMessage: failed.error, retriedSameResource: true, nativeReleased: true }
-  report = { status: 'partial acceptance passed', directory, initial, paused, adjustedSubtitles, subtitleClearance, hiddenControls, resumeChecks, errorChecks, focusChecks, historyChecks,
+  report = { status: 'partial acceptance passed', directory, initial, paused, adjustedSubtitles, subtitleClearance, hiddenControls, resumeChecks, errorChecks, focusChecks, historyChecks, reloadChecks,
     platform: `${process.platform}/${process.arch}`,
-    checks: ['real application startup', 'default player.play / openResource routing', 'options query the scoped file source and expose external open during playback', 'device volume survives stop and decoder replacement', 'H264 decode and platform audio output (decoder recorded in initial state)', 'expanded/docked/fullscreen same session', 'pause and exact seek', 'exact time form validation', 'embedded SRT size/delay controls', fullscreenState.rendererFullscreenControls ? 'fullscreen video size stays fixed behind chrome and settings' : 'fullscreen subtitle/control separation', fullscreenState.rendererFullscreenControls ? 'auto-hide reveals the full frame without resizing' : 'auto-hide restores native viewport', 'default-on preference and explicit non-recording progress file absence', 'recording preference uses saved draft', 'paused resume preparation and continue/from-start choices', 'private EOF preserves old progress', 'global off stops recording immediately', 'cancel clear preserves progress', 'controlled format error', 'explicit retry rechecks same resource', 'error releases native decoder', 'native fullscreen focus after animation and detail trigger restoration', 'one history back docks settings/fullscreen/expanded before page back', 'retired viewing slot reuse and reload ownership', 'explicit stop consumes viewing marker'],
-    pending: ['native screen/mini-video frame inspection', 'fullscreen native control interaction', 'remote source', 'full feature/packaging acceptance'], errors }
+    checks: ['real application startup', 'default player.play / openResource routing', 'options query the scoped file source and expose external open during playback', 'device volume survives stop and decoder replacement', 'H264 decode and platform audio output (decoder recorded in initial state)', 'expanded/docked/fullscreen same session', 'pause and exact seek', 'actual progress keyboard steps preserve pause', 'embedded SRT size/delay controls', fullscreenState.rendererFullscreenControls ? 'fullscreen video size stays fixed behind chrome and settings' : 'fullscreen subtitle/control separation', fullscreenState.rendererFullscreenControls ? 'auto-hide reveals the full frame without resizing' : 'auto-hide restores native viewport', 'default-on preference and explicit non-recording progress file absence', 'recording preference uses saved draft', 'paused resume preparation and continue/from-start choices', 'private EOF preserves old progress', 'global off stops recording immediately', 'cancel clear preserves progress', 'controlled format error', 'explicit retry rechecks same resource', 'error releases native decoder', 'fullscreen focus after animation and detail trigger restoration', 'one history back docks settings/fullscreen/expanded before page back', 'retired viewing slot reuse', ...(reloadChecks ? ['renderer reload stops production and requires restart'] : process.platform === 'win32' ? ['renderer reload reclaims viewing marker'] : []), 'explicit stop consumes viewing marker'],
+    pending: [process.platform === 'win32' ? 'native screen/mini-video frame inspection' : 'physical display inspection', ...(process.platform === 'win32' ? ['fullscreen native control interaction'] : []), 'remote source', 'full feature/packaging acceptance'], errors }
   assert.deepEqual(errors, [])
   fs.writeFileSync(path.join(output, 'report.json'), JSON.stringify(report, null, 2))
   if (process.argv.includes('--keep-open')) {

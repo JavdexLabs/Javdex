@@ -50,7 +50,6 @@
     "dist:linux": "node scripts/dist.mjs --platform linux",
     "preview": "electron-vite preview",
     "start": "electron-vite preview",
-    "prototype:libmpv": "node scripts/libmpv-prototype.mjs",
     "playback:native:build": "node scripts/build-playback-native.mjs",
     "playback:runtime:build": "node scripts/build-playback-runtime.mjs",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",

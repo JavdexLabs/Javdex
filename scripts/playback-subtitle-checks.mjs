@@ -4,7 +4,22 @@ import path from 'node:path'
 import sharp from 'sharp'
 import { captureAcceptanceFrame, nativeEvidence, waitForState, waitForValue } from './playback-acceptance-support.mjs'
 import { bitmapFixture } from './playback-pgs-fixture.mjs'
-import { openPlaybackSettings, closePlaybackSettings, selectPlaybackSetting } from './playback-settings-ui.mjs'
+import { openPlaybackSettings, closePlaybackSettings, selectPlaybackSetting, revealFullscreenControls, hideFullscreenControls } from './playback-settings-ui.mjs'
+
+async function fullscreenSubtitleComposition(application, page, directory, prefix, compare) {
+  await revealFullscreenControls(page)
+  const controls = await captureAcceptanceFrame(application, directory, `${prefix}-fullscreen-controls`)
+  assert.ok(Number.isFinite(controls.controlsTop), 'visible fullscreen toolbar geometry must be measured')
+  if (controls.rendererFullscreen) await hideFullscreenControls(page)
+  const frame = await compare()
+  if (controls.rendererFullscreen) {
+    assert.equal(frame.rendererFullscreen, true)
+    assert.equal(frame.controlsTop, undefined, 'subtitle pixel assertions must not count HTML toolbar icons')
+    assert.deepEqual([frame.width, frame.height], [controls.width, controls.height], 'overlay chrome cannot resize the video')
+  } else assert.ok(Number.isFinite(frame.controlsTop) && frame.bottom < frame.controlsTop,
+    'subtitles must remain above native fullscreen controls')
+  return { ...frame, visibleFullscreenControls: { width: controls.width, height: controls.height, top: controls.controlsTop } }
+}
 
 export async function checkBitmapSubtitlePixels(application, page, directory, prefix) {
   assert.match(prefix, /^[a-z-]+$/)
@@ -156,9 +171,7 @@ export async function checkBitmapSubtitlePixels(application, page, directory, pr
   await page.getByRole('button', { name: '全屏', exact: true }).click()
   await waitForState(page, state => state.presentation === 'fullscreen' && state.paused, 'PGS fullscreen')
   await page.waitForTimeout(1500)
-  const fullscreen = await compare('fullscreen', second)
-  assert.ok(Number.isFinite(fullscreen.controlsTop) && fullscreen.bottom < fullscreen.controlsTop,
-    'PGS must remain above visible native fullscreen controls')
+  const fullscreen = await fullscreenSubtitleComposition(application, page, directory, prefix, () => compare('fullscreen', second))
   await control({ kind: 'presentation', value: 'expanded' })
   await waitForState(page, state => state.presentation === 'expanded' && state.paused, 'PGS exit fullscreen')
   await page.waitForTimeout(1500)
@@ -227,9 +240,7 @@ export async function checkComplexSubtitlePixels(application, page, directory, p
   await page.getByRole('button', { name: '全屏', exact: true }).click()
   await waitForState(page, state => state.presentation === 'fullscreen' && state.paused, 'complex ASS fullscreen')
   await page.waitForTimeout(1500)
-  const fullscreen = await compare('fullscreen')
-  assert.ok(Number.isFinite(fullscreen.controlsTop) && fullscreen.bottom < fullscreen.controlsTop,
-    'complex ASS must remain above visible native fullscreen controls')
+  const fullscreen = await fullscreenSubtitleComposition(application, page, directory, prefix, () => compare('fullscreen'))
   await control({ kind: 'presentation', value: 'expanded' })
   await waitForState(page, state => state.presentation === 'expanded', 'complex ASS fullscreen exit')
   await page.waitForTimeout(1500)
@@ -300,9 +311,7 @@ export async function checkLocalSubtitlePicker(application, page, directory, fil
   await page.getByRole('button', { name: '全屏', exact: true }).click()
   await waitForState(page, state => state.presentation === 'fullscreen' && state.paused, 'local SRT remote fullscreen')
   await page.waitForTimeout(1500)
-  const fullscreen = await compare('fullscreen', 150)
-  assert.ok(Number.isFinite(fullscreen.controlsTop) && fullscreen.bottom < fullscreen.controlsTop,
-    'local SRT must remain above remote fullscreen controls')
+  const fullscreen = await fullscreenSubtitleComposition(application, page, directory, prefix, () => compare('fullscreen', 150))
   await control({ kind: 'presentation', value: 'expanded' })
   await waitForState(page, state => state.presentation === 'expanded', 'local SRT fullscreen exit')
   await page.waitForTimeout(1500)

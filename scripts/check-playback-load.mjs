@@ -24,7 +24,8 @@ function run(command, args, env = environment) {
 if (process.platform === 'linux') {
   run(process.execPath, [path.join(root, 'scripts/playback-linux-helper-smoke.mjs'), path.join(directory, 'playback-helper')])
 } else {
-  const script = `const a=require(${JSON.stringify(path.join(directory, 'playback.node'))});for(const k of ['create','destroy','state'])if(typeof a[k]!=='function')throw Error('Missing native export '+k);console.log('Playback addon loaded in Electron '+process.versions.electron)`
+  const exports = ['create', 'destroy', 'state', ...(process.platform === 'darwin' ? ['setWakeup', 'nextFrame', 'releaseFrame', 'resetTiming', 'setRenderBudget', 'generatedSubtitles'] : [])]
+  const script = `const a=require(${JSON.stringify(path.join(directory, 'playback.node'))});for(const k of ${JSON.stringify(exports)})if(typeof a[k]!=='function')throw Error('Missing native export '+k);console.log('Playback addon loaded in Electron '+process.versions.electron)`
   run(require('electron'), ['-e', script], { ...environment, ELECTRON_RUN_AS_NODE: '1' })
 }
 const matrix = path.resolve(process.env.JAVDEX_PLAYBACK_RUNTIME_DIR ?? path.join(root, 'out/playback-runtime'))

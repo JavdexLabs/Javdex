@@ -33,8 +33,7 @@ if (platform === 'win32') {
   const pathKey = Object.keys(environment).find(key => key.toLowerCase() === 'path') ?? 'Path'
   environment[pathKey] = path.join(prefix, 'bin') + path.delimiter + (environment[pathKey] ?? '')
 }
-for (const step of playbackNativeBuild({ platform, arch, root, prefix, include, nodeLibrary, delayHook, output,
-  macSharedTexture: platform === 'darwin' && process.env.JAVDEX_BUILD_MAC_SHARED_TEXTURE === '1' })) {
+for (const step of playbackNativeBuild({ platform, arch, root, prefix, include, nodeLibrary, delayHook, output })) {
   const result = spawnSync(step.command, step.args, { cwd: root, env: environment, stdio: 'inherit' })
   if (result.error) throw result.error
   if (result.status !== 0) throw new Error('Native build or regression command failed: ' + step.command + ' (exit ' + result.status + ')')

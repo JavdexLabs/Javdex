@@ -139,15 +139,21 @@ Whisper b5130 的 macOS arm64／x64 工具保留静态运行库、Metal／Accele
 
 ### 内置播放运行库
 
-Windows 原生 adapter 使用 rendererFullscreenControls 和覆盖区域裁剪。Linux 已移除原生子窗口，视频、控制栏与菜单均由 renderer 合成，不再使用 X Shape 裁剪、原生全屏工具栏或 X11 焦点转发。Windows/macOS 原生视图行为保留。
+Windows 原生 adapter 使用 rendererFullscreenControls 和覆盖区域裁剪。macOS 以 IOSurface 共享纹理到 Canvas2D，Linux 以共享纹理或 CPU 帧到 Canvas；两者的视频、控制栏与菜单均由 renderer 合成，不使用原生子窗口或原生全屏工具栏。Windows 原生视图与输入行为保留。
 
 内置播放行为与平台边界见 [播放合同](BUILTIN_PLAYBACK.md)，实际源码构建及发布证据见下文。`npm run playback:native:build` 只生成链接本机开发库的运行文件：macOS/Windows 为 addon，Linux 为独立 `playback-helper`；正式打包输入由 `npm run playback:runtime:build` 从固定源码构建。普通桌面打包明确排除 `out/native-playback`、`out/playback-acceptance`、`out/libmpv-prototype` 与 `out/playback-runtime`，审核后的运行库通过打包钩子复制到 Resources，不把构建目录、合成素材、截图或临时 Electron bundle 收入 `app.asar`。
 
-原生核心的初始化、异步命令、事件复制、状态缓存与帧计数共用 `native/mpvCore.h`；Cocoa/WGL 拥有各自平台窗口、GL context 和原生输入，Linux 使用独立 helper。macOS 构建先编译运行 C++ 的键位与核心回归，再生成 Cocoa addon；Linux CMake 构建运行共用核心与 DMA-BUF 协议／槽位回归。`npm run test:playback:build` 检查构建命令选择，已纳入根测试；它本身不编译其它平台源码，也不证明可播放。
+原生核心的初始化、异步命令、事件复制、状态缓存与帧计数共用 `native/mpvCore.h`；Windows WGL 拥有平台窗口、GL context 和原生输入，macOS CGL 只生产离屏 IOSurface，Linux 使用独立 helper。macOS 构建先编译运行 C++ 核心回归，再将 `macSharedTexture.mm` 编译为唯一的 `playback.node`；Linux CMake 构建运行共用核心与 DMA-BUF 协议／槽位回归。`npm run test:playback:build` 检查构建命令选择，已纳入根测试；它本身不编译其它平台源码，也不证明可播放。
 
-macOS 共享 Canvas 实验需要显式构建 `JAVDEX_BUILD_MAC_SHARED_TEXTURE=1 npm run playback:native:build`，在保留 `playback.node` 的同时生成 `out/native-playback/playback-shared.node`。完成正常桌面构建后以 `electron . --javdex-mac-shared-texture` 启动；去掉参数并重启即回到原生视图。未更改正式运行库、签名或 Release 构建输入，普通构建与正式包不因开发目录存在实验 addon 而自动启用。
+macOS 正常运行 `npm run playback:native:build`，生成 `out/native-playback/playback.node`；完成 `npm run build` 后通过普通应用入口启动，无须试验参数。正式源码构建也复用同一原生编译计划，打包仍使用原有审核矩阵、许可材料和签名门禁；不会用本机开发 addon 替代正式运行库输入。旧 NSOpenGLView 后端及其专属构建目标已移除，不再有进程内旧后端切换或自动回退。
 
-`JAVDEX_TEST_MAC_SHARED_NATIVE=<实验 addon 绝对路径> node scripts/run-electron-tests.mjs apps/desktop/src/main/player/macSharedTextureNative.test.ts` 在本机真实 CGL/IOSurface 上检查三槽、resize、destroy 与跨会话租约；没有显式 addon 时注明宿主条件并跳过，不当作原生通过。`scripts/mac-shared-texture-acceptance.mjs` 使用隔离资料库和同一目录下的合成媒体，可加 `--baseline`、`--color`、`--stress` 或 `--crash` 分别作旧后端、参考色块、多轮慢消费或崩溃所有权检查。它捕获真实 Chromium 窗口；旧后端色块对照单独使用 native FBO 读回，不冒充窗口截图。`scripts/mac-shared-texture-probe.cjs` 仅为一帧 IOSurface 垂直探针，不替代完整播放器验收。物理上屏、声音听感、多显示器、长时间能耗及正式包另行判断。
+`node scripts/run-electron-tests.mjs apps/desktop/src/main/player/macSharedTextureNative.test.ts` 自动使用本机正常构建的 addon，在真实 CGL/IOSurface 上检查线程保护、事件合并、三槽、resize、destroy 与跨会话租约；非 macOS 或缺少编译产物时明确跳过，不当作原生通过。CI 用 `JAVDEX_TEST_MAC_PLAYBACK_NATIVE=<审核矩阵中的 playback.node 绝对路径>` 检查刚构建的同架构运行库；显式输入缺失即失败。
+
+`node scripts/mac-shared-texture-acceptance.mjs <同目录下的合成媒体...> --fps=24,30,60` 通过不带后端参数的正常应用入口，捕获真实 Chromium 窗口并核对视频／Canvas 速率、VideoToolbox、暂停、连续 seek、轨道、全屏、焦点、缩放与停止释放。fps 数量需与文件对应；多音轨夹具的真实速率以文件为准。`--color` 检查四种参考色块；`--stress` 对首个文件运行五轮 1.5 秒阻塞消费、立即停止与重开；`--crash` 只崩溃自有验收 renderer，检查未知引用隔离到退出。正常退出须无强制结束、exit=0、无信号；实际故障隔离不代表自动恢复。物理上屏、声音听感、多显示器、长时间能耗及正式包另行判断。
+
+共享帧的主线程调度使用有界 [Node-API 线程安全回调](https://nodejs.org/api/n-api.html#asynchronous-thread-safe-function-calls)，同一 dispatcher 只保留一个待处理唤醒；暂停时的非视频命令、字幕事件与关闭重开也有原生回归。dispatcher 不拥有 IOSurface 租约，停止先解绑 JS 回调，退出时先结束 mpv 线程再终止队列；不能用它替代 GPU 完成或 `allReferencesReleased`。
+
+旧新后端对照、阶段剥离和 WebGL/video/WebGPU 候选已停止维护并移出活动入口；脚本、失败记录、profile 与逐文件哈希保留在 [正式化记录](reviews/macos-canvas-default-2026-10-23.md)指向的可恢复归档，不销毁研究证据。既有播放态 CPU 对照没有显示采用 Canvas 的性能收益，历史数字按一核满载为 100% 计量，不是整机归一化百分比。需要按需排查时仍可拉取 `javdex.playback.mac-shared-texture.statistics` 现有主进程统计；它不暴露原生句柄或媒体位置，也不是物理上屏回执。
 
 Windows WGL 适配已在 Windows 11 x64 用 MSVC 实际编译，并在 Electron 中加载、播放本地与 loopback 远程合成素材；范围及剩余关口见 [Windows 验收记录](BUILTIN_PLAYBACK_WINDOWS_ACCEPTANCE.md)。开发构建需要 Windows 本机的 MSVC、Visual Studio CMake generator、同架构 libmpv headers/import library/DLL，以及对应 Electron 的 headers 和 `node.lib`。设置 `JAVDEX_MPV_PREFIX` 为已安装开发前缀；默认 Electron 输入为 `~/.electron-gyp/<version>/include/node` 与 `<arch>/node.lib`，可分别用 `JAVDEX_ELECTRON_HEADERS` / `JAVDEX_ELECTRON_NODE_LIBRARY` 覆盖。Windows 开发构建完成后按实际 PE 导入闭包，从该前缀的 `bin` 复制所需 DLL 到 `out/native-playback`，普通 `npm run dev` / `npm start` 无需额外配置 libmpv PATH；缺失依赖或架构不匹配会拒绝构建，前缀中的 Mesa `opengl32.dll` 不复制，以保留系统 WGL。旧的 addon-only 开发产物需重新构建并正常退出、重启应用。构建器不下载依赖、不修改用户系统环境；这些开发文件仍排除在正式安装包之外。WGL 不等于 ANGLE 直接硬解，本轮 H.264/HEVC Main10 的实际内核状态为 `d3d11va-copy`。
 

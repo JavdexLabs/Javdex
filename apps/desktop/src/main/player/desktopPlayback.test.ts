@@ -24,7 +24,7 @@ function deferred() {
   return { promise, resolve }
 }
 
-function fixture(t: TestContext, pause: 'recent' | 'playlist') {
+function fixture(t: TestContext, pause: 'recent' | 'playlist', renderPolling = true) {
   const root = mkdtempSync(path.join(os.tmpdir(), 'javdex-playback-start-'))
   const entered = deferred(), release = deferred(), finished = deferred()
   const removals: Array<{ catalog: string; videoId: number }> = []
@@ -48,7 +48,7 @@ function fixture(t: TestContext, pause: 'recent' | 'playlist') {
   const source = { target: { libraryId: 1, videoId: 7, resourceId: 9 }, title: 'Synthetic', mode: 'remote',
     locator: 'https://fixture.invalid/video', identityKey: playbackCatalogKey(backend), revision: '1', resumeKey: 'a'.repeat(64) }
   let raw: NativePlaybackState = { alive: true, loadedFiles: 1, pause: false, seekable: true, duration: 300, 'time-pos': 1, presentedFrames: 1 }
-  const native = { create() {}, destroy() {}, command() {}, load() {}, read: () => ({ ...raw }), render() {}, viewport() {}, addSubtitle() {} }
+  const native = { renderPolling, create() {}, destroy() {}, command() {}, load() {}, read: () => ({ ...raw }), render() {}, viewport() {}, addSubtitle() {} }
   let session!: ReturnType<typeof createPlaybackSession>
   const mocks: Record<string, unknown> = {
     electron: { app: { getPath: () => root }, dialog: {}, shell: {}, powerSaveBlocker: { start: () => 1, stop() {} }, powerMonitor: { on() {}, off() {} } },
@@ -91,6 +91,16 @@ function fixture(t: TestContext, pause: 'recent' | 'playlist') {
       await entered.promise
     } }
 }
+
+test('self-driven native hosts omit the render poll but still publish controlled failures through state observation', async t => {
+  const f = fixture(t, 'recent', false)
+  assert.equal((await f.open(f.source.target)).ok, true)
+  assert.equal(f.timers.has(16), false)
+  assert.ok(f.timers.has(200))
+  f.native.read = () => { throw Object.assign(new Error('private native state'), { code: 'PLAYBACK_RESTART_REQUIRED' }) }
+  f.timers.get(200)!()
+  assert.match(f.snapshot()!.error!, /重启应用/)
+})
 
 for (const interval of [16, 200]) {
   for (const restart of [false, true]) {

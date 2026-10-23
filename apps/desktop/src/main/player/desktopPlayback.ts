@@ -158,14 +158,14 @@ export function registerBuiltinPlayback(backend: CatalogBackend, getWindow: () =
     }
   })
   const stopSubtitles = aiSubtitles.stop
-  const renderTimer = setInterval(() => {
+  const renderTimer = native.renderPolling === false ? null : setInterval(() => {
     try { native.render() } catch (error) { session.fail(playbackFailure(error, 'video').message) }
   }, 16)
   const stateTimer = setInterval(() => {
     try { session.tick() } catch (error) { session.fail(playbackFailure(error, 'native').message) }
     try { aiSubtitles.tick(session.snapshot()) } catch { /* Optional subtitles cannot fail the video decoder. */ }
   }, 200)
-  renderTimer.unref(); stateTimer.unref()
+  renderTimer?.unref(); stateTimer.unref()
   const onSuspend = (): void => { session.pause() }
   powerMonitor.on('suspend', onSuspend)
   const unsubscribe = backend.onSessionChanged?.(() => session.stop())
@@ -174,7 +174,8 @@ export function registerBuiltinPlayback(backend: CatalogBackend, getWindow: () =
     if (!recordingEnabled) session.stopRecording()
   })
   dispose = () => {
-    clearInterval(renderTimer); clearInterval(stateTimer); unsubscribe?.(); unsubscribeSettings?.()
+    if (renderTimer) clearInterval(renderTimer)
+    clearInterval(stateTimer); unsubscribe?.(); unsubscribeSettings?.()
     powerMonitor.off('suspend', onSuspend)
     bound?.off('closed', onClosed); bound?.off('hide', onHidden); bound?.off('leave-full-screen', onFullscreenExit)
     bound?.off('minimize', onMinimized)

@@ -9,7 +9,8 @@ import { _electron } from 'playwright-core'
 export { recordAcceptanceCleanup } from './playback-acceptance-cleanup.mjs'
 
 export const root = process.cwd()
-export const output = path.join(root, 'out/playback-acceptance')
+export const output = process.env.JAVDEX_PLAYBACK_ACCEPTANCE_OUTPUT
+  ? path.resolve(process.env.JAVDEX_PLAYBACK_ACCEPTANCE_OUTPUT) : path.join(root, 'out/playback-acceptance')
 const acceptanceProcesses = new WeakMap()
 export const acceptanceProcess = application => acceptanceProcesses.get(application) ?? application.process()
 
@@ -22,7 +23,7 @@ export function createAcceptanceDirectory(suffix = '') {
 function macAcceptanceBundle(originalPlist) {
   const version = /<key>CFBundleVersion<\/key>\s*<string>([^<]+)/.exec(originalPlist)?.[1]
   assert.match(version ?? '', /^\d+\.\d+\.\d+(?:[.-][a-zA-Z0-9.-]+)?$/, 'Electron bundle has a safe version')
-  return path.join(output, `Javdex Playback Acceptance-${version}.app`)
+  return path.join(root, 'out/playback-acceptance', `Javdex Playback Acceptance-${version}.app`)
 }
 
 export function seedAcceptanceCatalog(directory, media) {
@@ -99,11 +100,35 @@ export const waitForState = (page, predicate, description, timeout) =>
 export const nativeEvidence = application => application.evaluate(({ app }) => {
   const require = process.getBuiltinModule('module').createRequire(app.getAppPath() + '/package.json')
   const state = require(app.isPackaged ? process.resourcesPath + '/native-playback/playback.node' : app.getAppPath() + '/out/native-playback/playback.node').inspect()
-  return { alive: state.alive, loadedFiles: state.loadedFiles, presentedFrames: state.presentedFrames,
+  // This is a producer render counter, not proof of physical screen presentation.
+  return { alive: state.alive, loadedFiles: state.loadedFiles,
+    renderedFrames: process.platform === 'darwin' ? state.nativeFrames : state.presentedFrames,
+    presentedFrames: process.platform === 'darwin' ? undefined : state.presentedFrames,
     commandErrors: state.commandErrors, position: state['time-pos'], audioPosition: state['audio-pts'],
     audioTracks: JSON.parse(state['track-list'] ?? '[]').filter(track => track.type === 'audio').map(track => ({
       id: track.id, title: track.title, language: track.lang, codec: track.codec, channels: track['demux-channel-count']
     })) }
+})
+
+export const captureAcceptanceImage = application => application.evaluate(async ({ app, BrowserWindow }) => {
+  if (process.platform === 'win32') {
+    const require = process.getBuiltinModule('module').createRequire(app.getAppPath() + '/package.json')
+    return require(app.isPackaged ? process.resourcesPath + '/native-playback/playback.node' : app.getAppPath() + '/out/native-playback/playback.node').capture()
+  }
+  const window = BrowserWindow.getAllWindows()[0], image = await window.webContents.capturePage()
+  const rect = await window.webContents.executeJavaScript(`(() => {
+    const canvas = document.querySelector('canvas[data-playback-surface]'), r = canvas.getBoundingClientRect();
+    const root = canvas.closest('[data-playback-session]');
+    const toolbar = root.querySelector('input[aria-label="播放进度"]')?.parentElement.parentElement;
+    const rendererFullscreen = root.dataset.rendererFullscreen === 'true';
+    const controlsTop = rendererFullscreen && root.dataset.controlsVisible === 'true' && toolbar ? toolbar.getBoundingClientRect().top - r.y : undefined;
+    return { x: r.x, y: r.y, width: r.width, height: r.height, windowWidth: innerWidth,
+      controlsTop, rendererFullscreen };
+  })()`)
+  const scale = image.getSize().width / rect.windowWidth
+  const crop = image.crop({ x: Math.round(rect.x * scale), y: Math.round(rect.y * scale), width: Math.round(rect.width * scale), height: Math.round(rect.height * scale) })
+  return { ...crop.getSize(), data: crop.toBitmap(),
+    controlsTop: rect.controlsTop === undefined ? undefined : Math.round(rect.controlsTop * scale), rendererFullscreen: rect.rendererFullscreen }
 })
 
 // One-shot render readback for acceptance only. Frames never cross product IPC.
@@ -111,11 +136,11 @@ export async function captureAcceptanceFrame(application, directory, name, { bas
   assert.match(name, /^[a-z0-9-]+$/)
   const relative = path.relative(output, path.resolve(directory))
   assert.ok(!relative.startsWith('..') && !path.isAbsolute(relative), 'frame output must remain in ignored acceptance artifacts')
-  return application.evaluate(({ app, nativeImage }, { directory, name, baseline, compare, whiteBounds }) => {
+  const frame = await captureAcceptanceImage(application)
+  return application.evaluate(({ app, nativeImage }, { directory, name, baseline, compare, whiteBounds, frame }) => {
     const require = process.getBuiltinModule('module').createRequire(app.getAppPath() + '/package.json')
-    const frame = require(app.isPackaged ? process.resourcesPath + '/native-playback/playback.node' : app.getAppPath() + '/out/native-playback/playback.node').capture()
     require('node:fs').writeFileSync(require('node:path').join(directory, name + '.png'),
-      nativeImage.createFromBitmap(frame.data, { width: frame.width, height: frame.height }).toPNG())
+      nativeImage.createFromBitmap(Buffer.from(frame.data), { width: frame.width, height: frame.height }).toPNG())
     let visiblePixels = 0, differentPixels = 0, bottom = -1
     const differentQuadrants = { topLeft: 0, topRight: 0, bottomLeft: 0, bottomRight: 0 }
     const changedColors = { cyan: 0, magenta: 0, green: 0, yellow: 0, red: 0, white: 0 }
@@ -143,11 +168,12 @@ export async function captureAcceptanceFrame(application, directory, name, { bas
     }
     if (baseline) globalThis.playbackAcceptanceBaseline = frame
     if (compare) delete globalThis.playbackAcceptanceBaseline
-    return { width: frame.width, height: frame.height, controlsTop: frame.controlsTop, visiblePixels, differentPixels, bottom,
+    return { width: frame.width, height: frame.height, controlsTop: frame.controlsTop, rendererFullscreen: frame.rendererFullscreen,
+      visiblePixels, differentPixels, bottom,
       differentQuadrants, changedColors, whitePixels,
       whiteBounds: whiteBounds && right >= left ? { x: left, y: top, width: right - left + 1, height: whiteBottom - top + 1 } : null,
-      sha256: require('node:crypto').createHash('sha256').update(frame.data).digest('hex') }
-  }, { directory: path.resolve(directory), name, baseline, compare, whiteBounds })
+      sha256: require('node:crypto').createHash('sha256').update(Buffer.from(frame.data)).digest('hex') }
+  }, { directory: path.resolve(directory), name, baseline, compare, whiteBounds, frame })
 }
 
 export async function closeAcceptance(application) {

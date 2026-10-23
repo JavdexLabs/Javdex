@@ -162,6 +162,11 @@ class MpvCore {
         }
     }
 public:
+    // Opt-in host event notification; render notifications alone do not cover
+    // command replies, track/property changes or subtitle work while paused.
+    void setEventWakeup(void (*wakeup)(void *), void *context) {
+        if (handle) mpv_set_wakeup_callback(handle, wakeup, context);
+    }
     bool alive() const { return handle && renderer; }
     uint64_t loads() const { return loadedFiles; }
     double number(const char *name) const {
@@ -251,6 +256,7 @@ public:
     }
     void shutdown() {
         renderWakeup.store(nullptr);
+        if (handle) mpv_set_wakeup_callback(handle, nullptr, nullptr);
         if (renderer) { mpv_render_context_set_update_callback(renderer, nullptr, nullptr); mpv_render_context_free(renderer); renderer = nullptr; }
         if (handle) { mpv_terminate_destroy(handle); handle = nullptr; }
         actions.clear(); requested.store(false);

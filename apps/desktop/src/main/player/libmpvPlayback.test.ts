@@ -17,8 +17,9 @@ const wrapperCode = transpileModule(readFileSync(new URL('./libmpvPlayback.ts', 
 const subtitleFile = path.resolve('fixture-subtitles', 'AI 日中字幕.ass')
 const newSubtitleFile = path.resolve('fixture-subtitles', 'new.ass')
 
-function fixture(platform: 'darwin' | 'win32' | 'linux', macShared = false) {
+function fixture(platform: 'darwin' | 'win32' | 'linux') {
   const commands: string[][] = []
+  const loaded: string[] = []
   let actions: NonNullable<NativePlaybackState['actions']> = []
   let created = false
   let rendererControls = false
@@ -88,13 +89,13 @@ function fixture(platform: 'darwin' | 'win32' | 'linux', macShared = false) {
     require(id: string): unknown {
       switch (id) {
         case 'electron': return {
-          app: { isPackaged: false, getAppPath: () => path.resolve('fixture-app'), commandLine: { hasSwitch: () => macShared } },
+          app: { isPackaged: false, getAppPath: () => path.resolve('fixture-app') },
           screen: { getDisplayMatching: () => ({ scaleFactor: 1 }) }
         }
         case 'node:fs': return { existsSync: () => true }
         case 'node:path': return path
         case 'node:timers/promises': return { setTimeout: delay }
-        case 'node:module': return { createRequire: () => () => bridge }
+        case 'node:module': return { createRequire: () => (filename: string) => { loaded.push(filename); return bridge } }
         case './playbackDisplay': return { linuxPlaybackBackend: () => 'dmabuf' }
         case './linuxPlaybackBridge': return { createLinuxPlaybackBridge: () => bridge }
         case './linuxSharedTexture': return { createLinuxSharedTexture: () => { throw new Error('Wrapper fixture does not materialize its deferred frame channel') } }
@@ -107,14 +108,14 @@ function fixture(platform: 'darwin' | 'win32' | 'linux', macShared = false) {
   }, { filename: 'libmpvPlayback.ts' })
   const window = {
     isDestroyed: () => false,
-    getNativeWindowHandle: () => { assert.ok(platform !== 'linux' && !macShared, 'Canvas backends must not request a native window handle'); return Buffer.alloc(4) },
+    getNativeWindowHandle: () => { assert.equal(platform, 'win32', 'only Windows requests a native window handle'); return Buffer.alloc(4) },
     getBounds: () => ({ x: 0, y: 0, width: 1, height: 1 }),
     webContents: { getZoomFactor: () => 1 }
   } as unknown as BrowserWindow
   const native = moduleExports.createLibmpvPlayback(() => window)
   native.create()
   assert.equal(created, true, 'the real wrapper must load the fixture bridge')
-  return { native, commands, overlays, viewports, occlusions, queue: (pending: typeof actions): void => { actions.push(...pending) },
+  return { native, commands, overlays, viewports, occlusions, loaded, queue: (pending: typeof actions): void => { actions.push(...pending) },
     hold: (): void => { held = true },
     observeSelection: (sub: string, audio = aid): void => { sid = sub; aid = audio },
     freeze: (): void => { frozen = snapshot() }, thaw: (): void => { frozen = null },
@@ -135,13 +136,13 @@ test('Linux and Windows enable the shared accessible fullscreen controls and pas
   }
 })
 
-test('macOS shared Canvas is opt-in and the original native controls remain the default rollback', t => {
-  for (const shared of [false, true]) {
-    const f = fixture('darwin', shared); t.after(f.native.destroy)
-    assert.equal(f.native.read().rendererFullscreenControls, shared)
-    f.native.viewport({ x: 0, y: 0, width: 640, height: 360 }, true, { presentation: 'expanded' } as PlaybackSnapshot)
-    assert.equal((f.viewports[0] as { scale?: number }).scale, shared ? 1 : undefined)
-  }
+test('macOS normal playback always uses the shared Canvas addon and DOM controls without switches', t => {
+  const f = fixture('darwin'); t.after(f.native.destroy)
+  assert.equal(f.native.read().rendererFullscreenControls, true)
+  assert.equal(f.native.renderPolling, false)
+  assert.deepEqual(f.loaded, [path.resolve('fixture-app/out/native-playback/playback.node')])
+  f.native.viewport({ x: 0, y: 0, width: 640, height: 360 }, true, { presentation: 'expanded' } as PlaybackSnapshot)
+  assert.equal((f.viewports[0] as { scale?: number }).scale, 1)
 })
 
 const timeline = 'generated timeline fixture'

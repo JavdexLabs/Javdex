@@ -20,11 +20,14 @@ const frame = (sequence = 1, slot = 0, extra: Record<string, unknown> = {}) => (
   modifier: '0', producerComplete: true, ...extra })
 function fixture(diagnostics = false, software = false) {
   let nextFd = 100
-  let now = 0, receiveCalls = 0, ackWritable = true, importFailure = false, sendFailure = false
+  let now = 0, receiveCalls = 0, ackWritable = true, importFailure = false, sendFailure = false, flushFailure = false
   let tick: () => void = () => {}
   const app = new EventEmitter(), ipc = new EventEmitter()
   const mainFrame = {}
-  const contents = Object.assign(new EventEmitter(), { mainFrame, send: (_channel: string, metadata: unknown) => sent.push({ frame: mainFrame, metadata: metadata as typeof sent[number]['metadata'] }), isDestroyed: () => false })
+  const contents = Object.assign(new EventEmitter(), { mainFrame, send: (channel: string, metadata: unknown) => {
+    if (flushFailure && channel === 'playback:frame-flush') throw new Error('disposed renderer frame')
+    sent.push({ frame: mainFrame, metadata: metadata as typeof sent[number]['metadata'] })
+  }, isDestroyed: () => false })
   const window = { webContents: contents } as unknown as BrowserWindow
   const closed: number[] = [], acknowledgements: number[] = [], errors: Error[] = []
   const incoming: Array<{ fd: number; metadata: Buffer }> = []
@@ -69,10 +72,32 @@ function fixture(diagnostics = false, software = false) {
     tick: async (advance = 0) => { now += advance; tick(); await Promise.resolve(); await Promise.resolve() },
     receiveCalls: () => receiveCalls,
     blockedAck: () => { ackWritable = false },
-    failImport: () => { importFailure = true }, failSend: () => { sendFailure = true },
+    failImport: () => { importFailure = true }, failSend: () => { sendFailure = true }, failFlush: () => { flushFailure = true },
     release: (index = 0) => imports[index].options.allReferencesReleased!()
   }
 }
+
+for (const mode of ['destroy', 'renderer-gone', 'gpu-gone'] as const)
+  test(`disposed flush cannot abort Linux ${mode} cleanup or its failure notification`, async () => {
+    const f = fixture(); f.ready(); f.manager.setVisible(true)
+    f.packet(); await f.tick()
+    assert.equal(f.imports.length, 1)
+    f.failFlush()
+    assert.doesNotThrow(() => {
+      if (mode === 'destroy') f.manager.destroy()
+      else if (mode === 'renderer-gone') f.contents.emit('render-process-gone')
+      else f.app.emit('child-process-gone', {}, { type: 'GPU' })
+    })
+    assert.deepEqual(f.closed.slice().sort((a, b) => a - b), [10, 11, 101])
+    assert.equal(f.errors.length, mode === 'destroy' ? 0 : 1, 'owner must receive the failure and terminate the helper')
+    assert.equal(f.ipc.listenerCount(READY), 0)
+    assert.equal(f.contents.listenerCount('render-process-gone'), 0)
+    assert.equal(f.app.listenerCount('child-process-gone'), 0)
+    const receives = f.receiveCalls(); await f.tick(10000)
+    assert.equal(f.receiveCalls(), receives)
+    f.release(); f.manager.destroy()
+    assert.deepEqual(f.acknowledgements, [], 'teardown never grants unknown consumer reuse')
+  })
 
 test('pixel diagnostics accept only requested sequences from the bound main frame and strip arbitrary data', async t => {
   const f = fixture(true); t.after(f.manager.destroy)

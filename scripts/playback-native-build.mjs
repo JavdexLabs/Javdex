@@ -38,26 +38,20 @@ export function stageWindowsDevelopmentLibraries({ output, libraryDirectory, arc
 
 /** Development build commands only; no SDK download, cross-platform claim or
  * release runtime staging. The driver checks the selected host's real inputs. */
-export function playbackNativeBuild({ platform, arch, root, prefix, include, nodeLibrary, delayHook, output, macSharedTexture = false }) {
+export function playbackNativeBuild({ platform, arch, root, prefix, include, nodeLibrary, delayHook, output }) {
   const source = path.join(root, 'apps/desktop/src/main/player/native')
   if (!['x64', 'arm64'].includes(arch)) throw new Error('Unsupported native playback architecture')
   if (platform === 'darwin') {
-    const navigation = path.join(output, 'navigation-key-test'), core = path.join(output, 'mpv-core-test')
+    const core = path.join(output, 'mpv-core-test')
     const architecture = ['-arch', arch === 'x64' ? 'x86_64' : 'arm64']
-    const steps = [
-      { command: 'clang++', args: ['-std=c++17', ...architecture, path.join(source, 'macNavigationKey.test.cpp'), '-o', navigation] },
-      { command: navigation, args: [] },
+    return [
       { command: 'clang++', args: ['-std=c++17', ...architecture, `-I${include}`, `-I${prefix}/include`, path.join(source, 'mpvCore.test.cpp'),
         `-L${prefix}/lib`, '-lmpv', '-o', core] },
       { command: core, args: [] },
       { command: 'clang++', args: ['-std=c++17', ...architecture, '-fobjc-arc', '-shared', '-undefined', 'dynamic_lookup', '-Wno-deprecated-declarations',
-        `-I${include}`, `-I${prefix}/include`, path.join(source, 'macPlayback.mm'), `-L${prefix}/lib`, '-lmpv',
-        '-framework', 'Cocoa', '-framework', 'OpenGL', '-o', path.join(output, 'playback.node')] }
+        `-I${include}`, `-I${prefix}/include`, path.join(source, 'macSharedTexture.mm'), `-L${prefix}/lib`, '-lmpv',
+        '-framework', 'Foundation', '-framework', 'OpenGL', '-framework', 'IOSurface', '-o', path.join(output, 'playback.node')] }
     ]
-    if (macSharedTexture) steps.push({ command: 'clang++', args: ['-std=c++17', ...architecture, '-fobjc-arc', '-shared', '-undefined', 'dynamic_lookup', '-Wno-deprecated-declarations',
-      `-I${include}`, `-I${prefix}/include`, path.join(source, 'macSharedTexture.mm'), `-L${prefix}/lib`, '-lmpv',
-      '-framework', 'Foundation', '-framework', 'OpenGL', '-framework', 'IOSurface', '-o', path.join(output, 'playback-shared.node')] })
-    return steps
   }
   if (platform === 'win32') {
     if (!nodeLibrary) throw new Error('Windows requires the matching Electron node.lib')

@@ -17,12 +17,13 @@ const wrapperCode = transpileModule(readFileSync(new URL('./libmpvPlayback.ts', 
 const subtitleFile = path.resolve('fixture-subtitles', 'AI 日中字幕.ass')
 const newSubtitleFile = path.resolve('fixture-subtitles', 'new.ass')
 
-function fixture(platform: 'darwin' | 'win32' | 'linux') {
+function fixture(platform: 'darwin' | 'win32' | 'linux', windowsCanvas = false) {
   const commands: string[][] = []
   const loaded: string[] = []
   let actions: NonNullable<NativePlaybackState['actions']> = []
   let created = false
   let rendererControls = false
+  const handles: number[] = [], sharedProducer = {}
   const viewports: unknown[] = [], occlusions: PlaybackOcclusion[][] = []
   let pending = 0, replies = 0, errors = 2, generatedErrors = 0, held = false
   let generatedPending = 0, generatedReplies = 0
@@ -52,7 +53,7 @@ function fixture(platform: 'darwin' | 'win32' | 'linux') {
     if (args[0] === 'set' && args[1] === 'sid') sid = args[2]
   }
   const bridge = {
-    create() { created = true },
+    create(handle: Buffer) { handles.push(handle.length); created = true },
     setRendererControls(value: boolean) { rendererControls = value },
     setBounds(bounds: unknown) { viewports.push(bounds) },
     setVisible() {},
@@ -95,12 +96,15 @@ function fixture(platform: 'darwin' | 'win32' | 'linux') {
         case 'node:fs': return { existsSync: () => true }
         case 'node:path': return path
         case 'node:timers/promises': return { setTimeout: delay }
-        case 'node:module': return { createRequire: () => (filename: string) => { loaded.push(filename); return bridge } }
-        case './playbackDisplay': return { linuxPlaybackBackend: () => 'dmabuf' }
+        case 'node:module': return { createRequire: () => (filename: string) => { loaded.push(filename); return windowsCanvas ? { ...bridge, sharedTexture: sharedProducer } : bridge } }
+        case './playbackDisplay': return { linuxPlaybackBackend: () => 'dmabuf', windowsCanvasPlayback: () => windowsCanvas }
         case './linuxPlaybackBridge': return { createLinuxPlaybackBridge: () => bridge }
         case './linuxSharedTexture': return { createLinuxSharedTexture: () => { throw new Error('Wrapper fixture does not materialize its deferred frame channel') } }
         case './linuxGpuImport': return { linuxGpuImportLoader: () => undefined }
         case './macSharedTexture': return { createMacSharedTextureBridge: () => bridge }
+        case './nativeSharedTexture': return { createNativeSharedTextureBridge: (producer: unknown, _window: unknown, platform: string) => {
+          assert.equal(producer, sharedProducer); assert.equal(platform, 'win32'); return bridge
+        } }
         case './linuxPlaybackDevice': return { linuxPlaybackRenderNode: () => '/dev/dri/renderD129' }
         default: throw new Error(`Unexpected playback wrapper dependency: ${id}`)
       }
@@ -115,7 +119,7 @@ function fixture(platform: 'darwin' | 'win32' | 'linux') {
   const native = moduleExports.createLibmpvPlayback(() => window)
   native.create()
   assert.equal(created, true, 'the real wrapper must load the fixture bridge')
-  return { native, commands, overlays, viewports, occlusions, loaded, queue: (pending: typeof actions): void => { actions.push(...pending) },
+  return { native, commands, overlays, viewports, occlusions, loaded, handles, queue: (pending: typeof actions): void => { actions.push(...pending) },
     hold: (): void => { held = true },
     observeSelection: (sub: string, audio = aid): void => { sid = sub; aid = audio },
     freeze: (): void => { frozen = snapshot() }, thaw: (): void => { frozen = null },
@@ -143,6 +147,14 @@ test('macOS normal playback always uses the shared Canvas addon and DOM controls
   assert.deepEqual(f.loaded, [path.resolve('fixture-app/out/native-playback/playback.node')])
   f.native.viewport({ x: 0, y: 0, width: 640, height: 360 }, true, { presentation: 'expanded' } as PlaybackSnapshot)
   assert.equal((f.viewports[0] as { scale?: number }).scale, 1)
+})
+test('Windows keeps legacy polling by default and selects the shared producer only by startup opt-in', t => {
+  const legacy = fixture('win32'), canvas = fixture('win32', true)
+  t.after(legacy.native.destroy); t.after(canvas.native.destroy)
+  assert.equal(legacy.native.renderPolling, undefined)
+  assert.equal(canvas.native.renderPolling, false)
+  assert.deepEqual(legacy.handles, [4]); assert.deepEqual(canvas.handles, [0], 'Canvas must not receive an HWND')
+  assert.deepEqual(canvas.loaded, [path.resolve('fixture-app/out/native-playback/playback.node')])
 })
 
 const timeline = 'generated timeline fixture'

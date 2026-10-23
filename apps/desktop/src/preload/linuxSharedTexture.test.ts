@@ -18,7 +18,7 @@ test('pixel diagnostic distinguishes opaque black from colored and transparent s
   assert.deepEqual(JSON.parse(JSON.stringify(exports.summarizePixels(data, 2, 2, 12))),
     { samples: 4, nonblack: 2, maximum: 255, opaque: 3 })
 })
-function fixture(options: { platform?: 'linux' | 'darwin'; registerFails?: boolean; contextFails?: boolean; probePixels?: 'valid' | 'black' | 'throw'; clockShift?: number; copyWait?: Promise<void> } = {}) {
+function fixture(options: { platform?: 'linux' | 'darwin' | 'win32'; registerFails?: boolean; contextFails?: boolean; probePixels?: 'valid' | 'black' | 'throw'; clockShift?: number; copyWait?: Promise<void> } = {}) {
   let nextToken = 0, draws = 0, closes = 0, releases = 0, clears = 0, drawFails = false
   let gpuReleased: (() => void) | undefined
   let compositeOperation = 'source-over'
@@ -80,15 +80,16 @@ test('draws on the mounted canvas and releases VideoFrame and imported texture i
   assert.equal(f.canvas.height, 0)
   assert.equal(f.messages.at(-1)?.channel, 'playback:shared-texture-removed')
 })
-test('macOS subtle transfer ACK waits for the consumer GPU release callback, not drawImage', async () => {
-  const f = fixture({ platform: 'darwin' }), unbind = f.bind(token)
+for (const [platform, channel] of [['darwin', 'mac'], ['win32', 'windows']] as const)
+test(`${platform} subtle transfer ACK waits for the consumer GPU release callback, not drawImage`, async () => {
+  const f = fixture({ platform }), unbind = f.bind(token)
   const binding = f.messages.find(m => m.channel.endsWith('ready'))!.data
-  f.listeners.get('playback:mac-texture-transfer')!(null, { ...binding, sequence: 1, transfer: { transfer: 'opaque' } })
+  f.listeners.get(`playback:${channel}-texture-transfer`)!(null, { ...binding, sequence: 1, transfer: { transfer: 'opaque' } })
   await Promise.resolve(); await Promise.resolve()
   assert.equal(f.counts().draws, 1)
-  assert.equal(f.messages.filter(m => m.channel === 'playback:mac-texture-released').length, 0)
+  assert.equal(f.messages.filter(m => m.channel === `playback:${channel}-texture-released`).length, 0)
   f.gpuRelease()
-  assert.equal(f.messages.filter(m => m.channel === 'playback:mac-texture-released').length, 1)
+  assert.equal(f.messages.filter(m => m.channel === `playback:${channel}-texture-released`).length, 1)
   unbind()
 })
 test('macOS uses the same Canvas submission and reference-release interface', async () => {

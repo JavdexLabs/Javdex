@@ -25,7 +25,8 @@ if (process.platform === 'linux') {
   run(process.execPath, [path.join(root, 'scripts/playback-linux-helper-smoke.mjs'), path.join(directory, 'playback-helper')])
 } else {
   const exports = ['create', 'destroy', 'state', ...(process.platform === 'darwin' ? ['setWakeup', 'nextFrame', 'releaseFrame', 'resetTiming', 'setRenderBudget', 'generatedSubtitles'] : [])]
-  const script = `const a=require(${JSON.stringify(path.join(directory, 'playback.node'))});for(const k of ${JSON.stringify(exports)})if(typeof a[k]!=='function')throw Error('Missing native export '+k);console.log('Playback addon loaded in Electron '+process.versions.electron)`
+  const sharedExports = ['create', 'destroy', 'state', 'inspect', 'setBounds', 'setVisible', 'setWakeup', 'nextFrame', 'releaseFrame', 'resetTiming', 'setRenderBudget', 'command', 'generatedSubtitles']
+  const script = `const a=require(${JSON.stringify(path.join(directory, 'playback.node'))});for(const k of ${JSON.stringify(exports)})if(typeof a[k]!=='function')throw Error('Missing native export '+k);if(process.platform==='win32')for(const k of ${JSON.stringify(sharedExports)})if(typeof a.sharedTexture?.[k]!=='function')throw Error('Missing Windows shared export '+k);console.log('Playback addon loaded in Electron '+process.versions.electron)`
   run(require('electron'), ['-e', script], { ...environment, ELECTRON_RUN_AS_NODE: '1' })
 }
 const matrix = path.resolve(process.env.JAVDEX_PLAYBACK_RUNTIME_DIR ?? path.join(root, 'out/playback-runtime'))

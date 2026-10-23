@@ -3,6 +3,7 @@
 export const LINUX_X11_PLAYBACK_FLAG = '--javdex-x11'
 export const LINUX_DMABUF_PLAYBACK_FLAG = '--javdex-dmabuf'
 export const LINUX_WAYLAND_PLAYBACK_FLAG = '--javdex-wayland'
+export const WINDOWS_CANVAS_PLAYBACK_FLAG = '--javdex-windows-canvas'
 
 interface DisplayStartupHost {
   isReady(): boolean
@@ -12,14 +13,21 @@ interface DisplayStartupHost {
 }
 
 let linuxBackend: 'dmabuf' | 'software' | null = null
+let windowsCanvas = false
 
 export function configurePlaybackDisplay(
   host: DisplayStartupHost,
   { platform = process.platform, argv = process.argv, windowsNativePlayback = false }:
     { platform?: NodeJS.Platform; argv?: string[]; windowsNativePlayback?: boolean } = {}
 ): void {
-  if (platform === 'win32' && windowsNativePlayback) {
-    if (host.isReady()) throw new Error('播放显示后端必须在应用启动时选择；请退出应用后重新启动')
+  // Temporary migration gate. Native Windows acceptance must precede changing
+  // the default. Canvas must not inherit the old HWND composition workaround.
+  const argumentsTrimmed = argv.slice(1).map(arg => arg.replace(/^[\t\n\v\f\r ]+|[\t\n\v\f\r ]+$/g, ''))
+  const separator = argumentsTrimmed.indexOf('--')
+  const beforeSeparator = separator < 0 ? argumentsTrimmed : argumentsTrimmed.slice(0, separator)
+  if (platform === 'win32' && host.isReady()) throw new Error('播放显示后端必须在应用启动时选择；请退出应用后重新启动')
+  windowsCanvas = platform === 'win32' && beforeSeparator.includes(WINDOWS_CANVAS_PLAYBACK_FLAG)
+  if (platform === 'win32' && windowsNativePlayback && !windowsCanvas) {
     // Chromium's DirectComposition tree obscures the sibling WGL/Win32 child
     // surfaces. Use its normal GPU swap chain so video and controls compose.
     host.commandLine.appendSwitch('disable-direct-composition', '')
@@ -52,3 +60,4 @@ export function configurePlaybackDisplay(
 }
 
 export function linuxPlaybackBackend(): 'dmabuf' | 'software' | null { return linuxBackend }
+export function windowsCanvasPlayback(): boolean { return windowsCanvas }

@@ -139,11 +139,15 @@ Whisper b5130 的 macOS arm64／x64 工具保留静态运行库、Metal／Accele
 
 ### 内置播放运行库
 
-Windows 原生 adapter 使用 rendererFullscreenControls 和覆盖区域裁剪。macOS 以 IOSurface 共享纹理到 Canvas2D，Linux 以共享纹理或 CPU 帧到 Canvas；两者的视频、控制栏与菜单均由 renderer 合成，不使用原生子窗口或原生全屏工具栏。Windows 原生视图与输入行为保留。
+Windows 默认原生 adapter 使用 rendererFullscreenControls 和覆盖区域裁剪。macOS 以 IOSurface 共享纹理到 Canvas2D，Linux 以共享纹理或 CPU 帧到 Canvas；两者的视频、控制栏与菜单均由 renderer 合成，不使用原生子窗口或原生全屏工具栏。Windows 原生视图与输入行为保留。
+
+Windows 候选 Canvas 路径通过启动参数 `--javdex-windows-canvas` 显式启用，默认关闭；在 `--` 后、拼接值或其他平台上不启用。完整退出后移除参数即可回到原 HWND 后端，运行中不自动改后端。候选路径保留正常 DirectComposition，不套用旧 HWND 的禁用开关；使用同一个 `playback.node` 的 `sharedTexture` 导出对象，经 WGL 私有 D3D11 bridge、GPU copy、三个 BGRA NT 导出槽和 Electron 共享纹理进入现有 Canvas2D。不是把 IOSurface 或裸 HANDLE 传给页面，也不宣称零复制。生产完成、消费者 GPU 释放及 `allReferencesReleased` 分别确认；设备或同步状态不明时有界隔离并要求重启。实现、实际 Mac 检查和后续 Windows 准入见 [Windows Canvas 接入记录](reviews/windows-canvas-implementation-2026-10-23.md)。
 
 内置播放行为与平台边界见 [播放合同](BUILTIN_PLAYBACK.md)，实际源码构建及发布证据见下文。`npm run playback:native:build` 只生成链接本机开发库的运行文件：macOS/Windows 为 addon，Linux 为独立 `playback-helper`；正式打包输入由 `npm run playback:runtime:build` 从固定源码构建。普通桌面打包明确排除 `out/native-playback`、`out/playback-acceptance`、`out/libmpv-prototype` 与 `out/playback-runtime`，审核后的运行库通过打包钩子复制到 Resources，不把构建目录、合成素材、截图或临时 Electron bundle 收入 `app.asar`。
 
 原生核心的初始化、异步命令、事件复制、状态缓存与帧计数共用 `native/mpvCore.h`；Windows WGL 拥有平台窗口、GL context 和原生输入，macOS CGL 只生产离屏 IOSurface，Linux 使用独立 helper。macOS 构建先编译运行 C++ 核心回归，再将 `macSharedTexture.mm` 编译为唯一的 `playback.node`；Linux CMake 构建运行共用核心与 DMA-BUF 协议／槽位回归。`npm run test:playback:build` 检查构建命令选择，已纳入根测试；它本身不编译其它平台源码，也不证明可播放。
+
+Windows CMake 同时编译旧 HWND 与新 D3D11 生产端，仍保留 Electron delay-load hook，新增的 `d3d11.dll`、`dxgi.dll` 使用系统 ABI，不下载或随包复制图形驱动。原生构建计划运行核心、slider 及三 ticket 生命周期回归；源码聚合要求新增生产源码和 ticket 合同，加载烟测检查两套导出。Mac 上的 ticket C++ 测试仅验证无平台依赖的状态机，不替代 Windows 源码编译。后续在解锁的 Windows 桌面完成正常原生构建和桌面构建后，可运行 `node scripts/windows-canvas-acceptance.mjs`；该入口显式选择候选后端、隔离资料库并检查真实生产／Canvas 提交、暂停 seek、全屏、慢消费和停止重开，非 Windows 直接拒绝。它不代替后续色彩、驱动故障或安装包检查。
 
 macOS 正常运行 `npm run playback:native:build`，生成 `out/native-playback/playback.node`；完成 `npm run build` 后通过普通应用入口启动，无须试验参数。正式源码构建也复用同一原生编译计划，打包仍使用原有审核矩阵、许可材料和签名门禁；不会用本机开发 addon 替代正式运行库输入。旧 NSOpenGLView 后端及其专属构建目标已移除，不再有进程内旧后端切换或自动回退。
 

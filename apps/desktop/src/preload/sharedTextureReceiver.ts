@@ -59,7 +59,7 @@ export function summarizePixels(data: Uint8Array | Uint8ClampedArray, width: num
  * function for its fixed player canvas, never a VideoFrame, FD or Electron API. */
 export function installSharedTextureReceiver(): (surfaceToken: string) => () => void {
   let mounted: MountedSurface | null = null
-  let supported = ['linux', 'darwin'].includes(process.platform) && process.isMainFrame
+  let supported = ['linux', 'darwin', 'win32'].includes(process.platform) && process.isMainFrame
     && typeof sharedTexture?.setSharedTextureReceiver === 'function'
   // Monotonic-clock calibration: no wall clock, no synchronous renderer IPC.
   // Midpoint mapping has bounded RTT uncertainty; choose the best of 3 probes.
@@ -231,13 +231,14 @@ export function installSharedTextureReceiver(): (surfaceToken: string) => () => 
     }
   }
   ipcRenderer.on('playback:cpu-frame', (_event, value: unknown) => { void receiveCpu(value) })
-  if (process.platform === 'darwin' && process.isMainFrame) ipcRenderer.on('playback:mac-texture-transfer', (_event, value: unknown) => {
+  const nativeTransfer = process.platform === 'darwin' ? 'mac' : process.platform === 'win32' ? 'windows' : null
+  if (nativeTransfer && process.isMainFrame) ipcRenderer.on(`playback:${nativeTransfer}-texture-transfer`, (_event, value: unknown) => {
     const metadata = value as FrameMetadata & { transfer: Electron.SharedTextureTransfer }
     if (!metadata || typeof metadata.surfaceToken !== 'string' || typeof metadata.bindingToken !== 'string'
       || !Number.isSafeInteger(metadata.sequence) || metadata.sequence < 1) return
     let imported: Electron.SharedTextureImportedSubtle | undefined
     let released = false
-    const acknowledge = (): void => ipcRenderer.send('playback:mac-texture-released', {
+    const acknowledge = (): void => ipcRenderer.send(`playback:${nativeTransfer}-texture-released`, {
       surfaceToken: metadata.surfaceToken, bindingToken: metadata.bindingToken, sequence: metadata.sequence
     })
     try {

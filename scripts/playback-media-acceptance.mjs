@@ -253,6 +253,10 @@ try {
 } catch (error) {
   report.status = 'failed'
   report.failure = error.stack ?? String(error)
+  if (application) report.failureState = await application.evaluate(async ({ BrowserWindow }) => {
+    const window = BrowserWindow.getAllWindows()[0]
+    return window ? window.webContents.executeJavaScript('window.api.playback.snapshot()') : null
+  }).catch(failure => ({ observationError: failure.message }))
   save()
   throw error
 } finally {

@@ -8,8 +8,8 @@ import type { BrowserWindow } from 'electron'
 import { FrameBudget } from './frameBudget'
 import { channel } from 'node:diagnostics_channel'
 
-function fixture() {
-  const code = transpileModule(readFileSync(new URL('./macSharedTexture.ts', import.meta.url), 'utf8'), {
+function fixture(platform: 'darwin' | 'win32' = 'darwin') {
+  const code = transpileModule(readFileSync(new URL('./nativeSharedTexture.ts', import.meta.url), 'utf8'), {
     compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022 }
   }).outputText
   let tick = () => {}, wake = () => {}, sequence = 0, timeline = 0, created = false, mainReleases = 0, sendFailure = false, flushFailure = false
@@ -17,7 +17,7 @@ function fixture() {
   const messages: Array<{ channel: string; value: Record<string, unknown> }> = []
   const contents = Object.assign(new EventEmitter(), { mainFrame, isDestroyed: () => false,
     send: (channel: string, value: Record<string, unknown>) => {
-      if (sendFailure && channel === 'playback:mac-texture-transfer') throw Error('delivery unknown')
+      if (sendFailure && channel.endsWith('-texture-transfer')) throw Error('delivery unknown')
       if (flushFailure && channel === 'playback:frame-flush') throw Error('frame already disposed')
       messages.push({ channel, value })
     } })
@@ -27,10 +27,10 @@ function fixture() {
     setWakeup(callback: (() => void) | null) { wake = callback ?? (() => {}) },
     resetTiming(value: number) { timeline = value }, setRenderBudget() {}, command() {}, generatedSubtitles() {},
     inspect: () => ({ alive: created }), state: () => ({ alive: created }),
-    nextFrame() { if (held.size >= 3) return; held.add(++sequence); return { sequence, timeline, width: 640, height: 360, ioSurface: Buffer.alloc(8),
+    nextFrame() { if (held.size >= 3) return; held.add(++sequence); return { sequence, timeline, width: 640, height: 360, [platform === 'darwin' ? 'ioSurface' : 'ntHandle']: Buffer.alloc(8),
       producerComplete: true, pixelFormat: 'bgra', colorContract: 'bt709-srgb-rgb-full', renderStartUs: 1, targetTimeUs: 0 } },
     releaseFrame(value: number) { releases.push(value); held.delete(value) } }
-  const exports = {} as typeof import('./macSharedTexture')
+  const exports = {} as typeof import('./nativeSharedTexture')
   runInNewContext(code, { exports, Buffer, process: { hrtime: { bigint: () => 1000000000n }, env: {} }, Date,
     setInterval: (callback: () => void) => { tick = callback; return { unref() {} } }, clearInterval() {},
     require(name: string) {
@@ -43,13 +43,60 @@ function fixture() {
       } }
       throw Error(name)
     } })
-  const bridge = exports.createMacSharedTextureBridge(native, { webContents: contents } as unknown as BrowserWindow)
+  const bridge = exports.createNativeSharedTextureBridge(native, { webContents: contents } as unknown as BrowserWindow, platform)
   bridge.create(Buffer.alloc(0), { width: 640, height: 360, scale: 1 })
   const binding = { surfaceToken: bridge.inspect().sharedTextureSurface!, bindingToken: '33333333-3333-4333-8333-333333333333' }
   ipc.emit('playback:shared-texture-ready', event, binding); bridge.setVisible(true)
   return { bridge, native, ipc, app, event, binding, messages, imported, releases, failFlush: () => { flushFailure = true }, failTransfer: () => { sendFailure = true }, mainReleases: () => mainReleases,
     wake: async () => { wake(); await Promise.resolve(); await Promise.resolve() }, tick: async () => { tick(); await Promise.resolve(); await Promise.resolve() } }
 }
+test('Windows imports only an NT handle and shares the three-slot final-release contract', async t => {
+  const f = fixture('win32'); t.after(f.bridge.destroy)
+  await f.tick(); await f.tick(); await f.tick(); await f.tick()
+  assert.equal(f.imported.length, 3); assert.deepEqual(f.releases, [])
+  const options = f.imported[0] as unknown as { textureInfo: Electron.SharedTextureImportTextureInfo }
+  assert.deepEqual(Object.keys(options.textureInfo.handle), ['ntHandle'])
+  assert.equal(options.textureInfo.handle.ntHandle?.length, 8)
+  assert.equal(options.textureInfo.pixelFormat, 'bgra')
+  const transfer = f.messages.find(message => message.channel === 'playback:windows-texture-transfer')!
+  assert.ok(transfer); assert.equal('ntHandle' in transfer.value, false)
+  assert.equal('ioSurface' in transfer.value, false)
+  f.ipc.emit('playback:mac-texture-released', f.event, { ...f.binding, sequence: 1 })
+  assert.equal(f.mainReleases(), 0)
+  f.ipc.emit('playback:windows-texture-released', { ...f.event, senderFrame: {} }, { ...f.binding, sequence: 1 })
+  assert.equal(f.mainReleases(), 0)
+  f.ipc.emit('playback:windows-texture-released', f.event, { ...f.binding, sequence: 1 })
+  assert.equal(f.mainReleases(), 1); assert.deepEqual(f.releases, [])
+  f.imported[0].allReferencesReleased(); await f.tick()
+  assert.deepEqual(f.releases, [1]); assert.equal(f.imported.length, 4)
+  f.bridge.destroy()
+  for (const item of f.imported) { item.allReferencesReleased(); item.allReferencesReleased() }
+  assert.deepEqual(f.releases, [1, 2, 3, 4])
+})
+test('Windows rejects IOSurface substitution and incomplete producer metadata before import', async t => {
+  for (const mutation of [
+    { ioSurface: Buffer.alloc(8), ntHandle: undefined }, { ioSurface: Buffer.alloc(8) },
+    { ntHandle: Buffer.alloc(4) }, { producerComplete: false }
+  ]) {
+    const f = fixture('win32'); t.after(f.bridge.destroy)
+    const next = f.native.nextFrame.bind(f.native)
+    f.native.nextFrame = () => ({ ...next(), ...mutation }) as never
+    await f.tick()
+    assert.throws(() => f.bridge.render(), /Windows.*生产失败/)
+    assert.equal(f.imported.length, 0); assert.deepEqual(f.releases, [1])
+  }
+})
+test('Windows uncertain delivery keeps its lease and rejects a new binding release', async t => {
+  const f = fixture('win32'); t.after(f.bridge.destroy)
+  f.failTransfer(); await f.tick()
+  assert.throws(() => f.bridge.render(), { code: 'PLAYBACK_RESTART_REQUIRED' })
+  assert.deepEqual(f.releases, [])
+  f.ipc.emit('playback:windows-texture-released', f.event, { ...f.binding, bindingToken: '44444444-4444-4444-8444-444444444444', sequence: 1 })
+  assert.equal(f.mainReleases(), 0)
+  f.ipc.emit('playback:windows-texture-released', f.event, { ...f.binding, sequence: 1 })
+  assert.equal(f.mainReleases(), 1); assert.deepEqual(f.releases, [])
+  f.imported[0].allReferencesReleased(); assert.deepEqual(f.releases, [1])
+})
 test('native wakeups drain new frames without waiting for a watchdog and are detached at teardown', async () => {
   const f = fixture()
   try {

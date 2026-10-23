@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { it } from 'node:test'
-import { configurePlaybackDisplay, linuxPlaybackBackend } from './playbackDisplay'
+import { configurePlaybackDisplay, linuxPlaybackBackend, windowsCanvasPlayback } from './playbackDisplay'
 
 function host(selected = '', ready = false) {
   const switches: string[][] = []
@@ -18,6 +18,20 @@ it('selects a Windows composition path that exposes installed WGL child surfaces
   assert.throws(() => configurePlaybackDisplay(host('', true), { platform: 'win32', windowsNativePlayback: true }), /重新启动/)
 })
 
+it('Windows Canvas opt-in is exact, before ready and does not disable DirectComposition', () => {
+  const canvas = host()
+  configurePlaybackDisplay(canvas, { platform: 'win32', windowsNativePlayback: true, argv: ['electron', '--javdex-windows-canvas'] })
+  assert.equal(windowsCanvasPlayback(), true); assert.deepEqual(canvas.switches, [])
+  assert.throws(() => configurePlaybackDisplay(host('', true), { platform: 'win32', argv: ['electron', '--javdex-windows-canvas'] }), /重新启动/)
+  for (const argv of [['electron'], ['--javdex-windows-canvas'], ['electron', '--javdex-windows-canvas=false'],
+    ['electron', '--other=--javdex-windows-canvas'], ['electron', ' \t--\r\n', '--javdex-windows-canvas']]) {
+    const legacy = host()
+    configurePlaybackDisplay(legacy, { platform: 'win32', windowsNativePlayback: true, argv })
+    assert.equal(windowsCanvasPlayback(), false); assert.deepEqual(legacy.switches, [['disable-direct-composition', '']])
+  }
+  configurePlaybackDisplay(host(), { platform: 'darwin', argv: ['electron', '--javdex-windows-canvas'] })
+  assert.equal(windowsCanvasPlayback(), false)
+})
 it('preserves normal composition without a Windows native runtime and on other platforms', () => {
   for (const platform of ['win32', 'darwin'] as const) {
     const withoutRuntime = host()

@@ -169,7 +169,10 @@ export async function aggregatePlaybackSources(directory, version) {
         'apps/desktop/src/main/player/native/CMakeLists.txt', 'apps/desktop/src/main/player/native/mpvCore.h',
         `apps/desktop/src/main/player/native/${{ win32: 'windowsPlayback.cpp', darwin: 'macSharedTexture.mm', linux: 'linuxX11Playback.cpp' }[runtime.platform]}`,
         'electron-sdk/include/node/node.h', 'electron-sdk/include/node/node_version.h',
-        ...(runtime.platform === 'win32' ? ['win_delay_load_hook.cc', 'node-gyp-LICENSE'] : [])]
+        ...(runtime.platform === 'win32' ? ['win_delay_load_hook.cc', 'node-gyp-LICENSE',
+          'apps/desktop/src/main/player/native/windowsSharedTexture.cpp',
+          'apps/desktop/src/main/player/native/windowsTextureTickets.h',
+          'apps/desktop/src/main/player/native/windowsTextureTickets.test.cpp'] : [])]
       for (const name of requiredNative) assert.ok(fs.statSync(path.join(native, name)).size > 0, 'Missing preferred native source/SDK: ' + name)
       assert.equal(JSON.parse(fs.readFileSync(path.join(native, 'package.json'))).version, version, 'Native snapshot version mismatch')
       const nativeLock = JSON.parse(fs.readFileSync(path.join(native, 'build/playback-sources.json')))

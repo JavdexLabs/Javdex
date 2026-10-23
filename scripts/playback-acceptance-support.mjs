@@ -99,11 +99,14 @@ export const waitForState = (page, predicate, description, timeout) =>
 // Keep diagnostics projected; raw tracks can contain local paths or signed locators.
 export const nativeEvidence = application => application.evaluate(({ app }) => {
   const require = process.getBuiltinModule('module').createRequire(app.getAppPath() + '/package.json')
-  const state = require(app.isPackaged ? process.resourcesPath + '/native-playback/playback.node' : app.getAppPath() + '/out/native-playback/playback.node').inspect()
+  const addon = require(app.isPackaged ? process.resourcesPath + '/native-playback/playback.node' : app.getAppPath() + '/out/native-playback/playback.node')
+  const windowsCanvas = process.platform === 'win32' && app.commandLine.hasSwitch('javdex-windows-canvas')
+  const state = (windowsCanvas ? addon.sharedTexture : addon).inspect()
+  const canvas = process.platform === 'darwin' || windowsCanvas
   // This is a producer render counter, not proof of physical screen presentation.
   return { alive: state.alive, loadedFiles: state.loadedFiles,
-    renderedFrames: process.platform === 'darwin' ? state.nativeFrames : state.presentedFrames,
-    presentedFrames: process.platform === 'darwin' ? undefined : state.presentedFrames,
+    renderedFrames: canvas ? state.nativeFrames : state.presentedFrames,
+    presentedFrames: canvas ? undefined : state.presentedFrames,
     commandErrors: state.commandErrors, position: state['time-pos'], audioPosition: state['audio-pts'],
     audioTracks: JSON.parse(state['track-list'] ?? '[]').filter(track => track.type === 'audio').map(track => ({
       id: track.id, title: track.title, language: track.lang, codec: track.codec, channels: track['demux-channel-count']
@@ -111,7 +114,7 @@ export const nativeEvidence = application => application.evaluate(({ app }) => {
 })
 
 export const captureAcceptanceImage = application => application.evaluate(async ({ app, BrowserWindow }) => {
-  if (process.platform === 'win32') {
+  if (process.platform === 'win32' && !app.commandLine.hasSwitch('javdex-windows-canvas')) {
     const require = process.getBuiltinModule('module').createRequire(app.getAppPath() + '/package.json')
     return require(app.isPackaged ? process.resourcesPath + '/native-playback/playback.node' : app.getAppPath() + '/out/native-playback/playback.node').capture()
   }

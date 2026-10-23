@@ -32,6 +32,8 @@
 
 ## 其他历史证据
 
+[Windows Canvas 本地接入](windows-canvas-implementation-2026-10-23.md)记录 D3D11 NT 生产端、共用帧传输和 Mac 上的实际检查；Windows 默认仍为旧 HWND，原生编译与实机准入未完成。[Windows 同步 API 调查](windows-canvas-api-2026-10-23.md)保留 Microsoft／Khronos 的句柄、互操作与完成条件。
+
 [macOS 共享视频帧实验验证](macos-shared-texture-2026-10-23.md)保留正式化之前的真实窗口、控制、色彩和新旧短时对照；当时的启用／回滚入口已移出活动代码，性能证据不追溯改写。
 
 - `v0.8.0-*` 与 `v0.9.0-beta.*` 对应各自发行，不能替代后续版本的结果。

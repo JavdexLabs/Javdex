@@ -741,6 +741,7 @@ napi_value destroy(napi_env env, napi_callback_info) {
 void cleanup(void *) { try { destroyPlayer(); } catch (...) { /* Environment is closing; normal shutdown happens earlier. */ } }
 } // namespace
 
+napi_value initializeWindowsSharedTexture(napi_env env, napi_value exports);
 napi_value initialize(napi_env env, napi_value exports) {
     napi_property_descriptor methods[] = {
         {"create", nullptr, create, nullptr, nullptr, nullptr, napi_default, nullptr},
@@ -759,6 +760,6 @@ napi_value initialize(napi_env env, napi_value exports) {
     };
     napi_define_properties(env, exports, sizeof(methods) / sizeof(methods[0]), methods);
     napi_add_env_cleanup_hook(env, cleanup, nullptr);
-    return exports;
+    return initializeWindowsSharedTexture(env, exports);
 }
 NAPI_MODULE(NODE_GYP_MODULE_NAME, initialize)

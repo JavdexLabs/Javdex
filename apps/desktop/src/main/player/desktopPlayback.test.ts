@@ -24,7 +24,7 @@ function deferred() {
   return { promise, resolve }
 }
 
-function fixture(t: TestContext, pause: 'recent' | 'playlist', renderPolling = true) {
+function fixture(t: TestContext, pause: 'recent' | 'playlist', renderPolling = true, platform: NodeJS.Platform = process.platform) {
   const root = mkdtempSync(path.join(os.tmpdir(), 'javdex-playback-start-'))
   const entered = deferred(), release = deferred(), finished = deferred()
   const removals: Array<{ catalog: string; videoId: number }> = []
@@ -73,7 +73,7 @@ function fixture(t: TestContext, pause: 'recent' | 'playlist', renderPolling = t
     } }
   }
   const exports = {} as typeof import('./desktopPlayback')
-  runInNewContext(code, { exports, Buffer, process, console,
+  runInNewContext(code, { exports, Buffer, process: { ...process, platform }, console,
     setInterval: (callback: () => void, ms: number) => { timers.set(ms, callback); return { unref() {} } }, clearInterval() {},
     require: (name: string) => Object.hasOwn(mocks, name) ? mocks[name] : requireDependency(name)
   }, { filename: 'desktopPlayback.ts' })
@@ -93,7 +93,9 @@ function fixture(t: TestContext, pause: 'recent' | 'playlist', renderPolling = t
 }
 
 test('self-driven native hosts omit the render poll but still publish controlled failures through state observation', async t => {
-  const f = fixture(t, 'recent', false)
+  // The self-driven host is macOS; Linux deliberately wraps its native hosts
+  // in a polling fallback controller, independently of the test runner's OS.
+  const f = fixture(t, 'recent', false, 'darwin')
   assert.equal((await f.open(f.source.target)).ok, true)
   assert.equal(f.timers.has(16), false)
   assert.ok(f.timers.has(200))

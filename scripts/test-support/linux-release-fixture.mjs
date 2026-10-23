@@ -14,9 +14,9 @@ export async function linuxReleaseFixture(root, version = JSON.parse(fs.readFile
   write(project, 'package.json', { ...JSON.parse(fs.readFileSync(path.join(project, 'package.json'))), version })
   const sdk = { electronVersion: 'fixture', nodeVersion: '1.2.3' }
   const upstream = path.join(root, 'preferred-source')
-  write(upstream, 'mpv.tar.gz', 'preferred mpv'); write(upstream, 'ffmpeg.tar.xz', 'preferred ffmpeg')
-  const sources = ['mpv', 'ffmpeg'].map(id => {
-    const filename = id === 'mpv' ? 'mpv.tar.gz' : 'ffmpeg.tar.xz'
+  write(upstream, 'nv_codec_headers.tar.gz', 'preferred NVDEC'); write(upstream, 'mpv.tar.gz', 'preferred mpv'); write(upstream, 'ffmpeg.tar.xz', 'preferred ffmpeg')
+  const sources = ['mpv', 'ffmpeg', 'nv_codec_headers'].map(id => {
+    const filename = id === 'ffmpeg' ? 'ffmpeg.tar.xz' : id + '.tar.gz'
     return { id, version: 'fixture', filename, bytes: fs.statSync(path.join(upstream, filename)).size, sha256: hash(path.join(upstream, filename)) }
   })
   write(project, 'build/playback-sources.json', { sdk, sources })
@@ -28,14 +28,14 @@ export async function linuxReleaseFixture(root, version = JSON.parse(fs.readFile
     if (id === 'angle') {
       for (const name of ['build/angle-runtime.json', 'build/angle-args.gn', 'scripts/build-linux-angle.py', 'build/patches/angle-x11-vulkan-visual.patch',
         ...Object.keys(angleLock.electronPatches).map(n => 'build/angle-electron-patches/' + n)]) write(input, 'recipe/' + name, fs.readFileSync(path.join(project, name)))
-      for (const name of ['angle/LICENSE', 'angle/DEPS', 'angle/include/EGL/egl.h', 'angle/src/libANGLE/renderer/vulkan/linux/DisplayVkXcb.cpp']) write(input, name, 'preferred ' + name)
+      for (const name of ['angle/LICENSE', 'angle/DEPS', 'angle/include/EGL/egl.h', 'angle/src/libANGLE/renderer/vulkan/linux/xcb/DisplayVkXcb.cpp']) write(input, name, 'preferred ' + name)
       write(directory, 'libEGL.so', 'EGL'); write(directory, 'libGLESv2.so', 'GLES'); write(directory, 'ANGLE-LICENSE.txt', fs.readFileSync(path.join(input, 'angle/LICENSE')))
       inventories[id] = { schemaVersion: 1, electronVersion: sdk.electronVersion, angleRevision: angleLock.angleRevision,
         patchSha256: hash(path.join(project, 'build/patches/angle-x11-vulkan-visual.patch')), argsSha256: hash(path.join(project, 'build/angle-args.gn')),
         provenanceSha256: hash(path.join(project, 'build/angle-runtime.json')),
         files: Object.fromEntries(['libEGL.so', 'libGLESv2.so'].map(n => [n, hash(path.join(directory, n))])) }
     } else {
-      const receipt = { profile: linuxReleaseComponents[id].profile, sdk, sources, sourcePackages: { fixture: '1.0' } }
+      const receipt = { profile: linuxReleaseComponents[id].profile, sdk, sources: sources.filter(s => id !== 'cpu' || s.id !== 'nv_codec_headers'), sourcePackages: { fixture: '1.0' } }
       write(directory, 'build.json', receipt)
       for (const name of ['libmpv.so.2', 'playback-fd.node', id === 'gpu' ? 'playback-dmabuf-helper' : 'playback-software-helper']) write(directory, name, id + ' ' + name)
       const files = Object.fromEntries(fs.readdirSync(directory).map(name => [name, hash(path.join(directory, name))]))

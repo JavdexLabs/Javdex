@@ -47,6 +47,7 @@ test('portable source recipe excludes untracked files and nested workspace depen
   write(copied, '.javdex-source-files.json', ['../escape'])
   assert.throws(() => copyPortableRecipe(copied, path.join(root, 'unsafe')), /Unsafe/)
   assert.equal(fs.existsSync(path.join(root, 'unsafe')), false)
+
 })
 test('Linux release inventory refuses missing components, paths and omitted runtime hashes', async t => {
   const { manifest } = await fixture(t)
@@ -63,6 +64,7 @@ for (const [label, id, mutate, expected] of [
   ['stale native helper', 'gpu', input => write(input, 'recipe/apps/desktop/src/main/player/native/linuxDmaBufPlayback.cpp', 'old helper'), /Stale Linux/],
   ['incomplete Ubuntu sources', 'cpu', input => fs.rmSync(path.join(input, 'fixture.tar.xz')), /ENOENT/],
   ['missing ANGLE preferred source', 'angle', input => fs.rmSync(path.join(input, 'angle/DEPS')), /ENOENT/],
+  ['missing patched ANGLE XCB source', 'angle', input => fs.rmSync(path.join(input, 'angle/src/libANGLE/renderer/vulkan/linux/xcb/DisplayVkXcb.cpp')), /ENOENT/],
   ['stale ANGLE recipe', 'angle', input => write(input, 'recipe/build/angle-args.gn', 'different args'), /ANGLE recipe/]
 ]) test(`Linux aggregation rejects ${label} despite refreshed outer bindings`, async t => {
   const f = await fixture(t); mutate(f.inputs[id])
@@ -105,4 +107,71 @@ test('final Linux installers bind both closures and ANGLE, not just one legacy d
     verifyPlaybackInstallers(f.output, f.version, 'linux-x64', { extract(file, directory) {
       const value = extract(file, directory); write(directory, name, 'different build'); return value
     }, verify, host }), /runtime differs/)
+})
+
+test('ANGLE source filter excludes both sysroot names but retains build recipes and dependencies', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-angle-filter-'))
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }))
+  // Evaluate the production callback without invoking downloads or a native build.
+  const program = String.raw`
+import ast, pathlib, sys, tarfile
+source = ast.parse(pathlib.Path('scripts/build-linux-angle.py').read_text())
+callback = next(n for n in source.body if isinstance(n, ast.FunctionDef) and n.name == 'source_filter')
+angle = pathlib.Path(sys.argv[1]) / 'angle'
+angle.mkdir()
+ns = {'pathlib': pathlib, 'angle': angle}
+exec(compile(ast.Module(body=[callback], type_ignores=[]), '<source_filter>', 'exec'), ns)
+filter_source = ns['source_filter']
+for name in ['angle/build/linux/debian_bullseye_amd64-sysroot', 'angle/build/linux/old_sysroot', 'angle/out/Javdex', 'angle/third_party/llvm-build']:
+    entry = tarfile.TarInfo(name); entry.type = tarfile.DIRTYPE
+    assert filter_source(entry) is None, name
+for name in ['angle/build/linux/sysroot_scripts/install-sysroot.py', 'angle/DEPS', 'angle/third_party/llvm-project/LICENSE.TXT', 'angle/src/libANGLE/renderer/vulkan/linux/xcb/DisplayVkXcb.cpp']:
+    entry = tarfile.TarInfo(name)
+    assert filter_source(entry) is entry, name
+for name in ['angle/../escape', '/absolute', r'angle/bad\name', 'angle/bad:name']:
+    try: filter_source(tarfile.TarInfo(name))
+    except AssertionError: pass
+    else: raise AssertionError(name)
+entry = tarfile.TarInfo('angle/link'); entry.type = tarfile.SYMTYPE
+try: filter_source(entry)
+except AssertionError: pass
+else: raise AssertionError('symlink accepted')
+`
+  const result = spawnSync(process.platform === 'win32' ? 'python' : 'python3', ['-c', program, root], { encoding: 'utf8' })
+  assert.equal(result.status, 0, result.stderr)
+})
+
+test('ANGLE archive budget stays bounded and never relaxes path or link checks', async t => {
+  const { unpackPlaybackSources, angleSourceLimits } = await import('./playback-source-archive.mjs')
+  assert.deepEqual(angleSourceLimits, { maxBytes: 8 * 1024 ** 3, maxEntries: 200000 })
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-source-budget-'))
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }))
+  write(root, 'source/a', '1234'); write(root, 'source/b', '5678')
+  const archive = path.join(root, 'sources.tar.gz')
+  await createTar({ cwd: path.join(root, 'source'), file: archive, gzip: true }, ['a', 'b'])
+  for (const limits of [{ maxBytes: 7 }, { maxEntries: 1 }]) {
+    const destination = path.join(root, 'rejected')
+    await assert.rejects(unpackPlaybackSources(archive, destination, limits), /exceeds bounds/)
+    assert.equal(fs.existsSync(destination), false)
+  }
+  await unpackPlaybackSources(archive, path.join(root, 'accepted'), { maxBytes: 8, maxEntries: 2 })
+  const unsafe = path.join(root, 'unsafe.tar.gz')
+  await createTar({ cwd: path.join(root, 'source'), file: unsafe, gzip: true, prefix: '../escape' }, ['a'])
+  await assert.rejects(unpackPlaybackSources(unsafe, path.join(root, 'unsafe'), angleSourceLimits), /Unsafe/)
+  assert.equal(fs.existsSync(path.join(root, 'unsafe')), false)
+  fs.linkSync(path.join(root, 'source/a'), path.join(root, 'source/link'))
+  const linked = path.join(root, 'linked.tar')
+  await createTar({ cwd: path.join(root, 'source'), file: linked }, ['a', 'link'])
+  await assert.rejects(unpackPlaybackSources(linked, path.join(root, 'linked'), angleSourceLimits), /links\/special/)
+  assert.equal(fs.existsSync(path.join(root, 'linked')), false)
+})
+
+test('GPU still requires NVDEC sources when the matching CPU receipt omits unused GPU pins', async t => {
+  const f = await fixture(t)
+  const file = path.join(f.inputs.gpu, 'runtime/build.json'), receipt = JSON.parse(fs.readFileSync(file))
+  receipt.sources = receipt.sources.filter(s => s.id !== 'nv_codec_headers')
+  write(f.inputs.gpu, 'runtime/build.json', receipt)
+  f.inventories.gpu.files['build.json'] = hash(file)
+  write(f.app, 'resources/linux-texture-experimental/build.json', receipt)
+  await assert.rejects(verifyLinuxSourceBundle(f.output, await repack(f, 'gpu')), /Incomplete Linux source pins/)
 })

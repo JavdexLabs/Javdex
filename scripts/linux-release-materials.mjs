@@ -7,7 +7,7 @@ import { spawnSync } from 'node:child_process'
 import { playbackFileSha256 } from './playback-runtime.mjs'
 import { playbackPackagingFiles, playbackPackagingDigest } from './playback-source-materials.mjs'
 import { safePath } from './restore-playback-sources.mjs'
-import { unpackPlaybackSources } from './playback-source-archive.mjs'
+import { unpackPlaybackSources, angleSourceLimits } from './playback-source-archive.mjs'
 
 export const linuxReleaseInventory = 'linux-playback-release.json'
 export const linuxReleaseComponents = {
@@ -134,7 +134,7 @@ export async function verifyLinuxSourceMaterials(input, manifest, temporary) {
     const archive = path.join(input, 'reviewed-runtime', source.file)
     assert.equal(playbackFileSha256(archive), source.sha256, 'Linux source material digest mismatch')
     const extracted = path.join(temporary, id)
-    await unpackPlaybackSources(archive, extracted)
+    await unpackPlaybackSources(archive, extracted, id === 'angle' ? angleSourceLimits : undefined)
     if (id === 'angle') {
       const angleLock = JSON.parse(fs.readFileSync(path.join(tools, 'build/angle-runtime.json')))
       assert.equal(manifest.inventories.angle.angleRevision, angleLock.angleRevision)
@@ -143,7 +143,7 @@ export async function verifyLinuxSourceMaterials(input, manifest, temporary) {
       for (const name of ['build/angle-runtime.json', 'build/angle-args.gn', 'scripts/build-linux-angle.py',
         'build/patches/angle-x11-vulkan-visual.patch', ...Object.keys(angleLock.electronPatches).map(n => 'build/angle-electron-patches/' + n)])
         assert.equal(playbackFileSha256(path.join(extracted, 'recipe', name)), playbackFileSha256(path.join(tools, name)), 'ANGLE recipe/source mismatch')
-      for (const name of ['angle/LICENSE', 'angle/DEPS', 'angle/include/EGL/egl.h', 'angle/src/libANGLE/renderer/vulkan/linux/DisplayVkXcb.cpp'])
+      for (const name of ['angle/LICENSE', 'angle/DEPS', 'angle/include/EGL/egl.h', 'angle/src/libANGLE/renderer/vulkan/linux/xcb/DisplayVkXcb.cpp'])
         assert.ok(fs.statSync(path.join(extracted, name)).size > 0, 'Missing preferred ANGLE source')
       assert.equal(playbackFileSha256(path.join(extracted, 'angle/LICENSE')), manifest.files['ANGLE-LICENSE.txt'], 'ANGLE license binding mismatch')
     } else {
@@ -152,7 +152,11 @@ export async function verifyLinuxSourceMaterials(input, manifest, temporary) {
       const receipt = JSON.parse(fs.readFileSync(path.join(extracted, 'runtime/build.json')))
       assert.deepEqual(receipt.sdk, lock.sdk)
       assert.equal(receipt.profile, inventory.profile)
-      assert.deepEqual(receipt.sources.map(s => s.id).sort(), lock.sources.filter(s => !s.platforms || s.platforms.includes('linux')).map(s => s.id).sort(), 'Incomplete Linux source pins')
+      // CPU builds disable NVDEC/CUDA. Older CPU receipts predate this GPU-only
+      // pin; newer builders may still deliver it as unused corresponding source.
+      const expectedSources = lock.sources.filter(s => (!s.platforms || s.platforms.includes('linux'))
+        && !(id === 'cpu' && s.id === 'nv_codec_headers' && !receipt.sources.some(r => r.id === s.id)))
+      assert.deepEqual(receipt.sources.map(s => s.id).sort(), expectedSources.map(s => s.id).sort(), 'Incomplete Linux source pins')
       for (const source of receipt.sources) {
         assert.ok(lock.sources.some(s => s.id === source.id && s.sha256 === source.sha256 && s.version === source.version), 'Linux source pin mismatch')
         const file = path.join(extracted, safePath(source.filename))

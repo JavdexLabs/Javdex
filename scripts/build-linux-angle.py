@@ -71,8 +71,9 @@ bundle = destination / ('Javdex-ANGLE-Sources-' + sha(root / 'build/patches/angl
 # binaries, downloaded compilers and the Debian sysroot. DEPS pins these tools.
 def source_filter(info):
     parts = pathlib.PurePosixPath(info.name).parts
-    if any(p in {'.git', 'out', '__pycache__', '.cipd', 'node_modules', 'llvm-build'} or p.endswith('_sysroot') for p in parts):
+    if any(p in {'.git', 'out', '__pycache__', '.cipd', 'node_modules', 'llvm-build'} or p.endswith(('_sysroot', '-sysroot')) for p in parts):
         return None
+    assert not any(c in info.name for c in ('\\', ':', '\x00')) and not info.name.startswith('/') and all(p not in {'.', '..'} for p in parts), 'Unsafe ANGLE source path: ' + repr(info.name)
     if parts[0] == 'angle':
         assert (angle / pathlib.Path(*parts[1:])).resolve().is_relative_to(angle.resolve()), 'ANGLE source link escapes checkout'
     assert info.isfile() or info.isdir(), 'Only regular ANGLE source materials are delivered'

@@ -14,6 +14,10 @@
 
 ## Linux 本地验证
 
+[最终 AppImage 自动验收（2026-10-23）](linux-final-appimage-20261023.md)记录合并 Linux AI 运行库与 ANGLE 源码校验修复后的实际包身份、播放矩阵、故障回退及 4K60 性能边界。
+
+[Linux AI GPU 验收](linux-local-ai-gpu-20261023.md)记录 CUDA/Vulkan 按需运行库、真实推理及平台边界。
+
 [Linux 小尺寸纹理导入修复](linux-small-texture-2026-10-22.md)记录独立 EGL／ANGLE／Vulkan 对照与尺寸相关 modifier 选择修复。
 
 [Linux 色彩与高分辨率验收](linux-color-load-2026-10-22.md)记录 CPU HDR 转 SDR 修复、参考色块、设备/缺库隔离及性能验证边界。

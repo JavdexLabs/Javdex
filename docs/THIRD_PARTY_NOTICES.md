@@ -61,3 +61,5 @@ Javdex 中的 MetaTube 适配代码为本项目实现；上述说明用于标明
 ## 图片处理
 
 Sharp 0.35.5 使用 Apache-2.0；Linux Electron 采用官方 `@img/sharp-wasm32` 0.35.5（Apache-2.0、LGPL-3.0-or-later、MIT），包含 libvips 及图片编解码库，版本清单随包保留。后端选择补丁见 `scripts/patch-sharp-electron.mjs`。上游源码和构建入口见 [Sharp v0.35.5](https://github.com/lovell/sharp/tree/v0.35.5) 和 [sharp-libvips](https://github.com/lovell/sharp-libvips)；上游 [Electron/Linux 兼容性说明](https://sharp.pixelplumbing.com/install/#electron-and-linux) 记录 GLib 符号冲突。
+
+Linux x64 文本 GPU 新增固定 llama.cpp b11435 官方发行及 CUDA 12.8 运行依赖，遵守 [CUDA 12.8.1 EULA](https://docs.nvidia.com/cuda/archive/12.8.1/eula/index.html)。Whisper Linux GPU r1 保留 MIT、Vulkan Headers 与 NVIDIA 许可；驱动 `libcuda.so.1`、Vulkan ICD 由宿主提供，不随包覆盖。实际发行及验证范围见 [Linux AI GPU 验收](reviews/linux-local-ai-gpu-20261023.md)。

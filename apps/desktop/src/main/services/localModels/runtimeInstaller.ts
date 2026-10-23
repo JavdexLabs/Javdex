@@ -93,7 +93,7 @@ export function createAiRuntimeInstaller(root: string, download: typeof fetch = 
   const modelFile = (asset: AiRuntimeAsset): string => path.join(assetDirectory(asset), asset.filename)
   const requiredTools = (id: AiRuntimeAsset['id']): string[] => {
     if (assets.find(asset => asset.id === id)?.runtimePackage) return ['whisper-cli.exe', 'vulkan-1.dll']
-    if (id === 'cuda') return ['cudart64_12.dll', 'cublas64_12.dll', 'cublasLt64_12.dll']
+    if (id === 'cuda') return windows ? ['cudart64_12.dll', 'cublas64_12.dll', 'cublasLt64_12.dll'] : ['libcudart.so.12', 'libcublas.so.12', 'libcublasLt.so.12']
     const names = id === 'ffmpeg' ? ['ffmpeg', 'ffprobe'] : [id === 'whisper' ? 'whisper-cli' : 'llama-server']
     return names.map(name => windows ? `${name}.exe` : target.platform === 'linux' && id === 'ffmpeg' ? `bin/${name}` : name)
   }
@@ -140,7 +140,7 @@ export function createAiRuntimeInstaller(root: string, download: typeof fetch = 
       }
       for (const name of requiredTools(id)) {
         // Cross-target inventories can be inspected on Windows, where stat has no POSIX executable bits.
-        if (!names.has(name) || (!windows && process.platform !== 'win32' && !((await fs.stat(path.join(base, name))).mode & 0o111))) return false
+        if (!names.has(name) || (!windows && id !== 'cuda' && process.platform !== 'win32' && !((await fs.stat(path.join(base, name))).mode & 0o111))) return false
       }
       if (assets.find(asset => asset.id === id)?.backend === 'cuda' && !names.has('NOTICE-CUDA.txt')) return false
       if (asset?.runtimePackage && !legacy) await verifyRuntimePackage(base, asset.runtimePackage, asset.expandedBytes!, { installed: true, fullHash })
@@ -175,11 +175,11 @@ export function createAiRuntimeInstaller(root: string, download: typeof fetch = 
         await fs.writeFile(path.join(staging, 'LICENSE.txt'), AI_RUNTIME_LICENSES[id === 'whisper' ? 'Whisper-MIT.txt' : 'Llama-MIT.txt'])
       }
       if (assets.find(asset => asset.id === id)?.backend === 'cuda') {
-        await fs.writeFile(path.join(staging, 'NOTICE-CUDA.txt'), 'NVIDIA CUDA Runtime / cuBLAS components are not covered by the engine MIT license.\nLicense: https://docs.nvidia.com/cuda/archive/12.4.0/eula/index.html\nSource: pinned Javdex Runtime distribution in runtimeDistributions.json.\n')
+        await fs.writeFile(path.join(staging, 'NOTICE-CUDA.txt'), `NVIDIA CUDA Runtime / cuBLAS components are not covered by the engine MIT license.\nLicense: https://docs.nvidia.com/cuda/archive/${windows ? '12.4.0' : '12.8.1'}/eula/index.html\nSource: pinned distribution in runtimeDistributions.json.\n`)
       }
       for (const name of requiredTools(id)) {
         if (!(await fs.lstat(path.join(staging, name))).isFile()) throw new Error('运行库缺少必需工具')
-        if (!windows) await fs.chmod(path.join(staging, name), 0o755)
+        if (!windows && id !== 'cuda') await fs.chmod(path.join(staging, name), 0o755)
       }
       const files = await runtimeFiles(staging)
       await atomicWrite(path.join(staging, 'asset.json'), JSON.stringify({ sha256: identity(id), target: targetId, files }))
@@ -254,7 +254,7 @@ export function createAiRuntimeInstaller(root: string, download: typeof fetch = 
           })
           else {
             if (!asset.archivePrefix) throw new Error('运行库资源与当前平台不匹配')
-            await extractPosixRuntime(partial, expanded, asset.archivePrefix, signal)
+            await extractPosixRuntime(partial, expanded, asset.archivePrefix, signal, asset.expandedBytes)
           }
           signal.throwIfAborted()
           if (asset.runtimePackage) await verifyRuntimePackage(expanded, asset.runtimePackage, asset.expandedBytes!)

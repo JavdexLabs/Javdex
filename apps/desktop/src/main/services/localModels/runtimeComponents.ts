@@ -16,7 +16,7 @@ export function runtimeComponentDefinitions(target: AiRuntimeTarget): RuntimeCom
     return { assetId: id, asset, component: {
       id: `${id}-${backend}`, group: id === 'translator' || id === 'cuda' ? 'text' : 'speech',
       name: names[id], backend, delivery: 'download', bytes: asset?.bytes ?? 0,
-      version: asset?.model?.family ?? (id === 'whisper' ? 'b5130' : id === 'ffmpeg' ? '8.1.3' : id === 'cuda' ? '12.4' : 'b11435'),
+      version: asset?.model?.family ?? (id === 'whisper' ? 'b5130' : id === 'ffmpeg' ? '8.1.3' : id === 'cuda' ? target.platform === 'linux' ? '12.8.1' : '12.4' : 'b11435'),
       source: asset?.url ?? ''
     } }
   }
@@ -55,11 +55,11 @@ export function preparationPlan(options: {
   }
   if (options.supported) for (const group of groups) {
     const gpu = runtimeBackend(group, policy, devices, components)
-      ?? (options.forceGpu && target.platform === 'win32' ? (devices.find(item => item.backend === 'cuda')?.backend ?? 'vulkan') : undefined)
+      ?? (options.forceGpu && ['win32', 'linux'].includes(target.platform) ? (devices.find(item => item.backend === 'cuda')?.backend ?? 'vulkan') : undefined)
     if (gpu) backend = gpu
     const wanted = components.filter(item => item.group === group && (item.backend === 'cpu' || item.backend === 'common' || item.backend === gpu))
-    // Vulkan device enumeration currently uses the text engine, even for speech-only setup.
-    if (gpu === 'vulkan' && !devices.some(device => device.backend === 'vulkan')) {
+    // Linux also needs Vulkan enumeration on NVIDIA hosts to discover secondary Intel/AMD GPUs.
+    if (gpu && (gpu === 'vulkan' || target.platform === 'linux') && !devices.some(device => device.backend === 'vulkan')) {
       const probe = components.find(item => item.id === 'translator-vulkan')
       if (probe) wanted.push(probe)
     }

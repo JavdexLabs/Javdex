@@ -6,7 +6,7 @@ export class LocalModelProcessFailure extends Error {
 }
 
 export const gpuDiagnosticFailure = (text: string): boolean =>
-  /out of (?:device )?memory|cuda(?: error|_error)|cublas.*(?:fail|error)|vulkan.*(?:fail|error)|VK_ERROR_|no (?:usable )?GPU|invalid device: (?:CUDA|Vulkan)|failed to (?:initialize|allocate).*?(?:CUDA|Vulkan|GPU|device)|CUDA driver|unsupported.*(?:gpu|architecture)|no kernel image|device lost/i.test(text)
+  /error while loading shared libraries:.*(?:libcuda|libcublas|libggml|libvulkan)|out of (?:device )?memory|cuda(?: error|_error)|cublas.*(?:fail|error)|vulkan.*(?:fail|error)|VK_ERROR_|no (?:usable )?GPU|invalid device: (?:CUDA|Vulkan)|failed to (?:initialize|allocate).*?(?:CUDA|Vulkan|GPU|device)|CUDA driver|unsupported.*(?:gpu|architecture)|no kernel image|device lost/i.test(text)
 export const gpuLoaderFailure = (code: number | null): boolean => code !== null
   && [0xc0000135, 0xc0000142, 0xc000007b, 0xc0000139, 0xc000001d].includes(code >>> 0)
 export const gpuMemoryFailure = (text: string): boolean => /out of (?:device )?memory|VK_ERROR_OUT_OF_(?:DEVICE|HOST)_MEMORY|cudaMalloc.*failed/i.test(text)

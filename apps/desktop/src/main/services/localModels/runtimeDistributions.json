@@ -334,6 +334,66 @@
       "bytes": 33337420,
       "sha256": "631b029f7df84aa22d1b8c9c929ea3cc505a70ad091f90ac0eabdb7ef0d05563",
       "archivePrefix": null
+    },
+    {
+      "release": "b11435",
+      "id": "translator",
+      "target": "linux-x64",
+      "backend": "vulkan",
+      "name": "llama-b11435-bin-ubuntu-vulkan-x64.tar.gz",
+      "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11435/llama-b11435-bin-ubuntu-vulkan-x64.tar.gz",
+      "source": "https://github.com/ggml-org/llama.cpp/tree/b11435",
+      "bytes": 31636156,
+      "sha256": "e8a9c44c8212c5e7ff1186864080ae49283131c60e7c07753a296faccd3a0324",
+      "archivePrefix": "llama-b11435"
+    },
+    {
+      "release": "b11435",
+      "id": "translator",
+      "target": "linux-x64",
+      "backend": "cuda",
+      "name": "llama-b11435-bin-ubuntu-cuda-12.8-x64.tar.gz",
+      "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11435/llama-b11435-bin-ubuntu-cuda-12.8-x64.tar.gz",
+      "source": "https://github.com/ggml-org/llama.cpp/tree/b11435",
+      "bytes": 171652084,
+      "sha256": "251ad225b60da6eab0591567b639dda5e405662589bdaee7bd54a159b8d87fa9",
+      "archivePrefix": "llama-b11435"
+    },
+    {
+      "release": "b11435",
+      "id": "cuda",
+      "target": "linux-x64",
+      "backend": "cuda",
+      "name": "cudart-llama-b11435-bin-ubuntu-cuda-12.8-x64.tar.gz",
+      "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11435/cudart-llama-b11435-bin-ubuntu-cuda-12.8-x64.tar.gz",
+      "source": "https://github.com/ggml-org/llama.cpp/tree/b11435",
+      "bytes": 594377810,
+      "sha256": "c14f9b18c0e19623d2fb763e47ca6cd0e409206d462176af8ac0665331b64f74",
+      "archivePrefix": "cudart-llama-b11435-bin-ubuntu-cuda-12.8-x64"
+    },
+    {
+      "release": "whisper-b5130-linux-gpu-r1",
+      "id": "whisper",
+      "target": "linux-x64",
+      "backend": "cuda",
+      "name": "whisper-b5130-linux-x64-cuda.tar.gz",
+      "url": "https://github.com/JavdexLabs/javdex-runtime/releases/download/whisper-b5130-linux-gpu-r1/whisper-b5130-linux-x64-cuda.tar.gz",
+      "source": "https://github.com/JavdexLabs/javdex-runtime/tree/whisper-b5130-linux-gpu-r1/runtimes/whisper/linux",
+      "bytes": 652513972,
+      "sha256": "71a3b3f4a3da826c902f0516b2a1aa9d4c4c8fe3f5503bc7bbca2c7743175d54",
+      "archivePrefix": "whisper-b5130-linux-x64-cuda"
+    },
+    {
+      "release": "whisper-b5130-linux-gpu-r1",
+      "id": "whisper",
+      "target": "linux-x64",
+      "backend": "vulkan",
+      "name": "whisper-b5130-linux-x64-vulkan.tar.gz",
+      "url": "https://github.com/JavdexLabs/javdex-runtime/releases/download/whisper-b5130-linux-gpu-r1/whisper-b5130-linux-x64-vulkan.tar.gz",
+      "source": "https://github.com/JavdexLabs/javdex-runtime/tree/whisper-b5130-linux-gpu-r1/runtimes/whisper/linux",
+      "bytes": 18120772,
+      "sha256": "b4564176a2a20c9f10ba3f30175709f56980d4f55ca4244409218651b4a0f30a",
+      "archivePrefix": "whisper-b5130-linux-x64-vulkan"
     }
   ]
 }

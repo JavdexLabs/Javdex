@@ -3,6 +3,7 @@ import { runtimeDistributionAssets } from './runtimeDistributionAssets'
 
 /** CUDA 12.4 covers the initial Windows NVIDIA target; unsupported GPUs fail the native probe. */
 export function gpuRuntimeAssets(target: AiRuntimeTarget, backend: 'cuda' | 'vulkan'): AiRuntimeAsset[] {
+  if (target.platform === 'linux' && target.arch === 'x64') return runtimeDistributionAssets(target, backend)
   if (target.platform !== 'win32' || target.arch !== 'x64') return []
   if (backend === 'vulkan') return [...runtimeDistributionAssets(target, backend),
     { id: 'whisper', label: 'Vulkan 语音识别运行库', backend, archive: true,

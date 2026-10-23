@@ -54,14 +54,16 @@ test('host checks reject old macOS, old glibc and musl before enabling inference
   assert.equal(aiRuntimeHostSupported(linux, null), false)
 })
 
-test('all AI tools and VAD pin managed releases and each target includes downloadable speech tools', () => {
+test('AI tools pin managed releases or the reviewed Linux upstream GPU release', () => {
   const targets = [{ platform: 'win32', arch: 'x64' }, { platform: 'linux', arch: 'x64' }, { platform: 'linux', arch: 'arm64' }, { platform: 'darwin', arch: 'arm64' }, { platform: 'darwin', arch: 'x64' }]
   for (const target of targets) {
     const base = aiRuntimeAssets(target)
     for (const id of ['whisper', 'translator', 'ffmpeg']) assert.ok(base.some(asset => asset.id === id && asset.archive))
     const tools = [...base.filter(asset => asset.archive || asset.id === 'vad'), ...gpuRuntimeAssets(target, 'cuda'), ...gpuRuntimeAssets(target, 'vulkan')]
     for (const asset of tools) {
-      assert.match(asset.url, /^https:\/\/github\.com\/JavdexLabs\/javdex-runtime\/releases\/download\//)
+      if (target.platform === 'linux' && asset.backend && ['translator', 'cuda'].includes(asset.id)) {
+        assert.match(asset.url, /^https:\/\/github\.com\/ggml-org\/llama\.cpp\/releases\/download\/b11435\//)
+      } else assert.match(asset.url, /^https:\/\/github\.com\/JavdexLabs\/javdex-runtime\/releases\/download\//)
       if (asset.runtimePackage) continue // Existing Vulkan r1 has its own manifest/provenance contract.
       const pin = pins.assets.find(entry => entry.url === asset.url)
       assert.ok(pin); assert.equal(pin.sha256, asset.sha256); assert.equal(pin.bytes, asset.bytes)

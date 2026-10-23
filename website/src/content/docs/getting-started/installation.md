@@ -24,7 +24,7 @@ Javdex 桌面端支持 64 位 Windows、macOS（Apple Silicon 与 Intel 芯片�
 
 ### 3. 播放器图形渲染与 GPU 驱动
 - Javdex 的内置播放器使用 `libmpv` 原生引擎。程序会在检测到内置播放运行库时自动注入 `--disable-direct-composition` 参数，以确保在多数 Windows 显卡驱动下窗口嵌入稳定无黑屏。
-- 若需使用本地 AI 实时字幕加速，建议将 NVIDIA 显卡驱动升级至支持 **CUDA 12.4** 的版本，或确认显卡驱动支持 **Vulkan**。
+- 若需使用本地 AI 实时字幕加速，Windows 的 NVIDIA 运行库使用 **CUDA 12.4**，新增 Linux x64 构建使用 **CUDA 12.8**，需要相容驱动；也可选择驱动支持的 **Vulkan** 后端。加速运行库由应用按需下载，不需要安装完整 CUDA 开发工具包。
 
 ---
 

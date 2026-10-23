@@ -27,15 +27,16 @@ export default function LocalAccelerationPanel({ state, disabled, execute, failu
       </SelectControl></div>
     </SettingsRow>
     <SettingsValueRow label="已检测到的显卡" value={acceleration.devices.map(device => `${device.name} · ${device.backend.toUpperCase()}`).join('、')
-      || (state.supported ? (policy.mode === 'auto' && !acceleration.supported ? '使用平台默认后端，以下方验证结果为准'
-        : acceleration.detectionComplete === false ? 'GPU 检测尚未完成，请在下方安装 GPU 加速支持' : '未检测到可用独显，可使用 CPU') : '当前平台仅支持管理文件')} actions={
+      || (state.supported ? (policy.mode === 'auto' && !acceleration.supported ? '当前平台未提供可选 GPU 后端，请以下方验证结果为准'
+        : acceleration.detectionComplete === false ? 'GPU 检测尚未完成，请在下方安装 GPU 加速支持' : '未检测到受支持的 GPU，可使用 CPU') : '当前平台仅支持管理文件')} actions={
       <Button size="sm" disabled={disabled} onClick={() => void execute({ action: 'detect-devices' })}>重新检测并验证</Button>
     } />
+    {acceleration.devices.length > 0 && acceleration.detectionComplete === false && <p>已识别部分设备；安装 GPU 加速支持后，将继续检测其他 Vulkan 显卡。</p>}
     {failure && ['acceleration', 'detect-devices'].includes(failure.command.action) && !state.operation && <LocalModelOperationFeedback failure={failure} disabled={disabled} execute={execute} details={requestError} />}
     <SettingsDisclosure title="运行支持与设备详情">
       <p>语音和文本分别安装运行环境，GPU 加速支持可选。安装完成后，当前选用精度会自动进行短推理验证。</p>
       <p>验证不使用影片或麦克风内容。有任务运行时等待任务结束；新的任务或文件操作会中止检查，空闲后继续。实际运行仍可能因显存占用变化而使用 CPU，具体原因显示在对应模型上。</p>
-      <p>Windows 独显使用 CUDA 或 Vulkan，macOS 自动模式使用平台后端。没有独显时可正常使用 CPU。</p>
+      <p>Windows 和 Linux x64 可使用 CUDA 或 Vulkan，需安装对应加速运行库并通过模型验证。macOS 自动模式使用平台后端；GPU 不可用时使用 CPU。</p>
       <p>展开运行环境可查看组件、文件大小和安装状态。</p>
     </SettingsDisclosure>
   </SettingsCard>

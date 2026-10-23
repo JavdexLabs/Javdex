@@ -8,7 +8,36 @@ import { PassThrough } from 'node:stream'
 import type { ChildProcess, spawn } from 'node:child_process'
 import { createLocalTextInference } from './textInference'
 import { gpuDiagnosticFailure, gpuLoaderFailure, localModelProcessEnvironment } from './processRunner'
-import { parseVulkanDevices, selectLocalExecution, type LocalRuntimeAcceleration } from './runtimeAcceleration'
+import { localGpuTargetSupported, parseVulkanDevices, selectLocalExecution, type LocalRuntimeAcceleration } from './runtimeAcceleration'
+
+test('Linux GPU targets and integrated Vulkan adapters require native hardware evidence', () => {
+  assert.equal(localGpuTargetSupported('linux', 'x64'), true)
+  assert.equal(localGpuTargetSupported('linux', 'arm64'), false)
+  const devices = parseVulkanDevices('Vulkan0: Intel UHD (16000 MiB, 12000 MiB free)\nVulkan1: llvmpipe (16000 MiB, 12000 MiB free)',
+    '0 = Intel UHD (Intel) | uma: 1 | fp16: 1\n1 = llvmpipe (LLVM) | uma: 1 | fp16: 1', true)
+  assert.equal(devices.length, 1)
+  assert.equal(devices[0].integrated, true)
+  assert.equal(devices[0].name, 'Intel UHD')
+  assert.equal(gpuDiagnosticFailure('error while loading shared libraries: libcublas.so.12: cannot open shared object file'), true)
+  assert.equal(gpuDiagnosticFailure('error while loading shared libraries: unrelated.so: cannot open shared object file'), false)
+})
+
+test('Linux CUDA libraries are private to the GPU child process', { skip: process.platform !== 'linux' }, async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'javdex-linux-loader-'))
+  t.after(() => fs.rm(root, { recursive: true, force: true }))
+  const model = path.join(root, 'model'); await fs.writeFile(model, 'fixture')
+  const inherited = process.env.LD_LIBRARY_PATH
+  const execution = await selectLocalExecution('/cpu', model, 'translation', {
+    policy: { mode: 'auto' }, devices: [{ id: 'GPU-loader', name: 'Loader fixture', backend: 'cuda', index: 0, memoryMiB: 16000 }],
+    runtimes: { cuda: { translator: '/managed/cuda/llama-server', libraryDirectory: '/managed/dependencies' } }
+  })
+  try {
+    assert.equal(execution.backend, 'cuda')
+    assert.equal(execution.env.LD_LIBRARY_PATH, '/managed/cuda:/managed/cuda/lib:/managed/dependencies:/managed/dependencies/lib')
+    assert.equal(execution.env.PATH, undefined)
+    assert.equal(process.env.LD_LIBRARY_PATH, inherited)
+  } finally { execution.release() }
+})
 
 test('Vulkan enumeration requires native discrete-memory evidence and excludes integrated/virtual adapters', () => {
   const devices = parseVulkanDevices('Vulkan0: RTX (16048 MiB, 15000 MiB free)\nVulkan1: Intel UHD (16000 MiB, 12000 MiB free)',
@@ -33,7 +62,7 @@ test('automatic and explicit unavailable GPUs use a CPU executable without requi
   }
 })
 
-test('auto selects an installed backend and CUDA/Vulkan views share a bounded memory budget', { skip: process.platform !== 'win32' }, async t => {
+test('auto selects an installed backend and CUDA/Vulkan views share a bounded memory budget', { skip: !['win32', 'linux'].includes(process.platform) }, async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'javdex-gpu-budget-'))
   t.after(() => fs.rm(root, { recursive: true, force: true }))
   const model = path.join(root, 'model.gguf'); await fs.writeFile(model, 'fixture')
@@ -52,7 +81,7 @@ test('auto selects an installed backend and CUDA/Vulkan views share a bounded me
   const recovered = await selectLocalExecution('/cpu', model, 'translation', automatic)
   assert.equal(recovered.backend, 'vulkan'); recovered.release()
 })
-test('GPU startup retries once on CPU, but model errors and cancellation never do', { skip: process.platform !== 'win32' }, async t => {
+test('GPU startup retries once on CPU, but model errors and cancellation never do', { skip: !['win32', 'linux'].includes(process.platform) }, async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'javdex-gpu-fallback-'))
   t.after(() => fs.rm(root, { recursive: true, force: true }))
   const model = path.join(root, 'model.gguf'); await fs.writeFile(model, 'fixture')

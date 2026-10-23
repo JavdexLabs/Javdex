@@ -61,3 +61,13 @@ test('macOS speech tools are explicit network downloads with no bundled installa
   assert.equal(plan.downloadBytes, inventory.filter(item => item.group === 'speech').reduce((sum, item) => sum + item.bytes, 0))
   assert.ok(plan.downloadBytes > 885098)
 })
+
+test('Linux CUDA setup includes Vulkan enumeration for secondary integrated GPUs without changing CPU-only setup', () => {
+  const linux = { platform: 'linux', arch: 'x64' }
+  const inventory = runtimeComponentDefinitions(linux).map(({ component }) => ({ ...component, installed: false }))
+  const makePlan = (policy: { mode: 'auto' | 'cpu' }) => preparationPlan({ groups: ['text'], components: inventory,
+    policy, devices, target: linux, supported: true, installed: () => false })
+  assert.ok(makePlan({ mode: 'auto' }).items.some(item => item.id === 'translator-vulkan'))
+  assert.ok(makePlan({ mode: 'auto' }).items.some(item => item.id === 'cuda-cuda'))
+  assert.ok(!makePlan({ mode: 'cpu' }).items.some(item => item.id.endsWith('-vulkan') || item.id.endsWith('-cuda')))
+})

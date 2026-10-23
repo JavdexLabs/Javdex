@@ -8,6 +8,7 @@ import type { ElectronApi } from '../../../../preload/index'
 import { OverlayHistoryProvider } from '../../interaction/OverlayHistoryContext'
 import FloatingLayer from '../FloatingLayer'
 import Modal from '../Modal'
+import SettingsSwitchRow from '../SettingsSwitchRow'
 import { ToastProvider } from '../Toast'
 import { renderedText } from '../../test/renderedText'
 import { runtimeComponentsFixture, runtimePlanFixture } from '../../test/localRuntimeFixture'
@@ -99,6 +100,42 @@ function sharedEnvironment(installed = (id: string) => id.endsWith('-cpu') || id
       gpu: { state: 'missing', backend: 'cuda' }, preparation: plan, gpuPreparation: plan }
   })
 }
+
+test('temporary speech2 keeps Qwen separate from Kotoba and saves its ForcedAligner switch', async () => {
+  sharedEnvironment()
+  const model = family('qwen3-asr', 'Qwen3-ASR 1.7B', 'audio-cpp', 2473010048)
+  model.installed = false
+  model.variants = [{ ...model.variants[0], id: 'qwen3-asr-q8_0', precision: 'Q8_0', installed: false, ready: false, runtimeReady: false }]
+  state.models.push(model)
+  const components = [{ ...runtimeComponentsFixture[0], id: 'audiocpp-cpu', group: 'speech2' as const, name: 'audio.cpp 语音引擎', installed: false }]
+  const plan = runtimePlanFixture('speech2', components)
+  state.environments!.push({ group: 'speech2', supported: true, components, cpuReady: false, gpu: { state: 'missing', backend: 'vulkan' }, preparation: plan, gpuPreparation: plan })
+  await mount()
+  const first = renderer!.root.findAllByType('section').find(node => node.props['aria-label'] === '语音模型')!
+  const second = renderer!.root.findAllByType('section').find(node => node.props['aria-label'] === '语音模型2')!
+  assert.ok(renderedText(first).includes('Kotoba'))
+  assert.ok(!renderedText(first).includes('Qwen3-ASR'))
+  assert.ok(renderedText(second).includes('Qwen3-ASR'))
+  assert.ok(!renderedText(second).includes('Kotoba'))
+  assert.equal(first.findAllByType(SettingsSwitchRow).length, 0)
+  const aligner = () => second.findByType(SettingsSwitchRow)
+  assert.equal(aligner().props.checked, true)
+  assert.match(aligner().props.description, /时间轴较粗/)
+  await act(async () => aligner().props.onChange(false))
+  assert.deepEqual(commands[0], { action: 'qwen-forced-aligner', enabled: false, expectedRevision: 'r1' })
+  state.qwenForcedAligner = false
+  await act(async () => changed({ ...state }))
+  assert.equal(aligner().props.checked, false)
+  await act(async () => button('安装运行环境', second).props.onClick())
+  assert.deepEqual(commands[1], { action: 'prepare-runtime', group: 'speech2', target: 'cpu' })
+  await act(async () => select('语音模型2筛选').props.onChange({ target: { value: 'installed' } }))
+  assert.equal(second.findAllByType('article').length, 0)
+  assert.equal(first.findAllByType('article').length, 1)
+  assert.equal(select('语音模型筛选').props.value, 'all')
+  const active = structuredClone(state); active.models.find(item => item.id === 'qwen3-asr')!.inUse = true
+  await act(async () => changed(active))
+  assert.equal(aligner().props.disabled, true)
+})
 for (const group of ['speech', 'text'] as const) test(`${group} environment deletion checks only its own precision files and reacts to live changes`, async () => {
   sharedEnvironment(); await mount()
   const groupName = group === 'speech' ? '语音' : '文本'
@@ -312,7 +349,7 @@ test('local models separate speech and text modalities, keep families compact, a
   assert.equal(text.findAllByType('article').length, 2)
   assert.equal(renderer!.root.findAllByType('table').filter(node => String(node.props['aria-label']).endsWith('精度列表')).length, 2)
   const labels = renderer!.root.findAllByType(Select).map(node => node.props['aria-label'])
-  assert.deepEqual(labels, ['语音模型筛选', '文本模型筛选', '模型下载来源'])
+  assert.deepEqual(labels, ['语音模型筛选', '语音模型2筛选', '文本模型筛选', '模型下载来源'])
 })
 
 test('precision browsing retains exact publisher identity and downloads never change usage', async () => {
@@ -604,7 +641,7 @@ test('all models and precisions remain visible even when no files are installed'
   assert.equal(renderer!.root.findAllByType('article').length, empty.models.length)
   assert.equal(renderer!.root.findAllByProps({ 'data-variant': 'qwen3-q6_k' }).length, 1)
   assert.equal(renderer!.root.findAllByProps({ 'data-variant': 'qwen3-official-q8_0' }).length, 1)
-  assert.deepEqual(renderer!.root.findAllByType(Select).map(node => node.props['aria-label']), ['语音模型筛选', '文本模型筛选', '模型下载来源'])
+  assert.deepEqual(renderer!.root.findAllByType(Select).map(node => node.props['aria-label']), ['语音模型筛选', '语音模型2筛选', '文本模型筛选', '模型下载来源'])
 })
 
 test('targeted installation expands and highlights a missing nonrecommended precision, with a return route preserving scope', async () => {

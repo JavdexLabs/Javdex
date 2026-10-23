@@ -1,5 +1,6 @@
 import { CheckCircle2, Circle } from 'lucide-react'
 import type { LocalExecutionStatus, LocalModelCommand, LocalModelSnapshot, LocalModelVariantView, LocalModelView } from '@shared/desktop/localModels'
+import { isSpeechModel, localModelGroup } from '@shared/desktop/localModels'
 import Button from '../Button'
 import { SettingsStatusPill } from './SettingsPrimitives'
 import styles from './LocalModelsPanel.module.css'
@@ -22,13 +23,13 @@ export default function LocalModelStatus({ model, variant, state, busy, execute 
   const gpuFallback = backend === 'cpu' && !!reason && state.acceleration?.policy.mode !== 'cpu'
     && (!!state.acceleration?.devices.length || state.acceleration?.policy.mode === 'gpu')
   const optionalGpuMissing = state.acceleration?.policy.mode === 'auto'
-    && state.environments?.find(item => item.group === (model.id === 'kotoba' ? 'speech' : 'text'))?.gpu.state === 'missing'
+    && state.environments?.find(item => item.group === localModelGroup(model.id))?.gpu.state === 'missing'
   const repairGpu = gpuFallback && /运行库|未启用|启动失败|试运行失败|推理失败/.test(reason ?? '')
   const fallbackSummary = /运行库/.test(reason ?? '') ? '加速运行支持未就绪'
     : /指定显卡/.test(reason ?? '') ? '指定显卡不可用'
       : /显存|内存/.test(reason ?? '') ? '显存不足，已验证 CPU' : '显卡试运行未通过，CPU 可用'
   const runtimeReady = variant.runtimeReady ?? variant.ready
-  const blocked = busy || state.operation !== null || model.inUse || (model.id !== 'kotoba' && state.models.some(item => item.id !== 'kotoba' && item.inUse))
+  const blocked = busy || state.operation !== null || model.inUse || (!isSpeechModel(model.id) && state.models.some(item => !isSpeechModel(item.id) && item.inUse))
   const label = !state.supported ? '仅管理文件' : !variant.installed ? '待下载' : !runtimeReady ? '待安装运行环境'
     : check?.state === 'checking' ? '正在验证' : check?.state === 'waiting' ? '等待验证'
       : check?.state === 'failed' ? '验证失败' : check?.state === 'passed'
@@ -57,7 +58,7 @@ export default function LocalModelStatus({ model, variant, state, busy, execute 
       {gpuFallback && !repairGpu && <span className={styles.note}>{fallbackSummary}</span>}
       {check?.state === 'waiting' && <span className={styles.note}>{check.message ?? '空闲后自动验证'}</span>}
       {variant.installed && state.supported && !runtimeReady && <Button size="sm" variant="ghost" className={styles.inlineAction} disabled={blocked}
-        onClick={() => void execute({ action: 'prepare-runtime', group: model.id === 'kotoba' ? 'speech' : 'text', target: 'cpu' })}>安装运行环境</Button>}
+        onClick={() => void execute({ action: 'prepare-runtime', group: localModelGroup(model.id), target: 'cpu' })}>安装运行环境</Button>}
       {!check && variant.ready && !variant.references.length && <span className={styles.note}>选用后自动验证</span>}
       {repairGpu && !optionalGpuMissing && state.acceleration?.supported && <Button size="sm" variant="ghost" className={styles.inlineAction}
         disabled={busy || state.operation !== null || state.models.some(item => item.inUse)}

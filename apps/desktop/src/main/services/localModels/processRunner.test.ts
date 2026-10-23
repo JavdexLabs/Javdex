@@ -19,6 +19,14 @@ test('offline child failures never expose decoder paths or grants', async () => 
   await assert.rejects(runLocalModelProcess(process.execPath, ['-e', "console.error('https://secret.invalid/grant');process.exit(7)"], { env }),
     error => error instanceof LocalModelProcessFailure && error.exitCode === 7 && !error.message.includes('secret'))
 })
+
+test('failed native stdout is available only to an explicit diagnostic callback', async () => {
+  let output = ''
+  await assert.rejects(runLocalModelProcess(process.execPath, ['-e', "console.log('native alignment failed');process.exit(7)"], {
+    env, output: value => { output = value }
+  }), error => error instanceof LocalModelProcessFailure && error.exitCode === 7 && !error.message.includes('alignment'))
+  assert.match(output, /native alignment failed/)
+})
 test('abort, timeout and oversized output terminate the owned inference child', async () => {
   const controller = new AbortController()
   const pending = runLocalModelProcess(process.execPath, ['-e', 'setInterval(()=>{},1000)'], { env, signal: controller.signal })

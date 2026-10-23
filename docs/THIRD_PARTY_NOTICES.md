@@ -32,6 +32,8 @@ Windows 原生播放 addon 的 MSVC 构建复用已安装的 [node-gyp](https://
 
 ## 本地 AI 运行库
 
+- 可选 Qwen3-ASR 1.7B 与 Qwen3-ForcedAligner 0.6B 使用 Qwen 发布的模型，按 Apache-2.0 声明保存许可；独立 GGUF 由 [audio-cpp](https://huggingface.co/audio-cpp/audio.cpp-gguf) 发布。Windows CPU／Vulkan 推理由 [audio.cpp](https://github.com/0xShug0/audio.cpp) 提供，项目许可为 Apache-2.0；安装保留固定发行的 LICENSE 和运行 DLL，不能把模型许可当作运行库全部第三方组件的许可。固定发行、revision、文件大小与 SHA-256 见 `localModels/qwenAsrManifest.ts` 及 `modelCatalogAssets.json`；无需 Python，不进入服务端。
+
 - whisper.cpp b5130 与 llama.cpp b11435：MIT；固定下载地址、大小、SHA-256 见 [资产清单](../apps/desktop/src/main/services/localModels/runtimeManifest.ts)。各系统的资产独立，不能用 Windows ZIP 代替 POSIX 运行库。安装保留上游许可文件，模型许可与运行库许可分别记录。
 - macOS 随应用分发固定源码构建的 whisper-cli、FFmpeg／ffprobe；来源与摘要见 [源码清单](../scripts/ai-runtime-sources.json)，构建步骤见 [构建器](../scripts/ai-runtime-build.mjs)。FFmpeg 8.1.3 为 LGPL-2.1-or-later 静态构建，不启用 GPL／nonfree／自动探测外部编解码依赖；bundle 内附 `COPYING.LGPLv2.1`、`SOURCE.txt` 和完整构建来源清单。
 - Windows／Linux 的 FFmpeg 按需下载 BtbN 固定日期 LGPL shared 发布资产，保留包中的许可文件，不能把 macOS 自建工具的 LGPL 版本用于判断这些上游包的全部间接依赖许可。

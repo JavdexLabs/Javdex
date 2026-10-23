@@ -1,6 +1,7 @@
 import { Fragment, useId, useState } from 'react'
 import { ChevronDown, ChevronRight, Trash2 } from 'lucide-react'
 import type { LocalModelCommand, LocalModelSnapshot, LocalPreparationPlan, LocalRuntimeEnvironment as Environment } from '@shared/desktop/localModels'
+import { localModelGroup, localModelGroupLabel } from '@shared/desktop/localModels'
 import Button from '../Button'
 import IconButton from '../IconButton'
 import Modal from '../Modal'
@@ -47,7 +48,8 @@ export default function LocalRuntimeEnvironment({ environment, state, disabled, 
   const [deleting, setDeleting] = useState<{ name: string; target: 'cpu' | 'gpu' } | null>(null)
   const [deleteError, setDeleteError] = useState(false)
   const { gpu } = environment
-  const { supported, checkingDependencies: checking = false } = state
+  const { checkingDependencies: checking = false } = state
+  const supported = environment.supported ?? state.supported
   const baseComponents = environment.components.filter(item => item.backend === 'cpu' || item.backend === 'common')
   const baseIds = new Set(baseComponents.map(item => item.id))
   const baseItems = environment.preparation.items.filter(item => baseIds.has(item.id))
@@ -66,21 +68,21 @@ export default function LocalRuntimeEnvironment({ environment, state, disabled, 
       : gpu.state === 'platform' ? gpu.backend === 'metal' ? 'Metal 由系统提供，无需单独安装。' : '当前平台使用基础运行环境。'
         : gpu.state === 'unchecked' ? '安装检测组件后继续识别显卡。'
           : [gpu.backend?.toUpperCase(), device?.name].filter(Boolean).join(' · ')
-  const groupName = environment.group === 'speech' ? '语音' : '文本'
+  const groupName = localModelGroupLabel(environment.group)
   const allComponents = state.environments?.flatMap(item => item.components) ?? environment.components
   const hasFiles = (component: Environment['components'][number]) => component.installed || component.hasFiles
   const deletingBase = deleting?.target === 'cpu'
   const deletingComponents = environment.components.filter(component => hasFiles(component)
     && (deletingBase ? baseIds.has(component.id) : !baseIds.has(component.id)))
-  const remainingModels = state.models.filter(model => (model.id === 'kotoba') === (environment.group === 'speech'))
+  const remainingModels = state.models.filter(model => localModelGroup(model.id) === environment.group)
     .flatMap(model => model.variants.filter(variant => variant.installed || variant.hasFiles).map(variant => ({ model, variant })))
   const blocked = deletingBase && remainingModels.length > 0
   function requestDelete(name: string, target: 'cpu' | 'gpu'): void {
     setDeleteError(false); setDeleting({ name, target })
   }
   const rows = [
-    { id: 'cpu' as const, name: '基础运行环境', requirement: '必需', description: environment.group === 'speech' ? 'CPU 语音引擎、音频工具与检测文件' : 'CPU 文本引擎',
-      items: baseItems, plan: basePlan, installed: baseComponents.filter(item => item.installed || completedIds.has(item.id)).length, available: true },
+    { id: 'cpu' as const, name: '基础运行环境', requirement: '必需', description: environment.group !== 'text' ? '识别引擎、音频工具与配套模型' : 'CPU 文本引擎',
+      items: baseItems, plan: basePlan, installed: baseComponents.filter(item => item.enabled !== false && (item.installed || completedIds.has(item.id))).length, available: true },
     { id: 'gpu' as const, name: 'GPU 加速支持', requirement: '可选', description: gpuDescription,
       items: gpuItems, plan: gpuPlan, installed: gpuItems.filter(item => item.action === 'reuse' || completedIds.has(item.id)).length, available: canInstallGpu }
   ]
@@ -98,7 +100,7 @@ export default function LocalRuntimeEnvironment({ environment, state, disabled, 
           const working = !!active && ids.has(active.itemId)
           const queued = !!active && active.plan.items.some(item => ids.has(item.id) && !completedIds.has(item.id))
           const installed = row.items.length > 0 && row.installed === row.items.length
-          const partial = row.installed > 0 || environment.components.some(item => item.hasFiles && (row.id === 'cpu' ? baseIds.has(item.id) : !baseIds.has(item.id)))
+          const partial = row.installed > 0 || environment.components.some(item => item.enabled !== false && item.hasFiles && (row.id === 'cpu' ? baseIds.has(item.id) : !baseIds.has(item.id)))
             || row.items.some(item => item.action === 'verify' || item.action === 'download' && item.downloadBytes < item.bytes)
           const label = !supported ? '平台不支持' : checking ? '正在检查' : working ? active.phase === 'checking' ? '正在校验' : active.phase === 'installing' ? '正在安装' : '正在下载'
             : queued ? '等待安装' : installed ? '已安装' : partial ? '部分安装' : row.id === 'gpu' && gpu.state === 'platform' ? '无需安装' : '未安装'
@@ -138,14 +140,14 @@ export default function LocalRuntimeEnvironment({ environment, state, disabled, 
           {open && <tr className={styles.runtimeDetailsRow} data-runtime-details={row.id}><td colSpan={4} className={styles.runtimeDetailsCell}>
             <div id={`${detailId}-${row.id}`} role="region" aria-label={`${groupName}${row.name}组件清单`} className={styles.preparationDetails}>
               <p className={styles.note}>{row.id === 'gpu' ? '列出当前加速方式所需组件及已安装的其他 GPU 组件；缺少的基础环境会一起安装。实际 GPU 验证结果见下方精度行。'
-                : `${environment.group === 'speech' ? '所有语音精度' : 'Qwen3、HY-MT2 的所有精度'}使用以下组件；安装完成后，当前选用精度会自动验证。`}</p>
+                : `${environment.group !== 'text' ? '本模块的识别模型' : 'Qwen3、HY-MT2 的所有精度'}使用以下组件；安装完成后，当前选用精度会自动验证。`}</p>
               {components.length > 0 && <div className={styles.componentScroll} role="region" aria-label={`${groupName}${row.name}组件，可横向滚动`} tabIndex={0}>
                 <table className={styles.componentTable} aria-label={`${groupName}${row.name}组件`}>
                   <thead className={styles.componentHead}><tr>{['组件', '后端', '安装状态', '文件大小', '版本', '来源'].map(title => <th className={styles.componentCell} scope="col" key={title}>{title}</th>)}</tr></thead>
                   <tbody>{components.map(component => {
                     const installed = component.installed || completedIds.has(component.id)
                     return <tr className={styles.componentRow} key={component.id}>
-                      <th className={styles.componentCell} scope="row">{component.name}</th><td className={styles.componentCell}>{component.backend === 'common' ? '通用' : component.backend.toUpperCase()}</td>
+                      <th className={styles.componentCell} scope="row">{component.name}{component.enabled === false && '（已停用）'}</th><td className={styles.componentCell}>{component.backend === 'common' ? '通用' : component.backend.toUpperCase()}</td>
                       <td className={styles.componentCell}><SettingsStatusPill status={installed ? 'success' : 'muted'}>{installed ? '已安装' : component.hasFiles ? '部分文件' : '未安装'}</SettingsStatusPill></td>
                       <td className={styles.componentCell}>{fileSize(component.bytes)}</td>
                       <td className={styles.componentCell}>{component.version}</td><td className={styles.componentCell}>{component.delivery === 'bundled' ? '应用内置' : sourceName(component.source)}</td>
@@ -182,6 +184,7 @@ export default function LocalRuntimeEnvironment({ environment, state, disabled, 
           <ul>{deletingComponents.map(component => <li key={component.id}>{component.name} · {component.backend.toUpperCase()}</li>)}</ul>
           <p>{deletingBase ? `删除后，下载或导入${groupName}模型前需要重新安装基础运行环境。`
             : '删除后会重新检查依赖和精度状态；基础环境可用时自动使用 CPU。'}</p></>}
+      {deletingBase && environment.group !== 'text' && <p>仍被其他语音模块的模型文件使用的共用音频工具会保留。</p>}
       {deleteError && <p role="alert" className={styles.fullError}>{failure?.message ?? '删除失败，请查看页面错误详情后重试。'}</p>}
     </Modal>}
   </div>

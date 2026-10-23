@@ -4,6 +4,7 @@ import type { AiRuntimeAsset, AiRuntimeTarget } from './runtimeManifest'
 import { atomicWrite } from '../../utils/atomicWrite'
 import { AI_RUNTIME_LICENSES } from './runtimeLicenses'
 import { LOCAL_MODEL_NOTICES } from './modelNotices'
+import { AUDIOCPP_VERSION } from './qwenAsrManifest'
 
 export const MODEL_STORE_ENTRIES = ['models', 'runtimes', 'downloads', 'store.json'] as const
 /** Resolve existing ancestors without creating a rejected relocation target. */
@@ -34,7 +35,7 @@ export function modelAssetDirectory(root: string, asset: AiRuntimeAsset): string
   return path.join(root, 'models', ...[family, publisher, revision, precision].map(component))
 }
 export function runtimeAssetDirectory(root: string, id: AiRuntimeAsset['id'], target: AiRuntimeTarget, backend = 'cpu'): string {
-  const runtime = id === 'whisper' ? ['whisper.cpp', 'b5130'] : ['translator', 'cuda'].includes(id) ? ['llama.cpp', 'b11435'] : ['ffmpeg', 'n8.1.3-14-g330caae0c1']
+  const runtime = id === 'audiocpp' ? ['audio.cpp', AUDIOCPP_VERSION] : id === 'whisper' ? ['whisper.cpp', 'b5130'] : ['translator', 'cuda'].includes(id) ? ['llama.cpp', 'b11435'] : ['ffmpeg', 'n8.1.3-14-g330caae0c1']
   return path.join(root, 'runtimes', ...runtime, component(`${target.platform}-${target.arch}${id === 'ffmpeg' ? '' : `-${backend}${id === 'cuda' ? '-dependencies' : ''}`}`))
 }
 export function modelDownloadDirectory(root: string, asset: AiRuntimeAsset): string {

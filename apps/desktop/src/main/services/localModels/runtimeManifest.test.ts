@@ -26,7 +26,8 @@ test('all supported targets share portable weights but never reuse another targe
     for (const family of ['qwen3', 'hy-mt2-7b'] as const) {
       const selected = localModelAssets(DEFAULT_LOCAL_MODEL_VARIANTS, family, target)
       assert.equal(selected.find(asset => asset.id === 'translation-model')!.translationModelId, family)
-      assert.deepEqual(selected.filter(asset => asset.archive), assets.filter(asset => asset.archive))
+      assert.deepEqual(selected.filter(asset => asset.archive && asset.id !== 'audiocpp'), assets.filter(asset => asset.archive))
+      assert.equal(selected.some(asset => asset.id === 'audiocpp'), target.platform === 'win32')
     }
   }
 })

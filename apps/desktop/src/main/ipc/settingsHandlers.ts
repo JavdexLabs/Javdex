@@ -299,6 +299,7 @@ export function registerSettingsHandlers(ctx: IpcContext, backend: CatalogBacken
   appCommandAdapter.register(IPC.LOCAL_MODELS_COMMAND, async command => {
     const models = getLocalModels(), window = ctx.getWindow()
     if (command.action === 'download') await models.download(command.model, command.variant)
+    else if (command.action === 'qwen-forced-aligner') await models.setQwenForcedAligner(command.enabled, command.expectedRevision)
     else if (command.action === 'acceleration') await models.setAcceleration(command.policy, command.expectedRevision)
     else if (command.action === 'detect-devices') await models.detectDevices()
     else if (command.action === 'prepare-runtime') await models.prepareRuntime(command.group, command.target)

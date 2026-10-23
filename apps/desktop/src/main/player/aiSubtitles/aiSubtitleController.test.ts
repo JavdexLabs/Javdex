@@ -90,6 +90,22 @@ async function fixture() {
   }
 }
 
+test('failure logs retain the underlying recognition error and chunk without exposing remote grant URLs', async () => {
+  const f = await fixture()
+  f.setRecognition(async () => { throw Object.assign(new Error('Qwen 对齐失败 https://fixture.invalid/grant?secret=private'), { tool: 'audiocpp_cli.exe', exitCode: 7 }) })
+  try {
+    await f.controller.command('one', { action: 'start' })
+    await until(() => f.controller.snapshot().phase === 'error')
+    await f.controller.command('one', { action: 'view-log' })
+    assert.match(f.logs.at(-1)!, /字幕片段失败/)
+    assert.match(f.logs.at(-1)!, /Qwen 对齐失败/)
+    assert.match(f.logs.at(-1)!, /语音识别/)
+    assert.match(f.logs.at(-1)!, /audiocpp_cli.exe/)
+    assert.match(f.logs.at(-1)!, /exitCode.*7/)
+    assert.doesNotMatch(f.logs.at(-1)!, /fixture.invalid|secret=/)
+  } finally { await f.cleanup() }
+})
+
 test('changing audio during preparation cancels the old probe and starts the latest stream', async () => {
   const f = await fixture()
   let oldSignal: AbortSignal | null = null

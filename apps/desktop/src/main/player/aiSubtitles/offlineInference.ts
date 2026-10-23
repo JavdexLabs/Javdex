@@ -7,6 +7,7 @@ import type { AiRuntimePaths } from '../../services/localModels/runtimeInstaller
 import { createLocalTextInference, type LocalTextInferenceOptions } from '../../services/localModels/textInference'
 import { localSubtitleTranslationPrompt } from '../../services/localModels/localTranslation'
 import { parseWhisperCues, SUBTITLE_CONTEXT_SECONDS, type SubtitleCue } from './subtitleDocument'
+import { createQwenAsrRecognition } from './qwenAsrRecognition'
 
 export interface SubtitleAudioStream { index: number; identity: string }
 export { localModelProcessEnvironment } from '../../services/localModels/processRunner'
@@ -19,6 +20,7 @@ export function createOfflineSubtitleInference(paths: AiRuntimePaths, workRoot: 
   const threads = String(Math.max(1, Math.min(6, Math.floor(os.availableParallelism() / 2))))
   let recognitionCpuReason: string | undefined
   const run = options.run ?? runLocalModelProcess
+  const recognizeQwen = createQwenAsrRecognition(paths, run)
   return {
     translateText: translator.translateText,
     async probe(locator: string, expectedIndex: number, signal: AbortSignal): Promise<SubtitleAudioStream> {
@@ -32,16 +34,18 @@ export function createOfflineSubtitleInference(paths: AiRuntimePaths, workRoot: 
       if (!Number.isInteger(audioIndex) || audioIndex < 0 || !Number.isFinite(start) || !Number.isFinite(end)
         || start < 0 || end <= start || end - start > 30) throw new Error('音频识别区间无效')
       signal.throwIfAborted()
-      options.log?.('识别开始', { model: 'Kotoba', audioIndex, start, end })
+      options.log?.('识别开始', { model: paths.recognitionModel === 'qwen3-asr' ? 'Qwen3-ASR 1.7B' : 'Kotoba', audioIndex, start, end })
       await fs.mkdir(workRoot, { recursive: true })
       const directory = await fs.mkdtemp(path.join(workRoot, 'chunk-'))
       const wav = path.join(directory, 'audio.wav'), output = path.join(directory, 'recognized')
-      const extractStart = Math.max(0, start - SUBTITLE_CONTEXT_SECONDS)
+      const contextSeconds = paths.recognitionModel === 'qwen3-asr' && paths.qwenAsr?.forcedAligner === false ? 0 : SUBTITLE_CONTEXT_SECONDS
+      const extractStart = Math.max(0, start - contextSeconds)
       try {
         await run(paths.ffmpeg, ['-nostdin', '-v', 'error', '-ss', String(extractStart), '-i', locator,
-          '-t', String(end - extractStart + SUBTITLE_CONTEXT_SECONDS), '-map', `0:${audioIndex}`, '-vn', '-sn', '-dn',
+          '-t', String(end - extractStart + contextSeconds), '-map', `0:${audioIndex}`, '-vn', '-sn', '-dn',
           '-ar', '16000', '-ac', '1', '-c:a', 'pcm_s16le', '-y', wav], { signal, timeoutMs: 45000 })
         if ((await fs.stat(wav)).size > 4 * 1024 * 1024) throw new Error('音频提取结果超限')
+        if (paths.recognitionModel === 'qwen3-asr') return await recognizeQwen(wav, output, extractStart, start, end, signal, options.log)
         const args = ['-m', paths.kotoba, '-f', wav, '-l', 'ja', '-ojf', '-of', output,
           '-t', threads, '-mc', '0', '--vad', '--vad-model', paths.vad]
         const execution = recognitionCpuReason ? cpuExecution(paths.whisper, 'recognition', paths.acceleration, recognitionCpuReason)

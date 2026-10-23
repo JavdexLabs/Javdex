@@ -7,15 +7,18 @@ import { AI_MAC_BUNDLE_VERSION, AI_RUNTIME_ASSET_IDS, AI_RUNTIME_PLATFORM_MESSAG
   aiRuntimeAssets, aiRuntimeTargetSupported, currentAiRuntimeTarget, type AiRuntimeAsset, type AiRuntimeTarget } from './runtimeManifest'
 import { runLocalModelProcess } from './processRunner'
 import { atomicWrite } from '../../utils/atomicWrite'
-import type { LocalTranslationModelId } from '@shared/desktop/localModels'
+import type { LocalRecognitionModelId, LocalTranslationModelId } from '@shared/desktop/localModels'
 import { localTranslationVersion } from './localTranslation'
 import { extractPosixRuntime, safeRuntimePath } from './runtimeArchive'
 import { ensureModelStore, ensureStorageDirectory, modelAssetDirectory, runtimeAssetDirectory, modelDownloadDirectory, modelDownloadFile, writeModelManifest } from './modelStorage'
 import { AI_RUNTIME_LICENSES } from './runtimeLicenses'
 import type { LocalRuntimeAcceleration } from './runtimeAcceleration'
 import { runtimePackageExtractScript, verifyRuntimePackage } from './runtimePackage'
+import { AUDIOCPP_VERSION } from './qwenAsrManifest'
 
 export interface AiRuntimePaths {
+  recognitionModel?: LocalRecognitionModelId
+  qwenAsr?: { executable: string; model: string; aligner: string; forcedAligner?: boolean }
   acceleration?: LocalRuntimeAcceleration
   whisper: string; translator: string; ffmpeg: string; ffprobe: string; kotoba: string; translationModel: string; vad: string
   asrVersion?: string
@@ -60,7 +63,8 @@ try {
     $total += $entry.Length
     if ($total -gt [long]$env:JAVDEX_AI_EXPANDED_LIMIT) { throw 'archive size limit' }
     $name = [IO.Path]::GetFileName($entry.FullName.Replace('\\','/'))
-    if ($name -notmatch '^(whisper-cli|llama-server|ffmpeg|ffprobe)\\.exe$|\\.dll$|^(LICENSE|COPYING|NOTICE)') { continue }
+    if ($env:JAVDEX_AI_AUDIOCPP -eq '1' -and ($entry.FullName -match '[/\\\\]' -or $name -notmatch '^audiocpp_cli\\.exe$|\\.dll$|^(LICENSE|COPYING|NOTICE)')) { continue }
+    if ($name -notmatch '^(whisper-cli|llama-server|ffmpeg|ffprobe|audiocpp_cli)\\.exe$|\\.dll$|^(LICENSE|COPYING|NOTICE)') { continue }
     if ($entry.FullName -match '(^|[/\\\\])\\.\\.([/\\\\]|$)' -or ($entry.ExternalAttributes -shr 16 -band 61440) -eq 40960) { throw 'unsafe archive entry' }
     $target = [IO.Path]::Combine($env:JAVDEX_AI_DIRECTORY, $name)
     if ([IO.File]::Exists($target)) { throw 'duplicate archive entry' }
@@ -81,7 +85,7 @@ async function runtimeFiles(directory: string, relative = ''): Promise<RuntimeFi
   return result
 }
 export function createAiRuntimeInstaller(root: string, download: typeof fetch = fetch, manifest?: readonly AiRuntimeAsset[], options: {
-  target?: AiRuntimeTarget; bundleRoot?: string
+  target?: AiRuntimeTarget; bundleRoot?: string; recognitionModel?: LocalRecognitionModelId; qwenForcedAligner?: boolean
 } = {}) {
   const target = options.target ?? currentAiRuntimeTarget()
   const assets = manifest ?? aiRuntimeAssets(target)
@@ -92,6 +96,7 @@ export function createAiRuntimeInstaller(root: string, download: typeof fetch = 
   const assetDirectory = (asset: AiRuntimeAsset): string => asset.archive ? toolDirectory(asset.id) : modelAssetDirectory(root, asset)
   const modelFile = (asset: AiRuntimeAsset): string => path.join(assetDirectory(asset), asset.filename)
   const requiredTools = (id: AiRuntimeAsset['id']): string[] => {
+    if (id === 'audiocpp') return ['audiocpp_cli.exe']
     if (assets.find(asset => asset.id === id)?.runtimePackage) return ['whisper-cli.exe', 'vulkan-1.dll']
     if (id === 'cuda') return ['cudart64_12.dll', 'cublas64_12.dll', 'cublasLt64_12.dll']
     const names = id === 'ffmpeg' ? ['ffmpeg', 'ffprobe'] : [id === 'whisper' ? 'whisper-cli' : 'llama-server']
@@ -101,11 +106,19 @@ export function createAiRuntimeInstaller(root: string, download: typeof fetch = 
   const bundled = (id: AiRuntimeAsset['id']): boolean => target.platform === 'darwin' && ['whisper', 'ffmpeg'].includes(id)
   const identity = (id: AiRuntimeAsset['id']): string | undefined => bundled(id) ? `${AI_MAC_BUNDLE_VERSION}:${targetId}:${id}` : assets.find(asset => asset.id === id && asset.archive)?.sha256
   const paths = (): AiRuntimePaths => ({
+    recognitionModel: options.recognitionModel ?? 'kotoba',
+    ...(assets.some(asset => asset.id === 'audiocpp') ? { qwenAsr: {
+      executable: toolPath('audiocpp'), model: modelFile(assets.find(asset => asset.id === 'qwen-asr')!),
+      aligner: modelFile(assets.find(asset => asset.id === 'qwen-aligner')!), forcedAligner: options.qwenForcedAligner !== false
+    } } : {}),
     whisper: toolPath('whisper'), translator: toolPath('translator'), ffmpeg: toolPath('ffmpeg'), ffprobe: toolPath('ffmpeg', 1),
     kotoba: modelFile(assets.find(asset => asset.id === 'kotoba')!),
     translationModel: modelFile(assets.find(asset => asset.id === 'translation-model')!),
     vad: modelFile(assets.find(asset => asset.id === 'vad')!),
-    asrVersion: assets.find(asset => asset.id === 'kotoba')!.sha256,
+    asrVersion: options.recognitionModel === 'qwen3-asr'
+      ? createHash('sha256').update(JSON.stringify([AUDIOCPP_VERSION, assets.find(asset => asset.id === 'qwen-asr')!.sha256,
+        ...(options.qwenForcedAligner === false ? ['unaligned-chunk-v1'] : [assets.find(asset => asset.id === 'qwen-aligner')!.sha256, 'ja-words-to-cues-v1'])])).digest('hex')
+      : assets.find(asset => asset.id === 'kotoba')!.sha256,
     translationModelId: assets.find(asset => asset.id === 'translation-model')!.translationModelId ?? 'qwen3',
     translationVersion: localTranslationVersion(assets.find(asset => asset.id === 'translation-model')!.translationModelId ?? 'qwen3',
       assets.find(asset => asset.id === 'translation-model')!.sha256)
@@ -158,7 +171,8 @@ export function createAiRuntimeInstaller(root: string, download: typeof fetch = 
       return true
     } catch { return false }
   }
-  const installed = (): Promise<boolean> => assetsInstalled(AI_RUNTIME_ASSET_IDS)
+  const installed = (): Promise<boolean> => assetsInstalled(options.recognitionModel === 'qwen3-asr'
+    ? ['audiocpp', 'qwen-asr', ...(options.qwenForcedAligner === false ? [] : ['qwen-aligner'] as const), 'ffmpeg', 'translator', 'translation-model'] : AI_RUNTIME_ASSET_IDS)
   async function promoteTools(id: AiRuntimeAsset['id'], populate: (staging: string) => Promise<void>): Promise<void> {
     const destination = toolDirectory(id)
     await ensureStorageDirectory(root, path.dirname(destination))
@@ -170,6 +184,8 @@ export function createAiRuntimeInstaller(root: string, download: typeof fetch = 
       if ((id === 'whisper' || id === 'translator') && !assets.find(asset => asset.id === id)?.runtimePackage) {
         await fs.writeFile(path.join(staging, 'LICENSE.txt'), AI_RUNTIME_LICENSES[id === 'whisper' ? 'Whisper-MIT.txt' : 'Llama-MIT.txt'])
       }
+      if (id === 'audiocpp') await fs.writeFile(path.join(staging, 'NOTICE-audiocpp.txt'),
+        `audio.cpp ${AUDIOCPP_VERSION} · Apache-2.0\nhttps://github.com/0xShug0/audio.cpp\nThe upstream LICENSE and runtime DLLs are retained.\n`)
       if (assets.find(asset => asset.id === id)?.backend === 'cuda') {
         await fs.writeFile(path.join(staging, 'NOTICE-CUDA.txt'), 'NVIDIA CUDA Runtime / cuBLAS components are not covered by the engine MIT license.\nLicense: https://docs.nvidia.com/cuda/eula/index.html\nSource: pinned upstream distribution in gpuManifest.ts.\n')
       }
@@ -210,7 +226,7 @@ export function createAiRuntimeInstaller(root: string, download: typeof fetch = 
   }
   async function install(signal: AbortSignal, progress: (bytes: number, label: string) => void,
     ids: readonly AiRuntimeAsset['id'][] = AI_RUNTIME_ASSET_IDS, onEvent?: (event: RuntimeInstallEvent) => void): Promise<void> {
-    if (!supported() && ids.some(id => ['whisper', 'translator', 'ffmpeg', 'cuda'].includes(id))) throw new Error(AI_RUNTIME_PLATFORM_MESSAGE)
+    if (!supported() && ids.some(id => ['whisper', 'translator', 'ffmpeg', 'cuda', 'audiocpp'].includes(id))) throw new Error(AI_RUNTIME_PLATFORM_MESSAGE)
     await ensureModelStore(root)
     let completed = 0
     for (const id of new Set(ids)) {
@@ -271,6 +287,7 @@ export function createAiRuntimeInstaller(root: string, download: typeof fetch = 
             || !Number.isSafeInteger(asset.expandedBytes) || asset.expandedBytes! <= 0 || asset.expandedBytes! > 256 * 1024 ** 2)) throw new Error('运行库发行包与目标不匹配')
           if (windows) await runLocalModelProcess('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', asset.runtimePackage ? runtimePackageExtractScript : extractScript], {
             signal, env: { ...process.env, JAVDEX_AI_ARCHIVE: partial, JAVDEX_AI_DIRECTORY: expanded,
+              JAVDEX_AI_AUDIOCPP: id === 'audiocpp' ? '1' : '',
               JAVDEX_AI_EXPANDED_LIMIT: String(asset.expandedBytes ?? 1024 ** 3) }
           })
           else {

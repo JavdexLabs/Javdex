@@ -1,5 +1,8 @@
 export const LOCAL_TRANSLATION_MODEL_IDS = ['qwen3', 'hy-mt2-7b'] as const
-export const LOCAL_MODEL_IDS = ['qwen3', 'kotoba', 'hy-mt2-7b'] as const
+export const LOCAL_RECOGNITION_MODEL_IDS = ['kotoba', 'qwen3-asr'] as const
+export type LocalRecognitionModelId = typeof LOCAL_RECOGNITION_MODEL_IDS[number]
+export const isSpeechModel = (model: string): model is LocalRecognitionModelId => (LOCAL_RECOGNITION_MODEL_IDS as readonly string[]).includes(model)
+export const LOCAL_MODEL_IDS = ['qwen3', 'kotoba', 'hy-mt2-7b', 'qwen3-asr'] as const
 export type LocalTranslationModelId = typeof LOCAL_TRANSLATION_MODEL_IDS[number]
 export type LocalModelId = typeof LOCAL_MODEL_IDS[number]
 export const LOCAL_MODEL_DOWNLOAD_SOURCES = ['official', 'hf-mirror'] as const
@@ -28,8 +31,13 @@ export interface LocalAccelerationSnapshot {
   /** False when Vulkan enumeration still needs its probe component. */
   detectionComplete?: boolean
 }
-export type LocalModelGroup = 'speech' | 'text'
+export const LOCAL_MODEL_GROUPS = ['speech', 'speech2', 'text'] as const
+export type LocalModelGroup = typeof LOCAL_MODEL_GROUPS[number]
+export const localModelGroup = (model: LocalModelId): LocalModelGroup => model === 'qwen3-asr' ? 'speech2' : model === 'kotoba' ? 'speech' : 'text'
+export const localModelGroupLabel = (group: LocalModelGroup): string => group === 'speech2' ? '语音模型2' : group === 'speech' ? '语音' : '文本'
 export interface LocalRuntimeComponent {
+  /** False when an optional component is disabled but retained for file management. */
+  enabled?: boolean
   /** Includes incomplete downloads and damaged installations that can be removed. */
   hasFiles?: boolean
   id: string
@@ -58,6 +66,7 @@ export interface LocalPreparationPlan {
 }
 export interface LocalRuntimeEnvironment {
   group: LocalModelGroup
+  supported?: boolean
   components: LocalRuntimeComponent[]
   cpuReady: boolean
   gpu: { state: 'ready' | 'missing' | 'unavailable' | 'unchecked' | 'disabled' | 'platform'; backend?: 'cuda' | 'vulkan' | 'metal' }
@@ -72,12 +81,13 @@ export interface LocalDependencyCheck {
 }
 export interface LocalModelRef { model: LocalModelId; variant: string }
 export interface LocalModelUsage {
-  subtitleRecognition: LocalModelRef & { model: 'kotoba' }
+  subtitleRecognition: LocalModelRef & { model: LocalRecognitionModelId }
   subtitleTranslation: LocalModelRef & { model: LocalTranslationModelId }
   textTranslation: LocalModelRef & { model: LocalTranslationModelId; mode: LocalTranslationMode }
 }
 export type LocalModelReadiness = 'ready' | 'missing-model' | 'missing-runtime' | 'unsupported'
 export type LocalModelCommand =
+  | { action: 'qwen-forced-aligner'; enabled: boolean; expectedRevision?: string }
   | { action: 'acceleration'; policy: LocalAccelerationPolicy; expectedRevision?: string }
   | { action: 'detect-devices' }
   | { action: 'prepare-acceleration'; model?: LocalModelId; variant?: string }
@@ -128,6 +138,8 @@ export interface LocalModelView {
   variants: LocalModelVariantView[]
 }
 export interface LocalModelSnapshot {
+  /** Missing in older snapshots means enabled. */
+  qwenForcedAligner?: boolean
   /** Last asynchronous failure retains its exact retry target after the task ends. */
   operationError?: { message: string; command: LocalModelCommand }
   /** Actual regular-file bytes, measured on refresh; links are never followed. */

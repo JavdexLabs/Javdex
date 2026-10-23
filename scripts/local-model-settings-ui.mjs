@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 
 export async function waitForLocalModelSettings(page) {
-  for (const name of ['语音模型', '文本模型']) await page.getByRole('heading', { name, exact: true }).waitFor()
+  for (const name of ['语音模型', '语音模型2', '文本模型']) await page.getByRole('heading', { name, exact: true }).waitFor()
   await page.locator('[aria-label="存储与维护"]').waitFor()
 }
 
@@ -28,7 +28,7 @@ export async function checkLocalModelCatalog(page, models) {
 }
 
 export async function checkLocalModelInstalledFilters(page) {
-  for (const name of ['语音模型', '文本模型']) {
+  for (const name of ['语音模型', '语音模型2', '文本模型']) {
     const filter = page.getByRole('button', { name: `${name}筛选`, exact: true })
     await filter.click()
     await page.getByRole('option', { name: '已下载', exact: true }).click()

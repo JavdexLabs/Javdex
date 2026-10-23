@@ -4,7 +4,7 @@ import type { LocalAccelerationPolicy, LocalExecutionStatus, LocalGpuDevice } fr
 import { runLocalModelProcess } from './processRunner'
 
 export type LocalEngine = 'recognition' | 'translation'
-export interface LocalGpuRuntime { translator?: string; whisper?: string; libraryDirectory?: string }
+export interface LocalGpuRuntime { translator?: string; whisper?: string; audiocpp?: string; libraryDirectory?: string }
 export interface LocalRuntimeAcceleration {
   policy: LocalAccelerationPolicy
   devices: LocalGpuDevice[]
@@ -22,6 +22,15 @@ export interface LocalExecution {
 }
 export class LocalGpuFailure extends Error {}
 const reservations = new Map<string, number>()
+
+/** Audio and text engines share the same conservative per-card budget. */
+export function reserveLocalGpuMemory(name: string, memoryMiB: number, requiredMiB: number): (() => void) | null {
+  const used = reservations.get(name) ?? 0
+  if (requiredMiB > memoryMiB - 2048 - used) return null
+  reservations.set(name, used + requiredMiB)
+  let released = false
+  return () => { if (!released) { released = true; reservations.set(name, Math.max(0, (reservations.get(name) ?? 0) - requiredMiB)) } }
+}
 
 /** Only native backend enumeration can qualify a device. Virtual/UMA adapters are excluded. */
 export function parseVulkanDevices(stdout: string, diagnostic: string): LocalGpuDevice[] {

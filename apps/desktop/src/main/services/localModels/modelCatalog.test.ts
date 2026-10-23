@@ -3,16 +3,18 @@ import path from 'node:path'
 import { test } from 'node:test'
 import { LOCAL_MODEL_ASSETS } from './runtimeManifest'
 import { DEFAULT_LOCAL_MODEL_VARIANTS, LOCAL_MODEL_VARIANTS, localModelAssets, localModelVariant } from './modelCatalog'
+import { isSpeechModel } from '@shared/desktop/localModels'
+import { createAiRuntimeInstaller } from './runtimeInstaller'
 
 test('catalog enumerates curated published assets with immutable provenance and unique precision identities', () => {
-  assert.equal(LOCAL_MODEL_VARIANTS.length, 9)
-  assert.equal(new Set(LOCAL_MODEL_VARIANTS.map(item => item.id)).size, 9)
+  assert.equal(LOCAL_MODEL_VARIANTS.length, 10)
+  assert.equal(new Set(LOCAL_MODEL_VARIANTS.map(item => item.id)).size, 10)
   assert.deepEqual(LOCAL_MODEL_VARIANTS.filter(item => item.model === 'kotoba').map(item => item.precision).sort(), ['F16', 'Q5_0'])
   assert.equal(LOCAL_MODEL_VARIANTS.filter(item => item.publisher === 'bartowski').length, 3)
   assert.equal(LOCAL_MODEL_VARIANTS.filter(item => item.publisher === 'Qwen').length, 1)
   assert.deepEqual(LOCAL_MODEL_VARIANTS.filter(item => item.model === 'hy-mt2-7b').map(item => item.precision), ['Q4_K_M', 'Q6_K', 'Q8_0'])
   for (const item of LOCAL_MODEL_VARIANTS) {
-    assert.match(item.asset.url, /^https:\/\/huggingface\.co\/(?:kotoba-tech|Qwen|bartowski|tencent)\/[^/]+\/resolve\/[a-f0-9]{40}\/[^/]+$/)
+    assert.match(item.asset.url, /^https:\/\/huggingface\.co\/(?:kotoba-tech|Qwen|bartowski|tencent|audio-cpp)\/[^/]+\/resolve\/[a-f0-9]{40}\/.+$/)
     assert.match(item.asset.sha256, /^[a-f0-9]{64}$/)
     assert.ok(Number.isSafeInteger(item.asset.bytes) && item.asset.bytes > 0)
     assert.equal(path.basename(item.asset.filename), item.asset.filename)
@@ -58,7 +60,7 @@ test('HY 7B catalog preserves official filename casing and selects only the chos
 test('mirror preserves every pinned model identity and only rewrites Hugging Face downloads', () => {
   for (const variant of LOCAL_MODEL_VARIANTS) {
     const selection = { ...DEFAULT_LOCAL_MODEL_VARIANTS, [variant.model]: variant.id }
-    const model = variant.model === 'kotoba' ? 'qwen3' : variant.model
+    const model = isSpeechModel(variant.model) ? 'qwen3' : variant.model
     const original = localModelAssets(selection, model)
     const mirrored = localModelAssets(selection, model, undefined, 'hf-mirror')
     original.forEach((asset, index) => {
@@ -67,4 +69,18 @@ test('mirror preserves every pinned model identity and only rewrites Hugging Fac
     })
     assert.deepEqual(localModelAssets(selection, model), original)
   }
+})
+
+test('Qwen subtitle cache identity includes both models and never changes the preserved Kotoba identity', () => {
+  const assets = localModelAssets(DEFAULT_LOCAL_MODEL_VARIANTS)
+  const options = { recognitionModel: 'qwen3-asr' as const }
+  const original = createAiRuntimeInstaller('/models', undefined, assets, options).paths()
+  const changedAligner = createAiRuntimeInstaller('/models', undefined, assets.map(asset => asset.id === 'qwen-aligner' ? { ...asset, sha256: 'a'.repeat(64) } : asset), options).paths()
+  const changedAsr = createAiRuntimeInstaller('/models', undefined, assets.map(asset => asset.id === 'qwen-asr' ? { ...asset, sha256: 'b'.repeat(64) } : asset), options).paths()
+  assert.notEqual(original.asrVersion, changedAligner.asrVersion)
+  assert.notEqual(original.asrVersion, changedAsr.asrVersion)
+  const kotoba = createAiRuntimeInstaller('/models', undefined, assets).paths()
+  assert.equal(kotoba.asrVersion, localModelVariant('kotoba').asset.sha256)
+  assert.notEqual(kotoba.asrVersion, original.asrVersion)
+  assert.equal(kotoba.kotoba, original.kotoba)
 })

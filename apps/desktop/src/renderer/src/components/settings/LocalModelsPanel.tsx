@@ -2,11 +2,13 @@ import { Fragment, useEffect, useId, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { AudioLines, ChevronDown, ChevronRight, Download, Ellipsis, FileSearch, FolderInput, FolderOutput, Link, Settings2, TextCursorInput, Trash2, Wrench } from 'lucide-react'
 import type { LocalModelCommand, LocalModelGroup, LocalModelId, LocalModelSnapshot, LocalModelVariantView, LocalModelView } from '@shared/desktop/localModels'
+import { isSpeechModel, localModelGroup, localModelGroupLabel } from '@shared/desktop/localModels'
 import Button from '../Button'
 import FloatingLayer from '../FloatingLayer'
 import IconButton from '../IconButton'
 import Modal from '../Modal'
 import SelectControl from '../SelectControl'
+import SettingsSwitchRow from '../SettingsSwitchRow'
 import { useToast } from '../Toast'
 import { DetailMenuItem, DetailMenuSeparator } from '../DetailMenu'
 import { UI_ICON_SM } from '../iconDefaults'
@@ -47,14 +49,14 @@ function VariantActions({ model, variant, state, busy, execute, requestDelete, r
   const menuRef = useRef<HTMLDivElement>(null)
   const menuId = useId()
   const working = busy || state.operation !== null
-  const sharedRuntimeInUse = state.models.some(item => item.id !== 'kotoba' && item.inUse)
+  const sharedRuntimeInUse = state.models.some(item => !isSpeechModel(item.id) && item.inUse)
   const repairing = state.operation === 'download' && state.activeVariant === variant.id
   const deletionReason = variant.inUse ? '当前任务正在使用此精度。' : ''
   const failedDownload = failure?.command.action === 'download' && failure.command.variant === variant.id
   const needsRepair = variant.hasFiles && variant.preparation?.downloadBytes === variant.bytes
   const downloadAction = variant.installed ? '模型已下载' : failedDownload || needsRepair ? '重试下载' : variant.hasFiles ? '继续下载' : '下载模型'
   function checkEnvironment(): boolean {
-    const group = model.id === 'kotoba' ? 'speech' : 'text'
+    const group = localModelGroup(model.id)
     const baseReady = state.environments?.find(item => item.group === group)?.cpuReady ?? variant.runtimeReady ?? true
     if (state.supported && !baseReady) { requestEnvironment(group); return false }
     return true
@@ -81,7 +83,7 @@ function VariantActions({ model, variant, state, busy, execute, requestDelete, r
   return <div className={styles.variantActions}>
     <IconButton size="control" icon={<Download {...UI_ICON_SM} />} label={`${model.name} ${variant.precision} ${variant.publisher} ${downloadAction}`}
       title={variant.installed ? '模型已下载；可在更多操作中校验与修复' : downloadAction} aria-busy={repairing}
-      disabled={variant.installed || working || state.checkingDependencies || model.inUse || (model.id !== 'kotoba' && sharedRuntimeInUse)} onClick={download} />
+      disabled={variant.installed || working || state.checkingDependencies || model.inUse || (!isSpeechModel(model.id) && sharedRuntimeInUse)} onClick={download} />
     <IconButton ref={anchorRef} size="control" icon={<Ellipsis {...UI_ICON_SM} />} label={`${model.name} ${variant.precision} ${variant.publisher} 更多操作`}
       aria-haspopup="menu" aria-expanded={open} aria-controls={menuId} onClick={() => setOpen(value => !value)} />
     <FloatingLayer open={open} anchorRef={anchorRef} side="bottom" align="end" id={menuId} role="menu" className={styles.menu}
@@ -103,7 +105,7 @@ function VariantActions({ model, variant, state, busy, execute, requestDelete, r
           <FileSearch {...UI_ICON_SM} />精度与验证详情
         </DetailMenuItem>
         <DetailMenuItem className={styles.menuItem} onClick={() => { setOpen(false); requestUsage(model, variant) }}><Settings2 {...UI_ICON_SM} />前往用途配置</DetailMenuItem>
-        {variant.installed && <DetailMenuItem disabled={working || model.inUse || (model.id !== 'kotoba' && sharedRuntimeInUse)} aria-busy={repairing}
+        {variant.installed && <DetailMenuItem disabled={working || model.inUse || (!isSpeechModel(model.id) && sharedRuntimeInUse)} aria-busy={repairing}
           className={styles.menuItem} onClick={download}><Wrench {...UI_ICON_SM} />校验与修复</DetailMenuItem>}
         <DetailMenuSeparator />
         <DetailMenuItem className={styles.menuItem} disabled={busy} onClick={() => run('copy-download-url')}><Link {...UI_ICON_SM} />复制下载地址</DetailMenuItem>
@@ -179,7 +181,7 @@ export default function LocalModelsPanel(): JSX.Element {
   const targetModel = query.get('model') as LocalModelId | null
   const targetVariant = query.get('variant')
   const [expanded, setExpanded] = useState<Partial<Record<LocalModelId, boolean>>>({})
-  const [filters, setFilters] = useState({ speech: 'all', text: 'all' })
+  const [filters, setFilters] = useState({ speech: 'all', speech2: 'all', text: 'all' })
   const [showError, setShowError] = useState(false)
   const [inspecting, setInspecting] = useState<{ model: LocalModelId; variant: string } | null>(null)
   const [deleting, setDeleting] = useState<{ model: LocalModelView; variant: LocalModelVariantView } | null>(null)
@@ -191,7 +193,7 @@ export default function LocalModelsPanel(): JSX.Element {
   useEffect(() => {
     if (!targetModel) return
     setExpanded(value => ({ ...value, [targetModel]: true }))
-    setFilters(value => ({ ...value, [targetModel === 'kotoba' ? 'speech' : 'text']: 'all' }))
+    setFilters(value => ({ ...value, [localModelGroup(targetModel)]: 'all' }))
   }, [targetModel, targetVariant])
   if (!state) return <p role="status">{error || '正在读取本地模型…'}</p>
   const working = busy || state.operation !== null
@@ -206,9 +208,9 @@ export default function LocalModelsPanel(): JSX.Element {
   }
   function locateFiles(group: LocalModelGroup, variant?: string): void {
     const model = state!.models.find(item => item.variants.some(entry => entry.id === variant))
-      ?? state!.models.find(item => (item.id === 'kotoba') === (group === 'speech') && item.variants.some(entry => entry.hasFiles || entry.installed))
+      ?? state!.models.find(item => localModelGroup(item.id) === group && item.variants.some(entry => entry.hasFiles || entry.installed))
     setFilters(value => ({ ...value, [group]: 'all' }))
-    setExpanded(value => ({ ...value, ...Object.fromEntries(state!.models.filter(item => (item.id === 'kotoba') === (group === 'speech')).map(item => [item.id, true])) }))
+    setExpanded(value => ({ ...value, ...Object.fromEntries(state!.models.filter(item => localModelGroup(item.id) === group).map(item => [item.id, true])) }))
     if (model) {
       const next = new URLSearchParams(location.search)
       next.set('model', model.id); next.set('variant', variant ?? model.variants.find(entry => entry.hasFiles || entry.installed)!.id)
@@ -220,18 +222,23 @@ export default function LocalModelsPanel(): JSX.Element {
   const inspected = inspectedModel?.variants.find(variant => variant.id === inspecting?.variant)
   return <div className={styles.root}>
     <LocalAccelerationPanel state={state} disabled={working || anyInUse} execute={execute} failure={failure} requestError={() => setShowError(true)} />
-    {([{ id: 'speech', title: '语音模型', icon: <AudioLines {...UI_ICON_SM} />, models: state.models.filter(model => model.id === 'kotoba') },
-      { id: 'text', title: '文本模型', icon: <TextCursorInput {...UI_ICON_SM} />, models: state.models.filter(model => model.id !== 'kotoba') }] as const).map(group => {
+    {([{ id: 'speech', title: '语音模型', icon: <AudioLines {...UI_ICON_SM} />, models: state.models.filter(model => localModelGroup(model.id) === 'speech') },
+      { id: 'speech2', title: '语音模型2', icon: <AudioLines {...UI_ICON_SM} />, models: state.models.filter(model => localModelGroup(model.id) === 'speech2') },
+      { id: 'text', title: '文本模型', icon: <TextCursorInput {...UI_ICON_SM} />, models: state.models.filter(model => localModelGroup(model.id) === 'text') }] as const).map(group => {
       const models = [...group.models].filter(model => matchesFilter(model, filters[group.id]))
         .sort((a, b) => Number(b.variants.some(variant => variant.references.length)) - Number(a.variants.some(variant => variant.references.length)))
       return <SettingsCard as="section" key={group.id} aria-label={group.title} title={<span className={styles.title}>{group.icon}{group.title}</span>}
-        hint="管理模型文件、精度与运行状态；用途在“功能”中配置。" actions={<>
+        hint={group.id === 'speech2' ? '临时用于 Qwen3-ASR 与 ForcedAligner；环境、文件和用途分别管理。' : '管理模型文件、精度与运行状态；用途在“功能”中配置。'} actions={<>
           <SelectControl aria-label={`${group.title}筛选`} value={filters[group.id]}
             onChange={event => setFilters(value => ({ ...value, [group.id]: event.target.value }))}>
             <option value="all">全部精度</option><option value="selected">当前选用</option><option value="installed">已下载</option><option value="partial">未完成下载</option>
           </SelectControl>
           {targetModel && group.models.some(model => model.id === targetModel) && <Button size="sm" onClick={returnToUsage}>返回用途配置</Button>}
         </>}>
+        {group.id === 'speech2' && <SettingsSwitchRow title="ForcedAligner 时间轴对齐"
+          description="开启后使用 ForcedAligner 0.6B 对齐时间轴；关闭后仅按识别片段显示字幕，时间轴较粗。立即保存，对新任务生效，已有对齐模型文件保留。"
+          checked={state.qwenForcedAligner !== false} disabled={working || anyInUse || state.checkingDependencies}
+          onChange={enabled => void execute({ action: 'qwen-forced-aligner', enabled, expectedRevision: state.revision })} />}
         {state.environments?.find(environment => environment.group === group.id) && <LocalRuntimeEnvironment
           environment={state.environments.find(environment => environment.group === group.id)!} state={state} disabled={working || anyInUse} execute={execute}
           failure={failure} requestError={() => setShowError(true)} requestFiles={variant => locateFiles(group.id, variant)} />}
@@ -241,7 +248,7 @@ export default function LocalModelsPanel(): JSX.Element {
           requestDelete={(family, variant) => setDeleting({ model: family, variant })}
           requestEnvironment={setRequiredEnvironment}
           failure={failure} requestError={() => setShowError(true)}
-          requestUsage={(family, variant) => navigate(modelUsageLocation(location.search, family.id === 'kotoba' || state.usage.subtitleTranslation.variant === variant.id ? 'ai-subtitles' : 'text-translation'))}
+          requestUsage={(family, variant) => navigate(modelUsageLocation(location.search, isSpeechModel(family.id) || state.usage.subtitleTranslation.variant === variant.id ? 'ai-subtitles' : 'text-translation'))}
           requestDetails={(family, variant) => setInspecting({ model: family.id, variant: variant.id })} />)
           : <p className={styles.note}>暂无符合筛选条件的模型。</p>}
       </SettingsCard>
@@ -254,7 +261,7 @@ export default function LocalModelsPanel(): JSX.Element {
         const command = failure.command
         const group = failureGroup(failure)
         if (group) document.querySelector(`[data-runtime-group="${group}"]`)?.scrollIntoView({ block: 'center' })
-        else if ('model' in command && command.model) locateFiles(command.model === 'kotoba' ? 'speech' : 'text', 'variant' in command ? command.variant : undefined)
+        else if ('model' in command && command.model) locateFiles(localModelGroup(command.model), 'variant' in command ? command.variant : undefined)
         else if (['acceleration', 'detect-devices', 'prepare-acceleration'].includes(command.action)) document.querySelector('[aria-label="本地模型计算设备"]')?.scrollIntoView({ block: 'center' })
         else document.querySelector('[aria-label="存储与维护"]')?.scrollIntoView({ block: 'center' })
       }} />}
@@ -264,7 +271,7 @@ export default function LocalModelsPanel(): JSX.Element {
       onCancel={() => setRequiredEnvironment(null)} onConfirm={async () => {
         if (await execute({ action: 'prepare-runtime', group: requiredEnvironment, target: 'cpu' })) setRequiredEnvironment(null)
       }}>
-      <p>下载或导入模型前，请先安装{requiredEnvironment === 'speech' ? '语音' : '文本'}模型的基础运行环境。仅安装基础环境即可使用 CPU，GPU 加速支持可选。</p>
+      <p>下载或导入模型前，请先安装{localModelGroupLabel(requiredEnvironment)}{requiredEnvironment === 'speech2' ? '' : '模型'}的基础运行环境。仅安装基础环境即可使用 CPU，GPU 加速支持可选。</p>
       <p>本次只安装环境；完成后请再次选择下载或导入。</p>
       {currentError && <p role="alert" className={styles.fullError}>{currentError}</p>}
     </Modal>}
@@ -289,6 +296,7 @@ export default function LocalModelsPanel(): JSX.Element {
         <p>固定版本：{inspectedModel.version}。下载及导入均核验对应精度和发布者的 SHA-256；导入会复制文件，原文件保留。导出不包含运行依赖和缓存，分发请遵守上游许可证。文件大小不是运行内存需求。</p>
         {inspected.references.length > 0 && <p>删除此精度会使相关用途暂不可用；用途选择会保留，重新安装后恢复。</p>}
         {inspectedModel.id === 'kotoba' && <p>日语语音转写使用 Kotoba v2.0；中文翻译由单独的文本模型负责。</p>}
+        {inspectedModel.id === 'qwen3-asr' && <p>Qwen3-ASR 1.7B 识别日语，ForcedAligner 0.6B 生成时间轴。在“语音模型2”先安装基础环境（开启对齐时含约 1.13 GB 的对齐模型），再下载识别权重；当前支持 Windows x64 的 CPU／Vulkan。</p>}
         {inspectedModel.id === 'hy-mt2-7b' && <p>腾讯官方 GGUF，Apache-2.0。当前目录只收录已有完整校验信息的精度。</p>}
       </SettingsDisclosure>
     </Modal>}

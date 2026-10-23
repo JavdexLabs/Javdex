@@ -1,4 +1,5 @@
 import type { LocalModelCommand, LocalModelSnapshot } from '@shared/desktop/localModels'
+import { localModelGroup } from '@shared/desktop/localModels'
 import Button from '../Button'
 import styles from './LocalModelsPanel.module.css'
 
@@ -8,7 +9,7 @@ export function failureModel(failure?: ModelOperationFailure) {
 }
 export function failureGroup(failure?: ModelOperationFailure) {
   const command = failure?.command
-  return command && 'group' in command ? command.group : command?.action === 'prepare-acceleration' && command.model ? command.model === 'kotoba' ? 'speech' : 'text' : undefined
+  return command?.action === 'qwen-forced-aligner' ? 'speech2' : command && 'group' in command ? command.group : command?.action === 'prepare-acceleration' && command.model ? localModelGroup(command.model) : undefined
 }
 export default function LocalModelOperationFeedback({ failure, disabled, execute, details, detailsLabel = '错误详情', showMessage = true }: {
   failure: ModelOperationFailure; disabled: boolean; execute: (command: LocalModelCommand) => Promise<boolean>; details: () => void

@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
-import { c as createTar } from 'tar'
+import { c as createTar, t as listTar } from 'tar'
 import { linuxReleaseFixture, write } from './test-support/linux-release-fixture.mjs'
 import { linuxReleaseComponents, linuxInventory, verifyLinuxSourceBundle, validateLinuxInventory } from './linux-release-materials.mjs'
 import { playbackFileSha256 as hash } from './playback-runtime.mjs'
@@ -161,7 +161,12 @@ test('ANGLE archive budget stays bounded and never relaxes path or link checks',
   assert.equal(fs.existsSync(path.join(root, 'unsafe')), false)
   fs.linkSync(path.join(root, 'source/a'), path.join(root, 'source/link'))
   const linked = path.join(root, 'linked.tar')
-  await createTar({ cwd: path.join(root, 'source'), file: linked }, ['a', 'link'])
+  // This tiny fixture needs a real hardlink, not async Pack's link-cache race.
+  // Keep the source reader below asynchronous, as used for actual archives.
+  createTar({ cwd: path.join(root, 'source'), file: linked, sync: true }, ['a', 'link'])
+  const entryTypes = []
+  await listTar({ file: linked, onReadEntry: entry => entryTypes.push(entry.type) })
+  assert.deepEqual(entryTypes, ['File', 'Link'], 'the fixture must retain an actual tar hardlink')
   await assert.rejects(unpackPlaybackSources(linked, path.join(root, 'linked'), angleSourceLimits), /links\/special/)
   assert.equal(fs.existsSync(path.join(root, 'linked')), false)
 })

@@ -74,7 +74,7 @@ npm run build
 npm run packaging:list
 ```
 
-6. 确认 `build/packaging.targets.json` 中 Windows x64、macOS x64、macOS arm64、Linux x64 四个目标已启用，产出第 6 节规定的六个桌面包。各原生 runner 从固定源码构建播放运行库，打包后运行 `packaging:verify-playback-runtime`、`packaging:verify-agent-runtime`，macOS 另核对应用签名。四份平台源码包及对应 `.runtime.json` 留作 CI 汇总输入；总源码包校验成功后才允许发布服务端镜像。`verify_only` 也执行桌面验证与源码汇总，但不发布镜像或 Release。
+6. 确认 `build/packaging.targets.json` 中 Windows x64、macOS x64、macOS arm64、Linux x64 四个目标已启用，产出第 6 节规定的六个桌面包。各原生 runner 从固定源码构建播放运行库；Linux 在 Ubuntu 22.04 分别构建 GPU／CPU helper 及匹配 Electron 的 ANGLE，保留三套对应源码材料。打包后运行 `packaging:verify-playback-runtime`、`packaging:verify-agent-runtime`，macOS 另核对应用签名。四份平台源码包及对应 `.runtime.json` 留作 CI 汇总输入；Linux 的同一投影同时绑定两套运行库与 ANGLE。总源码包校验成功后才允许发布服务端镜像。`verify_only` 也执行桌面验证与源码汇总，但不发布镜像或 Release。
 7. 检查数据库迁移、设置兼容和插件格式变化是否有升级说明。
 8. 核对发布正文提供与本次源码提交对应的 Compose 示例、JSON 配置和部署说明链接；不将示例或公钥作为附件。所有发布都需通过 Ed25519 签名配置检查，私钥和 key ID 缺失时不得上传镜像；镜像内置公钥必须与生成升级包的签名配置一致。
 
@@ -101,16 +101,32 @@ git push origin v0.9.0
 
 发布入口先只读检查同名 Release、Git 标签指向和固定镜像标签。已存在的 Release 或固定镜像一律拒绝复用；由标签触发时，标签必须指向本次源码。不同分支的发布工作流统一串行，写入固定镜像与上传 Release 前再次检查，失败作业重跑也不能覆盖已公开版本。查询失败不能当作“版本不存在”；`verify_only` 不调用发布预检，也不进入发布作业。
 
-1. Windows 环境运行类型检查和完整测试。
+1. Windows 环境运行类型检查、完整测试和真实浏览器交互回归。
 2. Windows x64、macOS x64、macOS arm64、Linux x64 四个原生 runner 从固定源码构建播放运行库，生成六个桌面包；完成包内加载与 PCM 解码 EOF、Agent 运行时验证及 macOS 签名。对最终 EXE 静默安装、ZIP/DEB/AppImage 提取、DMG 只读挂载后检查嵌入运行库，生成最终文件摘要与源码绑定回执。
 3. 汇总四份平台播放源码包、分发投影和安装包回执，核对来源、构建材料、原生快照/SDK、运行库与实际安装包绑定，按 SHA-256 去重并逐文件往返验证，生成一个 `Javdex-Playback-Sources-<版本>.tar.gz`。四份平台源码包保留为 CI 产物。
 4. 仅在桌面打包和总源码包校验成功后，Linux amd64 / arm64 原生 runner 分别验证签名配置、构建服务端、运行容器烟测并上传 GHCR，合成固定版本的多架构镜像。
 5. 从已验证镜像取得各架构的完整程序闭包，封装签名清单和程序归档为两个 `.javdex-update`，读回验证内层字节；生成覆盖六个桌面包、总源码包和两个升级文件的 `SHA256SUMS.txt`。
 6. 创建 GitHub Release，上传第 6 节规定的 10 个附件；正文提供与本次源码提交对应的 Compose 示例、JSON 配置和部署说明链接。
 
+Linux 的包内与最终安装器门禁验证两个独立 ELF 闭包、ANGLE、启动器和 AppImage 运行时前缀，并在实际包内 Electron 加载 FD addon、分别解码 GPU／CPU libmpv 的 PCM 至 EOF。总源码汇总另检查两份 helper 材料的固定依赖、Ubuntu `.dsc` 与源码摘要、原生源码及 SDK，以及 ANGLE 源码和补丁。它们不能替代真机画面、硬解、音画同步或长播验收，详细合同见 [Linux 播放](LINUX_COMPATIBLE_PLAYBACK.md#validation-and-release-boundary)。
+
 正式版进入 GitHub 最新正式 Release，供应用更新提醒与官网读取；服务镜像仍使用固定版本标签，当前工作流不创建 `latest` 滚动镜像标签。发布后核验默认分支包含发布代码，并检查 Pages 工作流生成的下载信息。
 
-也可以手动运行 Release workflow，但输入的 `release_tag` 必须与 `package.json` 一致。
+也可以手动运行 Release workflow，但输入的 `release_tag` 必须与 `package.json` 一致；发布构建开始前须由维护者建立指向同一已检查源码的标签，缺失时预检立即失败，避免先写固定镜像后才发现不能上传。正常发布优先推送一次标签触发，不再为同一源码并行手动调度。上传入口再次读取并剥离标签、核对源码后才创建 Release，不再显式发送可能要求 workflow 编辑权限的 `target_commitish`，也不由上传动作隐式创建标签。
+
+### 未发布候选的服务端接续
+
+同一源码的临时失败优先使用 GitHub 的“重跑失败作业”，已成功作业和产物无需重建。若四个平台、总源码汇总及 ARM64 服务端均成功，只有 AMD64 的 `server:test` 因测试夹具环境问题失败，可用 `resume_server_run_id=<原 run ID>` 接续原候选；不能同时选择 `verify_only` 或同版本替换。
+
+接续入口检查原仓库、源码祖先、成功作业、唯一失败步骤、未过期的不可变 artifact ID 和摘要；仅允许已列明的测试夹具／发布编排修复，任何产品源码变化都要求新候选重建。六个桌面包和总源码包复用原字节；AMD64 仍从原提交构建，修正的测试夹具仅用于验证，容器测试前恢复原源码。ARM64 镜像核对原提交与版本并固定摘要；最终签名封装仍逐架构检查完整程序闭包，不能放宽源码身份。
+
+发布标签、镜像 build 标识及部署链接始终指向原候选提交，接续工作流的修复提交单独记入 provenance。桌面包摘要再次与总源码包的四份 manifest 对照。接续的镜像合成、签名封装与 Release 上传分为独立作业，后段临时失败可单独重跑；已公开版本仍禁止覆盖。不能把原 run 的失败标为成功，应同时保留原门禁与接续 CI 证据。
+
+若接续作业的 AMD64 构建、服务端／升级／权限／容器检查全部成功，已上传镜像但摘要固定步骤失败，可另填 `resume_amd64_run_id=<该接续 run ID>`。入口逐项要求这些步骤成功且仅摘要固定失败，再从 registry 取得不可变摘要、读取镜像内原源码与版本；镜像不存在、身份不符或任一门禁缺失均拒绝继续，不重新构建已经通过的产品。
+
+若固定镜像已合成、完整签名封装及源码闭包校验已通过，仅创建 Release 失败，可填 `resume_publish_run_id=<该接续 run ID>`，跳过所有产品构建和镜像写入，只接续封装与上传。入口要求原接续的镜像合成成功且唯一失败步骤为 Release 创建，仍拒绝已存在的公开 Release。
+
+接续发布须先由维护者建立指向原源码的标签；入口和上传前均核对剥离后的提交。GitHub 的 [Release 权限规则](https://docs.github.com/en/rest/releases/releases#create-a-release)会检查显式 `target_commitish` 相对默认分支的工作流变化，普通工作流令牌即使有 `contents: write` 也可能返回 403。因此接续上传使用已核验的标签，不再传入这个对既有标签无效的参数，也不扩大令牌权限。Release API 可能将默认分支记为 `target_commitish`；实际源码身份以已核对的 Git 标签为准。
 
 ## 6. Release 内容要求
 

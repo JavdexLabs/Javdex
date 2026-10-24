@@ -6,10 +6,19 @@ export class LocalModelProcessFailure extends Error {
 }
 
 export const gpuDiagnosticFailure = (text: string): boolean =>
-  /out of (?:device )?memory|cuda(?: error|_error)|cublas.*(?:fail|error)|vulkan.*(?:fail|error)|VK_ERROR_|no (?:usable )?GPU|invalid device: (?:CUDA|Vulkan)|failed to (?:initialize|allocate).*?(?:CUDA|Vulkan|GPU|device)|CUDA driver|unsupported.*(?:gpu|architecture)|no kernel image|device lost/i.test(text)
+  /error while loading shared libraries:.*(?:libcuda|libcublas|libggml|libvulkan)|out of (?:device )?memory|cuda(?: error|_error)|cublas.*(?:fail|error)|vulkan.*(?:fail|error)|VK_ERROR_|no (?:usable )?GPU|invalid device: (?:CUDA|Vulkan)|failed to (?:initialize|allocate).*?(?:CUDA|Vulkan|Metal|MTL\d*|GPU|device)|CUDA driver|unsupported.*(?:gpu|architecture)|no kernel image|device lost/i.test(text)
 export const gpuLoaderFailure = (code: number | null): boolean => code !== null
   && [0xc0000135, 0xc0000142, 0xc000007b, 0xc0000139, 0xc000001d].includes(code >>> 0)
 export const gpuMemoryFailure = (text: string): boolean => /out of (?:device )?memory|VK_ERROR_OUT_OF_(?:DEVICE|HOST)_MEMORY|cudaMalloc.*failed/i.test(text)
+
+/** Preserve backend decisions even amid long loading/progress logs; retain recent errors within the same bound. */
+export function appendLocalModelDiagnostic(previous: string, chunk: string): string {
+  const combined = previous + chunk
+  if (combined.length <= 65536) return combined
+  const evidence = [...new Set(combined.split('\n').filter(line =>
+    /whisper_backend_init_gpu: (?:using|failed to initialize) .* backend|offloaded \d+\/\d+ layers/.test(line)))].join('\n').slice(-16383)
+  return `${evidence}\n${combined.slice(-49152)}`
+}
 
 const stopping = new WeakMap<ChildProcess, Promise<void>>()
 
@@ -56,7 +65,7 @@ export function runLocalModelProcess(executable: string, args: string[], options
       else chunks.push(data)
     })
     // Bounded volatile diagnostics; only derived GPU state reaches product snapshots/logs.
-    child.stderr.on('data', (data: Buffer) => { diagnostic = (diagnostic + data.toString()).slice(-65536) })
+    child.stderr.on('data', (data: Buffer) => { diagnostic = appendLocalModelDiagnostic(diagnostic, data.toString()) })
     child.once('error', (error: NodeJS.ErrnoException) => { failure = new LocalModelProcessFailure(path.basename(executable), null, error.code === 'ENOENT') })
     child.once('close', code => {
       clearTimeout(timeout); options.signal?.removeEventListener('abort', abort)

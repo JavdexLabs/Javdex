@@ -51,11 +51,37 @@ test('automatic plans choose the same installed alternative backend as execution
   assert.equal(runtimeBackend('text', { mode: 'auto' }, adapters, inventory), 'vulkan')
   assert.equal(runtimeBackend('text', { mode: 'gpu', device: 'gpu' }, adapters, inventory), 'cuda')
 })
-test('macOS bundled speech tools are installation resources rather than network downloads', () => {
+test('macOS speech tools are explicit network downloads with no bundled installation', () => {
   const inventory = runtimeComponentDefinitions({ platform: 'darwin', arch: 'arm64' }).map(({ component }) => ({ ...component, installed: false }))
   const plan = preparationPlan({ groups: ['speech'], components: inventory, policy: { mode: 'auto' }, devices: [],
     target: { platform: 'darwin', arch: 'arm64' }, supported: true, installed: () => false })
   assert.equal(plan.backend, 'metal')
-  assert.equal(plan.items.filter(item => item.action === 'install').length, 2)
-  assert.equal(plan.downloadBytes, 885098)
+  assert.equal(plan.items.filter(item => item.action === 'install').length, 0)
+  assert.ok(plan.items.every(item => item.action === 'download'))
+  assert.equal(plan.downloadBytes, inventory.filter(item => item.group === 'speech').reduce((sum, item) => sum + item.bytes, 0))
+  assert.ok(plan.downloadBytes > 885098)
+})
+
+test('Linux CUDA setup includes Vulkan enumeration for secondary integrated GPUs without changing CPU-only setup', () => {
+  const linux = { platform: 'linux', arch: 'x64' }
+  const inventory = runtimeComponentDefinitions(linux).map(({ component }) => ({ ...component, installed: false }))
+  const makePlan = (policy: { mode: 'auto' | 'cpu' }) => preparationPlan({ groups: ['text'], components: inventory,
+    policy, devices, target: linux, supported: true, installed: () => false })
+  assert.ok(makePlan({ mode: 'auto' }).items.some(item => item.id === 'translator-vulkan'))
+  assert.ok(makePlan({ mode: 'auto' }).items.some(item => item.id === 'cuda-cuda'))
+  assert.ok(!makePlan({ mode: 'cpu' }).items.some(item => item.id.endsWith('-vulkan') || item.id.endsWith('-cuda')))
+})
+
+test('macOS plans reflect each pinned engine capability on Intel and Apple Silicon', () => {
+  for (const arch of ['x64', 'arm64']) {
+    const target = { platform: 'darwin', arch }
+    const inventory = runtimeComponentDefinitions(target).map(({ component }) => ({ ...component, installed: false }))
+    for (const group of ['speech', 'text'] as const) {
+      for (const mode of ['auto', 'cpu'] as const) {
+        const plan = preparationPlan({ groups: [group], components: inventory, policy: { mode }, devices: [],
+          target, supported: true, installed: () => false })
+        assert.equal(plan.backend, mode === 'auto' && (arch === 'arm64' || group === 'speech') ? 'metal' : 'cpu')
+      }
+    }
+  }
 })

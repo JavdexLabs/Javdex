@@ -36,7 +36,7 @@ for (const directory of workspaces) {
     }
   }
 }
-assert.equal(root.scripts.postinstall, undefined, 'Root install must not rebuild Electron native modules')
+assert.equal(root.scripts.postinstall, 'node scripts/patch-sharp-electron.mjs', 'Root install only prepares the Sharp backend; no Electron native rebuild')
 const violations = []
 for (const directory of ['apps/web/src', 'packages/contracts/src', 'packages/ui/src']) {
   for (const file of sourceFiles(directory)) {

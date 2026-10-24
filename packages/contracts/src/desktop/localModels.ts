@@ -6,7 +6,7 @@ export const LOCAL_MODEL_DOWNLOAD_SOURCES = ['official', 'hf-mirror'] as const
 export type LocalModelDownloadSource = typeof LOCAL_MODEL_DOWNLOAD_SOURCES[number]
 export type LocalTranslationMode = 'app-default' | 'local'
 export interface LocalAccelerationPolicy { mode: 'auto' | 'cpu' | 'gpu'; device?: string }
-export interface LocalGpuDevice { id: string; name: string; backend: 'cuda' | 'vulkan'; index: number; memoryMiB: number }
+export interface LocalGpuDevice { id: string; name: string; backend: 'cuda' | 'vulkan'; index: number; memoryMiB: number; integrated?: boolean }
 export interface LocalExecutionStatus {
   backend: 'cpu' | 'cuda' | 'vulkan' | 'metal' | 'idle'
   device?: string

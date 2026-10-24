@@ -87,7 +87,7 @@ export default function AiSubtitleToggle({ playback, controller, onOpenModels }:
     </div>
     {open && <InteractionLayerOwner.Provider value={layer.owner}>
       <div ref={panel} id={id} role="dialog" aria-labelledby={`${id}-title`} aria-describedby={`${id}-description`}
-        tabIndex={-1} className={styles.guide} style={layer.style} data-native-playback-occluder>
+        tabIndex={-1} className={styles.guide} style={layer.style} data-playback-overlay-surface>
         <div className={styles.heading}>
           <h3 id={`${id}-title`}>{title}</h3>
           <IconButton size="sm" icon={<X size={16} />} label="关闭 AI 字幕引导" onClick={() => setOpen(false)} />

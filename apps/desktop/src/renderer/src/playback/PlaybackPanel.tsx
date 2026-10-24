@@ -14,13 +14,21 @@ import { useOverlayHistory } from '../interaction/OverlayHistoryContext'
 import type { OverlayTraversalResult } from '../interaction/overlayHistory'
 import { createPlaybackHistory, type PlaybackViewState } from './playbackHistory'
 import { playbackTrackLabel } from './playbackTrackLabel'
-import { playbackOcclusions } from './playbackOcclusion'
 import styles from './PlaybackPanel.module.css'
 import AiSubtitleSettings from './AiSubtitleSettings'
 import AiSubtitleToggle from './AiSubtitleToggle'
 import { useAiSubtitles } from './useAiSubtitles'
 import { settingsPath } from '../settings/settingsRoutes'
 import { mediaLibraryVideoDetailPath } from '../listView/mediaLibraryRoutes'
+
+function recoveryLabel(reason: string): string {
+  if (reason === 'DISPLAY_SELF_TEST_FAILED') return 'GPU 画面通道检查未通过'
+  if (reason === 'DISPLAY_SELF_TEST_TIMEOUT' || reason === 'RECEIVER_NOT_READY') return '等待 GPU 画面超时'
+  if (reason === 'TEXTURE_IMPORT_FAILED' || reason === 'FRAME_CHANNEL_FAILED') return '共享画面传输失败'
+  if (reason === 'GPU_PROCESS_EXITED') return 'GPU 进程退出'
+  if (reason === 'HELPER_HEARTBEAT_TIMEOUT' || reason === 'FRAME_RELEASE_TIMEOUT') return 'GPU 播放通道未响应'
+  return '当前 GPU 播放路径不可用'
+}
 
 let viewportSequence = 0
 
@@ -38,10 +46,9 @@ export default function PlaybackPanel(): JSX.Element | null {
   const settingsId = useId()
   const [chromeVisible, setChromeVisible] = useState(true)
   const [htmlControlsFocused, setControlsFocused] = useState(false)
-  const controlsFocused = htmlControlsFocused && state?.nativeVideoFocused !== true
+  const controlsFocused = htmlControlsFocused
   const [hoveredChrome, setHoveredChrome] = useState<'header' | 'controls' | null>(null)
   const [childLayerActive, setChildLayerActive] = useState(false)
-  const handledFocus = useRef<number | undefined>()
   const keyboardChrome = useRef(false)
   const [adjusting, setAdjusting] = useState(false)
   const [volumeDraft, setVolumeDraft] = useState<number | null>(null)
@@ -54,6 +61,11 @@ export default function PlaybackPanel(): JSX.Element | null {
   stateRef.current = state
   const root = useRef<HTMLDivElement>(null)
   const video = useRef<HTMLButtonElement>(null)
+  const videoClickTimer = useRef<number | null>(null)
+  const cancelVideoClick = useCallback(() => {
+    if (videoClickTimer.current !== null) window.clearTimeout(videoClickTimer.current)
+    videoClickTimer.current = null
+  }, [])
   const header = useRef<HTMLElement>(null)
   const toolbar = useRef<HTMLDivElement>(null)
   const toast = useToast()
@@ -143,14 +155,16 @@ export default function PlaybackPanel(): JSX.Element | null {
     })
     return () => { disposed = true }
   }, [options, sessionId, libraryId, videoId, presentation])
+  const sharedTextureSurface = state?.phase === 'error' ? undefined : state?.sharedTextureSurface
+  useLayoutEffect(() => {
+    if (!sharedTextureSurface) return
+    return api.playback.bindSharedTextureSurface(sharedTextureSurface)
+  }, [sharedTextureSurface])
+  useEffect(() => cancelVideoClick, [sessionId, sharedTextureSurface, presentation, cancelVideoClick])
   const presentationRevision = state?.presentationRevision
-  const focusSequence = state?.focusRequest?.sequence
-  const rendererFullscreen = presentation === 'fullscreen' && state?.rendererFullscreenControls === true
+  const rendererFullscreen = presentation === 'fullscreen'
   const [chromeActivity, setChromeActivity] = useState(0)
   const revealChrome = useCallback(() => { setChromeVisible(true); setChromeActivity(value => value + 1) }, [])
-  useEffect(() => {
-    if (rendererFullscreen && state?.fullscreenPointerY != null) locatePointer(state.fullscreenPointerY)
-  }, [rendererFullscreen, state?.fullscreenPointerY, locatePointer])
   useEffect(() => {
     if (!rendererFullscreen) { setChildLayerActive(false); return }
     const sync = (): void => setChildLayerActive(!layer.isTop() && interactionLayers.isActiveModal(layer.id))
@@ -181,21 +195,6 @@ export default function PlaybackPanel(): JSX.Element | null {
     if (previous === 'fullscreen' && presentation === 'expanded' && layer.isTop()) video.current?.focus()
   }, [presentation, layer])
   useLayoutEffect(() => {
-    const current = stateRef.current
-    if (!current?.focusRequest || current.presentation === 'fullscreen' && !current.rendererFullscreenControls || !root.current || !video.current) return
-    if (handledFocus.current === current.focusRequest.sequence) return
-    if (current.rendererFullscreenControls && !chromeVisible) { setChromeVisible(true); return }
-    if (current.presentation === 'docked' ? interactionLayers.hasModal() : !layer.isTop()) return
-    const elements = Array.from(root.current.querySelectorAll<HTMLElement>('button,input,select,textarea,[tabindex]'))
-      .filter(element => element.tabIndex >= 0 && !element.matches(':disabled') && !element.closest('[inert],[aria-hidden="true"]') && element.getClientRects().length > 0)
-    const index = elements.indexOf(video.current)
-    if (index < 0 || !elements.length) return
-    const next = (index + (current.focusRequest.backwards ? -1 : 1) + elements.length) % elements.length
-    keyboardChrome.current = true
-    elements[next]?.focus()
-    handledFocus.current = current.focusRequest.sequence
-  }, [sessionId, focusSequence, layer, chromeVisible])
-  useLayoutEffect(() => {
     if (!sessionId || !presentation || presentationRevision == null) return
     let last = ''
     let disposed = false
@@ -204,18 +203,13 @@ export default function PlaybackPanel(): JSX.Element | null {
       const element = video.current
       if (!current || current.sessionId !== sessionId || !element || disposed) return
       const bounds = element.getBoundingClientRect()
-      const occlusions = playbackOcclusions(bounds, document.querySelectorAll<HTMLElement>('[data-native-playback-occluder]'))
       const visible = current.phase !== 'error' && bounds.width > 0 && bounds.height > 0
-        && document.visibilityState !== 'hidden' && !element.closest('[inert]')
-        && (presentation === 'docked' ? !interactionLayers.hasModal() : interactionLayers.isActiveModal(layer.id))
-        && (current.rendererFullscreenControls || occlusions.length === 0)
+        && document.visibilityState !== 'hidden'
       const rect = { x: Math.max(0, bounds.x), y: Math.max(0, bounds.y), width: bounds.width, height: bounds.height }
-      const popupRects = current.rendererFullscreenControls ? occlusions.slice(0, 32) : undefined
-      const key = JSON.stringify([rect, visible, popupRects, window.devicePixelRatio])
+      const key = JSON.stringify([rect, visible, window.devicePixelRatio])
       if (key === last) return
       last = key
-      void api.playback.viewport({ sessionId, sequence: ++viewportSequence, presentation, presentationRevision, rect, visible,
-        ...(popupRects ? { occlusions: popupRects } : {}) }).catch(() => { /* Old session geometry is disposable. */ })
+      void api.playback.viewport({ sessionId, sequence: ++viewportSequence, presentation, presentationRevision, rect, visible }).catch(() => { /* Old session geometry is disposable. */ })
     }
     report()
     const observer = new ResizeObserver(report)
@@ -228,7 +222,6 @@ export default function PlaybackPanel(): JSX.Element | null {
   if (!state) return null
   const docked = state.presentation === 'docked'
   const fullscreen = state.presentation === 'fullscreen'
-  const nativeFullscreen = fullscreen && !state.rendererFullscreenControls
   const headerShown = !rendererFullscreen || chromeVisible || hoveredChrome === 'header' || options
   const chromeShown = !rendererFullscreen || chromeVisible || hoveredChrome === 'controls' || options || adjusting || controlsFocused || childLayerActive
   const disabled = state.phase === 'opening' || state.phase === 'error'
@@ -299,11 +292,11 @@ export default function PlaybackPanel(): JSX.Element | null {
       onFocusCapture={event => {
         const target = event.target as HTMLElement
         if (keyboardChrome.current && target !== root.current) revealChrome()
-        setControlsFocused(Boolean(target.closest?.('[data-native-playback-occluder]') && !root.current?.contains(target))
+        setControlsFocused(Boolean(target.closest?.('[data-playback-overlay-surface]') && !root.current?.contains(target))
           || keyboardChrome.current && target !== root.current && target !== video.current)
       }}
       onBlurCapture={event => {
-        if (!event.currentTarget.contains(event.relatedTarget) && !(event.relatedTarget as HTMLElement | null)?.closest?.('[data-native-playback-occluder]')) setControlsFocused(false)
+        if (!event.currentTarget.contains(event.relatedTarget) && !(event.relatedTarget as HTMLElement | null)?.closest?.('[data-playback-overlay-surface]')) setControlsFocused(false)
       }}
       onKeyDown={event => {
         if (event.defaultPrevented || event.nativeEvent.isComposing || event.metaKey || event.ctrlKey || event.altKey || !document.hasFocus()) return
@@ -315,8 +308,8 @@ export default function PlaybackPanel(): JSX.Element | null {
         else if (event.key.toLowerCase() === 'm') { event.preventDefault(); control({ kind: 'mute', muted: !state.muted }) }
         else if (event.key.toLowerCase() === 'f') { event.preventDefault(); control({ kind: 'presentation', value: fullscreen ? 'expanded' : 'fullscreen' }) }
       }}>
-      {!docked && !nativeFullscreen && <header ref={header} className={styles.header} hidden={!headerShown && !rendererFullscreen}
-        data-chrome-visible={headerShown} aria-hidden={rendererFullscreen && !headerShown || undefined} data-native-playback-occluder={rendererFullscreen || undefined}>
+      {!docked && <header ref={header} className={styles.header} hidden={!headerShown && !rendererFullscreen}
+        data-chrome-visible={headerShown} aria-hidden={rendererFullscreen && !headerShown || undefined} data-playback-overlay-surface={rendererFullscreen || undefined}>
         <div className={styles.heading}><span className={styles.title}>{state.title}</span><span className={styles.caption}>{state.source === 'remote' ? '远程原文件' : '本机文件'}</span></div>
         <IconButton icon={<ChevronDown size={18} />} label="收起到底栏" disabled={state.phase === 'error'} onClick={() => control({ kind: 'presentation', value: 'docked' })} />
         <IconButton icon={<X size={18} />} label="停止播放" onClick={() => control({ kind: 'stop' })} />
@@ -331,11 +324,30 @@ export default function PlaybackPanel(): JSX.Element | null {
             <Button size="sm" onClick={() => control({ kind: 'stop' })}>关闭播放器</Button>
           </div>
           <p className={styles.note}>重试会重新检查同一资源，不自动切换资源或播放器。</p>
-        </div> : <button ref={video} className={styles.video} aria-hidden={nativeFullscreen || undefined} tabIndex={nativeFullscreen ? -1 : 0}
+        </div> : <button ref={video} className={styles.video} tabIndex={0}
           aria-label={docked ? '恢复展开播放器' : '视频画面，单击播放或暂停，双击全屏'}
-          onClick={() => control(docked ? { kind: 'presentation', value: 'expanded' }
-            : state.phase === 'ended' ? { kind: 'restart' } : { kind: 'pause', paused: !state.paused })} />}
-        {options && !docked && !nativeFullscreen && state.phase !== 'error' && <aside className={styles.options} aria-label="播放设置" id={settingsId} data-native-playback-occluder={rendererFullscreen || undefined}>
+          onClick={event => {
+            cancelVideoClick()
+            const activate = (): void => {
+              videoClickTimer.current = null
+              const current = stateRef.current
+              if (!current || current.sessionId !== state.sessionId || current.presentation !== state.presentation || current.phase === 'error') return
+              control(current.presentation === 'docked' ? { kind: 'presentation', value: 'expanded' }
+                : current.phase === 'ended' ? { kind: 'restart' } : { kind: 'pause', paused: !current.paused })
+            }
+            // Native surfaces handle their own pointer gestures. The canvas uses
+            // the legacy Linux 300 ms window; keyboard activation stays immediate.
+            if (sharedTextureSurface && !docked && event?.detail > 0) {
+              if (event.detail === 1) videoClickTimer.current = window.setTimeout(activate, 300)
+            } else activate()
+          }}
+          onDoubleClick={sharedTextureSurface && !docked ? () => {
+            cancelVideoClick()
+            control({ kind: 'presentation', value: fullscreen ? 'expanded' : 'fullscreen' })
+          } : undefined}>
+          {sharedTextureSurface && <canvas key={sharedTextureSurface} className={styles.sharedTexture} data-playback-surface={sharedTextureSurface} aria-hidden="true" />}
+        </button>}
+        {options && !docked && state.phase !== 'error' && <aside className={styles.options} aria-label="播放设置" id={settingsId} data-playback-overlay-surface={rendererFullscreen || undefined}>
           <div className={styles.optionsHeader}><span>播放设置</span><IconButton size="sm" icon={<X size={16} />} label="关闭播放设置" onClick={() => presentationHistory.setOptions(false)} /></div>
           <div className={styles.tabs} role="tablist" aria-label="播放设置分类">
             {(['playback', 'subtitle', 'info'] as const).map(tab => <button type="button" role="tab" key={tab}
@@ -391,7 +403,9 @@ export default function PlaybackPanel(): JSX.Element | null {
           <div className={styles.optionBody} role="tabpanel" id={`${settingsId}-info`} aria-labelledby={`${settingsId}-info-tab`} hidden={optionTab !== 'info'}>
           <dl className={styles.info}><dt>来源</dt><dd>{state.source === 'remote' ? '远程原文件' : '本机文件'}</dd>
             <dt>视频</dt><dd>{state.info.videoCodec ?? '未知'} · {state.info.width ?? '?'}×{state.info.height ?? '?'}</dd>
-            <dt>实际硬解</dt><dd>{state.info.hardwareDecoder || '软件解码'}</dd><dt>音频</dt><dd>{state.info.audioCodec ?? '无'} / {state.info.audioOutput ?? '无输出'}</dd>
+            {state.info.playbackMode ? <><dt>播放模式</dt><dd>{state.info.playbackMode === 'cpu' ? 'CPU 兼容' : 'GPU'}{state.info.playbackFallback ? '（自动回退）' : ''}</dd></> : null}<dt>实际硬解</dt><dd>{state.info.hardwareDecoder && state.info.hardwareDecoder !== 'no' ? state.info.hardwareDecoder : '软件解码'}{state.info.playbackDiagnostics?.decoderFallback ? '（已从硬解切换）' : ''}</dd><dt>音频</dt><dd>{state.info.audioCodec ?? '无'} / {state.info.audioOutput ?? '无输出'}</dd>
+            {state.info.playbackDiagnostics?.displayProbe !== 'not-applicable' && state.info.playbackDiagnostics ? <><dt>画面通道</dt><dd>{state.info.playbackDiagnostics.displayProbe === 'passed' ? '导入与画布检查通过' : '正在检查'}</dd></> : null}
+            {state.info.playbackDiagnostics?.fallbackReason ? <><dt>回退原因</dt><dd>{recoveryLabel(state.info.playbackDiagnostics.fallbackReason)}</dd></> : null}
           </dl>
           <section className={styles.shortcuts} aria-label="画面快捷键">
             <h3>画面快捷键</h3>
@@ -413,8 +427,8 @@ export default function PlaybackPanel(): JSX.Element | null {
           onClick={() => control({ kind: 'resume', choice: 'continue' })}>继续 {playbackTime(state.resumePosition)}</Button>
         <Button size="sm" disabled={disabled} onClick={() => control({ kind: 'resume', choice: 'start' })}>从头播放</Button>
       </div>}
-      {!nativeFullscreen && state.phase !== 'error' && <div ref={toolbar} className={styles.controls} hidden={!chromeShown && !rendererFullscreen}
-        data-chrome-visible={chromeShown} aria-hidden={rendererFullscreen && !chromeShown || undefined} data-native-playback-occluder={rendererFullscreen || undefined}>
+      {state.phase !== 'error' && <div ref={toolbar} className={styles.controls} hidden={!chromeShown && !rendererFullscreen}
+        data-chrome-visible={chromeShown} aria-hidden={rendererFullscreen && !chromeShown || undefined} data-playback-overlay-surface={rendererFullscreen || undefined}>
         <div className={styles.progress}>
           <span className={styles.currentTime}>{playbackTime(seekDraft ?? state.position)}</span>
           <input className={styles.range} aria-label="播放进度" type="range" min={0} max={state.duration || 1} step={0.1} disabled={seekDisabled || !state.duration}

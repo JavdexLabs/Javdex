@@ -66,6 +66,9 @@ async function settle(): Promise<void> {
   await act(async () => {
     await Promise.resolve()
     await Promise.resolve()
+    // React Query schedules notifications on timers. Microtasks alone can
+    // exhaust waitFor before that scheduler gets an event-loop turn.
+    await new Promise<void>(resolve => setTimeout(resolve, 0))
   })
 }
 

@@ -1,7 +1,10 @@
+import { prepareSharp } from './patch-sharp-electron.mjs'
 import { spawnSync } from 'node:child_process'
 import { readdirSync } from 'node:fs'
 import path from 'node:path'
 import electronPath from 'electron'
+
+prepareSharp(process.cwd(), { check: true })
 
 function discoverTests(root) {
   return readdirSync(root, { withFileTypes: true })

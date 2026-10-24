@@ -16,6 +16,7 @@
 
 | 你在改什么 | 必读 | 可选 |
 |------------|------|------|
+| 内置播放、Canvas、GPU/CPU 回退、跨平台播放架构 | [`docs/BUILTIN_PLAYBACK.md`](docs/BUILTIN_PLAYBACK.md)、[三平台统一与接续方案](docs/adr/0033-unify-desktop-playback-capabilities.md) | `docs/DEVELOPMENT.md`（构建与验收） |
 | 官网、文档站、下载中心、Pages 构建 | [`website/README.md`](website/README.md) | `website/site.config.mjs` |
 | UI、布局、样式、交互、无障碍 | [`docs/UI_DESIGN_GUIDELINES.md`](docs/UI_DESIGN_GUIDELINES.md) | [`docs/UI_COMPONENT_CONTRACTS.md`](docs/UI_COMPONENT_CONTRACTS.md) |
 | 局域网 Web 页面、移动端交互 | [`docs/MOBILE_WEB_GUIDELINES.md`](docs/MOBILE_WEB_GUIDELINES.md) | — |

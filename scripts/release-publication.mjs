@@ -21,6 +21,7 @@ export async function assertReleaseAvailable({ tag, version, image, phase = 'pre
   }
   if (await github(`releases/tags/${encodeURIComponent(tag)}`)) throw new Error(`Release ${tag} already exists; choose a new version`)
   const reference = await github(`git/ref/tags/${encodeURIComponent(tag)}`)
+  if (!reference) throw new Error(`Tag ${tag} must exist before publication; create it at the checked source`)
   if (reference) {
     let object = reference.object
     for (let depth = 0; object?.type === 'tag' && depth < 5; depth++) {

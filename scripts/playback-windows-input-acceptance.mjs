@@ -10,7 +10,7 @@ const directory = createAcceptanceDirectory('windows-input-')
 const [target] = seedAcceptanceCatalog(directory, [path.join(output, 'synthetic-subtitles.mkv')])
 const reportFile = path.join(output, 'windows-input-state.json')
 const application = await launchAcceptance(directory, 'windows-input-application.log',
-  process.argv.includes('--disable-direct-composition') ? ['--disable-direct-composition'] : [])
+  [])
 let timer
 try {
   const page = await application.firstWindow()
@@ -42,7 +42,8 @@ try {
       })
       const native = await application.evaluate(({ app, BrowserWindow, screen }) => {
         const require = process.getBuiltinModule('module').createRequire(app.getAppPath() + '/package.json')
-        const value = require(app.isPackaged ? process.resourcesPath + '/native-playback/playback.node' : app.getAppPath() + '/out/native-playback/playback.node').inspect()
+        const addon = require(app.isPackaged ? process.resourcesPath + '/native-playback/playback.node' : app.getAppPath() + '/out/native-playback/playback.node')
+        const value = (addon.software.inspect().alive ? addon.software : addon.sharedTexture).inspect()
         return { alive: value.alive, loadedFiles: value.loadedFiles, focusedControl: value.focusedControl,
           dpi: value.dpi, scale: screen.getDisplayMatching(BrowserWindow.getAllWindows()[0].getBounds()).scaleFactor,
           pixelWidth: value.pixelWidth, pixelHeight: value.pixelHeight,

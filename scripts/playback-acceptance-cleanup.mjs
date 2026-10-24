@@ -15,3 +15,17 @@ export function recordAcceptanceCleanup(report, cleanup) {
     process.exitCode = 1
   }
 }
+
+/** Keep the original failure and always persist the real host exit verdict. */
+export async function closeAcceptanceAndSave(report, application, close, save) {
+  try {
+    if (application) {
+      report.cleanup = await close(application)
+      assertOrdinaryAcceptanceExit(report.cleanup)
+    }
+  } catch (error) {
+    report.passed = false
+    report.error ??= error.stack ?? String(error)
+    throw error
+  } finally { save() }
+}

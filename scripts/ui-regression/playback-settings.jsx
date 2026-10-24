@@ -11,7 +11,7 @@ let revision = 1
 const listeners = new Set()
 let snapshot = {
   sessionId: 'settings-fixture', target: { libraryId: 1, videoId: 2, resourceId: 3 }, title: 'Synthetic settings',
-  source: 'local', presentation: fullscreen ? 'fullscreen' : 'expanded', rendererFullscreenControls: fullscreen,
+  source: 'local', presentation: fullscreen ? 'fullscreen' : 'expanded',
   presentationRevision: 1, phase: 'paused', paused: true, seeking: false,
   position: 1, duration: 120, seekable: true, volume: 50, muted: false, speed: 1, subtitleDelay: 0, subtitleSize: 55,
   tracks: [

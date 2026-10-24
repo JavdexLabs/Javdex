@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Generates the reviewed packaging input from pinned preferred source. Outputs
-// are task-owned build/cache artifacts; installed codec libraries are never copied.
+// are task-owned build/cache artifacts. The portable profile additionally inventories
+// baseline distribution client libraries; its codecs still use pinned source.
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { appendFileSync, copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
@@ -9,19 +10,22 @@ import { createRequire } from 'node:module'
 import { availableParallelism } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { playbackBuildFingerprint, playbackLinuxAssDependency, playbackPkgConfigEnvironment, playbackSourceNativePlan, playbackSourcePlan, playbackWindowsExportNames, staticPlaybackDependencies, verifyPlaybackSource } from './playback-source-build.mjs'
+import { playbackBuildFingerprint, playbackMpvRenderFenceFix, playbackLinuxAssDependency, playbackLinuxVaapiRenderDependency, playbackPkgConfigEnvironment, playbackSourceNativePlan, playbackSourcePlan, playbackWindowsExportNames, playbackWindowsSourceEnvironment, stageWindowsStaticZlib, staticPlaybackDependencies, verifyPlaybackSource } from './playback-source-build.mjs'
 import { playbackFileSha256, validatePlaybackRuntime } from './playback-runtime.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'), require = createRequire(import.meta.url)
+const software = process.argv.includes('--linux-software')
 const platform = process.platform, arch = process.arch
+const portable = platform === 'linux' || process.argv.includes('--linux-portable') || software
+assert.ok(!portable || (platform === 'linux' && arch === 'x64'), 'Portable test build requires Linux x64')
 assert.ok(['darwin', 'linux', 'win32'].includes(platform) && ['x64', 'arm64'].includes(arch), 'Unsupported source build host')
 assert.ok(platform !== 'win32' || arch === 'x64', 'Windows source build currently targets x64')
 const lock = JSON.parse(readFileSync(path.join(root, 'build/playback-sources.json')))
 const sources = lock.sources.filter(item => !item.platforms || item.platforms.includes(platform))
 const electronVersion = require('electron/package.json').version
 assert.equal(electronVersion, lock.sdk.electronVersion, 'Update the pinned playback SDK source/notice lock for this Electron version')
-const work = path.join(root, 'out/playback-runtime-build'), cache = path.join(work, 'sources')
-const matrix = path.resolve(process.env.JAVDEX_PLAYBACK_RUNTIME_DIR ?? path.join(root, 'out/playback-runtime'))
+const work = path.join(root, software ? 'out/linux-software-build' : portable ? 'out/linux-portable-build' : 'out/playback-runtime-build'), cache = path.join(work, 'sources')
+const matrix = path.resolve((portable ? process.env.JAVDEX_LINUX_PORTABLE_RUNTIME_DIR : process.env.JAVDEX_PLAYBACK_RUNTIME_DIR) ?? path.join(root, software ? 'out/linux-software-runtime' : portable ? 'out/linux-portable-runtime' : 'out/playback-runtime'))
 assert.ok(path.relative(root, matrix).startsWith('out' + path.sep), 'Build output must be under this checkout out directory')
 const destination = path.join(matrix, `${platform}-${arch}`)
 mkdirSync(work, { recursive: true }); mkdirSync(cache, { recursive: true }); mkdirSync(matrix, { recursive: true })
@@ -52,17 +56,20 @@ function run(command, args = [], cwd = root, capture = false, overrides = {}) {
 }
 const compiler = platform === 'win32' ? 'gcc' : 'cc'
 const python = platform === 'win32' && process.env.pythonLocation ? path.join(process.env.pythonLocation, 'python.exe') : 'python3'
+const windowsRuntimeSymbols = platform === 'win32'
+  ? run('nm', ['--defined-only', '--extern-only', run(compiler, ['-print-file-name=libmingw32.a'], root, true)], root, true) : ''
 environment.CC = compiler; environment.CXX = platform === 'win32' ? 'g++' : 'c++'
 const toolchain = { compiler: run(compiler, ['--version'], root, true), cmake: run('cmake', ['--version'], root, true),
   python: run(python, ['--version'], root, true), make: run('make', ['--version'], root, true),
   ...(arch === 'x64' ? { nasm: run('nasm', ['--version'], root, true) } : {}),
-  ...(platform === 'win32' ? { msysRoot, vcToolsVersion: process.env.VCToolsVersion, windowsSdkVersion: process.env.WindowsSDKVersion } : {}),
-  ...(platform === 'linux' ? { systemApis: run('pkg-config', ['--modversion', 'x11', 'xft', 'fontconfig', 'alsa', 'libva'], root, true) } : {}),
+  ...(platform === 'win32' ? { msysRoot, vcToolsVersion: process.env.VCToolsVersion, windowsSdkVersion: process.env.WindowsSDKVersion,
+    mingwRuntimePackages: run('pacman', ['-Q', 'mingw-w64-ucrt-x86_64-gcc', 'mingw-w64-ucrt-x86_64-crt', 'mingw-w64-ucrt-x86_64-headers'], root, true) } : {}),
+  ...(platform === 'linux' ? { systemApis: run(portable ? '/usr/bin/pkg-config' : 'pkg-config', ['--modversion', ...(software ? ['fontconfig', 'libpulse'] : portable ? ['fontconfig', 'libpulse', 'libva', 'libva-drm', 'egl', 'gbm', 'libdrm'] : ['x11', 'xft', 'fontconfig', 'alsa', 'libva'])], root, true) } : {}),
   ...(platform === 'darwin' ? { sdk: run('xcrun', ['--show-sdk-version'], root, true), swift: run('swiftc', ['--version'], root, true), deploymentTarget: '12.0' } : {}) }
 if (platform === 'darwin') environment.MACOSX_DEPLOYMENT_TARGET = '12.0'
 const native = path.join(root, 'apps/desktop/src/main/player/native')
 const recipeFiles = ['build/playback-sources.json', 'scripts/build-playback-runtime.mjs', 'scripts/playback-source-build.mjs',
-  'scripts/playback-runtime.mjs', 'scripts/playback-source-materials.mjs', 'scripts/packaging-runtime.mjs', 'scripts/playback-native-build.mjs', 'scripts/check-playback-load.mjs', 'scripts/playback-linux-helper-smoke.mjs',
+  'scripts/playback-runtime.mjs', ...(portable ? ['scripts/linux-portable-runtime.mjs'] : []), 'scripts/playback-source-materials.mjs', 'scripts/packaging-runtime.mjs', 'scripts/playback-native-build.mjs', 'scripts/check-playback-load.mjs', 'scripts/playback-linux-helper-smoke.mjs',
   'package.json', 'package-lock.json', 'LICENSE', 'NOTICE', 'LICENSES/Javdex-MIT.txt', 'LICENSES/node-gyp-MIT.txt',
   ...readdirSync(native).filter(name => /\.(cpp|mm|h)$|^CMakeLists.txt$/.test(name)).map(name => 'apps/desktop/src/main/player/native/' + name)]
 for (const parent of ['apps', 'packages']) {
@@ -78,7 +85,7 @@ if (process.argv.includes('--fingerprint')) {
   if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `fingerprint=${fingerprint}\n`)
   process.exit(0)
 }
-if (existsSync(path.join(destination, 'runtime.json'))) {
+if (!portable && existsSync(path.join(destination, 'runtime.json'))) {
   const receipt = JSON.parse(readFileSync(path.join(destination, 'build.json')))
   if (receipt.fingerprint === fingerprint) {
     validatePlaybackRuntime(destination, target)
@@ -123,9 +130,16 @@ for (const source of sources) {
   run('tar', ['-xf', file, '--strip-components=1', '-C', directory])
   for (const license of source.licenseFiles) assert.ok(statSync(path.join(directory, license)).size > 0, `Missing source license: ${source.id}/${license}`)
 }
+if (platform === 'linux') cpSync(path.join(sourceRoot, 'vulkan_headers/include'), path.join(prefix, 'include'), { recursive: true })
 cpSync(path.join(sourceRoot, 'fast_float'), path.join(sourceRoot, 'libplacebo/3rdparty/fast_float'), { recursive: true })
 cpSync(path.join(sourceRoot, 'vulkan_headers'), path.join(sourceRoot, 'libplacebo/3rdparty/Vulkan-Headers'), { recursive: true })
 const patches = []
+// Keep upstream's native swapchain fences; libmpv render API owns no swapchain.
+if (!software) {
+  const file = path.join(sourceRoot, 'mpv/video/out/opengl/context.c')
+  writeFileSync(file, playbackMpvRenderFenceFix(readFileSync(file, 'utf8')))
+  patches.push({ id: 'mpv', operation: 'Require native swap_buffers before allocating vsync fences', upstream: 'f74adc4243bd9e1a8ee96d187c939e6232510650' })
+}
 for (const [id, dependencies] of [['mpv', ['libavcodec', 'libavfilter', 'libavformat', 'libavutil', 'libswresample', 'libswscale', 'libplacebo', 'libass', 'zlib']],
   ['libass', ['freetype2', 'fribidi', 'harfbuzz', 'libunibreak']]]) {
   if (platform === 'win32') dependencies.push('iconv')
@@ -139,6 +153,10 @@ let mpvRecipeText = readFileSync(mpvRecipe, 'utf8')
 if (platform === 'linux') {
   mpvRecipeText = playbackLinuxAssDependency(mpvRecipeText, path.join(prefix, 'bin/pkgconf'))
   patches.push({ id: 'mpv', operation: 'libass private archives with shared OS font provider dependencies' })
+}
+if (portable) {
+  mpvRecipeText = playbackLinuxVaapiRenderDependency(mpvRecipeText)
+  patches.push({ id: 'mpv', operation: 'VAAPI render-node display without native KMS window output' })
 }
 for (const [before, after] of [["dependency('sdl2', required: false)", "dependency('sdl2', required: get_option('sdl2-audio'))"],
   ["dependency('ffnvcodec', version: '>= 11.1.5.1', required: false)", "dependency('ffnvcodec', version: '>= 11.1.5.1', required: get_option('cuda-hwaccel'))"],
@@ -161,12 +179,19 @@ environment.PKG_CONFIG = posix(environment.PKG_CONFIG)
 environment.CFLAGS = '-O2 -fPIC'; environment.CXXFLAGS = '-O2 -fPIC'
 environment.CPPFLAGS = `-I${posix(path.join(prefix, 'include'))}`
 environment.LDFLAGS = `-L${posix(path.join(prefix, 'lib'))}`
-if (platform === 'win32') environment.LDFLAGS += ' -static -static-libgcc -static-libstdc++'
+if (platform === 'win32') {
+  const windows = playbackWindowsSourceEnvironment(prefix, windowsRuntimeSymbols)
+  environment.LIBRARY_PATH = windows.libraryPath
+  environment.LDFLAGS += ' ' + windows.linkArgs.join(' ')
+}
 const jobs = Math.min(availableParallelism(), 8)
-const plan = playbackSourcePlan({ platform, arch, source: sourceRoot, build, prefix, tools, jobs })
+const plan = playbackSourcePlan({ platform, arch, source: sourceRoot, build, prefix, tools, jobs, linuxProfile: platform === 'linux' ? software ? 'software' : 'dmabuf' : undefined })
 for (const step of plan) {
   console.log(`Source build: ${step.command} ${step.args.join(' ')}`)
   run(step.command, step.args, step.cwd)
+  if (platform === 'win32' && step.command === 'cmake' && step.args[0] === '--install' && step.args[1] === path.join(build, 'zlib')) {
+    patches.push({ id: 'zlib', operation: 'Install canonical static-only Windows archive for -lz', ...stageWindowsStaticZlib(prefix) })
+  }
   if (step.command === 'make' && step.args.includes('liblua.a')) {
     const lua = path.join(sourceRoot, 'lua/src'), include = path.join(prefix, 'include/lua5.2')
     mkdirSync(include, { recursive: true })
@@ -174,6 +199,10 @@ for (const step of plan) {
     cpSync(path.join(lua, 'liblua.a'), path.join(prefix, 'lib/liblua.a'))
     writeFileSync(path.join(prefix, 'lib/pkgconfig/lua5.2.pc'), `prefix=${prefix.replaceAll('\\', '/')}\nName: Lua\nDescription: Lua 5.2\nVersion: 5.2.4\nLibs: -L\${prefix}/lib -llua\nLibs.private: -lm${platform === 'linux' ? ' -ldl' : ''}\nCflags: -I\${prefix}/include/lua5.2\n`)
   }
+}
+if (platform === 'win32') for (const name of ['libiconv.a', 'libz.a']) {
+  assert.equal(realpathSync(run(compiler, ['-print-file-name=' + name], root, true)), realpathSync(path.join(prefix, 'lib', name)),
+    'Preferred source-built archive was shadowed by a toolchain library: ' + name)
 }
 // Matching Electron SDK in a task-owned cache; node-gyp verifies its checksums.
 const rebuildRequire = createRequire(require.resolve('@electron/rebuild'))
@@ -184,6 +213,14 @@ const sdk = path.join(sdkCache, electronVersion), include = path.join(sdk, 'incl
 const versionHeader = readFileSync(path.join(include, 'node_version.h'), 'utf8')
 const nodeVersion = ['MAJOR', 'MINOR', 'PATCH'].map(part => versionHeader.match(new RegExp(`NODE_${part}_VERSION\\s+(\\d+)`))?.[1]).join('.')
 assert.equal(nodeVersion, lock.sdk.nodeVersion, 'Electron SDK Node headers differ from the pinned notice provenance')
+if (portable) {
+  for (const notice of lock.notices.filter(item => !item.platforms || item.platforms.includes(platform))) await download(notice)
+  const { buildPortablePlaybackRuntime } = await import('./linux-portable-runtime.mjs')
+  const context = { software, root, sourceRoot, buildRoot, prefix, include, cache, sources, lock, fingerprint, toolchain, plan, patches, destination }
+  writeFileSync(path.join(buildRoot, 'portable-context.json'), JSON.stringify(context, null, 2))
+  await buildPortablePlaybackRuntime({ software, ...context, run })
+  process.exit(0)
+}
 const addon = path.join(buildRoot, 'adapter'); mkdirSync(addon)
 const delayHook = path.join(nodeGypRoot, 'src/win_delay_load_hook.cc')
 if (platform === 'win32') {
@@ -198,7 +235,12 @@ if (platform === 'win32') {
   // Visual Studio tools are added by the CI developer-command-prompt step.
   run('lib.exe', ['/machine:x64', `/def:${definition}`, `/out:${path.join(prefix, 'lib/mpv.lib')}`])
 }
-if (platform === 'win32') { environment.CC = 'cl'; environment.CXX = 'cl'; delete environment.CMAKE_GENERATOR }
+if (platform === 'win32') {
+  environment.CC = 'cl'; environment.CXX = 'cl'
+  // CMake supplies the MSVC include/link paths and /MT explicitly. Do not
+  // carry the dependency compiler's GCC flags into this separate toolchain.
+  for (const key of ['CMAKE_GENERATOR', 'CFLAGS', 'CXXFLAGS', 'CPPFLAGS', 'LDFLAGS', 'LIBRARY_PATH']) delete environment[key]
+}
 const adapterPlan = playbackSourceNativePlan({ platform, arch, root, prefix, include,
   nodeLibrary: path.join(sdk, arch, 'node.lib'), delayHook, output: addon })
 for (const step of adapterPlan) {
@@ -208,7 +250,8 @@ for (const step of adapterPlan) {
 }
 const staged = path.join(buildRoot, 'runtime'); mkdirSync(staged)
 const entry = platform === 'linux' ? 'playback-helper' : 'playback.node'
-cpSync(path.join(addon, entry), path.join(staged, entry))
+const nativeEntries = platform === 'linux' ? [entry] : [entry, 'playback-interop.node']
+for (const name of nativeEntries) cpSync(path.join(addon, name), path.join(staged, name))
 const libraryDirectory = path.join(prefix, platform === 'win32' ? 'bin' : 'lib')
 const candidates = readdirSync(libraryDirectory).filter(name => platform === 'darwin' ? /^libmpv.*\.dylib$/.test(name)
   : platform === 'win32' ? /^(lib)?mpv.*\.dll$/.test(name) : /^libmpv\.so(?:\.\d+)*$/.test(name))
@@ -223,7 +266,7 @@ for (const name of libraries) {
   copyFileSync(file, path.join(staged, name))
 }
 if (platform === 'darwin') {
-  for (const name of [entry, ...libraries]) {
+  for (const name of [...nativeEntries, ...libraries]) {
     const file = path.join(staged, name), commands = run('otool', ['-l', file], root, true)
     const ids = new Set([...commands.matchAll(/cmd LC_ID_DYLIB\s+cmdsize \d+\s+name (.+?) \(offset \d+\)/g)].map(match => match[1]))
     if (ids.size) run('install_name_tool', ['-id', '@loader_path/' + name, file])
@@ -282,11 +325,11 @@ function inventory(directory, relative = '') {
   }
 }
 inventory(staged)
-writeFileSync(path.join(staged, 'runtime.json'), JSON.stringify({ schemaVersion: 1, hashStage: 'pre-sign', platform, arch, electronVersion,
+writeFileSync(path.join(staged, 'runtime.json'), JSON.stringify({ schemaVersion: 1, playbackHostVersion: 1, hashStage: 'pre-sign', platform, arch, electronVersion,
   mpvVersion: lock.sources.find(item => item.id === 'mpv').version, files, components: [
     { name: 'mpv', version: lock.sources.find(item => item.id === 'mpv').version, license: 'GPL-3.0-or-later', binaries: libraries,
       licenseFile: 'licenses/libmpv.txt', sourceArchive: 'sources/libmpv-sources.tar', buildRecipe: 'build.json' },
-    { name: 'javdex-native', version: require('../package.json').version, license: 'GPL-3.0-or-later', binaries: [entry],
+    { name: 'javdex-native', version: require('../package.json').version, license: 'GPL-3.0-or-later', binaries: nativeEntries,
       licenseFile: 'licenses/javdex.txt', sourceArchive: 'sources/javdex-native.tar.gz', buildRecipe: 'build.json' }
   ] }, null, 2) + '\n')
 validatePlaybackRuntime(staged, target)

@@ -25,6 +25,7 @@ const preload = `
 `
 
 function run(fixture = {}, extra = {}, script = 'release-metadata.mjs', args = []) {
+  fixture = { refStatus: 200, ref: { object: { type: 'commit', sha } }, ...fixture }
   const directory = mkdtempSync(path.join(os.tmpdir(), 'javdex-publication-check-'))
   try {
     const output = path.join(directory, 'outputs')
@@ -66,8 +67,8 @@ test('unknown API and registry failures cannot be interpreted as absence', () =>
     assert.match(result.stderr, /HTTP/)
   }
 })
-test('fresh metadata and an existing matching lightweight or annotated tag may proceed', () => {
-  for (const fixture of [{}, { refStatus: 200, ref: { object: { type: 'commit', sha } } },
+test('fresh metadata with an existing matching lightweight or annotated tag may proceed', () => {
+  for (const fixture of [{ refStatus: 200, ref: { object: { type: 'commit', sha } } },
     { refStatus: 200, ref: { object: { type: 'tag', sha: 'c'.repeat(40) } }, annotated: { type: 'commit', sha } }]) {
     const result = run(fixture)
     assert.equal(result.status, 0, result.stderr)
@@ -91,8 +92,23 @@ test('replayed publication jobs recheck the immutable boundary immediately befor
   const existingImage = run({ imageStatus: 200 }, {}, 'release-publication.mjs', ['manifest'])
   assert.notEqual(existingImage.status, 0)
   assert.match(existingImage.stderr, /already exists/)
-  const ownImage = run({ imageStatus: 200 }, {}, 'release-publication.mjs', ['release'])
+  const ownImage = run({ imageStatus: 200, refStatus: 200, ref: { object: { type: 'commit', sha } } }, {}, 'release-publication.mjs', ['release'])
   assert.equal(ownImage.status, 0, ownImage.stderr)
+})
+
+test('release upload requires a pre-existing source-bound tag instead of implicit tag creation', () => {
+  for (const [script, args] of [['release-metadata.mjs', []], ['release-publication.mjs', ['manifest']], ['release-publication.mjs', ['release']]]) {
+    const missingTag = run({ refStatus: 404 }, {}, script, args)
+    assert.notEqual(missingTag.status, 0)
+    assert.match(missingTag.stderr, /must exist before publication/)
+  }
+  for (const fixture of [
+    { refStatus: 200, ref: { object: { type: 'commit', sha } } },
+    { refStatus: 200, ref: { object: { type: 'tag', sha: 'c'.repeat(40) } }, annotated: { type: 'commit', sha } }
+  ]) {
+    const result = run(fixture, {}, 'release-publication.mjs', ['release'])
+    assert.equal(result.status, 0, result.stderr)
+  }
 })
 
 test('workflow serializes refs and wires fresh guards ahead of both fixed publications', () => {
@@ -105,4 +121,5 @@ test('workflow serializes refs and wires fresh guards ahead of both fixed public
   const release = workflow.split('\n  release:\n')[1]
   assert.ok(release.indexOf('node scripts/release-publication.mjs release') < release.indexOf('uses: softprops/action-gh-release@'))
   assert.ok(release.includes('node scripts/release-publication.mjs release'))
+  assert.ok(!release.includes('target_commitish:'), 'an existing source-checked tag does not need workflow-edit permission')
 })

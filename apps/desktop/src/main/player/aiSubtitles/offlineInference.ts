@@ -2,7 +2,7 @@ import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { gpuMemoryFailure, LocalModelProcessFailure, runLocalModelProcess } from '../../services/localModels/processRunner'
-import { cpuExecution, reportLocalExecution, selectLocalExecution } from '../../services/localModels/runtimeAcceleration'
+import { cpuExecution, executionUsesGpu, reportLocalExecution, selectLocalExecution } from '../../services/localModels/runtimeAcceleration'
 import type { AiRuntimePaths } from '../../services/localModels/runtimeInstaller'
 import { createLocalTextInference, type LocalTextInferenceOptions } from '../../services/localModels/textInference'
 import { localSubtitleTranslationPrompt } from '../../services/localModels/localTranslation'
@@ -53,7 +53,7 @@ export function createOfflineSubtitleInference(paths: AiRuntimePaths, workRoot: 
           options.nativeDiagnostic?.(diagnostic)
           retry = !reportLocalExecution(paths.acceleration, 'recognition', execution, diagnostic)
         } catch (cause) {
-          if (signal.aborted || !execution.device || !(cause instanceof LocalModelProcessFailure) || !cause.gpuFailure) throw cause
+          if (signal.aborted || !executionUsesGpu(execution) || !(cause instanceof LocalModelProcessFailure) || !cause.gpuFailure) throw cause
           retry = true
         } finally { execution.release() }
         if (retry) {

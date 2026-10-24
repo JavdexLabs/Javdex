@@ -407,7 +407,6 @@ if (hostConfigRaw) {
         'sudo',
         [
           '-n',
-          '-E',
           'ip',
           'netns',
           'exec',
@@ -416,7 +415,15 @@ if (hostConfigRaw) {
           '-n',
           '-u',
           os.userInfo().username,
-          '-E',
+          // sudo-rs does not support preserving the entire environment with -E.
+          // Set the host-only configuration after both privilege transitions so
+          // a reset environment cannot recursively launch this test suite.
+          'env',
+          'ELECTRON_RUN_AS_NODE=',
+          'TSX_TSCONFIG_PATH=tsconfig.server.json',
+          `JAVDEX_TEST_HOST_CONFIG=${JSON.stringify(config)}`,
+          `JAVDEX_TEST_HOST_WORKER=${workerEntry}`,
+          `JAVDEX_TEST_USER_DATA=${config.dataDir}`,
           process.execPath,
           '--require',
           './scripts/register-test-paths.cjs',
@@ -426,14 +433,6 @@ if (hostConfigRaw) {
         ],
         {
           cwd: process.cwd(),
-          env: {
-            ...process.env,
-            ELECTRON_RUN_AS_NODE: '',
-            TSX_TSCONFIG_PATH: 'tsconfig.server.json',
-            JAVDEX_TEST_HOST_CONFIG: JSON.stringify(config),
-            JAVDEX_TEST_HOST_WORKER: workerEntry,
-            JAVDEX_TEST_USER_DATA: config.dataDir
-          },
           stdio: ['ignore', 'pipe', 'pipe']
         }
       )

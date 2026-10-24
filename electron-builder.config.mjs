@@ -1,13 +1,19 @@
+import { prepareSharp } from './scripts/patch-sharp-electron.mjs'
+import { integratedLinuxPlayback, verifyIntegratedLinuxPlayback, stageIntegratedLinuxPlayback } from './scripts/linux-integrated-playback.mjs'
+import { prepareAutomaticAppImageRuntime } from './scripts/linux-appimage-runtime.mjs'
+import { verifyAsarUnpackedFiles } from './scripts/packaged-asar.mjs'
 import { signAsync } from '@electron/osx-sign'
 import { resolve } from 'node:path'
 import {
   MAC_ELECTRON_LANGUAGES,
   PORTABLE_ELECTRON_LANGUAGES,
-  prunePackagedRuntime
+  prunePackagedRuntime,
+  verifyNoPackagedAiRuntime
 } from './scripts/packaging-runtime.mjs'
 import { stagePackagedPlaybackRuntime, verifyPackagedPlaybackRuntime } from './scripts/playback-runtime.mjs'
 import { stageLocalPlaybackRuntime, verifyLocalPlaybackRuntime } from './scripts/local-playback-package.mjs'
-import { preparePackagedAiRuntime, stagePackagedAiRuntime, signPackagedAiTools, verifySignedAiRuntime } from './scripts/ai-runtime-build.mjs'
+
+prepareSharp(process.cwd(), { check: true })
 
 const adHocEntitlements = resolve('build/entitlements.mac.adhoc.plist')
 
@@ -27,17 +33,14 @@ async function signMacApp(options) {
     })
   }
 
-  const originalIgnore = options.ignore
-  const aiTools = await signPackagedAiTools(options.app, identity, adHocEntitlements)
-  signOptions.ignore = file => aiTools(file) || (typeof originalIgnore === 'function' ? originalIgnore(file)
-    : (Array.isArray(originalIgnore) ? originalIgnore : originalIgnore ? [originalIgnore] : []).some(pattern => file.match(pattern)))
-
   await signAsync(signOptions)
 }
 
 /** @type {import('electron-builder').Configuration} */
 const base = {
   appId: 'com.javdex.app',
+  // Static toolset; Linux x64 beforePack supplies the pinned fallback runtime.
+  toolsets: { appimage: '1.0.3' },
   productName: 'Javdex',
   extraMetadata: {
     description: 'Javdex'
@@ -76,6 +79,9 @@ const base = {
     '!node_modules/**/*.d.cts',
     '!node_modules/**/*.d.ts.map',
     '!node_modules/**/*.map',
+    // Exclude SQLite development inputs before the ASAR index is generated.
+    '!node_modules/better-sqlite3/binding.gyp',
+    '!node_modules/better-sqlite3/{build,deps,src}/**/*',
     '!node_modules/playwright-core/lib/vite/**/*',
     // Photon is bundled into out/main/chunks with its adjacent WASM asset.
     '!node_modules/@silvia-odwyer/photon-node/photon_rs_bg.wasm',
@@ -92,6 +98,10 @@ const base = {
   win: {
     icon: 'build/icon.ico',
     files: [
+      '!node_modules/better-sqlite3/prebuilds/!(win32-${arch}).node',
+      // Linux Electron needs the WASM backend to avoid GLib symbol collisions.
+      // Windows uses the native backend and must not ship that Linux fallback.
+      '!node_modules/@img/sharp-wasm32/**/*',
       '!node_modules/@mariozechner/clipboard-{android,darwin,freebsd,linux}-*/**/*',
       '!node_modules/@mariozechner/clipboard-win32-!(${arch})-*/**/*',
       '!node_modules/@earendil-works/pi-tui/native/!(win32)/**/*',
@@ -118,6 +128,8 @@ const base = {
   },
   mac: {
     icon: 'build/icon.icns',
+    // Retain both Darwin slices for universal builds as well as single-arch apps.
+    files: ['!node_modules/@img/sharp-wasm32/**/*', '!node_modules/better-sqlite3/prebuilds/!(darwin-*).node'],
     identity: '-',
     electronLanguages: MAC_ELECTRON_LANGUAGES,
     category: 'public.app-category.entertainment',
@@ -132,8 +144,19 @@ const base = {
   },
   linux: {
     icon: 'build/icon.png',
+    // Electron Linux packages target glibc. Filter binaries before ASAR creation;
+    // keep loaders, metadata and licenses, including notices for optional packages.
+    files: [
+      '!node_modules/better-sqlite3/prebuilds/!(linux-${arch}).node',
+      '!node_modules/@img/sharp-!(linux-${arch})/**/*.node',
+      '!node_modules/@img/sharp-libvips-!(linux-${arch})/**/*.so*',
+      '!node_modules/@mariozechner/clipboard-!(linux-${arch}-gnu)/**/*.node',
+      '!node_modules/@earendil-works/pi-tui/native/!(linux)/**/*.node',
+      '!node_modules/@earendil-works/pi-tui/native/linux/prebuilds/linux-!(${arch})/**/*.node'
+    ],
     electronLanguages: PORTABLE_ELECTRON_LANGUAGES,
     category: 'Video',
+    executableName: 'javdex',
     maintainer: 'Javdex',
     artifactName: '${productName}-${version}-${arch}.${ext}',
     target: []
@@ -164,15 +187,25 @@ export default function buildConfig() {
   // Platform files form a separate matcher in electron-builder. An exclusions-
   // only matcher defaults to **/*, so retain the desktop allowlist here too.
   config.win.files.unshift(...config.files)
+  config.mac.files.unshift(...config.files)
+  config.linux.files.unshift(...config.files)
 
-  config.beforePack = async context => { verifyLocalPlaybackRuntime(context); verifyPackagedPlaybackRuntime(context); await preparePackagedAiRuntime(context) }
+  config.beforePack = async context => {
+    if (integratedLinuxPlayback(context)) {
+      verifyIntegratedLinuxPlayback()
+      await prepareAutomaticAppImageRuntime()
+    } else {
+      verifyLocalPlaybackRuntime(context)
+      verifyPackagedPlaybackRuntime(context)
+    }
+  }
   config.afterPack = async context => {
     prunePackagedRuntime(context)
-    stagePackagedPlaybackRuntime(context)
-    stageLocalPlaybackRuntime(context)
-    await stagePackagedAiRuntime(context)
+    verifyAsarUnpackedFiles(resolve(context.packager.getResourcesDir(context.appOutDir), 'app.asar'))
+    verifyNoPackagedAiRuntime(context)
+    if (integratedLinuxPlayback(context)) stageIntegratedLinuxPlayback(context)
+    else { stagePackagedPlaybackRuntime(context); stageLocalPlaybackRuntime(context) }
   }
-  config.afterSign = verifySignedAiRuntime
   config.mac.sign = signMacApp
 
   if (selected?.win) config.win.target = selected.win

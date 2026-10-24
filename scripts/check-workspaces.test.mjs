@@ -16,7 +16,7 @@ test('workspace check rejects stale versions, licenses and lock entries', () => 
   try {
     const version = '0.8.0-beta.2'
     const license = 'GPL-3.0-or-later'
-    const product = { version, license, scripts: {}, workspaces: ['apps/*', 'packages/*', 'website'] }
+    const product = { version, license, scripts: { postinstall: 'node scripts/patch-sharp-electron.mjs' }, workspaces: ['apps/*', 'packages/*', 'website'] }
     const lock = { version, packages: { '': { version, license } } }
     write('package.json', product)
     for (const directory of directories) {
@@ -30,6 +30,12 @@ test('workspace check rejects stale versions, licenses and lock entries', () => 
     lock.packages['apps/desktop'] = structuredClone(desktop)
     write('package-lock.json', lock)
     assert.equal(run().status, 0)
+
+    write('package.json', { ...product, scripts: { postinstall: 'electron-rebuild' } })
+    const nativeInstall = run()
+    assert.notEqual(nativeInstall.status, 0)
+    assert.match(nativeInstall.stderr, /Root install only prepares the Sharp backend/)
+    write('package.json', product)
 
     write('package.json', { ...product, license: 'GPL-3.0-only' })
     const wrongProductLicense = run()

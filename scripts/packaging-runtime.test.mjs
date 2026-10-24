@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 import { FileMatcher, getMainFileMatchers } from 'app-builder-lib/out/fileMatcher.js'
 import { doMergeConfigs } from 'app-builder-lib/out/util/config/config.js'
 import buildConfig from '../electron-builder.config.mjs'
+import { createPackageWithOptions, extractAll } from '@electron/asar'
+import { verifyAsarUnpackedFiles } from './packaged-asar.mjs'
 import {
   MAC_ELECTRON_LANGUAGES,
   expectedBetterSqlitePrebuilds,
@@ -19,6 +21,35 @@ import {
 function tempDirectory(name) {
   return mkdtempSync(path.join(tmpdir(), `javdex-${name}-`))
 }
+
+test('SQLite packaging excludes removed files before generating the archive index', () => {
+  const root = process.cwd(), config = buildConfig()
+  for (const [platform, arch, kept] of [['linux', 'x64', ['linux-x64']], ['win', 'arm64', ['win32-arm64']],
+    ['mac', 'universal', ['darwin-arm64', 'darwin-x64']]]) {
+    const filter = new FileMatcher(root, '/unused-package-output', value => value.replaceAll('${arch}', arch),
+      ['node_modules/**/*', ...config.files, ...config[platform].files]).createFilter()
+    const selected = name => filter(path.join(root, 'node_modules/better-sqlite3', name), { isDirectory: () => false })
+    for (const name of ['lib/index.js', 'package.json', 'LICENSE']) assert.equal(selected(name), true)
+    for (const name of ['binding.gyp', 'build/Makefile', 'deps/common.gypi', 'src/better_sqlite3.cpp']) assert.equal(selected(name), false)
+    for (const target of ['linux-x64', 'linux-arm64', 'linuxmusl-x64', 'darwin-arm64', 'darwin-x64', 'win32-x64', 'win32-arm64']) {
+      assert.equal(selected(`prebuilds/${target}.node`), kept.includes(target), `${platform}/${arch}: ${target}`)
+    }
+  }
+})
+
+test('archive verification accepts internal aliases but rejects missing unpacked files', async t => {
+  const root = tempDirectory('asar-index')
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const input = path.join(root, 'input'), archive = path.join(root, 'app.asar')
+  mkdirSync(input); writeFileSync(path.join(input, 'binding.node'), 'fixture')
+  // Windows symlink creation needs privileges unrelated to this archive check.
+  if (process.platform !== 'win32') symlinkSync('binding.node', path.join(input, 'alias.js'))
+  await createPackageWithOptions(input, archive, { unpack: '*.node' })
+  verifyAsarUnpackedFiles(archive)
+  extractAll(archive, path.join(root, 'extracted'))
+  rmSync(path.join(archive + '.unpacked', 'binding.node'))
+  assert.throws(() => verifyAsarUnpackedFiles(archive), /Missing ASAR unpacked file: binding.node/)
+})
 
 test('pruneBetterSqlitePrebuilds retains only the current platform and arch', (t) => {
   const root = tempDirectory('sqlite')
@@ -200,19 +231,34 @@ test('desktop packaging keeps bundled Photon WASM and LAN web while excluding th
   }
 })
 
-test('normalized Windows desktop matchers do not default to including the repository', () => {
+for (const platform of ['win', 'mac', 'linux']) test(`normalized ${platform} desktop matchers do not default to including the repository`, () => {
   const root = process.cwd()
   const config = doMergeConfigs([buildConfig()])
   const debugLogger = { isEnabled: false }
   const packager = { config, projectDir: root, buildResourcesDir: 'build', debugLogger }
   const matchers = getMainFileMatchers(root, '/unused-package-output', value => value.replaceAll('${arch}', 'x64'),
-    config.win, { info: packager, config, debugLogger }, path.join(root, 'dist'), false)
+    config[platform], { info: packager, config, debugLogger }, path.join(root, 'dist'), false)
   const selected = file => matchers.some(matcher => matcher.createFilter()(path.join(root, file), { isDirectory: () => false }))
   for (const file of ['out/playback-acceptance/build/large.dll', 'out/server/index.js', 'scripts/dist.mjs', 'docs/DEVELOPMENT.md']) {
     assert.equal(selected(file), false, `${file} must be excluded by every app file set`)
   }
   for (const file of ['out/main/index.js', 'out/web/index.html', 'out/main/chunks/photon_rs_bg.wasm']) {
     assert.equal(selected(file), true, `${file} must remain in the application`)
+  }
+})
+
+test('desktop Sharp packaging keeps WASM for Linux and native image libraries for Windows and macOS', () => {
+  const root = process.cwd(), config = buildConfig()
+  for (const platform of ['win', 'mac', 'linux']) {
+    const filter = new FileMatcher(root, '/unused-package-output', value => value.replaceAll('${arch}', 'x64'),
+      ['node_modules/**/*', ...config.files, ...config[platform].files]).createFilter()
+    const selected = file => filter(path.join(root, file), { isDirectory: () => false })
+    for (const file of ['node_modules/@img/sharp-wasm32/package.json', 'node_modules/@img/sharp-wasm32/lib/sharp-wasm32-0.35.5.node.wasm'])
+      assert.equal(selected(file), platform === 'linux', `${platform}: ${file}`)
+    assert.equal(selected('node_modules/sharp/dist/sharp.cjs'), true, `${platform} requires the Sharp loader`)
+    const native = platform === 'win' ? 'win32-x64' : platform === 'mac' ? 'darwin-x64' : 'linux-x64'
+    assert.equal(selected(`node_modules/@img/sharp-${native}/lib/sharp.node`), true, `${platform} requires its native backend`)
+    if (platform === 'win') assert.equal(selected(`node_modules/@img/sharp-${native}/lib/libvips-42.dll`), true)
   }
 })
 
@@ -241,5 +287,42 @@ test('desktop packages exclude playback acceptance fixtures and development nati
   ]) assert.equal(selected(file), false, `${file} is a development artifact, not an audited packaged runtime`)
   for (const file of ['out/main/index.js', 'out/preload/index.js', 'out/renderer/index.html']) {
     assert.equal(selected(file), true, `${file} remains in the application archive`)
+  }
+})
+
+test('Linux glibc packaging excludes foreign binaries but retains native loaders and notices', () => {
+  const root = process.cwd()
+  for (const arch of ['x64', 'arm64']) {
+    const config = buildConfig()
+    const filter = new FileMatcher(root, '/unused-package-output', value => value.replaceAll('${arch}', arch),
+      ['node_modules/**/*', ...config.files, ...config.linux.files]).createFilter()
+    const selected = file => filter(path.join(root, file), { isDirectory: () => false })
+    for (const file of [
+      `node_modules/@img/sharp-linux-${arch}/lib/sharp.node`,
+      `node_modules/@img/sharp-libvips-linux-${arch}/lib/libvips-cpp.so.8`,
+      `node_modules/@mariozechner/clipboard-linux-${arch}-gnu/clipboard.node`,
+      'node_modules/@mariozechner/clipboard/index.js',
+      'node_modules/sharp/dist/sharp.cjs',
+      'node_modules/@img/colour/index.cjs',
+      'node_modules/@img/sharp-wasm32/index.cjs',
+      'node_modules/@img/sharp-wasm32/lib/sharp-wasm32-0.35.5.node.js',
+      'node_modules/@img/sharp-wasm32/lib/sharp-wasm32-0.35.5.node.wasm',
+      'node_modules/@emnapi/runtime/dist/index.js',
+      'node_modules/@img/sharp-linuxmusl-x64/LICENSE',
+      'node_modules/@img/sharp-libvips-linuxmusl-x64/package.json',
+      'node_modules/@mariozechner/clipboard-darwin-arm64/LICENSE'
+    ]) assert.equal(selected(file), true, `${arch} must retain ${file}`)
+    const otherArch = arch === 'x64' ? 'arm64' : 'x64'
+    for (const file of [
+      `node_modules/@img/sharp-linux-${otherArch}/lib/sharp.node`,
+      `node_modules/@img/sharp-libvips-linux-${otherArch}/lib/libvips-cpp.so.8`,
+      'node_modules/@img/sharp-linuxmusl-x64/lib/sharp.node',
+      'node_modules/@img/sharp-libvips-linuxmusl-x64/lib/libvips-cpp.so.8.18.7',
+      `node_modules/@mariozechner/clipboard-linux-${otherArch}-gnu/clipboard.node`,
+      'node_modules/@mariozechner/clipboard-linux-x64-musl/clipboard.node',
+      'node_modules/@mariozechner/clipboard-win32-x64-msvc/clipboard.node',
+      'node_modules/@mariozechner/clipboard-darwin-universal/clipboard.node',
+      'node_modules/@earendil-works/pi-tui/native/darwin/prebuilds/darwin-arm64/modifiers.node'
+    ]) assert.equal(selected(file), false, `${arch} must exclude ${file}`)
   }
 })

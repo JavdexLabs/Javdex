@@ -18,14 +18,16 @@ export function verifyLocalPlaybackRuntime(context, { environment = process.env 
   const directory = realpathSync(source)
   const addon = path.join(directory, 'playback.node')
   assert.ok(existsSync(addon), 'Local playback addon is missing; run playback:native:build first')
-  const candidates = [addon, ...readdirSync(directory)
+  const interop = path.join(directory, 'playback-interop.node')
+  assert.ok(existsSync(interop), 'Playback host interop is missing; rebuild the native adapter')
+  const candidates = [addon, interop, ...readdirSync(directory)
     .filter(name => /\.dll$/i.test(name) && name.toLowerCase() !== 'opengl32.dll')
     .map(name => path.join(directory, name))]
   const byName = new Map(candidates.map(file => [path.basename(file).toLowerCase(), file]))
   assert.equal(byName.size, candidates.length, 'Ambiguous local playback DLL names')
   const archName = electronBuilderArchName(context.arch)
   const selected = new Set()
-  const queue = [addon]
+  const queue = [addon, interop]
   while (queue.length) {
     const file = queue.shift()
     if (selected.has(file)) continue

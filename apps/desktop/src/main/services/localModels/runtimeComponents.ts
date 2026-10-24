@@ -1,5 +1,6 @@
 import type { LocalAccelerationPolicy, LocalGpuDevice, LocalModelGroup, LocalModelRef, LocalPreparationPlan, LocalRuntimeComponent } from '@shared/desktop/localModels'
-import { aiRuntimeAssets, type AiRuntimeAsset, type AiRuntimeTarget, AI_MAC_BUNDLE_VERSION } from './runtimeManifest'
+import { aiRuntimeAssets, type AiRuntimeAsset, type AiRuntimeTarget } from './runtimeManifest'
+import { runtimeSupportsMetal } from './runtimeDistributionAssets'
 import { gpuRuntimeAssets } from './gpuManifest'
 import { localModelVariant } from './modelCatalog'
 
@@ -13,12 +14,11 @@ const names = { whisper: '语音引擎', translator: '文本引擎', ffmpeg: '�
 export function runtimeComponentDefinitions(target: AiRuntimeTarget): RuntimeComponentDefinition[] {
   const base = aiRuntimeAssets(target)
   const definition = (id: typeof baseIds[number] | 'cuda', backend: LocalRuntimeComponent['backend'], asset?: AiRuntimeAsset): RuntimeComponentDefinition => {
-    const bundled = target.platform === 'darwin' && (id === 'whisper' || id === 'ffmpeg')
     return { assetId: id, asset, component: {
       id: `${id}-${backend}`, group: id === 'translator' || id === 'cuda' ? 'text' : 'speech',
-      name: names[id], backend, delivery: bundled ? 'bundled' : 'download', bytes: asset?.bytes ?? 0,
-      version: asset?.model?.family ?? (id === 'whisper' ? 'b5130' : id === 'ffmpeg' ? '8.1.3' : id === 'cuda' ? '12.4' : 'b11435'),
-      source: bundled ? `应用内置 · ${AI_MAC_BUNDLE_VERSION}` : asset?.url ?? ''
+      name: names[id], backend, delivery: 'download', bytes: asset?.bytes ?? 0,
+      version: asset?.model?.family ?? (id === 'whisper' ? 'b5130' : id === 'ffmpeg' ? '8.1.3' : id === 'cuda' ? target.platform === 'linux' ? '12.8.1' : '12.4' : 'b11435'),
+      source: asset?.url ?? ''
     } }
   }
   return [
@@ -46,7 +46,7 @@ export function preparationPlan(options: {
 }): LocalPreparationPlan {
   const { groups, components, policy, devices, target } = options
   const items: LocalPreparationPlan['items'] = []
-  let backend: LocalPreparationPlan['backend'] = target.platform === 'darwin' && policy.mode === 'auto' ? 'metal' : 'cpu'
+  let backend: LocalPreparationPlan['backend'] = policy.mode === 'auto' && groups.some(group => runtimeSupportsMetal(target, group === 'speech' ? 'whisper' : 'translator')) ? 'metal' : 'cpu'
   for (const ref of options.refs ?? []) {
     const variant = localModelVariant(ref.model, ref.variant), installed = options.installed(variant.id), id = `model:${variant.id}`
     if (items.some(item => item.id === id)) continue
@@ -56,11 +56,11 @@ export function preparationPlan(options: {
   }
   if (options.supported) for (const group of groups) {
     const gpu = runtimeBackend(group, policy, devices, components)
-      ?? (options.forceGpu && target.platform === 'win32' ? (devices.find(item => item.backend === 'cuda')?.backend ?? 'vulkan') : undefined)
+      ?? (options.forceGpu && ['win32', 'linux'].includes(target.platform) ? (devices.find(item => item.backend === 'cuda')?.backend ?? 'vulkan') : undefined)
     if (gpu) backend = gpu
     const wanted = components.filter(item => item.group === group && (item.backend === 'cpu' || item.backend === 'common' || item.backend === gpu))
-    // Vulkan device enumeration currently uses the text engine, even for speech-only setup.
-    if (gpu === 'vulkan' && !devices.some(device => device.backend === 'vulkan')) {
+    // Linux also needs Vulkan enumeration on NVIDIA hosts to discover secondary Intel/AMD GPUs.
+    if (gpu && (gpu === 'vulkan' || target.platform === 'linux') && !devices.some(device => device.backend === 'vulkan')) {
       const probe = components.find(item => item.id === 'translator-vulkan')
       if (probe) wanted.push(probe)
     }

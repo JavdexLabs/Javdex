@@ -5,7 +5,8 @@ import { app, BrowserWindow, powerMonitor, protocol } from 'electron'
 import { pathToFileURL } from 'node:url'
 import { APP_DISPLAY_NAME } from '@shared/appIdentity'
 import { applyAppIcons, resolveWindowIcon } from './appIcon'
-import { configureAppIdentity } from './appPaths'
+import { startupGraphics } from './bootstrap/startupGraphics'
+import { bindMainWindowPresentation } from './bootstrap/mainWindowPresentation'
 import { getDb } from '@library/db/database'
 import { configureDesktopLibraryRuntime } from './libraryRuntime'
 import { catalogReadService } from './services/catalogReadService'
@@ -41,12 +42,15 @@ import { videoMaintenanceService } from './services/videoMaintenanceService'
 import { videoLifecycleService } from './services/videoLifecycleService'
 import { videoQueryService } from './services/videoQueryService'
 import { disposeBuiltinPlayback, stopBuiltinPlayback } from './player/desktopPlayback'
+import { prepareLinuxPlaybackDevice } from './player/linuxPlaybackDevice'
 import { captureInitialLocalModelMode, closeLocalModels } from './services/localModels/desktopLocalModels'
 
 let mainWindow: BrowserWindow | null = null
 let shutdownInProgress = false
 let shutdownReady = false
 let desktopRuntime: DesktopRuntime | null = null
+let startupTask: Promise<void> | undefined
+let bootstrapStarted = false
 
 // Register the custom asset scheme as privileged BEFORE app is ready so the
 // renderer can load downloaded covers/avatars via media://covers/xxx.jpg
@@ -63,8 +67,6 @@ protocol.registerSchemesAsPrivileged([
   }
 ])
 
-configureAppIdentity()
-
 function focusMainWindow(): void {
   const win = mainWindow
   if (!win || win.isDestroyed()) return
@@ -74,6 +76,7 @@ function focusMainWindow(): void {
 }
 
 const gotSingleInstanceLock = app.requestSingleInstanceLock()
+startupGraphics.claimPrimary(gotSingleInstanceLock)
 if (!gotSingleInstanceLock) {
   app.quit()
 } else {
@@ -111,7 +114,11 @@ function createWindow(rendererEntryUrl = resolveRendererEntryUrl()): void {
     }
   })
 
-  mainWindow.on('ready-to-show', () => mainWindow?.show())
+  bindMainWindowPresentation(mainWindow, startupGraphics, !app.isHardwareAccelerationEnabled())
+  mainWindow.webContents.once('render-process-gone', () => {
+    // A renderer failure alone is not evidence of a GPU startup failure.
+    if (startupGraphics.isStarting()) startupGraphics.startupFailed(new Error('Main renderer exited before first display'))
+  })
 
   mainWindow.webContents.on('will-navigate', (event, url) => {
     if (!isSameRendererLocation(url, rendererEntryUrl)) event.preventDefault()
@@ -131,9 +138,9 @@ function createWindow(rendererEntryUrl = resolveRendererEntryUrl()): void {
   // electron-vite injects this env var in dev for HMR.
   const devUrl = process.env['ELECTRON_RENDERER_URL']
   if (devUrl) {
-    void mainWindow.loadURL(devUrl)
+    void mainWindow.loadURL(devUrl).catch(error => startupGraphics.startupFailed(error))
   } else {
-    void mainWindow.loadFile(assets.renderer)
+    void mainWindow.loadFile(assets.renderer).catch(error => startupGraphics.startupFailed(error))
   }
 
   mainWindow.on('closed', () => {
@@ -156,8 +163,12 @@ function registerAssetProtocol(): void {
   })
 }
 
-if (gotSingleInstanceLock) {
-  void app.whenReady().then(async () => {
+if (gotSingleInstanceLock && startupGraphics.canContinue()) {
+  startupTask = app.whenReady().then(async () => {
+    if (!startupGraphics.canContinue()) return
+    bootstrapStarted = true
+    await prepareLinuxPlaybackDevice()
+    if (!startupGraphics.canContinue()) return
     captureInitialLocalModelMode()
     applyAppIcons()
     configureDesktopLibraryRuntime()
@@ -178,6 +189,7 @@ if (gotSingleInstanceLock) {
       }
     })
     desktopRuntime = runtime
+    if (!startupGraphics.canContinue()) return
     if (runtime.mode === 'local') {
       const libraryBootstrap = bootstrapLegacyMediaLibrary({
         database: getDb(),
@@ -209,6 +221,7 @@ if (gotSingleInstanceLock) {
       ...await libraryCurator.restoreRecoverableRuns(),
       ...await agentMetadataCollection.restoreRecoverableRuns()
     ]
+    if (!startupGraphics.canContinue()) return
     for (const failure of recoveryFailures) {
       console.error(`[agent-recovery:${failure.runId}] ${failure.error}`)
     }
@@ -263,6 +276,7 @@ if (gotSingleInstanceLock) {
     )
     if (runtime.mode === 'local') {
       await webAccess.initialize()
+      if (!startupGraphics.canContinue()) return
       automaticScanScheduler.start()
       powerMonitor.on('resume', handleSystemResume)
     }
@@ -274,7 +288,7 @@ if (gotSingleInstanceLock) {
       if (BrowserWindow.getAllWindows().length === 0) createWindow()
       else focusMainWindow()
     })
-  })
+  }).catch(error => startupGraphics.startupFailed(error))
 
   app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') {
@@ -287,42 +301,46 @@ if (gotSingleInstanceLock) {
     event.preventDefault()
     if (shutdownInProgress) return
     shutdownInProgress = true
-    const playbackDisposal = disposeBuiltinPlayback()
-    if (desktopRuntime?.mode === 'local') {
-      automaticScanScheduler.stop()
-      powerMonitor.off('resume', handleSystemResume)
-    }
-    let readerTerminationFailed = false
-    void Promise.allSettled([
-      playbackDisposal,
-      closeLocalModels(),
-      scanCoordinator.stopAndDrain(),
-      catalogReadService.dispose().catch((error: unknown) => {
-        readerTerminationFailed = true
-        console.error('[catalog-reader] Failed to confirm termination', error)
-      }),
-      webAccess.stop(),
-      pluginDeveloper.dispose(),
-      libraryCurator.dispose(),
-      agentMetadataCollection.dispose(),
-      nfoExportTaskController.dispose()
-    ])
-      .then(() => Promise.allSettled([
-        agentExecution.dispose(),
-        scrapeBrowser.dispose(),
-        desktopRuntime?.dispose() ?? Promise.resolve()
-      ]))
-      .finally(() => {
-        destroyAppTray()
-        if (readerTerminationFailed) {
-          // Do not report a clean database shutdown while a native reader may
-          // still be alive. Other product cleanup has settled before process exit.
-          app.exit(1)
-          return
-        }
-        shutdownReady = true
-        app.quit()
-      })
+    // A graphics restart can arrive while the database/runtime is opening.
+    // Let that operation settle before disposing its resources or relaunching.
+    void Promise.resolve(bootstrapStarted ? startupTask : undefined).then(() => {
+      const playbackDisposal = disposeBuiltinPlayback()
+      if (desktopRuntime?.mode === 'local') {
+        automaticScanScheduler.stop()
+        powerMonitor.off('resume', handleSystemResume)
+      }
+      let readerTerminationFailed = false
+      return Promise.allSettled([
+        playbackDisposal,
+        closeLocalModels(),
+        scanCoordinator.stopAndDrain(),
+        catalogReadService.dispose().catch((error: unknown) => {
+          readerTerminationFailed = true
+          console.error('[catalog-reader] Failed to confirm termination', error)
+        }),
+        webAccess.stop(),
+        pluginDeveloper.dispose(),
+        libraryCurator.dispose(),
+        agentMetadataCollection.dispose(),
+        nfoExportTaskController.dispose()
+      ])
+        .then(() => Promise.allSettled([
+          agentExecution.dispose(),
+          scrapeBrowser.dispose(),
+          desktopRuntime?.dispose() ?? Promise.resolve()
+        ]))
+        .finally(() => {
+          destroyAppTray()
+          if (readerTerminationFailed) {
+            // Do not report a clean database shutdown while a native reader may
+            // still be alive. Other product cleanup has settled before process exit.
+            app.exit(1)
+            return
+          }
+          shutdownReady = true
+          app.quit()
+        })
+    }).catch(() => app.exit(1))
   })
 }
 

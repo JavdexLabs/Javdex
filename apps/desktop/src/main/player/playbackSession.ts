@@ -23,6 +23,7 @@ function tracks(raw: NativePlaybackState): PlaybackTrack[] {
 }
 interface Dependencies {
   native: NativePlayback
+  prepareNative?(): Promise<void>
   resolve(target: PlaybackTarget): Promise<PlaybackSource>
   validate(source: PlaybackSource): Promise<void>
   release?(source: PlaybackSource): void
@@ -33,8 +34,6 @@ interface Dependencies {
   awake(playing: boolean): void
   windowSize(): { width: number; height: number }
   focusControls?(): void
-  navigate?(direction: 'back' | 'forward'): void
-  escape?(): void
   readVolume?(): Promise<number>
   volumeChanged?(value: number): void
   progress?: {
@@ -61,7 +60,6 @@ export function createPlaybackSession(deps: Dependencies) {
   let pendingSeek: { target: number; requestedAt: number } | null = null
   let subtitleRefresh: { id: number; target: number; requestedAt: number } | null = null
   let openedAt = 0
-  let focusSequence = 0
   const now = deps.now ?? Date.now
   const publish = (): void => { deps.changed(snapshot ? structuredClone(snapshot) : null) }
   function destroySource(): void {
@@ -171,15 +169,16 @@ export function createPlaybackSession(deps: Dependencies) {
       commandNative({ kind: 'pause', paused: false })
     } else {
       commandNative(command)
-      // A paused PGS re-selection needs a same-time refresh, but issuing it in
-      // the same batch races decoder reinit. Wait for selected-track feedback;
-      // keep the intended time, not an intermediate clock from that reinit.
+      // Paused subtitle re-selection can leave an empty decoder even after
+      // track selection succeeds (ASS/text as well as PGS). Refresh the same
+      // time only after selection feedback, preserving the intended position
+      // rather than an intermediate clock from decoder reinit.
       if (command.kind === 'track' && command.type === 'sub') {
         subtitleRefresh = null
         if (command.id !== null && state.paused && state.seekable && state.position != null && state.resumePosition == null
           && state.phase !== 'opening' && state.phase !== 'ended') {
           const track = state.tracks.find(track => track.type === 'sub' && track.id === command.id)
-          if (track?.codec === 'hdmv_pgs_subtitle' && !track.selected) {
+          if (track && !track.selected) {
             subtitleRefresh = { id: command.id, target: pendingSeek?.target ?? state.position, requestedAt: now() }
             state.seeking = true; sample = null
           }
@@ -199,6 +198,10 @@ export function createPlaybackSession(deps: Dependencies) {
         await deps.validate(source)
         if (request !== generation || !snapshot) return false
         control(snapshot.sessionId, { kind: 'presentation', value: 'expanded' }); return true
+      }
+      if (deps.prepareNative) {
+        await deps.prepareNative()
+        if (request !== generation) return false
       }
       const resolved = await deps.resolve(target)
       let adopted = false
@@ -257,12 +260,7 @@ export function createPlaybackSession(deps: Dependencies) {
       const { width, height } = deps.windowSize()
       const rect = viewport.rect
       const valid = rect.width >= 1 && rect.height >= 1 && rect.x + rect.width <= width + 1 && rect.y + rect.height <= height + 1
-      const occlusions = valid ? (viewport.occlusions ?? []).flatMap(area => {
-        const x = Math.max(rect.x, area.x), y = Math.max(rect.y, area.y)
-        const right = Math.min(rect.x + rect.width, area.x + area.width), bottom = Math.min(rect.y + rect.height, area.y + area.height)
-        return right > x && bottom > y ? [area.radii ? area : { x, y, width: right - x, height: bottom - y }] : []
-      }) : []
-      deps.native.viewport(valid ? rect : { x: 0, y: 0, width: 1, height: 1 }, viewport.visible && valid, snapshot, occlusions)
+      deps.native.viewport(valid ? rect : { x: 0, y: 0, width: 1, height: 1 }, viewport.visible && valid, snapshot)
     },
     addSubtitle(id: string, file: string): void { current(id); deps.native.addSubtitle(file) },
     aiSubtitleSource(id: string): PlaybackSource {
@@ -278,6 +276,9 @@ export function createPlaybackSession(deps: Dependencies) {
       const raw = deps.native.read()
       if (!raw.alive) { fail(new PlaybackFailure('native').message); return }
       if (raw.error) { fail(new PlaybackFailure(raw.errorKind ?? 'load').message); return }
+      // A replacement decoder can report loadedFiles=0 until its load replies.
+      // Give that one backend transition a fresh deadline, not the old movie's.
+      if (raw.playbackMode === 'cpu' && raw.playbackFallback && state.info.playbackMode !== 'cpu') openedAt = now()
       state.paused = raw.pause ?? state.paused
       state.phase = raw['eof-reached'] ? 'ended' : raw.loadedFiles ? raw['paused-for-cache'] ? 'buffering' : state.paused ? 'paused' : 'playing' : 'opening'
       if (state.phase === 'opening' && now() - openedAt >= 30000) { fail(new PlaybackFailure('openingTimeout').message); return }
@@ -303,14 +304,17 @@ export function createPlaybackSession(deps: Dependencies) {
         ? [{ title: typeof chapter.title === 'string' ? chapter.title.slice(0, 256) : `章节 ${index + 1}`, time: chapter.time }] : [])
       state.info = { videoCodec: raw['video-codec'] ?? null, audioCodec: raw['audio-codec'] ?? null,
         width: finite(raw.width), height: finite(raw.height), hardwareDecoder: raw['hwdec-current'] ?? null,
+        playbackMode: raw.playbackMode, playbackFallback: raw.playbackFallback,
+        ...(raw.playbackMode ? { playbackDiagnostics: {
+          decoding: raw['hwdec-current'] ? raw['hwdec-current'] === 'no' ? 'software' as const : 'hardware' as const : 'unknown' as const,
+          decoderFallback: raw.decoderFallback ?? false, displayProbe: raw.displayProbe ?? 'not-applicable' as const,
+          fallbackReason: raw.playbackFallbackReason ?? null
+        } } : {}),
         audioOutput: raw['current-ao'] ?? null, droppedFrames: finite(raw['frame-drop-count']) }
-      state.rendererFullscreenControls = raw.rendererFullscreenControls === true
-      state.nativeVideoFocused = raw.nativeVideoFocused === true
-      state.interactionSequence = finite(raw.interactionSequence) ?? undefined
-      state.fullscreenPointerY = finite(raw.fullscreenPointerY) ?? undefined
+      state.sharedTextureSurface = raw.sharedTextureSurface
       deps.awake(state.phase === 'playing')
       // Rendering a paused first frame and jumping the clock cannot prove actual playback.
-      const frames = raw.presentedFrames ?? 0
+      const frames = raw.submittedFrames ?? raw.presentedFrames ?? 0
       if (!started && state.resumePosition == null && state.phase === 'playing' && !state.seeking && state.position != null) {
         if (sample && frames > sample.frames && state.position > sample.position && state.position - sample.position < 2) {
           started = true
@@ -319,36 +323,6 @@ export function createPlaybackSession(deps: Dependencies) {
         sample = { frames, position: state.position }
       } else sample = null
       saveProgress(state.phase === 'ended' || state.phase === 'paused' && previousPhase !== 'paused')
-      let pauseIntent = state.paused
-      let muteIntent = state.muted
-      let volumeIntent = state.volume
-      for (const action of raw.actions ?? []) {
-        if (snapshot !== state) break
-        if (action.kind === 'history-back' || action.kind === 'history-forward') deps.navigate?.(action.kind === 'history-back' ? 'back' : 'forward')
-        else if (action.kind === 'escape') {
-          if (state.presentation === 'docked') deps.navigate?.('back')
-          else deps.escape?.()
-        }
-        else if (action.kind === 'toggle-pause') {
-          if (state.phase === 'ended' && !state.seeking) { control(state.sessionId, { kind: 'restart' }); pauseIntent = false }
-          else { pauseIntent = !pauseIntent; control(state.sessionId, { kind: 'pause', paused: pauseIntent }) }
-        }
-        else if (action.kind === 'toggle-mute') { muteIntent = !muteIntent; control(state.sessionId, { kind: 'mute', muted: muteIntent }) }
-        else if (action.kind === 'focus-forward' || action.kind === 'focus-backward') {
-          state.focusRequest = { sequence: ++focusSequence, backwards: action.kind === 'focus-backward' }
-          deps.focusControls?.()
-        }
-        else if (action.kind === 'stop') stop()
-        else if (action.kind === 'dock') control(state.sessionId, { kind: 'presentation', value: 'docked' })
-        else if (action.kind === 'expand') control(state.sessionId, { kind: 'presentation', value: state.presentation === 'fullscreen' ? 'docked' : 'expanded' })
-        else if (action.kind === 'fullscreen') control(state.sessionId, { kind: 'presentation', value: state.presentation === 'fullscreen' ? 'expanded' : 'fullscreen' })
-        else if (action.kind === 'seek' && action.value != null) control(state.sessionId, { kind: 'seek', seconds: action.value })
-        else if (action.kind === 'seek-relative' && state.seekable && action.value != null) control(state.sessionId, { kind: 'seek', relative: true, seconds: action.value })
-        else if ((action.kind === 'volume' || action.kind === 'volume-relative') && action.value != null && Number.isFinite(action.value)) {
-          volumeIntent = Math.max(0, Math.min(100, action.kind === 'volume-relative' ? volumeIntent + action.value : action.value))
-          control(state.sessionId, { kind: 'volume', value: volumeIntent })
-        }
-      }
       if (!validation && now() - lastValidation >= 5000) {
         lastValidation = now()
         const check = deps.validate(activeSource).catch(error => {

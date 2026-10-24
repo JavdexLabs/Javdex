@@ -30,7 +30,7 @@ inline GeneratedTimeline parseGeneratedSubtitles(const std::string &document) {
     GeneratedTimeline result; std::istringstream input(document); std::string line; bool style = false;
     while (std::getline(input, line)) {
         if (!line.empty() && line.back() == '\r') line.pop_back();
-        if (line.rfind("Style: Default,Microsoft YaHei,", 0) == 0) {
+        if (line.rfind("Style: Default,sans-serif,", 0) == 0) {
             const auto start = line.find(',', line.find(',') + 1) + 1;
             const auto end = line.find(',', start); size_t used = 0;
             result.fontSize = std::stod(line.substr(start, end - start), &used);

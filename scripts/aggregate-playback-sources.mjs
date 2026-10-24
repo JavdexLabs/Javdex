@@ -2,10 +2,12 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { t as listTar, x as extractTar, c as createTar } from 'tar'
+import { c as createTar } from 'tar'
 import { playbackFileSha256 } from './playback-runtime.mjs'
 import { sha256, safePath, materialBytes } from './restore-playback-sources.mjs'
 import { playbackPackagingDigest, playbackInstallers } from './playback-source-materials.mjs'
+import { unpackPlaybackSources as unpack } from './playback-source-archive.mjs'
+import { verifyLinuxSourceMaterials } from './linux-release-materials.mjs'
 
 const targets = { 'win32-x64': 'windows-x64', 'darwin-x64': 'macos-x64',
   'darwin-arm64': 'macos-arm64', 'linux-x64': 'linux-x64' }
@@ -18,27 +20,6 @@ function files(directory, prefix = '') {
     assert.ok(entry.isFile(), 'Source materials must be regular files')
     return [name]
   })
-}
-async function unpack(archive, destination) {
-  const seen = new Set()
-  let total = 0
-  const filter = function (name, entry) {
-    try {
-      assert.ok(['File', 'Directory'].includes(entry.type), 'Source archive contains links/special files')
-      const clean = name.replace(/^\.\//, '').replace(/\/$/, '')
-      if (clean && clean !== '.') {
-        safePath(clean)
-        assert.ok(!seen.has(clean), 'Duplicate source archive entry')
-        seen.add(clean)
-      }
-      total += entry.size
-      assert.ok(total <= 2 * 1024 ** 3 && seen.size <= 50000, 'Source archive exceeds bounds')
-      return true
-    } catch (error) { this.abort(error); return false }
-  }
-  await listTar({ file: archive, strict: true, filter })
-  fs.mkdirSync(destination)
-  await extractTar({ file: archive, cwd: destination, strict: true, preserveOwner: false })
 }
 
 // libmpv-sources.tar wraps pristine upstream archives. Split at tar entry
@@ -121,6 +102,21 @@ export async function aggregatePlaybackSources(directory, version) {
       assert.deepEqual(Object.keys(installerProof.installers).sort(), Object.entries(playbackInstallers(version)).filter(([, value]) => value === target).map(([name]) => name).sort(), 'Installer verification matrix mismatch')
       const projectionSha256 = playbackFileSha256(path.join(directory, archive + '.runtime.json'))
       for (const proof of Object.values(installerProof.installers)) assert.equal(proof.runtimeInventorySha256, projectionSha256, 'Final installer inventory binding mismatch')
+      if (runtime.kind === 'linux-integrated') {
+        assert.equal(target, 'linux-x64')
+        assert.equal(runtime.version, version)
+        assert.deepEqual(projection, { ...runtime, sourceBundle: binding }, 'Linux distribution inventory mismatch')
+        await verifyLinuxSourceMaterials(input, projection, temporary)
+        const materials = {}
+        for (const name of files(input)) {
+          const bytes = fs.readFileSync(path.join(input, name)), { bytes: ignored, ...record } = store(bytes, name.includes('/sources/') ? 'dependencies' : 'linux')
+          materials[name] = { ...record, bytes: bytes.length, mode: fs.statSync(path.join(input, name)).mode & 0o777 }
+          materialBytes(root, materials[name])
+        }
+        manifests.push({ schemaVersion: 1, target, version, originalBundle: binding, runtime, materials, installerProof, installers: [] })
+        fs.rmSync(input, { recursive: true })
+        continue
+      }
       assert.ok(runtime.components.some(c => c.name === 'javdex-native' && c.version === version), 'Wrong native source version')
       for (const name of Object.keys(runtime.files).filter(binary)) assert.equal(projection.files[name], runtime.files[name], 'Runtime binary binding mismatch')
       for (const component of runtime.components) for (const field of ['licenseFile', 'sourceArchive', 'buildRecipe']) {
@@ -166,14 +162,47 @@ export async function aggregatePlaybackSources(directory, version) {
       }
       const native = path.join(temporary, 'native-' + target)
       await unpack(path.join(input, 'reviewed-runtime/sources/javdex-native.tar.gz'), native)
+      // Preserve restoration of already-distributed source archives after the
+      // Windows display implementation was removed from new builds.
+      const windowsEntry = fs.existsSync(path.join(native, 'apps/desktop/src/main/player/native/windowsPlaybackAddon.cpp'))
+        ? 'windowsPlaybackAddon.cpp' : 'windowsPlayback.cpp'
       const requiredNative = ['package.json', 'package-lock.json', 'build/playback-sources.json', 'LICENSE', 'NOTICE',
         'scripts/build-playback-runtime.mjs', 'scripts/playback-source-build.mjs', 'scripts/playback-runtime.mjs',
         'scripts/playback-source-materials.mjs', 'scripts/packaging-runtime.mjs', 'scripts/playback-native-build.mjs',
         'scripts/check-playback-load.mjs', 'scripts/playback-linux-helper-smoke.mjs',
         'apps/desktop/src/main/player/native/CMakeLists.txt', 'apps/desktop/src/main/player/native/mpvCore.h',
-        `apps/desktop/src/main/player/native/${{ win32: 'windowsPlayback.cpp', darwin: 'macPlayback.mm', linux: 'linuxX11Playback.cpp' }[runtime.platform]}`,
+        `apps/desktop/src/main/player/native/${{ win32: windowsEntry, darwin: 'macSharedTexture.mm', linux: 'linuxX11Playback.cpp' }[runtime.platform]}`,
         'electron-sdk/include/node/node.h', 'electron-sdk/include/node/node_version.h',
-        ...(runtime.platform === 'win32' ? ['win_delay_load_hook.cc', 'node-gyp-LICENSE'] : [])]
+        ...(runtime.platform === 'win32' ? ['win_delay_load_hook.cc', 'node-gyp-LICENSE',
+          'apps/desktop/src/main/player/native/windowsSharedTexture.cpp',
+          'apps/desktop/src/main/player/native/windowsSoftwarePlayback.cpp',
+          'apps/desktop/src/main/player/native/windowsTextureTickets.h',
+          'apps/desktop/src/main/player/native/windowsTextureTickets.test.cpp'] : [])]
+      // Old archives predate the shared CPU implementation. New producers must
+      // carry its header; never accept a snapshot that cannot rebuild itself.
+      if (['darwin', 'win32'].includes(runtime.platform)) {
+        const producer = runtime.platform === 'darwin' ? 'macSharedTexture.mm' : 'windowsSoftwarePlayback.cpp'
+        if (fs.readFileSync(path.join(native, 'apps/desktop/src/main/player/native', producer), 'utf8').includes('#include "softwarePlayback.h"'))
+          requiredNative.push('apps/desktop/src/main/player/native/softwarePlayback.h')
+      }
+      if (runtime.playbackHostVersion === 1 && runtime.platform !== 'linux') requiredNative.push('apps/desktop/src/main/player/native/playbackInterop.cpp')
+      // Application-local headers belong to the native source closure. SDK
+      // headers have a different include root and conditional generated includes
+      // (e.g. V8_GN_HEADER); validate their identity separately below instead of
+      // treating their quoted includes as application files.
+      const nativeDirectory = path.join(native, 'apps/desktop/src/main/player/native')
+      const visited = new Set()
+      function headers(file) {
+        if (visited.has(file)) return
+        visited.add(file)
+        for (const match of fs.readFileSync(file, 'utf8').matchAll(/^\s*#include "([^"/\\]+)"/gm)) {
+          const header = path.join(nativeDirectory, match[1])
+          assert.ok(fs.statSync(header).size > 0, 'Missing native header: ' + match[1])
+          headers(header)
+        }
+      }
+      for (const name of requiredNative.filter(name => name.startsWith('apps/desktop/src/main/player/native/')
+        && /\.(?:h|cpp|mm)$/.test(name))) headers(path.join(native, name))
       for (const name of requiredNative) assert.ok(fs.statSync(path.join(native, name)).size > 0, 'Missing preferred native source/SDK: ' + name)
       assert.equal(JSON.parse(fs.readFileSync(path.join(native, 'package.json'))).version, version, 'Native snapshot version mismatch')
       const nativeLock = JSON.parse(fs.readFileSync(path.join(native, 'build/playback-sources.json')))
@@ -210,7 +239,7 @@ export async function aggregatePlaybackSources(directory, version) {
       `# Playback corresponding sources — ${version}`,
       'This is not needed to install or play media. Each manifests/<platform>.json binds installers, pre-sign playback binary hashes, original platform bundle hashes and all source/build materials.',
       'sources/ and LICENSES/ are content-addressed: only identical SHA-256 contents share storage, never names. Pristine upstream archives remain intact. Uncompressed tar containers are stored as ordered header/payload parts, deduplicating shared files while preserving exact original bytes. Different versions or contents remain distinct.',
-      'Restore on Node.js 22+: `node restore.mjs windows-x64 /path/to/new-directory` (also macos-x64, macos-arm64, linux-x64). All bytes are verified before restoration; an existing destination is refused. The restored reviewed-runtime/build.json records source pins, patches, compiler/SDK requirements and commands. Follow its recipe and README.txt, using restored packaging-tools/ with the native source snapshot. System compilers/SDKs and platform ABIs are prerequisites, not shipped binaries; signatures and byte-identical compiler output are not promised.',
+      'Restore on Node.js 22+: `node restore.mjs windows-x64 /path/to/new-directory` (also macos-x64, macos-arm64, linux-x64). All bytes are verified before restoration; an existing destination is refused. Follow the restored README.txt and build recipes with packaging-tools/. Integrated Linux restores three exact component archives for the GPU helper, CPU helper and ANGLE; extract each into a separate new directory. Other targets retain reviewed-runtime/build.json. System compilers/SDKs and platform ABIs are prerequisites; signatures and byte-identical compiler output are not promised.',
       'Original per-platform companion archives are CI-only. Input inventories and nested archives restore exactly; compressed outer archive hashes remain provenance records, not hashes of this combined archive. SHA256SUMS.txt alongside this download verifies the combined archive. Never trust a source package as an update signing root.', ''
     ].join('\n\n'))
     await createTar({ cwd: temporary, file: path.join(temporary, 'combined.tar.gz'), gzip: true, portable: true }, ['Playback-Sources'])

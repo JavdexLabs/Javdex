@@ -37,7 +37,7 @@ function fixture(model: LocalTranslationModelId, result: unknown = '中文译文
   return { inference, launches, requests, logs, kills: () => kills }
 }
 
-test('recognition retries a failed GPU chunk once on CPU and retains CPU for later chunks', { skip: process.platform !== 'win32' }, async t => {
+test('recognition retries a failed GPU chunk once on CPU and retains CPU for later chunks', { skip: !['win32', 'linux', 'darwin'].includes(process.platform) || !['x64', 'arm64'].includes(process.arch) || process.platform !== 'darwin' && process.arch !== 'x64' }, async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'javdex-asr-gpu-'))
   t.after(() => fs.rm(root, { recursive: true, force: true }))
   const model = path.join(root, 'model.bin'); await fs.writeFile(model, 'fixture')
@@ -47,7 +47,7 @@ test('recognition retries a failed GPU chunk once on CPU and retains CPU for lat
   }, path.join(root, 'work'), { run: async (executable, args) => {
     if (executable === '/extract') { await fs.writeFile(args.at(-1)!, 'wav'); return '' }
     launches.push({ executable, args })
-    if (executable === '/gpu-asr') throw new LocalModelProcessFailure('whisper', 1, true)
+    if (!args.includes('--no-gpu')) throw new LocalModelProcessFailure('whisper', 1, true)
     assert.ok(args.includes('--no-gpu'))
     const output = args[args.indexOf('-of') + 1]
     await fs.writeFile(`${output}.json`, JSON.stringify({ transcription: [{ offsets: { from: 4000, to: 5000 }, text: 'こんにちは' }] }))
@@ -57,7 +57,7 @@ test('recognition retries a failed GPU chunk once on CPU and retains CPU for lat
     const signal = new AbortController().signal
     assert.equal((await inference.recognize('/sample', 0, 0, 20, signal)).length, 1)
     await inference.recognize('/sample', 0, 20, 40, signal)
-    assert.deepEqual(launches.map(value => value.executable), ['/gpu-asr', '/cpu-asr', '/cpu-asr'])
+    assert.deepEqual(launches.map(value => value.executable), [process.platform === 'darwin' ? '/cpu-asr' : '/gpu-asr', '/cpu-asr', '/cpu-asr'])
     assert.deepEqual(await fs.readdir(path.join(root, 'work')), [])
   } finally { await inference.close() }
 })

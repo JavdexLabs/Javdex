@@ -50,7 +50,7 @@ sequenceDiagram
 
 ### 1. 官方支持的预置模型
 - **语音识别组（Speech）**：
-  - **`kotoba`（Kotoba Whisper v2.0 GGML）**：针对日语对白进行了深度强化微调，默认搭配 `Silero VAD v6.2.0` 静音过滤。macOS 已内置签名版运行库，Windows/Linux 支持自动拉取。
+  - **`kotoba`（Kotoba Whisper v2.0 GGML）**：针对日语对白进行了深度强化微调，默认搭配 `Silero VAD v6.2.0` 静音过滤。Windows、macOS、Linux 的语音引擎、音频提取工具和 VAD 均从 Javdex Runtime 固定发行按需下载；macOS AI 工具不再占用主应用安装包。首次准备会列出实际下载量，支持续传和校验修复。
 - **文本翻译组（Text）**：
   - **`hy-mt2-7b`（HY-MT2 7B GGUF，默认推荐）**：翻译语意通顺自然，对日语俚语与成人影视特定语境理解极佳。
   - **`qwen3`（Qwen3 1.7B GGUF）**：超轻量级翻译模型，适合显存或性能较受限的设备。
@@ -73,16 +73,18 @@ sequenceDiagram
 
 | 操作系统 | 推荐加速后端 | 技术实现与配置建议 |
 | :--- | :--- | :--- |
-| **Windows** | **NVIDIA CUDA 12.4**<br/>或 **Vulkan** | 优先选择 CUDA 获得最高推理速度；若为 AMD 显卡或 Intel 独显，选择 Vulkan（系统仅枚举 `uma: 0` 的独立显卡）。支持指定具体 GPU 设备。 |
-| **macOS** | **Apple Metal** | macOS 系统原生支持，自动调用 M 系列芯片的统一内存与 GPU/神经引擎执行加速。 |
-| **Linux** | **CPU 模式** | 使用 CPU 驱动推理（需配合 GCC 14 `libstdc++6` 运行库）。 |
+| **Windows** | **NVIDIA CUDA 12.4**<br/>或 **Vulkan** | 自动模式优先选择已安装的 CUDA 后端；若为 AMD 显卡或 Intel 独显，选择 Vulkan（系统仅枚举 `uma: 0` 的独立显卡）。支持指定具体 GPU 设备。 |
+| **macOS** | **Apple Metal** | macOS 系统原生支持，自动调用 M 系列芯片的统一内存与 GPU 执行加速。 |
+| **Linux x64** | **NVIDIA CUDA 12.8** 或 **Vulkan** | 按需安装语音、文本 GPU 运行库；支持经检测的独显与硬件核显，保留独立 CPU 回退。需要 glibc 2.38+、GCC 14 C++ 运行库及对应显卡驱动。 |
+| **Linux arm64** | **CPU 模式** | 本次未增加 GPU 后端。 |
 
-### 源码级显存安全预算门禁
-为了防止模型加载导致显卡显存溢出（OOM）进而导致系统崩溃，Javdex 强制执行严格的显存预算：
-$$\text{可用显存} = \text{设备总显存} - 2048\text{ MiB (保留给桌面环境与视频硬解)} - \text{已占用显存}$$
-- **语音识别 ASR 门槛**：要求可用显存 $\ge \lceil \text{ASR 模型体积} \times 3 + 1024 \rceil\text{ MiB}$。
-- **大模型翻译门槛**：要求可用显存 $\ge \lceil \text{LLM 模型体积} \times 1.4 + 1024 \rceil\text{ MiB}$。
-- **自动 CPU 降级机制**：若显存预算不足，系统会自动、安全地将该任务回退至 CPU 执行，绝不导致软件闪退。
+Linux GPU 支持属于新增构建；已发布的旧 0.9.0 不会因为运行库发布而自动获得该能力。先安装“GPU 加速支持”，再查看所选模型的实际验证结果。双显卡 Linux 会通过 Vulkan 检测组件继续识别核显；只检测到 NVIDIA 不代表完整枚举已完成。
+
+### 显存预算与 CPU 回退
+
+应用为桌面和视频播放预留 2 GiB，并记录本应用推理任务的显存预算；CUDA 和 Vulkan 如果使用同一张卡，会共用预算。Linux 核显还受系统可用内存约束。这是保守估计，并非其他进程显存占用的实时测量。
+
+语音模型需要足够预算加载；文本引擎可以根据预算只将部分层放到 GPU。设备、驱动、加载或显存错误发生时，任务会尝试独立 CPU 引擎，并在模型状态中说明原因。取消、模型文件损坏等错误不会被当作 GPU 故障掩盖。
 
 ---
 

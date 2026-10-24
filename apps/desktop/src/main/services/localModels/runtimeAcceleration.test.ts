@@ -8,7 +8,36 @@ import { PassThrough } from 'node:stream'
 import type { ChildProcess, spawn } from 'node:child_process'
 import { createLocalTextInference } from './textInference'
 import { gpuDiagnosticFailure, gpuLoaderFailure, localModelProcessEnvironment } from './processRunner'
-import { parseVulkanDevices, selectLocalExecution, type LocalRuntimeAcceleration } from './runtimeAcceleration'
+import { localGpuTargetSupported, parseVulkanDevices, reportLocalExecution, selectLocalExecution, type LocalRuntimeAcceleration } from './runtimeAcceleration'
+
+test('Linux GPU targets and integrated Vulkan adapters require native hardware evidence', () => {
+  assert.equal(localGpuTargetSupported('linux', 'x64'), true)
+  assert.equal(localGpuTargetSupported('linux', 'arm64'), false)
+  const devices = parseVulkanDevices('Vulkan0: Intel UHD (16000 MiB, 12000 MiB free)\nVulkan1: llvmpipe (16000 MiB, 12000 MiB free)',
+    '0 = Intel UHD (Intel) | uma: 1 | fp16: 1\n1 = llvmpipe (LLVM) | uma: 1 | fp16: 1', true)
+  assert.equal(devices.length, 1)
+  assert.equal(devices[0].integrated, true)
+  assert.equal(devices[0].name, 'Intel UHD')
+  assert.equal(gpuDiagnosticFailure('error while loading shared libraries: libcublas.so.12: cannot open shared object file'), true)
+  assert.equal(gpuDiagnosticFailure('error while loading shared libraries: unrelated.so: cannot open shared object file'), false)
+})
+
+test('Linux CUDA libraries are private to the GPU child process', { skip: process.platform !== 'linux' }, async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'javdex-linux-loader-'))
+  t.after(() => fs.rm(root, { recursive: true, force: true }))
+  const model = path.join(root, 'model'); await fs.writeFile(model, 'fixture')
+  const inherited = process.env.LD_LIBRARY_PATH
+  const execution = await selectLocalExecution('/cpu', model, 'translation', {
+    policy: { mode: 'auto' }, devices: [{ id: 'GPU-loader', name: 'Loader fixture', backend: 'cuda', index: 0, memoryMiB: 16000 }],
+    runtimes: { cuda: { translator: '/managed/cuda/llama-server', libraryDirectory: '/managed/dependencies' } }
+  })
+  try {
+    assert.equal(execution.backend, 'cuda')
+    assert.equal(execution.env.LD_LIBRARY_PATH, '/managed/cuda:/managed/cuda/lib:/managed/dependencies:/managed/dependencies/lib')
+    assert.equal(execution.env.PATH, undefined)
+    assert.equal(process.env.LD_LIBRARY_PATH, inherited)
+  } finally { execution.release() }
+})
 
 test('Vulkan enumeration requires native discrete-memory evidence and excludes integrated/virtual adapters', () => {
   const devices = parseVulkanDevices('Vulkan0: RTX (16048 MiB, 15000 MiB free)\nVulkan1: Intel UHD (16000 MiB, 12000 MiB free)',
@@ -17,7 +46,7 @@ test('Vulkan enumeration requires native discrete-memory evidence and excludes i
   assert.deepEqual(parseVulkanDevices('Vulkan0: Virtual (16000 MiB, 0 MiB free)', ''), [])
 })
 test('GPU diagnostics distinguish hardware/allocation failures from model errors and sanitize inherited overrides', () => {
-  for (const message of ['CUDA error: out of memory', 'VK_ERROR_DEVICE_LOST', 'no usable GPU', 'CUDA driver version is insufficient']) assert.equal(gpuDiagnosticFailure(message), true)
+  for (const message of ['CUDA error: out of memory', 'VK_ERROR_DEVICE_LOST', 'no usable GPU', 'CUDA driver version is insufficient', 'whisper_backend_init_gpu: failed to initialize MTL0 backend']) assert.equal(gpuDiagnosticFailure(message), true)
   for (const message of ['invalid GGUF header', 'failed to load model', '任务已取消']) assert.equal(gpuDiagnosticFailure(message), false)
   assert.equal(gpuLoaderFailure(-1073741515), true)
   assert.equal(gpuLoaderFailure(0xc0000005), false, 'An arbitrary crash can be a corrupt model and is not proof of GPU failure')
@@ -27,13 +56,13 @@ test('automatic and explicit unavailable GPUs use a CPU executable without requi
   for (const policy of [{ mode: 'auto' }, { mode: 'gpu', device: 'absent' }, { mode: 'cpu' }] as const) {
     const selected = await selectLocalExecution('/cpu', '/missing-weight', 'translation', { policy, devices: [], runtimes: {} })
     assert.equal(selected.executable, '/cpu')
-    if (process.platform === 'darwin' && policy.mode === 'auto') assert.equal(selected.backend, 'metal')
+    if (process.platform === 'darwin' && process.arch === 'arm64' && policy.mode === 'auto') assert.equal(selected.backend, 'metal')
     else assert.ok(selected.args.includes('none'))
     assert.ok(!selected.env.CUDA_VISIBLE_DEVICES)
   }
 })
 
-test('auto selects an installed backend and CUDA/Vulkan views share a bounded memory budget', { skip: process.platform !== 'win32' }, async t => {
+test('auto selects an installed backend and CUDA/Vulkan views share a bounded memory budget', { skip: !['win32', 'linux'].includes(process.platform) }, async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'javdex-gpu-budget-'))
   t.after(() => fs.rm(root, { recursive: true, force: true }))
   const model = path.join(root, 'model.gguf'); await fs.writeFile(model, 'fixture')
@@ -52,7 +81,7 @@ test('auto selects an installed backend and CUDA/Vulkan views share a bounded me
   const recovered = await selectLocalExecution('/cpu', model, 'translation', automatic)
   assert.equal(recovered.backend, 'vulkan'); recovered.release()
 })
-test('GPU startup retries once on CPU, but model errors and cancellation never do', { skip: process.platform !== 'win32' }, async t => {
+test('GPU startup retries once on CPU, but model errors and cancellation never do', { skip: !(['win32', 'linux'].includes(process.platform) && process.arch === 'x64' || process.platform === 'darwin' && process.arch === 'arm64') }, async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'javdex-gpu-fallback-'))
   t.after(() => fs.rm(root, { recursive: true, force: true }))
   const model = path.join(root, 'model.gguf'); await fs.writeFile(model, 'fixture')
@@ -65,8 +94,8 @@ test('GPU startup retries once on CPU, but model errors and cancellation never d
       const child = Object.assign(new EventEmitter(), { stderr: new PassThrough(), exitCode: null as number | null, signalCode: null,
         kill() { alive = false; child.exitCode = 0; child.emit('exit', 0); child.emit('close', 0); return true } })
       queueMicrotask(() => {
-        if (executable !== '/gpu') return
-        if (failure === 'success') { child.stderr.write('load_tensors: offloaded 29/29 layers to GPU\n'); return }
+        if (args[args.indexOf('--device') + 1] === 'none') return
+        if (failure === 'success') { child.stderr.write('load_tensors: offloaded 29/29 layers to GPU\n' + 'progress\n'.repeat(10000)); return }
         if (failure === 'zero-layers') return
         if (failure === 'cancel') { controller.abort(); return }
         child.stderr.write(failure === 'gpu' ? 'CUDA error: out of memory' : 'invalid GGUF header')
@@ -85,13 +114,37 @@ test('GPU startup retries once on CPU, but model errors and cancellation never d
     try {
       if (failure === 'model' || failure === 'cancel') {
         await assert.rejects(engine.translateText('テスト', controller.signal))
-        assert.deepEqual(launches.map(value => value.executable), ['/gpu'])
+        assert.deepEqual(launches.map(value => value.executable), [process.platform === 'darwin' ? '/cpu' : '/gpu'])
       } else {
         assert.equal(await engine.translateText('テスト', controller.signal), '中文')
-        assert.deepEqual(launches.map(value => value.executable), failure === 'success' ? ['/gpu'] : ['/gpu', '/cpu'])
+        assert.deepEqual(launches.map(value => value.executable), failure === 'success' ? [process.platform === 'darwin' ? '/cpu' : '/gpu'] : [process.platform === 'darwin' ? '/cpu' : '/gpu', '/cpu'])
         if (failure !== 'success') assert.ok(launches[1].args.includes('none'))
         if (failure === 'gpu') assert.match(reason, /显存/)
       }
     } finally { await engine.close() }
+  }
+})
+
+test('speech status recognizes the pinned Metal device name without treating GPU discovery as activation', () => {
+  for (const [diagnostic, expected] of [
+    ['whisper_backend_init_gpu: using MTL0 backend', 'metal'],
+    ['whisper_backend_init_gpu: using Metal backend', 'metal'],
+    ['whisper_backend_init_gpu: found GPU device 0: MTL0 (type: 1, cnt: 0)\nwhisper_backend_init: using BLAS backend', 'cpu']
+  ] as const) {
+    let backend = 'idle'
+    reportLocalExecution({ policy: { mode: 'auto' }, devices: [], runtimes: {}, status: (_engine, status) => { backend = status.backend } },
+      'recognition', { executable: '/whisper', backend: 'metal', args: [], env: {}, release() {} }, diagnostic)
+    assert.equal(backend, expected)
+  }
+})
+
+test('speech GPU initialization failures override the earlier using-backend message', () => {
+  for (const [name, backend] of [['MTL0', 'metal'], ['Metal', 'metal'], ['CUDA0', 'cuda'], ['Vulkan0', 'vulkan']] as const) {
+    let reported = 'idle'
+    const device = backend === 'metal' ? undefined : { id: name, name, backend, index: 0, memoryMiB: 16000 }
+    reportLocalExecution({ policy: { mode: 'auto' }, devices: [], runtimes: {}, status: (_engine, value) => { reported = value.backend } },
+      'recognition', { executable: '/whisper', backend, device, args: [], env: {}, release() {} },
+      `whisper_backend_init_gpu: using ${name} backend\nwhisper_backend_init_gpu: failed to initialize ${name} backend\nwhisper_backend_init: using BLAS backend`)
+    assert.equal(reported, 'cpu', name)
   }
 })

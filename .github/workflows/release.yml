@@ -25,6 +25,18 @@ on:
         description: "Exact checked source SHA required for the controlled 0.9.0 replacement."
         type: string
         required: false
+      resume_server_run_id:
+        description: "Resume an unpublished candidate with successful desktop/source/arm64 jobs and only an amd64 server-test failure."
+        type: string
+        required: false
+      resume_amd64_run_id:
+        description: "Optional prior recovery run whose amd64 tests/smokes passed before digest pinning failed."
+        type: string
+        required: false
+      resume_publish_run_id:
+        description: "Optional recovery run whose fixed image and signed closure checks passed before Release creation failed."
+        type: string
+        required: false
   push:
     branches:
       - "release-*"
@@ -47,7 +59,23 @@ env:
   RELEASE_PRERELEASE: ${{ inputs.prerelease }}
 
 jobs:
+  resume-server:
+    if: ${{ inputs.resume_server_run_id != '' && !inputs.verify_only && !inputs.replace_published_090 }}
+    uses: ./.github/workflows/release-resume-server.yml
+    permissions:
+      actions: read
+      contents: write
+      packages: write
+    with:
+      run_id: ${{ inputs.resume_server_run_id }}
+      amd64_run_id: ${{ inputs.resume_amd64_run_id }}
+      publish_run_id: ${{ inputs.resume_publish_run_id }}
+      release_tag: ${{ inputs.release_tag }}
+      prerelease: ${{ inputs.prerelease }}
+    secrets: inherit
+
   metadata:
+    if: ${{ !inputs.resume_server_run_id }}
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.meta.outputs.tag }}
@@ -60,7 +88,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: node --test scripts/release-metadata.test.mjs scripts/release-publication.test.mjs scripts/release-replacement.test.mjs scripts/release-replacement-process.test.mjs
+      - run: node --test scripts/release-metadata.test.mjs scripts/release-publication.test.mjs scripts/release-replacement.test.mjs scripts/release-replacement-process.test.mjs scripts/release-resume.test.mjs
       - id: meta
         run: node scripts/release-metadata.mjs
         env:
@@ -97,10 +125,21 @@ jobs:
           # The complete Windows suite can exceed five minutes on hosted runners.
           JAVDEX_TEST_TIMEOUT_MS: "900000"
 
+      - name: Prepare Chrome for browser interaction tests
+        uses: browser-actions/setup-chrome@v2
+        id: chrome
+        with:
+          chrome-version: stable
+
+      - name: Verify browser interactions
+        run: npm run test:ui
+        env:
+          JAVDEX_BROWSER_EXECUTABLE: ${{ steps.chrome.outputs.chrome-path }}
+
   package:
     name: Package ${{ matrix.platform }}-${{ matrix.arch }}
     needs: test
-    timeout-minutes: 90
+    timeout-minutes: ${{ matrix.platform == 'linux' && 180 || 90 }}
     strategy:
       fail-fast: false
       matrix:
@@ -135,8 +174,19 @@ jobs:
       - name: Install Linux packaging dependencies
         if: matrix.platform == 'linux'
         run: |
+          # The private helper closures deliver the exact Ubuntu source packages.
+          # Enable matching source repositories only on this ephemeral runner.
+          sudo sed -n 's/^deb /deb-src /p' /etc/apt/sources.list | sudo tee /etc/apt/sources.list.d/javdex-sources.list >/dev/null
+          test -s /etc/apt/sources.list.d/javdex-sources.list
           sudo apt-get update
-          sudo apt-get install -y rpm build-essential cmake nasm patchelf pkg-config xz-utils libx11-dev libxft-dev libxext-dev libxrandr-dev libxss-dev libxpresent-dev libgl1-mesa-dev libfontconfig1-dev libasound2-dev libva-dev
+          sudo apt-get install -y rpm build-essential cmake nasm patchelf pkg-config xz-utils python3-venv libx11-dev libxft-dev libxext-dev libxrandr-dev libxss-dev libxpresent-dev libgl1-mesa-dev libegl1-mesa-dev libgbm-dev libdrm-dev libfontconfig1-dev libpulse-dev libva-dev fonts-dejavu-core
+          # The private distribution closure comes from these font/audio clients.
+          # Hosted images may retain versions removed from the current source
+          # index. Upgrade their installed dependency closure before inventory,
+          # so each copied binary still gets its exact source version.
+          mapfile -t playback_clients < <(apt-cache depends --recurse --installed --important libfontconfig1 libpulse0 fonts-dejavu-core | sed -nE '/^[A-Za-z0-9][A-Za-z0-9+.:_-]*$/p' | sort -u)
+          test "${#playback_clients[@]}" -gt 0
+          sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=l apt-get install --only-upgrade -y "${playback_clients[@]}"
 
       - uses: actions/setup-python@v5
         with:
@@ -169,12 +219,14 @@ jobs:
         run: npm ci
 
       - name: Identify playback source/toolchain cache
+        if: matrix.platform != 'linux'
         id: playback_fingerprint
         run: npm run playback:runtime:build -- --fingerprint
         env:
           JAVDEX_PLAYBACK_MSYS2_ROOT: ${{ steps.msys2.outputs.msys2-location }}
 
       - name: Cache source-built playback inputs
+        if: matrix.platform != 'linux'
         # The exact compiler/SDK/options fingerprint is calculated before restore,
         # so hosted-image updates can save a fresh cache instead of reusing an
         # immutable stale key and rebuilding on every run.
@@ -186,9 +238,52 @@ jobs:
           key: playback-source-v1-${{ matrix.os }}-${{ matrix.arch }}-${{ steps.playback_fingerprint.outputs.fingerprint }}
 
       - name: Build playback runtime from pinned source
+        if: matrix.platform != 'linux'
         run: npm run playback:runtime:build
         env:
           JAVDEX_PLAYBACK_MSYS2_ROOT: ${{ steps.msys2.outputs.msys2-location }}
+
+      - name: Verify macOS GPU leases and CPU rendering contracts
+        if: matrix.platform == 'mac'
+        run: node scripts/run-electron-tests.mjs apps/desktop/src/main/player/macSharedTextureNative.test.ts apps/desktop/src/main/player/macSoftwareNative.test.ts
+        env:
+          JAVDEX_TEST_MAC_PLAYBACK_NATIVE: ${{ github.workspace }}/out/playback-runtime/darwin-${{ matrix.arch }}/playback.node
+          # A missing accelerated format is an explicit capability result,
+          # not a successful GPU test. CPU and Mach transport must still pass.
+          JAVDEX_TEST_MAC_ALLOW_NO_GPU: '1'
+
+      - name: Cache verified Linux source downloads
+        if: matrix.platform == 'linux'
+        uses: actions/cache@v4
+        with:
+          path: |
+            out/linux-portable-build/sources
+            out/linux-software-build/sources
+          key: linux-playback-downloads-${{ hashFiles('build/playback-sources.json') }}
+
+      - name: Build both isolated Linux playback runtimes
+        if: matrix.platform == 'linux'
+        run: |
+          npm run playback:runtime:build -- --linux-portable
+          npm run playback:runtime:build -- --linux-software
+
+      - name: Cache pinned Linux ANGLE and corresponding sources
+        if: matrix.platform == 'linux'
+        id: linux_angle
+        uses: actions/cache@v4
+        with:
+          path: out/linux-angle-runtime
+          key: linux-angle-ubuntu22-v1-${{ hashFiles('scripts/build-linux-angle.py', 'build/angle-runtime.json', 'build/angle-args.gn', 'build/angle-electron-patches/**', 'build/patches/angle-x11-vulkan-visual.patch') }}
+
+      - name: Build Electron-matched patched ANGLE
+        if: matrix.platform == 'linux' && steps.linux_angle.outputs.cache-hit != 'true'
+        run: python3 scripts/build-linux-angle.py "$GITHUB_WORKSPACE/out/linux-angle-build"
+        env:
+          JAVDEX_ANGLE_JOBS: '2'
+
+      - name: Verify Linux ANGLE cache provenance and source delivery
+        if: matrix.platform == 'linux'
+        run: node --input-type=module -e "import { verifyLinuxAngleRuntime } from './scripts/linux-angle-runtime.mjs'; verifyLinuxAngleRuntime()"
 
       - name: Package
         run: npm run setup:desktop && npm run dist -- --platform ${{ matrix.platform }} --arch ${{ matrix.arch }}
@@ -422,7 +517,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.metadata.outputs.tag }}
-          target_commitish: ${{ github.sha }}
           name: Javdex ${{ needs.metadata.outputs.tag }}
           body_path: release-body.md
           prerelease: ${{ needs.metadata.outputs.prerelease == 'true' }}

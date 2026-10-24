@@ -81,6 +81,22 @@ for (const [lineEnding, eol] of [['LF', '\n'], ['CRLF', '\r\n']]) {
     assert.match(workflow, /name: Package \$\{\{ matrix\.platform \}\}-\$\{\{ matrix\.arch \}\}\n\s+needs: test/)
   })
 
+  test(`Linux release builds both isolated closures and matched ANGLE before final package gates (${lineEnding})`, () => {
+    const packaging = workflow.indexOf('- name: Package\n')
+    for (const command of ['npm run playback:runtime:build -- --linux-portable', 'npm run playback:runtime:build -- --linux-software',
+      'python3 scripts/build-linux-angle.py', 'Verify Linux ANGLE cache provenance and source delivery'])
+      assert.ok(workflow.indexOf(command) >= 0 && workflow.indexOf(command) < packaging, command)
+    const legacy = workflow.split('- name: Build playback runtime from pinned source\n')[1].split('\n      - ')[0]
+    assert.match(legacy, /if: matrix.platform != 'linux'/)
+    const cache = workflow.split('- name: Cache verified Linux source downloads\n')[1].split('\n      - ')[0]
+    assert.ok(cache.includes('out/linux-portable-build/sources') && cache.includes('out/linux-software-build/sources'))
+    assert.ok(!cache.includes('path: out/playback-runtime'))
+    assert.match(workflow, /test -s \/etc\/apt\/sources.list.d\/javdex-sources.list/)
+    for (const dependency of ['libpulse-dev', 'libgbm-dev', 'libdrm-dev', 'fonts-dejavu-core']) assert.ok(workflow.includes(dependency))
+    assert.ok(workflow.indexOf('run: npm run packaging:verify-playback-runtime') > packaging)
+    assert.ok(workflow.indexOf('run: node scripts/check-playback-installers.mjs dist') > packaging)
+  })
+
   test(`verification-only runs cannot enter any publishing job (${lineEnding})`, () => {
     assert.match(workflow, /verify_only:\s+description:.*\n\s+required: false\n\s+default: false\n\s+type: boolean/)
     for (const name of ['server', 'server-manifest', 'release']) {

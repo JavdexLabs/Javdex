@@ -97,6 +97,17 @@ jobs:
           # The complete Windows suite can exceed five minutes on hosted runners.
           JAVDEX_TEST_TIMEOUT_MS: "900000"
 
+      - name: Prepare Chrome for browser interaction tests
+        uses: browser-actions/setup-chrome@v2
+        id: chrome
+        with:
+          chrome-version: stable
+
+      - name: Verify browser interactions
+        run: npm run test:ui
+        env:
+          JAVDEX_BROWSER_EXECUTABLE: ${{ steps.chrome.outputs.chrome-path }}
+
   package:
     name: Package ${{ matrix.platform }}-${{ matrix.arch }}
     needs: test

@@ -15,7 +15,6 @@ export interface PlaybackViewport {
   presentation: PlaybackPresentation
   rect: { x: number; y: number; width: number; height: number }
   visible: boolean
-  /** Visible HTML popup shapes intersecting this viewport. */
 }
 export type PlaybackControl =
   | { kind: 'pause'; paused: boolean }

@@ -92,6 +92,10 @@ jobs:
           git show "$REPAIR_SOURCE:apps/server/src/dualBackendScan.e2e.test.ts" > apps/server/src/dualBackendScan.e2e.test.ts
           npm run server:test
           git restore -- apps/server/src/dualBackendScan.e2e.test.ts
+          # npm links the server workspace bin and marks its TS entry executable.
+          # Verify all source bytes before restoring that install-time mode change.
+          git -c core.fileMode=false diff --exit-code
+          git restore -- apps/server/src/index.ts
           git diff --exit-code
         env:
           REPAIR_SOURCE: ${{ github.sha }}

@@ -57,6 +57,7 @@ test('recovery preserves publication guards, candidate identity, checks and all 
   assert.match(workflow, /target_commitish: \$\{\{ needs\.resume\.outputs\.source \}\}/)
   assert.ok(workflow.indexOf('npm run server:build') < workflow.indexOf('git show "$REPAIR_SOURCE:apps/server/src/dualBackendScan.e2e.test.ts"'))
   assert.ok(workflow.indexOf('git restore -- apps/server/src/dualBackendScan.e2e.test.ts') < workflow.indexOf('npm run server:smoke'))
+  assert.ok(workflow.indexOf('git -c core.fileMode=false diff --exit-code') < workflow.indexOf('git restore -- apps/server/src/index.ts'))
   for (const command of ['npm run server:test', 'npm run server:updater:test', 'npm run server:updater:smoke', 'npm run server:smoke',
     'node scripts/release-publication.mjs manifest', 'node scripts/release-publication.mjs release', 'node scripts/server-update-release.mjs publish']) assert.ok(workflow.includes(command), command)
   assert.ok(workflow.indexOf('node scripts/release-publication.mjs manifest') < workflow.indexOf('docker buildx imagetools create'))

@@ -2,6 +2,8 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import os from 'node:os'
 import type { LocalAccelerationPolicy, LocalExecutionStatus, LocalGpuDevice } from '@shared/desktop/localModels'
+import { runtimeSupportsMetal } from './runtimeDistributionAssets'
+import { currentAiRuntimeTarget } from './runtimeManifest'
 import { runLocalModelProcess } from './processRunner'
 
 export type LocalEngine = 'recognition' | 'translation'
@@ -64,7 +66,7 @@ export function cpuExecution(executable: string, engine: LocalEngine, accelerati
     args: engine === 'translation' ? ['--device', 'none', '--gpu-layers', '0'] : ['--no-gpu'] }
 }
 export async function selectLocalExecution(executable: string, model: string, engine: LocalEngine, acceleration?: LocalRuntimeAcceleration): Promise<LocalExecution> {
-  if (process.platform === 'darwin' && (!acceleration || acceleration.policy.mode === 'auto')) {
+  if (runtimeSupportsMetal(currentAiRuntimeTarget(), engine === 'recognition' ? 'whisper' : 'translator') && (!acceleration || acceleration.policy.mode === 'auto')) {
     return { executable, backend: 'metal', env: {}, release: () => {}, args: engine === 'translation' ? ['--log-verbosity', '4'] : [] }
   }
   if (!acceleration || !localGpuTargetSupported() || acceleration.policy.mode === 'cpu') return cpuExecution(executable, engine, acceleration)

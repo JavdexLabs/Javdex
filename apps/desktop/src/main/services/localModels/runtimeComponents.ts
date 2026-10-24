@@ -1,5 +1,6 @@
 import type { LocalAccelerationPolicy, LocalGpuDevice, LocalModelGroup, LocalModelRef, LocalPreparationPlan, LocalRuntimeComponent } from '@shared/desktop/localModels'
 import { aiRuntimeAssets, type AiRuntimeAsset, type AiRuntimeTarget } from './runtimeManifest'
+import { runtimeSupportsMetal } from './runtimeDistributionAssets'
 import { gpuRuntimeAssets } from './gpuManifest'
 import { localModelVariant } from './modelCatalog'
 
@@ -45,7 +46,7 @@ export function preparationPlan(options: {
 }): LocalPreparationPlan {
   const { groups, components, policy, devices, target } = options
   const items: LocalPreparationPlan['items'] = []
-  let backend: LocalPreparationPlan['backend'] = target.platform === 'darwin' && policy.mode === 'auto' ? 'metal' : 'cpu'
+  let backend: LocalPreparationPlan['backend'] = policy.mode === 'auto' && groups.some(group => runtimeSupportsMetal(target, group === 'speech' ? 'whisper' : 'translator')) ? 'metal' : 'cpu'
   for (const ref of options.refs ?? []) {
     const variant = localModelVariant(ref.model, ref.variant), installed = options.installed(variant.id), id = `model:${variant.id}`
     if (items.some(item => item.id === id)) continue

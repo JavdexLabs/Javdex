@@ -20,6 +20,7 @@ try {
   const page = await application.firstWindow()
   await page.waitForFunction(() => window.api?.playback && document.querySelector('nav'))
   await prepareNonRecordingPlayback(page)
+  await page.evaluate(mode => window.api.thisComputer.update({playbackRenderMode:mode}), mode)
   await application.evaluate(({BrowserWindow}) => BrowserWindow.getAllWindows()[0].setContentSize(1920, 1200))
   assert.equal((await page.evaluate(t => window.api.player.openResource(t.libraryId,t.resourceId,t.videoId), target)).ok, true)
   const state = await waitForState(page, s => s?.phase === 'playing' && s.position > 1, 'load playback started')

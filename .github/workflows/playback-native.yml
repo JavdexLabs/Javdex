@@ -3,6 +3,12 @@ name: Playback Native Preflight
 on:
   push:
     branches: ['codex/playback-unification']
+    paths:
+      - '.github/workflows/playback-native.yml'
+      - 'apps/desktop/src/main/player/native/**'
+      - 'scripts/playback-native-build.mjs'
+      - 'scripts/build-playback-native.mjs'
+      - 'package-lock.json'
   workflow_dispatch:
   pull_request:
     paths:

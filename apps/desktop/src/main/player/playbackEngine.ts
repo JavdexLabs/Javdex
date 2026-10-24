@@ -147,8 +147,8 @@ export function createPlaybackEngine(gpu: NativePlayback, cpu: NativePlayback,
       }
       restore(value)
       last = recovery ? { ...value, pause: recovery.paused, 'time-pos': recovery.position } : value
-      return { ...last, decoderFallback, playbackMode: current === cpu ? 'cpu' : 'gpu', playbackFallback: current === cpu && gpuFailed,
-        playbackFallbackReason: current === cpu && gpuFailed ? reason : undefined }
+      return { ...last, decoderFallback, playbackMode: current === cpu ? 'cpu' : 'gpu', playbackFallback: current === cpu && mode === 'auto' && gpuFailed,
+        playbackFallbackReason: current === cpu && mode === 'auto' && gpuFailed ? reason : undefined }
     },
     viewport(...args): void {
       viewport = args

@@ -31,6 +31,17 @@ for (const platform of ['darwin', 'win32', 'linux'] as const) {
     engine.create(); assert.equal(engine.read().playbackMode, 'cpu'); assert.equal(engine.read().playbackFallback, false)
     assert.equal(gpu.calls.length, 0); engine.destroy()
   })
+  test(`${platform}: choosing CPU after automatic recovery clears only the displayed fallback state`, () => {
+    const f = fixture(); f.gpu.fail(graphicsPlaybackFailure('TEXTURE_IMPORT_FAILED'))
+    f.engine.create(); assert.equal(f.engine.read().playbackFallback, true); f.engine.destroy()
+    f.gpu.fail(); f.mode('cpu'); f.engine.create()
+    assert.equal(f.engine.read().playbackMode, 'cpu')
+    assert.equal(f.engine.read().playbackFallback, false)
+    assert.equal(f.engine.read().playbackFallbackReason, undefined)
+    f.engine.destroy(); f.mode('auto'); f.engine.create()
+    assert.equal(f.engine.read().playbackFallback, true, 'automatic mode retains the earlier graphics failure until explicit GPU retry')
+    f.engine.destroy()
+  })
   test(`${platform}: explicit GPU mode fails without silently loading CPU`, () => {
     const { engine, gpu, cpu } = fixture('gpu'); gpu.fail(graphicsPlaybackFailure('FRAME_RENDER_FAILED'))
     assert.throws(() => engine.create()); assert.equal(cpu.calls.length, 0); engine.destroy()

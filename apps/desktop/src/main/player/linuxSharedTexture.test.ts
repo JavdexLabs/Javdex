@@ -82,6 +82,23 @@ function fixture(diagnostics = false, software = false) {
   }
 }
 
+for (const software of [false, true]) test(`Linux IPC callback failure notifies its owner without escaping (CPU: ${software})`, t => {
+  const f = fixture(false, software); t.after(f.manager.destroy)
+  f.manager.onReady(() => { throw new Error('helper pipe closed') })
+  assert.doesNotThrow(f.ready)
+  assert.equal(f.errors.length, 1)
+  assert.equal(f.ipc.listenerCount(READY), 0)
+  assert.deepEqual(f.closed.slice().sort((a, b) => a - b), [10, 11])
+})
+
+for (const software of [false, true]) test(`Linux failed clock reply notifies its owner (CPU: ${software})`, t => {
+  const f = fixture(false, software); t.after(f.manager.destroy)
+  f.contents.send = () => { throw new Error('frame reply unavailable') }
+  assert.doesNotThrow(() => f.ipc.emit('playback:frame-clock', f.event, { ...f.binding, sentAt: 1 }))
+  assert.equal(f.errors.length, 1)
+  assert.equal(f.ipc.listenerCount('playback:frame-clock'), 0)
+})
+
 for (const mode of ['destroy', 'renderer-gone', 'gpu-gone'] as const)
   test(`disposed flush cannot abort Linux ${mode} cleanup or its failure notification`, async () => {
     const f = fixture(); f.ready(); f.manager.setVisible(true)

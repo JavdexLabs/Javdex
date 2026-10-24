@@ -1,5 +1,6 @@
 /** Backend identity is fixed before Electron is ready. Environment variables and
  * native handle size cannot distinguish a Wayland parent from an X11 parent. */
+import { softwareStartupRequested } from '../bootstrap/startupGraphicsRecovery'
 export const LINUX_X11_PLAYBACK_FLAG = '--javdex-x11'
 export const LINUX_DMABUF_PLAYBACK_FLAG = '--javdex-dmabuf'
 export const LINUX_WAYLAND_PLAYBACK_FLAG = '--javdex-wayland'
@@ -23,7 +24,8 @@ export function configurePlaybackDisplay(
   // Electron may already report an ozone default (including x11) before ready.
   // Only startup arguments prove opt-in. Match Chromium's switch rules: skip the
   // executable, trim ASCII whitespace, stop at --, and use the last = value.
-  const software = argv.slice(1, argv.indexOf('--') < 0 ? undefined : argv.indexOf('--')).includes('--javdex-cpu')
+  const software = softwareStartupRequested(argv)
+    || argv.slice(1, argv.indexOf('--') < 0 ? undefined : argv.indexOf('--')).includes('--javdex-cpu')
   let explicitX11 = false, explicitWayland = false, sharedTexture = false
   let selected: string | undefined
   for (const rawArg of argv.slice(1)) {

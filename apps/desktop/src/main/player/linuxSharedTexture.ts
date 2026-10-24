@@ -143,14 +143,7 @@ export function createLinuxSharedTexture(window: BrowserWindow, addonPath: strin
       if (binding && !contents.isDestroyed()) contents.send('playback:frame-flush', { ...binding, timeline: ++timeline })
     } catch { /* A disposed frame must not prevent descriptor cleanup or owner notification. */ }
     clearInterval(timer)
-    ipcMain.removeListener(READY, ready)
-    ipcMain.removeListener(REMOVED, removed)
-    ipcMain.removeListener(FAILED, receiverFailed)
-    ipcMain.removeListener(DRAWN, drawn)
-    ipcMain.removeListener(CPU_RELEASED, cpuReleased)
-    ipcMain.removeListener(CLOCK, clock)
-    ipcMain.removeListener(PIXELS, pixels)
-    ipcMain.removeListener(SELF_TEST, selfTest)
+    for (const [name, listener] of listeners) ipcMain.removeListener(name, listener)
     contents.removeListener('did-start-navigation', navigation)
     contents.removeListener('render-process-gone', rendererGone)
     contents.removeListener('destroyed', rendererGone)
@@ -164,10 +157,10 @@ export function createLinuxSharedTexture(window: BrowserWindow, addonPath: strin
     for (const entry of pending.values()) closeFrame(entry)
     pending.clear(); timings.clear(); acknowledgements.length = 0
   }
-  const fail = (message: string): void => {
+  const fail = (message: string, kind: 'graphics' | 'page' = 'graphics'): void => {
     if (stopped) return
-    destroy()
-    onError(new Error(message))
+    try { destroy() } catch { console.warn('[playback] failed Linux frame resources retained until exit') }
+    onError(Object.assign(new Error(message), { playbackFailureKind: software ? 'cpu' : kind }))
   }
   const ready = (event: IpcMainEvent, value: unknown): void => {
     if (stopped || !trusted(event) || !validBinding(value) || value.surfaceToken !== surfaceToken) return
@@ -260,9 +253,9 @@ export function createLinuxSharedTexture(window: BrowserWindow, addonPath: strin
     console.info('[playback-texture-pixels]', JSON.stringify(result))
   }
   const navigation = (_event: unknown, _url: string, isInPlace: boolean, isMainFrame: boolean): void => {
-    if (isMainFrame && !isInPlace) fail('播放器页面已重新加载，请重新打开视频')
+    if (isMainFrame && !isInPlace) fail('播放器页面已重新加载，请重新打开视频', 'page')
   }
-  const rendererGone = (): void => fail('播放器页面已关闭，请重新打开视频')
+  const rendererGone = (): void => fail('播放器页面已关闭，请重新打开视频', 'page')
   const childGone = (_event: unknown, details: { type: string }): void => {
     if (!software && details.type === 'GPU') fail('GPU 进程已退出，请重新打开视频')
   }
@@ -337,6 +330,13 @@ export function createLinuxSharedTexture(window: BrowserWindow, addonPath: strin
       try { imported?.release() } catch { fail('共享视频纹理释放失败，请停止后重试') }
     }
   }
+  const guarded = (listener: (event: IpcMainEvent, value: unknown) => void) => (event: IpcMainEvent, value: unknown): void => {
+    try { listener(event, value) } catch { fail('共享视频帧通道已中断，请停止后重试') }
+  }
+  const listeners: Array<[string, (event: IpcMainEvent, value: unknown) => void]> = [
+    [READY, guarded(ready)], [REMOVED, guarded(removed)], [FAILED, receiverFailed], [DRAWN, guarded(drawn)],
+    [CPU_RELEASED, cpuReleased], [CLOCK, guarded(clock)], [PIXELS, pixels], [SELF_TEST, selfTest]
+  ]
   const timer = setInterval(() => {
     if (stopped || parentFd === null) return
     try {
@@ -366,14 +366,7 @@ export function createLinuxSharedTexture(window: BrowserWindow, addonPath: strin
     } catch { fail('共享视频帧通道已中断，请停止后重试') }
   }, 5)
   timer.unref()
-  ipcMain.on(READY, ready)
-  ipcMain.on(REMOVED, removed)
-  ipcMain.on(FAILED, receiverFailed)
-  ipcMain.on(DRAWN, drawn)
-  ipcMain.on(CPU_RELEASED, cpuReleased)
-  ipcMain.on(CLOCK, clock)
-  ipcMain.on(PIXELS, pixels)
-  ipcMain.on(SELF_TEST, selfTest)
+  for (const [name, listener] of listeners) ipcMain.on(name, listener)
   contents.on('did-start-navigation', navigation)
   contents.on('render-process-gone', rendererGone)
   contents.on('destroyed', rendererGone)

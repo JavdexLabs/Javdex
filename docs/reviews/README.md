@@ -16,6 +16,10 @@
 
 [2026-10-24 播放统一验证](playback-unification-2026-10-24.md)记录共用控制器、隔离宿主、色彩对齐和当前平台验收边界。
 
+[2026-10-24 自动 CPU 回退审计](playback-fallback-audit-2026-10-24.md)记录 Deepin 25 虚拟机反馈后的三平台故障分支检查、本地修复和仍需真机验证的环境；不代表 Beta.1 附件已经更新。
+
+[2026-10-24 图形启动保护](startup-graphics-recovery-2026-10-24.md)记录共用的单次软件重启、参数与单实例保护、真实 Electron 进程链及本机完整应用验收；Mac／Linux 桌面实机仍单独保留边界。
+
 ## 运行库独立发行
 
 [Linux llama GPU 下载来源统一](runtime-linux-llama-migration-2026-10-24.md)记录剩余三个 Linux x64 原包镜像的独立发行、消费锁定和缓存复用验证。

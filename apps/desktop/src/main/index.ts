@@ -2,12 +2,20 @@ import { app } from 'electron'
 import { SCRAPE_BROWSER_HELPER_FLAG } from './scrapers/scrapeBrowserProtocol'
 import { configurePlaybackDisplay } from './player/playbackDisplay'
 import { configureLinuxGpuImport } from './player/linuxGpuImport'
+import { configureAppIdentity } from './appPaths'
+import { configureStartupGraphics, startupGraphics } from './bootstrap/startupGraphics'
 
 const SCRAPE_BROWSER_SMOKE_FLAG = '--javdex-scraper-helper-smoke'
 
-configurePlaybackDisplay(app)
-
-configureLinuxGpuImport(app)
+const helper = process.argv.includes(SCRAPE_BROWSER_HELPER_FLAG) || process.argv.includes(SCRAPE_BROWSER_SMOKE_FLAG)
+try {
+  if (!helper) { configureAppIdentity(); configureStartupGraphics() }
+  configurePlaybackDisplay(app)
+  configureLinuxGpuImport(app)
+} catch (error) {
+  if (helper) throw error
+  startupGraphics.startupFailed(error)
+}
 
 if (process.argv.includes(SCRAPE_BROWSER_HELPER_FLAG)) {
   void import('./scrapers/scrapeBrowserHelperEntry')
@@ -29,5 +37,5 @@ if (process.argv.includes(SCRAPE_BROWSER_HELPER_FLAG)) {
       app.quit()
     })
 } else {
-  void import('./appMain')
+  if (startupGraphics.canContinue()) void import('./appMain').catch(error => startupGraphics.startupFailed(error))
 }

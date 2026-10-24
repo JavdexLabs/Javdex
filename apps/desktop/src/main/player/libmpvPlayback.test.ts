@@ -10,6 +10,7 @@ import type { NativePlaybackState } from './nativePlayback'
 import type { PlaybackSnapshot } from '@shared/desktop/playback'
 import { createPlaybackEngine } from './playbackEngine'
 import { createGeneratedSubtitleDisplay } from './generatedSubtitleDisplay'
+import { isGraphicsPlaybackFailure } from './playbackGraphicsFailure'
 
 // Exercise the production wrapper with isolated import adapters, without loading
 // Electron or a native binary, changing process.platform, or adding a production seam.
@@ -22,10 +23,11 @@ const factoryCode = transpileModule(readFileSync(new URL('./playbackHostFactory.
 const subtitleFile = path.resolve('fixture-subtitles', 'AI 日中字幕.ass')
 const newSubtitleFile = path.resolve('fixture-subtitles', 'new.ass')
 
-function fixture(platform: 'darwin' | 'win32' | 'linux', software = false) {
+function fixture(platform: 'darwin' | 'win32' | 'linux', software = false,
+  options: { deferCreate?: boolean; renderNode?: () => string; windowDestroyed?: boolean; createFailure?: boolean; destroyFailure?: boolean } = {}) {
   const commands: string[][] = []
   const loaded: string[] = []
-  let created = false
+  let created = false, destroys = 0
   const handles: number[] = [], sharedProducer = {}
   const viewports: unknown[] = []
   let pending = 0, replies = 0, errors = 2, generatedErrors = 0, held = false
@@ -57,7 +59,7 @@ function fixture(platform: 'darwin' | 'win32' | 'linux', software = false) {
     if (args[0] === 'set' && args[1] === 'sid') sid = args[2]
   }
   const bridge = {
-    create() { handles.push(0); created = true },
+    create() { handles.push(0); created = true; if (options.createFailure) throw new Error('partial initialization') },
     setBounds(bounds: unknown) { viewports.push(bounds) },
     setVisible() {},
     render() {},
@@ -80,7 +82,7 @@ function fixture(platform: 'darwin' | 'win32' | 'linux', software = false) {
     state(): NativePlaybackState {
       return snapshot()
     },
-    destroy() { created = false }
+    destroy() { destroys++; created = false; if (options.destroyFailure) throw new Error('lost context') }
   }
   const moduleExports = {} as Pick<typeof import('./libmpvPlayback'), 'createLibmpvPlayback'>
   const factoryExports = {} as typeof import('./playbackHostFactory')
@@ -112,7 +114,7 @@ function fixture(platform: 'darwin' | 'win32' | 'linux', software = false) {
         case './softwarePlayback': return { createSoftwarePlaybackBridge: (producer: unknown, _window: unknown, selected: string) => {
           assert.equal(selected, platform); assert.equal(producer, sharedProducer); return bridge
         } }
-        case './linuxPlaybackDevice': return { linuxPlaybackRenderNode: () => '/dev/dri/renderD129' }
+        case './linuxPlaybackDevice': return { linuxPlaybackRenderNode: options.renderNode ?? (() => '/dev/dri/renderD129') }
         default: throw new Error(`Unexpected playback wrapper dependency: ${id}`)
       }
     }
@@ -120,15 +122,17 @@ function fixture(platform: 'darwin' | 'win32' | 'linux', software = false) {
   runInNewContext(factoryCode, { ...sandbox, exports: factoryExports }, { filename: 'playbackHostFactory.ts' })
   runInNewContext(wrapperCode, { ...sandbox, exports: moduleExports }, { filename: 'libmpvPlayback.ts' })
   const window = {
-    isDestroyed: () => false,
+    isDestroyed: () => options.windowDestroyed ?? false,
     getNativeWindowHandle: () => { throw new Error('Canvas playback must never request an HWND') },
     getBounds: () => ({ x: 0, y: 0, width: 1, height: 1 }),
     webContents: { getZoomFactor: () => 1 }
   } as unknown as BrowserWindow
   const native = software ? moduleExports.createLibmpvPlayback(() => window, 'software') : moduleExports.createLibmpvPlayback(() => window)
-  native.create()
-  assert.equal(created, true, 'the real wrapper must load the fixture bridge')
-  return { native, commands, overlays, viewports, loaded, handles,
+  if (!options.deferCreate) {
+    native.create()
+    assert.equal(created, true, 'the real wrapper must load the fixture bridge')
+  }
+  return { native, commands, overlays, viewports, loaded, handles, destroys: () => destroys,
     failInspection: (): void => { inspectionFailed = true },
     hold: (): void => { held = true },
     observeSelection: (sub: string, audio = aid): void => { sid = sub; aid = audio },
@@ -136,6 +140,65 @@ function fixture(platform: 'darwin' | 'win32' | 'linux', software = false) {
     complete: (failed = false): void => { const value = waiting.shift(); assert.ok(value); complete(value.args, value.generated, failed) },
     release: (): void => { held = false; for (const value of waiting.splice(0)) complete(value.args, value.generated) } }
 }
+
+for (const platform of ['win32', 'darwin', 'linux'] as const)
+  for (const destroyFailure of [false, true]) test(`${platform}: partial GPU creation is cleaned before CPU recovery (cleanup throws: ${destroyFailure})`, t => {
+    const gpu = fixture(platform, false, { deferCreate: true, createFailure: true, destroyFailure })
+    const cpu = fixture(platform, true, { deferCreate: true })
+    const engine = createPlaybackEngine(gpu.native, cpu.native, { mode: () => 'auto', gpuAvailable: () => true }, platform)
+    t.after(() => engine.destroy())
+    engine.create()
+    assert.equal(gpu.destroys(), 1)
+    assert.equal(engine.read().playbackMode, 'cpu')
+    assert.equal(cpu.handles.length, 1)
+  })
+
+for (const failure of ['no matching DRM render node', 'X11 direct DMA-BUF import unavailable']) {
+  for (const mode of ['auto', 'gpu'] as const) test(`Linux ${mode}: ${failure} during host preparation`, t => {
+    let probes = 0
+    const gpu = fixture('linux', false, { deferCreate: true, renderNode: () => { probes++; throw new Error(failure) } })
+    const cpu = fixture('linux', true, { deferCreate: true, renderNode: () => assert.fail('CPU must not query GPU devices') })
+    const engine = createPlaybackEngine(gpu.native, cpu.native, { mode: () => mode, gpuAvailable: () => true }, 'linux')
+    t.after(() => engine.destroy())
+    if (mode === 'gpu') {
+      assert.throws(() => engine.create(), isGraphicsPlaybackFailure)
+      assert.equal(cpu.handles.length, 0, 'explicit GPU must not create a CPU session')
+    } else {
+      engine.create()
+      const state = engine.read()
+      assert.equal(state.playbackMode, 'cpu')
+      assert.equal(state.playbackFallback, true)
+      assert.equal(state.playbackFallbackReason, 'GPU_INITIALIZATION_FAILED')
+      assert.equal(cpu.handles.length, 1)
+      engine.load('/fixture.mkv', { paused: false })
+      assert.deepEqual(cpu.commands.filter(args => args[0] === 'loadfile'), [['loadfile', '/fixture.mkv', 'replace']])
+      assert.equal(gpu.commands.length, 0)
+    }
+    assert.equal(probes, 1)
+    assert.equal(gpu.handles.length, 0, 'device checks fail before bridge.create')
+  })
+}
+
+test('Linux manual CPU never queries a missing virtual GPU', t => {
+  const gpu = fixture('linux', false, { deferCreate: true, renderNode: () => assert.fail('manual CPU must not query GPU devices') })
+  const cpu = fixture('linux', true, { deferCreate: true, renderNode: () => assert.fail('CPU host must not query GPU devices') })
+  const engine = createPlaybackEngine(gpu.native, cpu.native, { mode: () => 'cpu', gpuAvailable: () => true }, 'linux')
+  t.after(() => engine.destroy())
+  engine.create()
+  assert.equal(engine.read().playbackMode, 'cpu')
+  assert.equal(engine.read().playbackFallback, false)
+  assert.equal(gpu.handles.length, 0)
+  assert.equal(cpu.handles.length, 1)
+})
+
+test('a closed page during host preparation does not trigger CPU recovery', t => {
+  const gpu = fixture('linux', false, { deferCreate: true, windowDestroyed: true })
+  const cpu = fixture('linux', true, { deferCreate: true })
+  const engine = createPlaybackEngine(gpu.native, cpu.native, { mode: () => 'auto', gpuAvailable: () => true }, 'linux')
+  t.after(() => engine.destroy())
+  assert.throws(() => engine.create(), /主窗口不可用/)
+  assert.equal(cpu.handles.length, 0)
+})
 
 test('Linux uses the common Canvas viewport contract', t => {
   for (const platform of ['linux'] as const) {

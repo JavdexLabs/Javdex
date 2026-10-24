@@ -50,6 +50,20 @@ function softwareFixture(platform: 'darwin' | 'win32') {
 }
 for (const platform of ['darwin', 'win32'] as const) {
   const fixture = () => softwareFixture(platform)
+  test(`${platform}: failed CPU clock reply is reported without an uncaught event error`, t => {
+    const f = fixture(); t.after(f.bridge.destroy)
+    f.contents.send = () => { throw new Error('frame reply unavailable') }
+    assert.doesNotThrow(() => f.emit('playback:frame-clock', { ...f.binding, sentAt: 1 }))
+    assert.throws(() => f.bridge.render(), /CPU/)
+  })
+  test(`${platform}: CPU IPC and teardown faults remain terminal without escaping into the main process`, t => {
+    const f = fixture(); t.after(f.bridge.destroy)
+    f.native.resetTiming = () => { throw new Error('CPU host stopped') }
+    f.native.destroy = () => { throw new Error('CPU cleanup failed') }
+    assert.doesNotThrow(f.ready)
+    assert.throws(() => f.bridge.render(), /CPU/)
+    assert.equal(f.ipc.listenerCount('playback:shared-texture-ready'), 0)
+  })
   test(`${platform}: CPU transport waits for its own trusted renderer binding and limits copied frames to two`, t => {
     const f = fixture(); t.after(f.bridge.destroy)
     f.bridge.setVisible(true); f.poll(); assert.equal(f.budgets.at(-1), false)

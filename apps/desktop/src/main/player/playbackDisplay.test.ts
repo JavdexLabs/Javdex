@@ -10,6 +10,15 @@ function host(selected = '', ready = false) {
   } }
 }
 
+for (const display of ['x11', 'wayland'])
+  for (const flag of ['--javdex-software', '--javdex-startup-recovery=1'])
+    it(`startup ${flag} preserves Linux ${display} identity and selects software transport`, () => {
+      const h = host(display)
+      configurePlaybackDisplay(h, { platform: 'linux', argv: ['electron', `--javdex-${display}`, flag] })
+      assert.equal(linuxPlaybackBackend(), 'software')
+      assert.deepEqual(h.switches, [['ozone-platform', display]])
+    })
+
 it('Windows and macOS retain normal Chromium composition without playback startup flags', () => {
   for (const platform of ['win32', 'darwin'] as const) {
     const current = host()

@@ -18,6 +18,7 @@ import fs from 'node:fs/promises'
 import { localAiDirectories } from '../services/localModels/modelStorage'
 import { createAiSubtitleController } from './aiSubtitles/aiSubtitleController'
 import { getLocalModels } from '../services/localModels/desktopLocalModels'
+import { softwareStartupRequested } from '../bootstrap/startupGraphicsRecovery'
 
 let active: ReturnType<typeof createPlaybackSession> | null = null
 let dispose: (() => Promise<void>) | null = null
@@ -30,7 +31,8 @@ export function disposeBuiltinPlayback(): Promise<void> {
 }
 
 export function registerBuiltinPlayback(backend: CatalogBackend, getWindow: () => BrowserWindow | null, settings: DesktopSettingsStore, recentStarted?: (videoId: number) => Promise<void>): (target: PlaybackTarget) => Promise<PlayResult> {
-  const forceCpu = process.argv.slice(1, process.argv.indexOf('--') < 0 ? undefined : process.argv.indexOf('--')).includes('--javdex-cpu')
+  const forceCpu = softwareStartupRequested(process.argv)
+    || process.argv.slice(1, process.argv.indexOf('--') < 0 ? undefined : process.argv.indexOf('--')).includes('--javdex-cpu')
   let renderMode: PlaybackRenderMode = forceCpu ? 'cpu' : 'auto'
   const native = createPlaybackEngine(createLibmpvPlayback(getWindow), createLibmpvPlayback(getWindow, 'software'), {
     mode: () => renderMode,

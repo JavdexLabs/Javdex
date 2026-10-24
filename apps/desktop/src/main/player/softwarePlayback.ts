@@ -91,16 +91,23 @@ export function createSoftwarePlaybackBridge(native: SoftwareProducer, window: B
     binding = null; pending.clear(); shown = requested = false
     native.destroy()
   }
-  const fail = (message: string): void => { failure ??= new Error(message); destroy() }
+  const fail = (message: string): void => {
+    failure ??= new Error(message)
+    try { destroy() } catch { console.warn('[playback] CPU host cleanup failed') }
+  }
   const gone = (): void => fail('播放器页面已关闭')
   const navigation = (_event: unknown, _url: string, inPlace: boolean, main: boolean): void => { if (main && !inPlace) gone() }
   const receiverFailed = (event: IpcMainEvent, value: unknown): void => {
     if (matches(event, value) && value.bindingToken === binding?.bindingToken) fail('CPU 视频画面显示失败')
   }
+  const guarded = (listener: (event: IpcMainEvent, value: unknown) => void) => (event: IpcMainEvent, value: unknown): void => {
+    try { listener(event, value) }
+    catch { fail('CPU 视频帧通道失败') }
+  }
   const listeners: Array<[string, (event: IpcMainEvent, value: unknown) => void]> = [
-    ['playback:shared-texture-ready', ready], ['playback:shared-texture-removed', removed],
-    ['playback:shared-texture-failed', receiverFailed], ['playback:frame-clock', clock],
-    ['playback:cpu-frame-released', released], ['playback:shared-texture-submitted', drawn]
+    ['playback:shared-texture-ready', guarded(ready)], ['playback:shared-texture-removed', guarded(removed)],
+    ['playback:shared-texture-failed', receiverFailed], ['playback:frame-clock', guarded(clock)],
+    ['playback:cpu-frame-released', guarded(released)], ['playback:shared-texture-submitted', guarded(drawn)]
   ]
   const poll = (): void => {
     if (stopped) return
@@ -132,7 +139,8 @@ export function createSoftwarePlaybackBridge(native: SoftwareProducer, window: B
     renderBudgetMs: budget.value, submissionLatenessMs: lateness })
   return {
     create(bounds: Bounds): void {
-      native.create({ ...bounds, scale: bounds.scale ?? 1 }); stopped = false
+      stopped = false
+      native.create({ ...bounds, scale: bounds.scale ?? 1 })
       for (const [name, listener] of listeners) ipcMain.on(name, listener)
       contents.on('destroyed', gone); contents.on('render-process-gone', gone); contents.on('did-start-navigation', navigation)
       timer = setInterval(poll, 8); timer.unref()

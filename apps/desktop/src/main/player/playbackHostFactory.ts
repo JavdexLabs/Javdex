@@ -48,23 +48,34 @@ export function builtinPlaybackAvailability(backend = linuxPlaybackBackend()): P
 /** Only this factory selects operating-system resource transport. Product mode,
  * recovery, commands and subtitle ownership remain in the shared layers. */
 export function createPlaybackHostBridge(getWindow: () => BrowserWindow | null, backend = linuxPlaybackBackend()): PlaybackHostBridge {
-  let bridge: PlaybackHostBridge
+  let bridge: PlaybackHostBridge | undefined
   const availability = builtinPlaybackAvailability(backend)
   if (!availability.available) throw new Error(availability.reason ?? '内置播放不可用')
   const window = getWindow()
   if (!window || window.isDestroyed()) throw new Error('主窗口不可用')
-  if (process.platform === 'darwin' || process.platform === 'win32') {
-    const producer = createIsolatedPlaybackHost(runtimePath(undefined, backend), backend === 'software' ? 'cpu' : 'gpu')
-    bridge = backend === 'software'
-      ? createSoftwarePlaybackBridge(producer as Parameters<typeof createSoftwarePlaybackBridge>[0], window, process.platform)
-      : createNativeSharedTextureBridge(producer as Parameters<typeof createNativeSharedTextureBridge>[0], window, process.platform)
-  } else bridge = createLinuxPlaybackBridge(runtimePath(undefined, backend), backend !== null
-    ? onError => {
-      const current = getWindow()
-      if (!current || current.isDestroyed()) throw new Error('主窗口不可用')
-      return createLinuxSharedTexture(current, runtimePath('playback-fd.node', backend), onError, backend === 'software')
-    } : undefined, backend === 'dmabuf' ? linuxPlaybackRenderNode() : undefined, backend === 'dmabuf' ? linuxGpuImportLoader(app) : undefined, backend ?? 'dmabuf')
-  try { bridge.create({ x: 0, y: 0, width: 1, height: 1, scale: screen.getDisplayMatching(window.getBounds()).scaleFactor }) }
-  catch (error) { if (backend !== 'software') throw graphicsPlaybackFailure('GPU_INITIALIZATION_FAILED'); throw error }
+  try {
+    // Device discovery and bridge construction can fail before bridge.create,
+    // including virtual GPUs without a usable DRM node or DMA-BUF import.
+    // Keep the whole GPU initialization stage inside the Auto recovery boundary.
+    if (process.platform === 'darwin' || process.platform === 'win32') {
+      const producer = createIsolatedPlaybackHost(runtimePath(undefined, backend), backend === 'software' ? 'cpu' : 'gpu')
+      bridge = backend === 'software'
+        ? createSoftwarePlaybackBridge(producer as Parameters<typeof createSoftwarePlaybackBridge>[0], window, process.platform)
+        : createNativeSharedTextureBridge(producer as Parameters<typeof createNativeSharedTextureBridge>[0], window, process.platform)
+    } else bridge = createLinuxPlaybackBridge(runtimePath(undefined, backend), backend !== null
+      ? onError => {
+        const current = getWindow()
+        if (!current || current.isDestroyed()) throw new Error('主窗口不可用')
+        return createLinuxSharedTexture(current, runtimePath('playback-fd.node', backend), onError, backend === 'software')
+      } : undefined, backend === 'dmabuf' ? linuxPlaybackRenderNode() : undefined, backend === 'dmabuf' ? linuxGpuImportLoader(app) : undefined, backend ?? 'dmabuf')
+    bridge.create({ x: 0, y: 0, width: 1, height: 1, scale: screen.getDisplayMatching(window.getBounds()).scaleFactor })
+  }
+  catch (error) {
+    // The wrapper cannot own this bridge until creation returns. Dispose any
+    // partial child/listeners here, while retaining uncertain consumer leases.
+    try { bridge?.destroy() } catch { console.warn('[playback] partial host cleanup failed') }
+    if (backend !== 'software') throw graphicsPlaybackFailure('GPU_INITIALIZATION_FAILED')
+    throw error
+  }
   return bridge
 }

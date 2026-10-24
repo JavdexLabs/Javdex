@@ -51,7 +51,7 @@ export function createNativeSharedTextureBridge(native: SharedTextureProducer, w
   const statistics = channel(`javdex.playback.${platform === 'darwin' ? 'mac' : 'windows'}-shared-texture.statistics`)
   const contents = window.webContents, surfaceToken = randomUUID()
   let stopped = true, requested = false, shown = false, timeline = 0, lastSequence = 0, lastSubmission = 0, submitted = 0
-  let binding: Binding | null = null, failure: Error | undefined, startedAt = 0, lateness = 0
+  let binding: Binding | null = null, failure: Error | undefined, waitingSince: number | null = null, lateness = 0
   let dimensions = '', timer: ReturnType<typeof setInterval> | undefined
   const pending = new Map<number, Lease>()
   const targets = new Map<number, { start: number; target: number }>()
@@ -119,11 +119,11 @@ export function createNativeSharedTextureBridge(native: SharedTextureProducer, w
     contents.removeListener('did-start-navigation', navigation)
     contents.removeListener('render-process-gone', gone); contents.removeListener('destroyed', gone)
     app.removeListener('child-process-gone', childGone)
-    try { native.setWakeup(null) } finally { native.destroy() }
     binding = null; targets.clear()
     if (pending.size === 0) ipcMain.removeListener(releaseChannel, consumerReleased)
     // Do not release/recycle consumer-held textures here. Each callback below
     // retains its original ticket, including after destroy or another create.
+    try { native.setWakeup(null) } finally { native.destroy() }
   }
   const fail = (message: string, kind: 'graphics' | 'page' = 'graphics', reason = 'GPU_RUNTIME_FAILED'): void => {
     if (!stopped) {
@@ -132,7 +132,7 @@ export function createNativeSharedTextureBridge(native: SharedTextureProducer, w
       // must not hide a graphics fault from the independent CPU recovery path.
       failure = Object.assign(new Error(message), { code: 'PLAYBACK_RESTART_REQUIRED', playbackFailureKind: kind,
         ...(kind === 'graphics' ? { playbackFailureCode: playbackFallbackReason(graphicsPlaybackFailure(reason), 'GPU_RUNTIME_FAILED') } : {}) })
-      destroy()
+      try { destroy() } catch { console.warn('[playback] failed graphics resources retained until exit') }
     }
   }
   const receiverFailed = (event: IpcMainEvent, value: unknown): void => {
@@ -156,9 +156,15 @@ export function createNativeSharedTextureBridge(native: SharedTextureProducer, w
     // callback. A Canvas submission or transfer receipt cannot free the slot.
     try { owner.imported?.release() } catch { fail(`${label} 共享纹理引用释放失败`) }
   }
+  // IPC callbacks run outside PlaybackEngine's command/read recovery boundary.
+  // Store host failures for its next read instead of throwing into Electron.
+  const guarded = (listener: (event: IpcMainEvent, value: unknown) => void) => (event: IpcMainEvent, value: unknown): void => {
+    try { listener(event, value) }
+    catch (error) { fail(`${label} 共享视频通道失败`, 'graphics', playbackFallbackReason(error, 'FRAME_CHANNEL_FAILED')) }
+  }
   const listeners: Array<[string, (event: IpcMainEvent, value: unknown) => void]> = [
-    ['playback:shared-texture-ready', ready], ['playback:shared-texture-removed', removed],
-    ['playback:shared-texture-failed', receiverFailed], ['playback:frame-clock', clock], ['playback:shared-texture-submitted', drawn],
+    ['playback:shared-texture-ready', guarded(ready)], ['playback:shared-texture-removed', guarded(removed)],
+    ['playback:shared-texture-failed', receiverFailed], ['playback:frame-clock', guarded(clock)], ['playback:shared-texture-submitted', guarded(drawn)],
     ['playback:shared-texture-self-test', selfTest]
   ]
   const publish = (frame: Frame, target: Binding): void => {
@@ -172,8 +178,9 @@ export function createNativeSharedTextureBridge(native: SharedTextureProducer, w
         colorSpace: { primaries: 'bt709', transfer: 'srgb', matrix: 'rgb', range: 'full' },
         handle: { [handleKey]: frame[handleKey] } }, allReferencesReleased: () => {
         if (owner.released) return
-        owner.released = true; pending.delete(frame.sequence); native.releaseFrame(frame.sequence)
-        if (stopped && pending.size === 0) ipcMain.removeListener(releaseChannel, consumerReleased)
+        owner.released = true; pending.delete(frame.sequence)
+        try { native.releaseFrame(frame.sequence) } catch { fail(`${label} 共享纹理引用释放失败`) }
+        finally { if (stopped && pending.size === 0) ipcMain.removeListener(releaseChannel, consumerReleased) }
       } })
       owner.imported = imported
       // Documented low-level transfer avoids sendSharedTexture's fixed 1s
@@ -198,7 +205,10 @@ export function createNativeSharedTextureBridge(native: SharedTextureProducer, w
       probe.tick(shown, Date.now())
       if (shown && pending.size >= 3 && [...pending.values()].every(p => Date.now() - p.since > 5000))
         throw graphicsPlaybackFailure('FRAME_RELEASE_TIMEOUT')
-      if (requested && lastSequence === 0 && Date.now() - startedAt > 10000) throw new Error(`等待 ${label} 共享帧超时`)
+      if (requested && (!binding || lastSequence === 0)) {
+        waitingSince ??= Date.now()
+        if (Date.now() - waitingSince > 10000) throw graphicsPlaybackFailure('RECEIVER_NOT_READY')
+      } else waitingSince = null
       // Pump mpv events even when hidden. The native producer drops updates but
       // never overwrites one of its three consumer-held surfaces.
       const value = native.nextFrame()
@@ -241,7 +251,8 @@ export function createNativeSharedTextureBridge(native: SharedTextureProducer, w
   return {
     create(bounds: Bounds): void {
       if (typeof sharedTexture?.importSharedTexture !== 'function') throw new Error(`Electron 不支持 ${label} 共享纹理`)
-      native.create({ ...bounds, scale: bounds.scale ?? 1 }); stopped = false; startedAt = Date.now()
+      stopped = false
+      native.create({ ...bounds, scale: bounds.scale ?? 1 })
       statistics.subscribe(reportStatistics)
       for (const [name, listener] of listeners) ipcMain.on(name, listener)
       ipcMain.on(releaseChannel, consumerReleased)
@@ -257,7 +268,10 @@ export function createNativeSharedTextureBridge(native: SharedTextureProducer, w
       const next = `${Math.round(bounds.width * (bounds.scale ?? 1))}:${Math.round(bounds.height * (bounds.scale ?? 1))}`
       if (next !== dimensions) { dimensions = next; native.setBounds({ ...bounds, scale: bounds.scale ?? 1 }); flush() }
     },
-    setVisible(value: boolean): void { requested = value; visibility() },
+    setVisible(value: boolean): void {
+      if (requested !== value) waitingSince = value ? Date.now() : null
+      requested = value; visibility()
+    },
     command(args: string[], generated = false): void {
       native.command(args, generated)
       if (!generated && (['loadfile', 'seek', 'stop'].includes(args[0]) || args[0] === 'set' && ['pause', 'speed'].includes(args[1]))) flush()

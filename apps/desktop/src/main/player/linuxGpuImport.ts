@@ -4,7 +4,7 @@ import { linuxPlaybackBackend } from './playbackDisplay'
 
 interface StartupHost {
   isReady(): boolean
-  commandLine: { getSwitchValue(name: string): string; appendSwitch(name: string, value: string): void }
+  commandLine: { hasSwitch(name: string): boolean; getSwitchValue(name: string): string; appendSwitch(name: string, value: string): void }
 }
 export function hasX11GpuRuntime(): boolean {
   if (process.platform !== 'linux') return false
@@ -16,7 +16,8 @@ export function hasX11GpuRuntime(): boolean {
 }
 
 export function configureLinuxGpuImport(host: StartupHost, available = hasX11GpuRuntime()): void {
-  if (!available || linuxPlaybackBackend() !== 'dmabuf' || host.commandLine.getSwitchValue('ozone-platform') !== 'x11') return
+  if (!available || host.commandLine.hasSwitch('disable-gpu') || linuxPlaybackBackend() !== 'dmabuf'
+    || host.commandLine.getSwitchValue('ozone-platform') !== 'x11') return
   if (host.isReady()) throw new Error('GPU 导入后端必须在应用启动时配置')
   const angle = host.commandLine.getSwitchValue('use-angle')
   if (angle && angle !== 'vulkan') return

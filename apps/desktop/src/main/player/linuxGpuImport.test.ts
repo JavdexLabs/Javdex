@@ -6,6 +6,7 @@ import { configureLinuxGpuImport } from './linuxGpuImport'
 function host(display = 'x11') {
   const switches = new Map<string, string>([['ozone-platform', display]])
   return { switches, isReady: () => false, commandLine: {
+    hasSwitch: (key: string) => switches.has(key),
     getSwitchValue: (key: string) => switches.get(key) ?? '',
     appendSwitch: (key: string, value: string) => { switches.set(key, value) }
   } }
@@ -19,6 +20,13 @@ test('fixed X11 runtime selects ANGLE Vulkan with Ganesh GLES and preserves unre
   assert.equal(h.switches.get('disable-features'), 'Example,Another,Vulkan')
   configureLinuxGpuImport(h, true)
   assert.equal(h.switches.get('disable-features'), 'Example,Another,Vulkan')
+})
+test('explicit Chromium CPU compositor does not force ANGLE Vulkan', () => {
+  const h = host()
+  configurePlaybackDisplay(h, { platform: 'linux', argv: ['electron', '--javdex-x11'] })
+  h.switches.set('disable-gpu', '')
+  configureLinuxGpuImport(h, true)
+  assert.equal(h.switches.has('use-angle'), false)
 })
 test('does not alter Wayland, CPU mode, an unfixed runtime, or an explicit alternate ANGLE backend', () => {
   for (const [display, cpu, available, angle] of [

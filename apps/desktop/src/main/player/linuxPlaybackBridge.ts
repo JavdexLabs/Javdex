@@ -3,6 +3,7 @@ import path from 'node:path'
 import { channel } from 'node:diagnostics_channel'
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import type { NativePlaybackState } from './nativePlayback'
+import { graphicsPlaybackFailure } from './playbackGraphicsFailure'
 
 interface Bounds { x: number; y: number; width: number; height: number; scale?: number }
 const LIMIT = 1024 * 1024
@@ -66,6 +67,7 @@ export function createLinuxPlaybackBridge(executable: string,
   let generation = 0
   let snapshot: NativePlaybackState = { alive: false }
   let failure: Error | null = null
+  let failTransport: (error: Error) => void = () => {}
   let input = ''
   let lastDiagnostic = 0
   let heartbeat: ReturnType<typeof setInterval> | undefined
@@ -86,10 +88,18 @@ export function createLinuxPlaybackBridge(executable: string,
     if (request.operation === 'stall') send(['diagnostic-stall'])
   }
   const send = (fields: string[]): void => {
+    // Argument validation is a caller error, independent of graphics health.
+    const message = encodePlaybackMessage(fields)
     if (failure) throw failure
-    if (!child || child.killed || !child.stdin.writable) throw new Error('Linux 播放进程未运行')
-    if (child.stdin.writableLength > GENERATED_LIMIT) throw new Error('Linux 播放进程未响应')
-    child.stdin.write(encodePlaybackMessage(fields))
+    if (!child) throw new Error('Linux 播放进程未运行')
+    const abort = (code: string): never => {
+      const error = backend === 'dmabuf' ? graphicsPlaybackFailure(code) : new Error('CPU 播放进程已退出或未响应')
+      failTransport(error)
+      throw failure ?? error
+    }
+    if (child.killed || !child.stdin.writable) abort('PLAYBACK_HOST_EXITED')
+    if (child.stdin.writableLength > GENERATED_LIMIT) abort('HELPER_HEARTBEAT_TIMEOUT')
+    try { child.stdin.write(message) } catch { abort('FRAME_CHANNEL_FAILED') }
   }
   const syncNativeVisibility = (): void => {
     const visible = requestedVisible && (!frameChannel || frameChannel.isReady?.() === true)
@@ -101,16 +111,21 @@ export function createLinuxPlaybackBridge(executable: string,
       send(['visible', visible ? '1' : '0']); lastVisible = visible
     }
   }
+  const destroyFrames = (): void => {
+    const previous = frameChannel; frameChannel = null
+    try { previous?.destroy() } catch { console.warn('[playback] failed Linux frame resources retained until exit') }
+  }
   const destroy = (): void => {
     generation++
     statistics.unsubscribe(report); controls.unsubscribe(control)
     clearInterval(heartbeat); heartbeat = undefined
     const previous = child; child = null
-    frameChannel?.destroy(); frameChannel = null
+    destroyFrames()
     snapshot = { alive: false }; failure = null; input = ''
     if (!previous) return
     // Graceful cleanup first, then bound shutdown of an unresponsive decoder.
-    if (previous.stdin.writable) previous.stdin.end(encodePlaybackMessage(['destroy']))
+    try { if (previous.stdin.writable) previous.stdin.end(encodePlaybackMessage(['destroy'])) }
+    catch { /* A broken control pipe cannot prevent bounded termination. */ }
     const timeout = setTimeout(() => previous.kill('SIGKILL'), 2000)
     timeout.unref(); previous.once('exit', () => clearTimeout(timeout))
   }
@@ -128,9 +143,11 @@ export function createLinuxPlaybackBridge(executable: string,
       const failed = (error: Error): void => {
         if (generation !== epoch || failure) return
         clearInterval(heartbeat); heartbeat = undefined
-        failure = Object.assign(error, { playbackFailureCode: linuxSharedTextureFailureCode(error.message) }); snapshot = { alive: false }
-        if (shared) console.warn('[playback-dmabuf] failure=' + linuxSharedTextureFailureCode(error.message))
-        frameChannel?.destroy(); frameChannel = null
+        const code = 'playbackFailureCode' in error ? error.playbackFailureCode : linuxSharedTextureFailureCode(error.message)
+        failure = Object.assign(error, { ...(backend === 'software' ? { playbackFailureKind: 'cpu' } : {}), playbackFailureCode: code })
+        snapshot = { alive: false }
+        if (shared) console.warn('[playback-dmabuf] failure=' + code)
+        destroyFrames()
         if (process) {
           process.kill('SIGTERM')
           const previous = process
@@ -138,6 +155,7 @@ export function createLinuxPlaybackBridge(executable: string,
           timeout.unref(); previous.once('exit', () => clearTimeout(timeout))
         }
       }
+      failTransport = failed
       try {
         if (shared) frameChannel = createFrameChannel!(failed)
         const fontConfig = path.join(path.dirname(executable), 'fonts.conf')
@@ -187,8 +205,8 @@ export function createLinuxPlaybackBridge(executable: string,
       launched.on('exit', (code, signal) => {
         if (child === launched) {
           clearInterval(heartbeat); heartbeat = undefined
-          frameChannel?.destroy(); frameChannel = null
           snapshot = { alive: false }; failure ??= Object.assign(new Error(`Linux 播放进程已退出（${signal ?? code ?? 'unknown'}）`), { playbackFailureCode: 'PLAYBACK_HOST_EXITED' })
+          destroyFrames()
         }
       })
       send(['create', ...rectangle(bounds), backend])

@@ -53,12 +53,13 @@ export function createIsolatedPlaybackHost(runtime: string, mode: 'gpu' | 'cpu')
   const post = (message: HostRequest): void => {
     if (failure) throw failure
     if (stopped || !child) throw new Error('播放进程未启动')
+    const abort = (code: string): never => { fail(code); throw failure }
     if (ready) {
-      if (requestsPending >= 64) throw graphicsPlaybackFailure('HELPER_HEARTBEAT_TIMEOUT')
-      child.postMessage(message); requestsPending++
+      if (requestsPending >= 64) abort('HELPER_HEARTBEAT_TIMEOUT')
+      try { child.postMessage(message); requestsPending++ } catch { abort('FRAME_CHANNEL_FAILED') }
     }
     else {
-      if (queued.length >= 64) throw new Error('播放进程未响应')
+      if (queued.length >= 64) abort('HELPER_HEARTBEAT_TIMEOUT')
       queued.push(message)
     }
   }
@@ -71,27 +72,33 @@ export function createIsolatedPlaybackHost(runtime: string, mode: 'gpu' | 'cpu')
   const discard = (): void => { for (const frame of frames.splice(0)) releaseFrame(frame.sequence) }
   const destroy = (): void => {
     if (stopped) return
-    stopped = true; discard(); clearInterval(heartbeat)
-    for (const resource of cache.values()) { resource.retired = true; dispose(resource) }
-    slots.clear()
-    if (channel) { interop?.closeChannel?.(channel); channel = '' }
-    queued.length = 0; state = { alive: false }; wakeup = null
-    unsubscribe()
+    stopped = true; clearInterval(heartbeat)
     const previous = child; child = null
-    if (previous) {
-      try { if (ready) previous.postMessage({ type: 'destroy' } satisfies HostRequest) } catch { /* The child may already have exited. */ }
-      const timer = setTimeout(() => previous.kill(), 1000); timer.unref()
-      previous.once('exit', () => clearTimeout(timer))
+    try {
+      discard()
+      for (const resource of cache.values()) { resource.retired = true; dispose(resource) }
+      slots.clear()
+      if (channel) { interop?.closeChannel?.(channel); channel = '' }
+    } finally {
+      // Interop cleanup may fail after a driver crash. It must not leave a
+      // native child alive or delay independent CPU recovery.
+      queued.length = 0; state = { alive: false }; wakeup = null
+      unsubscribe()
+      if (previous) {
+        try { if (ready) previous.postMessage({ type: 'destroy' } satisfies HostRequest) } catch { /* The child may already have exited. */ }
+        const timer = setTimeout(() => previous.kill(), 1000); timer.unref()
+        previous.once('exit', () => clearTimeout(timer))
+      }
     }
   }
   const fail = (code: string): void => {
     if (stopped) return
     const callback = wakeup
     console.warn('[playback-host-failure]', mode, code)
-    // Shut down before storing the error so unconsumed exported leases can be
-    // discarded. Consumer-held imports remain in resources until final release.
-    destroy()
+    // Consumer-held imports remain in resources until final release. Cleanup
+    // cannot erase the original fault or throw out of an IPC/timer callback.
     failure = mode === 'gpu' ? graphicsPlaybackFailure(code) : new Error('CPU 播放进程已退出或未响应，请重新打开影片')
+    try { destroy() } catch { console.warn('[playback] failed host resources retained until exit') }
     callback?.()
   }
   const snapshot = (): NativePlaybackState => { if (failure) throw failure; return { ...state } }

@@ -11,11 +11,11 @@ import type { BrowserWindow } from 'electron'
 import { FrameBudget } from './frameBudget'
 import { channel } from 'node:diagnostics_channel'
 
-function fixture(platform: 'darwin' | 'win32' = 'darwin') {
+function fixture(platform: 'darwin' | 'win32' = 'darwin', activate = true) {
   const code = transpileModule(readFileSync(new URL('./nativeSharedTexture.ts', import.meta.url), 'utf8'), {
     compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022 }
   }).outputText
-  let tick = () => {}, wake = () => {}, sequence = 0, timeline = 0, created = false, mainReleases = 0, sendFailure = false, flushFailure = false
+  let tick = () => {}, wake = () => {}, sequence = 0, timeline = 0, created = false, mainReleases = 0, sendFailure = false, flushFailure = false, now = 1000
   const ipc = new EventEmitter(), app = new EventEmitter(), mainFrame = {}
   const messages: Array<{ channel: string; value: Record<string, unknown> }> = []
   const contents = Object.assign(new EventEmitter(), { mainFrame, isDestroyed: () => false,
@@ -34,7 +34,7 @@ function fixture(platform: 'darwin' | 'win32' = 'darwin') {
       producerComplete: true, pixelFormat: 'bgra', colorContract: 'bt709-srgb-rgb-full', renderStartUs: 1, targetTimeUs: 0 } },
     requestSelfTest() {}, releaseFrame(value: number) { releases.push(value); held.delete(value) } }
   const exports = {} as typeof import('./nativeSharedTexture')
-  runInNewContext(code, { exports, Buffer, process: { hrtime: { bigint: () => 1000000000n }, env: {} }, Date,
+  runInNewContext(code, { exports, Buffer, process: { hrtime: { bigint: () => BigInt(now) * 1000000n }, env: {} }, Date: { now: () => now },
     setInterval: (callback: () => void) => { tick = callback; return { unref() {} } }, clearInterval() {},
     require(name: string) {
       if (name === './playbackGraphicsFailure') return { playbackFallbackReason, graphicsPlaybackFailure }
@@ -53,9 +53,36 @@ function fixture(platform: 'darwin' | 'win32' = 'darwin') {
   const bridge = exports.createNativeSharedTextureBridge(native, { webContents: contents } as unknown as BrowserWindow, platform)
   bridge.create({ width: 640, height: 360, scale: 1 })
   const binding = { surfaceToken: bridge.inspect().sharedTextureSurface!, bindingToken: '33333333-3333-4333-8333-333333333333' }
-  ipc.emit('playback:shared-texture-ready', event, binding); bridge.setVisible(true)
+  if (activate) { ipc.emit('playback:shared-texture-ready', event, binding); bridge.setVisible(true) }
   return { bridge, native, ipc, app, event, binding, messages, imported, releases, failFlush: () => { flushFailure = true }, failTransfer: () => { sendFailure = true }, mainReleases: () => mainReleases,
+    advance: (ms: number) => { now += ms },
     wake: async () => { wake(); await Promise.resolve(); await Promise.resolve() }, tick: async () => { tick(); await Promise.resolve(); await Promise.resolve() } }
+}
+
+for (const platform of ['win32', 'darwin'] as const) {
+  test(`${platform}: failed clock reply becomes a readable graphics fault`, t => {
+    const f = fixture(platform); t.after(f.bridge.destroy)
+    f.event.sender.send = () => { throw new Error('frame reply unavailable') }
+    assert.doesNotThrow(() => f.ipc.emit('playback:frame-clock', f.event, { ...f.binding, sentAt: 1 }))
+    assert.throws(() => f.bridge.render(), { playbackFailureKind: 'graphics' })
+  })
+  test(`${platform}: delayed viewport gets a full receiver deadline and absent receiver still fails`, async t => {
+    const f = fixture(platform, false); t.after(f.bridge.destroy)
+    f.native.nextFrame = () => undefined
+    f.advance(20000)
+    f.bridge.setVisible(true); await f.tick()
+    assert.doesNotThrow(() => f.bridge.render())
+    f.advance(10001); await f.tick()
+    assert.throws(() => f.bridge.render(), { playbackFailureKind: 'graphics' })
+  })
+  test(`${platform}: IPC host fault and cleanup fault are reported instead of escaping the event`, t => {
+    const f = fixture(platform); t.after(f.bridge.destroy)
+    f.native.resetTiming = () => { throw new Error('host pipe closed') }
+    f.native.destroy = () => { throw new Error('native cleanup failed') }
+    assert.doesNotThrow(() => f.ipc.emit('playback:shared-texture-removed', f.event, f.binding))
+    assert.throws(() => f.bridge.render(), { playbackFailureKind: 'graphics' })
+    assert.equal(f.ipc.listenerCount('playback:shared-texture-ready'), 0)
+  })
 }
 test('Windows imports only an NT handle and shares the three-slot final-release contract', async t => {
   const f = fixture('win32'); t.after(f.bridge.destroy)

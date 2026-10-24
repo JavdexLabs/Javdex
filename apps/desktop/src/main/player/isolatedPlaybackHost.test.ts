@@ -15,9 +15,9 @@ const code = transpileModule(readFileSync(new URL('./isolatedPlaybackHost.ts', i
 function fixture(mode: 'gpu' | 'cpu' = 'gpu') {
   const messages: HostRequest[] = [], acquired: Buffer[] = [], released: Buffer[] = []
   const intervals: Array<() => void> = [], timeouts: Array<() => void> = []
-  let time = 0, killed = false
+  let time = 0, killed = false, postFailure = false, releaseFailure = false
   const child = Object.assign(new EventEmitter(), { pid: 77, stderr: null,
-    postMessage(value: HostRequest) { messages.push(value) }, kill() { killed = true; child.emit('exit', 1) } })
+    postMessage(value: HostRequest) { if (postFailure) throw new Error('closed channel'); messages.push(value) }, kill() { killed = true; child.emit('exit', 1) } })
   const exports = {} as typeof import('./isolatedPlaybackHost')
   runInNewContext(code, { exports, Buffer, performance: { now: () => time }, process: { platform: 'win32', env: {} },
     setInterval: (callback: () => void) => { intervals.push(callback); return { unref() {} } }, clearInterval() {},
@@ -29,16 +29,26 @@ function fixture(mode: 'gpu' | 'cpu' = 'gpu') {
       if (name === 'node:diagnostics_channel') return { channel }
       if (name === './playbackGraphicsFailure') return { graphicsPlaybackFailure }
       if (name === 'node:module') return { createRequire: () => () => ({ acquire() { const resource = Buffer.alloc(8, acquired.length + 1); acquired.push(resource); return resource },
-        release(resource: Buffer) { released.push(resource) } }) }
+        release(resource: Buffer) { if (releaseFailure) throw new Error('interop cleanup failed'); released.push(resource) } }) }
       throw Error(name)
     } })
   const host = exports.createIsolatedPlaybackHost('/fixture/playback.node', mode)
   host.create({ width: 640, height: 360, scale: 1 })
   const emit = (message: HostResponse): void => { child.emit('message', message) }
   const frame = (sequence: number, resourceId = sequence, slot = (sequence - 1) % 3): void => emit({ type: 'frame', frame: { sequence, resourceId, slot, width: 640, height: 360, ntHandle: Buffer.alloc(8) } })
-  return { host, emit, frame, messages, acquired, released, intervals, timeouts,
+  return { host, emit, frame, messages, acquired, released, intervals, timeouts, failPost: () => { postFailure = true }, failRelease: () => { releaseFailure = true },
     advance: (ms: number) => { time += ms; for (const callback of intervals) callback() }, killed: () => killed }
 }
+
+test('host exit notification still terminates its child when resource disposal throws', t => {
+  const f = fixture(); t.after(f.host.destroy)
+  f.emit({ type: 'ready' }); f.frame(1)
+  f.failRelease()
+  assert.doesNotThrow(() => f.emit({ type: 'failed' }))
+  assert.throws(() => f.host.inspect(), { playbackFailureKind: 'graphics' })
+  for (const timeout of f.timeouts) timeout()
+  assert.equal(f.killed(), true)
+})
 test('isolated host preserves command order until ready and keeps imported resources until explicit final release', t => {
   const f = fixture(); t.after(() => f.host.destroy())
   f.host.command(['loadfile', '/authorized media.mkv', 'replace'])
@@ -99,10 +109,19 @@ test('CPU host returns copy credits only on consumer acknowledgement', t => {
   assert.equal(f.messages.filter(m => m.type === 'release').length, 1)
   assert.equal(f.acquired.length, 0)
 })
-test('host request queues are bounded before startup and while the native thread is stalled', t => {
+for (const ready of [false, true]) test(`host request queue is bounded and classified (ready: ${ready})`, t => {
   const f = fixture(); t.after(() => f.host.destroy())
+  if (ready) f.emit({ type: 'ready' })
   for (let n = 0; n < 63; n++) f.host.setVisible(true)
-  assert.throws(() => f.host.setVisible(true), /未响应/)
-  f.emit({ type: 'ready' }); assert.equal(f.messages.length, 64)
-  assert.throws(() => f.host.setVisible(true), (error: unknown) => (error as { playbackFailureCode: string }).playbackFailureCode === 'HELPER_HEARTBEAT_TIMEOUT')
+  assert.throws(() => f.host.setVisible(true), { playbackFailureKind: 'graphics', playbackFailureCode: 'HELPER_HEARTBEAT_TIMEOUT' })
+  assert.throws(() => f.host.inspect(), { playbackFailureKind: 'graphics' })
+  assert.equal(f.messages.filter(m => m.type !== 'destroy').length, ready ? 64 : 0)
+})
+
+for (const mode of ['gpu', 'cpu'] as const) test(`${mode}: sending to a closed utility channel records the appropriate terminal failure`, t => {
+  const f = fixture(mode); t.after(f.host.destroy)
+  f.emit({ type: 'ready' }); f.failPost()
+  assert.throws(() => f.host.command(['set', 'pause', 'yes']), mode === 'gpu'
+    ? { playbackFailureKind: 'graphics', playbackFailureCode: 'FRAME_CHANNEL_FAILED' } : /CPU/)
+  assert.throws(() => f.host.inspect(), mode === 'gpu' ? { playbackFailureKind: 'graphics' } : /CPU/)
 })

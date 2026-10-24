@@ -109,6 +109,16 @@ for (const [name, startup, expected] of [
   assert.deepEqual(f.creates(), { gpu: expected === 'gpu' ? 1 : 0, cpu: expected === 'cpu' ? 1 : 0 })
 })
 
+for (const platform of ['darwin', 'win32', 'linux'] as const)
+  for (const flag of ['--javdex-software', '--javdex-startup-recovery=1'])
+    test(`${platform}: ${flag} forces CPU through production playback registration`, async t => {
+      const f = fixture(t, 'recent', false, platform, { args: [flag] })
+      assert.equal((await f.open(f.source.target)).ok, true)
+      f.timers.get(200)!()
+      assert.deepEqual(f.creates(), { gpu: 0, cpu: 1 })
+      assert.equal(f.snapshot()!.info.playbackMode, 'cpu')
+    })
+
 test('macOS graphics failure recovers in CPU without requesting another authorization', async t => {
   const f = fixture(t, 'recent', false, 'darwin')
   assert.equal((await f.open(f.source.target)).ok, true)

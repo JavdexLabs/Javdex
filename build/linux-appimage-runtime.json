@@ -1,0 +1,13 @@
+{
+  "name": "uruntime",
+  "version": "0.8.1",
+  "commit": "6ec68e66782d632f22666ba2c661b3afd7c3a565",
+  "variant": "appimage-squashfs-lite-x86_64",
+  "url": "https://github.com/VHSgunzo/uruntime/releases/download/v0.8.1/uruntime-appimage-squashfs-lite-x86_64",
+  "sha256": "32c6024a14ff375749ee3bed3330c1586a6dd2bfeddbbd7ceacc053aec2b27a3",
+  "bytes": 1226208,
+  "extractPolicy": 2,
+  "unsharePolicy": 3,
+  "cleanupPolicy": 1,
+  "mountPolicy": 3
+}

@@ -72,7 +72,7 @@ export default function FloatingLayer({
       className={[styles.root, className].filter(Boolean).join(' ')}
       role={role}
       aria-label={ariaLabel}
-      data-native-playback-occluder="true"
+      data-playback-overlay-surface="true"
       style={{
         ...style,
         // These properties belong to the layer, not the caller's inline style.

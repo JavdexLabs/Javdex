@@ -1,0 +1,321 @@
+name: Resume verified candidate server
+
+on:
+  workflow_call:
+    inputs:
+      run_id:
+        type: string
+        required: true
+      amd64_run_id:
+        type: string
+        required: false
+      publish_run_id:
+        type: string
+        required: false
+      release_tag:
+        type: string
+        required: false
+      prerelease:
+        type: boolean
+        default: false
+
+# Called only by Release, inside its shared release-publication concurrency lock.
+permissions:
+  actions: read
+  contents: write
+  packages: write
+
+jobs:
+  resume:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: candidate
+        shell: bash
+    env:
+      RELEASE_TAG: ${{ inputs.release_tag }}
+      RELEASE_PRERELEASE: ${{ inputs.prerelease }}
+      RELEASE_REPLACE_090: 'false'
+      RELEASE_VERIFY_ONLY: 'false'
+    outputs:
+      source: ${{ steps.inspect.outputs.source }}
+      version: ${{ steps.inspect.outputs.version }}
+      tag: ${{ steps.inspect.outputs.tag }}
+      image: ${{ steps.inspect.outputs.image }}
+      prerelease: ${{ steps.inspect.outputs.prerelease }}
+      artifactIds: ${{ steps.inspect.outputs.artifactIds }}
+      publishOnly: ${{ steps.inspect.outputs.publishOnly }}
+      arm: ${{ steps.images.outputs.arm }}
+      amd: ${{ steps.images.outputs.amd }}
+    steps:
+      - name: Checkout recovery orchestration
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Test recovery policy
+        working-directory: .
+        run: node --test scripts/release-resume.test.mjs scripts/release-metadata.test.mjs scripts/release-publication.test.mjs
+      - name: Inspect original run and immutable artifacts
+        id: inspect
+        working-directory: .
+        run: node scripts/release-resume.mjs
+        env:
+          RESUME_RUN_ID: ${{ inputs.run_id }}
+          RESUME_AMD64_RUN_ID: ${{ inputs.amd64_run_id }}
+          RESUME_PUBLISH_RUN_ID: ${{ inputs.publish_run_id }}
+          GITHUB_TOKEN: ${{ github.token }}
+      - name: Retain recovery provenance
+        uses: actions/upload-artifact@v4
+        with:
+          name: Release-Resume-Provenance
+          path: out/release-resume-receipt.json
+          if-no-files-found: error
+      - name: Checkout original candidate, never relabel its artifacts
+        if: steps.inspect.outputs.publishOnly != 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.inspect.outputs.source }}
+          path: candidate
+          fetch-depth: 0
+      - run: npm ci
+        if: steps.inspect.outputs.publishOnly != 'true'
+      - name: Validate signing before publishing images
+        if: steps.inspect.outputs.publishOnly != 'true'
+        run: node scripts/server-update-release.mjs validate
+        env:
+          JAVDEX_SERVER_UPDATE_SIGNING_KEY: ${{ secrets.JAVDEX_SERVER_UPDATE_SIGNING_KEY }}
+          JAVDEX_SERVER_UPDATE_KEY_ID: ${{ vars.JAVDEX_SERVER_UPDATE_KEY_ID }}
+      - name: Build only the missing amd64 product from original source
+        if: steps.inspect.outputs.amdImage == '' && steps.inspect.outputs.publishOnly != 'true'
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SOURCE"
+          GITHUB_SHA="$CANDIDATE_SOURCE" npm run server:build
+        env:
+          CANDIDATE_SOURCE: ${{ steps.inspect.outputs.source }}
+          JAVDEX_SERVER_UPDATE_SIGNING_KEY: ${{ secrets.JAVDEX_SERVER_UPDATE_SIGNING_KEY }}
+          JAVDEX_SERVER_UPDATE_KEY_ID: ${{ vars.JAVDEX_SERVER_UPDATE_KEY_ID }}
+      - name: Verify server with the repaired namespace test harness
+        if: steps.inspect.outputs.amdImage == '' && steps.inspect.outputs.publishOnly != 'true'
+        run: |
+          set -euo pipefail
+          git show "$REPAIR_SOURCE:apps/server/src/dualBackendScan.e2e.test.ts" > apps/server/src/dualBackendScan.e2e.test.ts
+          npm run server:test
+          git restore -- apps/server/src/dualBackendScan.e2e.test.ts
+          # npm links the server workspace bin and marks its TS entry executable.
+          # Verify all source bytes before restoring that install-time mode change.
+          git -c core.fileMode=false diff --exit-code
+          git restore -- apps/server/src/index.ts
+          git diff --exit-code
+        env:
+          REPAIR_SOURCE: ${{ github.sha }}
+      - run: npm run server:updater:test
+        if: steps.inspect.outputs.amdImage == '' && steps.inspect.outputs.publishOnly != 'true'
+      - name: Verify supplementary business groups under Linux root
+        if: steps.inspect.outputs.amdImage == '' && steps.inspect.outputs.publishOnly != 'true'
+        run: |
+          set -euo pipefail
+          setpriv --version
+          sudo "$(command -v node)" --require ./scripts/register-test-paths.cjs --import tsx --test apps/server/src/updater/businessProcess.test.ts
+      - run: npm run server:updater:smoke
+        if: steps.inspect.outputs.amdImage == '' && steps.inspect.outputs.publishOnly != 'true'
+      - run: npm run server:smoke
+        if: steps.inspect.outputs.amdImage == '' && steps.inspect.outputs.publishOnly != 'true'
+      - uses: docker/login-action@v3
+        if: steps.inspect.outputs.publishOnly != 'true'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/setup-buildx-action@v3
+        if: steps.inspect.outputs.publishOnly != 'true'
+      - name: Verify reused arm64 identity and pin both architecture digests
+        if: steps.inspect.outputs.publishOnly != 'true'
+        id: images
+        run: |
+          set -euo pipefail
+          arm_digest="$IMAGE@$(docker buildx imagetools inspect "$ARM_IMAGE" --format '{{.Manifest.Digest}}')"
+          docker pull --platform linux/arm64 "$arm_digest"
+          test "$(docker image inspect "$arm_digest" --format '{{.Architecture}}')" = arm64
+          docker create --platform linux/arm64 --name verify-reused-arm "$arm_digest"
+          docker cp verify-reused-arm:/app/build-info.json "$RUNNER_TEMP/arm-build-info.json"
+          docker cp verify-reused-arm:/app/package.json "$RUNNER_TEMP/arm-package.json"
+          docker rm verify-reused-arm
+          node --input-type=module -e 'import fs from "node:fs"; import assert from "node:assert/strict"; const info = JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP + "/arm-build-info.json")); assert.equal(info.build, process.env.CANDIDATE_SOURCE); assert.equal(JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP + "/arm-package.json")).version, process.env.VERSION)'
+          amd_image="$AMD_IMAGE"
+          if [[ -z "$amd_image" ]]; then
+            amd_image="$IMAGE:build-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-amd64"
+            docker tag javdex-server:smoke "$amd_image"
+            docker push "$amd_image"
+          fi
+          amd_digest="$IMAGE@$(docker buildx imagetools inspect "$amd_image" --format '{{.Manifest.Digest}}')"
+          docker pull --platform linux/amd64 "$amd_digest"
+          test "$(docker image inspect "$amd_digest" --format '{{.Architecture}}')" = amd64
+          docker create --platform linux/amd64 --name verify-reused-amd "$amd_digest"
+          docker cp verify-reused-amd:/app/build-info.json "$RUNNER_TEMP/amd-build-info.json"
+          docker cp verify-reused-amd:/app/package.json "$RUNNER_TEMP/amd-package.json"
+          docker rm verify-reused-amd
+          node --input-type=module -e 'import fs from "node:fs"; import assert from "node:assert/strict"; const info = JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP + "/amd-build-info.json")); assert.equal(info.build, process.env.CANDIDATE_SOURCE); assert.equal(JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP + "/amd-package.json")).version, process.env.VERSION)'
+          [[ "$arm_digest" =~ ^ghcr.io/[a-z0-9/-]+@sha256:[a-f0-9]{64}$ ]]
+          [[ "$amd_digest" =~ ^ghcr.io/[a-z0-9/-]+@sha256:[a-f0-9]{64}$ ]]
+          printf 'arm=%s\namd=%s\n' "$arm_digest" "$amd_digest" >> "$GITHUB_OUTPUT"
+        env:
+          ARM_IMAGE: ${{ steps.inspect.outputs.armImage }}
+          AMD_IMAGE: ${{ steps.inspect.outputs.amdImage }}
+          IMAGE: ${{ steps.inspect.outputs.image }}
+          VERSION: ${{ steps.inspect.outputs.version }}
+          CANDIDATE_SOURCE: ${{ steps.inspect.outputs.source }}
+
+  manifest:
+    needs: resume
+    if: needs.resume.outputs.publishOnly != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resume.outputs.source }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/setup-buildx-action@v3
+      - name: Reject existing publication and publish fixed multiarch image
+        run: |
+          set -euo pipefail
+          GITHUB_SHA="$CANDIDATE_SOURCE" node scripts/release-publication.mjs manifest
+          docker buildx imagetools create -t "$IMAGE:$VERSION" "$AMD_DIGEST" "$ARM_DIGEST"
+          docker buildx imagetools inspect "$IMAGE:$VERSION"
+        env:
+          CANDIDATE_SOURCE: ${{ needs.resume.outputs.source }}
+          IMAGE: ${{ needs.resume.outputs.image }}
+          VERSION: ${{ needs.resume.outputs.version }}
+          RELEASE_TAG: ${{ needs.resume.outputs.tag }}
+          AMD_DIGEST: ${{ needs.resume.outputs.amd }}
+          ARM_DIGEST: ${{ needs.resume.outputs.arm }}
+          GITHUB_TOKEN: ${{ github.token }}
+
+  publish:
+    needs: [resume, manifest]
+    if: ${{ always() && needs.resume.result == 'success' && (needs.manifest.result == 'success' || (needs.resume.outputs.publishOnly == 'true' && needs.manifest.result == 'skipped')) }}
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: ${{ needs.resume.outputs.tag }}
+      RELEASE_REPLACE_090: 'false'
+      RELEASE_VERIFY_ONLY: 'false'
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resume.outputs.source }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Download only the original verified artifact IDs
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ needs.resume.outputs.artifactIds }}
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ github.token }}
+          path: release-artifacts
+          merge-multiple: true
+      - name: Bind reused desktop packages to original source manifests and hash release files
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict'
+          import fs from 'node:fs'
+          import { execFileSync } from 'node:child_process'
+          import { createHash } from 'node:crypto'
+          import { playbackInstallers } from './scripts/playback-source-materials.mjs'
+          const directory = 'release-artifacts', version = process.env.VERSION
+          const archive = `${directory}/Javdex-Playback-Sources-${version}.tar.gz`
+          const sums = [], seen = new Set()
+          const targets = ['windows-x64', 'macos-x64', 'macos-arm64', 'linux-x64']
+          const expected = playbackInstallers(version)
+          execFileSync('tar', ['-xzf', archive, '-C', directory, ...targets.map(target => `Playback-Sources/manifests/${target}.json`)])
+          for (const target of targets) {
+            const manifest = JSON.parse(fs.readFileSync(`${directory}/Playback-Sources/manifests/${target}.json`))
+            assert.equal(manifest.version, version)
+            assert.equal(manifest.target, target)
+            assert.equal(manifest.installers.length, ['windows-x64', 'linux-x64'].includes(target) ? 2 : 1)
+            for (const { fileName, sha256 } of manifest.installers) {
+              assert.match(fileName, /^Javdex[^/\\]*\.(exe|zip|dmg|deb|AppImage)$/)
+              assert.equal(expected[fileName], target, 'Installer version/platform mismatch')
+              assert.equal(seen.has(fileName), false)
+              seen.add(fileName)
+              const hash = createHash('sha256')
+              for await (const chunk of fs.createReadStream(`${directory}/${fileName}`)) hash.update(chunk)
+              const actual = hash.digest('hex')
+              assert.equal(actual, sha256, `Reused installer digest: ${fileName}`)
+              sums.push(`${actual}  ${fileName}`)
+            }
+          }
+          assert.equal(seen.size, 6)
+          assert.deepEqual(fs.readdirSync(directory).filter(name => /\.(exe|zip|dmg|deb|AppImage)$/.test(name)).sort(), Object.keys(expected).sort())
+          const hash = createHash('sha256')
+          for await (const chunk of fs.createReadStream(archive)) hash.update(chunk)
+          sums.push(`${hash.digest('hex')}  Javdex-Playback-Sources-${version}.tar.gz`)
+          fs.writeFileSync(`${directory}/SHA256SUMS.txt`, sums.join('\n') + '\n')
+          NODE
+        env:
+          VERSION: ${{ needs.resume.outputs.version }}
+      - name: Prepare original candidate description and deployment links
+        run: |
+          set -euo pipefail
+          cp ".github/release-notes/$TAG.md" release-body.md
+          printf '\n\n### 下载与部署\n\n桌面用户选择对应系统安装包即可，无需下载源码。`Javdex-Playback-Sources-%s.tar.gz` 为四个平台的总源码包。\n\nDocker 镜像：`%s:%s`（Linux amd64 / arm64）。桌面与服务端须使用相同版本。\n\n[Compose 示例](https://github.com/%s/blob/%s/deploy/docker-compose.example.yml) · [JSON 配置示例](https://github.com/%s/blob/%s/deploy/javdex-server.example.json) · [部署说明](https://github.com/%s/blob/%s/docs/SERVER_MODE.md)。可信升级公钥已内置镜像，无需下载公钥附件。\n' "$VERSION" "$IMAGE" "$VERSION" "$GITHUB_REPOSITORY" "$CANDIDATE_SOURCE" "$GITHUB_REPOSITORY" "$CANDIDATE_SOURCE" "$GITHUB_REPOSITORY" "$CANDIDATE_SOURCE" >> release-body.md
+        env:
+          TAG: ${{ needs.resume.outputs.tag }}
+          VERSION: ${{ needs.resume.outputs.version }}
+          IMAGE: ${{ needs.resume.outputs.image }}
+          CANDIDATE_SOURCE: ${{ needs.resume.outputs.source }}
+      - run: npm run server:updater:build
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/setup-buildx-action@v3
+      - name: Package signed updates, verify image closures and reject existing Release
+        run: |
+          set -euo pipefail
+          node scripts/server-update-release.mjs publish --directory release-artifacts
+          GITHUB_SHA="$CANDIDATE_SOURCE" node scripts/release-publication.mjs release
+          # The existing tag is authoritative. Omitting target_commitish avoids
+          # asking the release API to authorize workflow edits at an older SHA.
+          git fetch origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
+          test "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")" = "$CANDIDATE_SOURCE"
+        env:
+          CANDIDATE_SOURCE: ${{ needs.resume.outputs.source }}
+          GITHUB_TOKEN: ${{ github.token }}
+          JAVDEX_SERVER_UPDATE_SIGNING_KEY: ${{ secrets.JAVDEX_SERVER_UPDATE_SIGNING_KEY }}
+          JAVDEX_SERVER_UPDATE_KEY_ID: ${{ vars.JAVDEX_SERVER_UPDATE_KEY_ID }}
+      - name: Publish original candidate
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.resume.outputs.tag }}
+          name: Javdex ${{ needs.resume.outputs.tag }}
+          body_path: release-body.md
+          prerelease: ${{ needs.resume.outputs.prerelease == 'true' }}
+          fail_on_unmatched_files: true
+          files: |
+            release-artifacts/*.AppImage
+            release-artifacts/*.deb
+            release-artifacts/*.dmg
+            release-artifacts/*.exe
+            release-artifacts/*.zip
+            release-artifacts/Javdex-Playback-Sources-${{ needs.resume.outputs.version }}.tar.gz
+            release-artifacts/SHA256SUMS.txt
+            release-artifacts/Javdex-server-*.javdex-update

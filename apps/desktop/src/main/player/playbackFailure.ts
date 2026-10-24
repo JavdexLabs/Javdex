@@ -20,6 +20,7 @@ const messages = {
   streams: '所选文件没有可播放的音视频流，请检查文件或显式使用外部播放器',
   audio: '无法初始化音频输出，请检查系统音频设备后重试',
   video: '原生画面输出失败，请重试或显式使用外部播放器',
+  restart: '共享视频帧状态异常，请完全退出并重启应用后重试，或显式使用外部播放器',
   load: '无法读取所选影片，请检查文件、网络与播放授权后重试',
   openingTimeout: '30 秒内未能打开影片，请检查文件或网络后重试',
   seekTimeout: '20 秒内未能完成定位，请检查文件或网络后重试',
@@ -38,6 +39,7 @@ export class PlaybackFailure extends Error {
 export function playbackFailure(error: unknown, fallback: PlaybackFailureCode = 'load'): PlaybackFailure {
   if (error instanceof PlaybackFailure) return error
   const code = (error as NodeJS.ErrnoException | null)?.code
+  if (code === 'PLAYBACK_RESTART_REQUIRED') return new PlaybackFailure('restart')
   if (code === 'PLAYBACK_BRIDGE_CAPACITY') return new PlaybackFailure('capacity')
   if (code === 'PLAYBACK_BRIDGE_CLOSED') return new PlaybackFailure('connection')
   if (code === 'PLAYBACK_BRIDGE_GRANT') return new PlaybackFailure('grant')

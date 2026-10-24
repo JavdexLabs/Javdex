@@ -8,6 +8,39 @@
 // No GL context, Electron session or decoder required. These exercise the same
 // event-copy/JSON helpers used by all native adapters, not mock implementations.
 int main() {
+#if MPV_CLIENT_API_VERSION >= MPV_MAKE_VERSION(2, 2)
+    assert(javdex::MpvCore::frameDelayUs(1020000000, 1000000000, false, MPV_RENDER_FRAME_INFO_PRESENT) == 20000);
+    // Pause intent precedes the asynchronous mpv property observation. A stale
+    // scheduled target must become an immediate redraw, never a graphics fault.
+    assert(javdex::MpvCore::frameDelayUs(INT64_MAX, 1000000000, true, MPV_RENDER_FRAME_INFO_PRESENT) == 0);
+    assert(javdex::MpvCore::frameDelayUs(INT64_MAX, 1000000000, false, MPV_RENDER_FRAME_INFO_PRESENT | MPV_RENDER_FRAME_INFO_REDRAW) == 0);
+    assert(javdex::MpvCore::frameDelayUs(INT64_MAX, 1000000000, false, 0) == 0);
+#endif
+    const auto layout = javdex::frameLayout(1365.3, 767.7, 1.25);
+    assert(layout.width == 1707 && layout.height == 960 && layout.stride % 64 == 0);
+    assert(javdex::frameLayout(3840, 2160, 1).width == 3840);
+    assert(javdex::frameLayout(8192, 8192, 1).bytes == 256ULL * 1024 * 1024);
+    for (double invalid : {0.0, -1.0, 8193.0, std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN()}) {
+        bool rejected = false;
+        try { javdex::frameLayout(invalid, 1, 1); } catch (const std::runtime_error &) { rejected = true; }
+        assert(rejected);
+    }
+    // Independent neutral-axis targets used by the real compositor acceptance:
+    // encoded BT.1886 -> sRGB, ST2084/BT2390 -> 203 nit SDR, and HLG OOTF.
+    assert(std::abs(javdex::color::convert({.5, .5, .5}, {})[0] * 255 - 120.4875) < .02);
+    const javdex::color::Profile pq{"pq", "bt.2020", 1000};
+    assert(std::abs(javdex::color::convert({javdex::color::pq(100), javdex::color::pq(100), javdex::color::pq(100)}, pq)[0] * 255 - 185.8) < .5);
+    const javdex::color::Profile hlg{"hlg", "bt.2020", 1000};
+    const double hlg100 = .17883277 * std::log(12 * std::pow(.1, 1 / 1.2) - .28466892) + .55991073;
+    assert(std::abs(javdex::color::convert({hlg100, hlg100, hlg100}, hlg)[0] * 255 - 185.8) < .5);
+    assert(javdex::color::convert({0, 0, 0}, pq)[0] == 0);
+    assert(std::abs(javdex::color::pqInverse(javdex::color::pq(10000)) - 10000) < .0001);
+    javdex::color::LutFiles colorFilters;
+    const auto sdrFilter = colorFilters.write({}, 0);
+    assert(sdrFilter.find("lutrgb=") != std::string::npos);
+    assert(sdrFilter.find("lut3d=") == std::string::npos);
+    assert(sdrFilter.find("format=gbrp16le,") != std::string::npos);
+    assert(colorFilters.write(pq, 1).find("lut3d=") != std::string::npos);
     using javdex::nodeJson;
     assert(javdex::jsonString(nullptr) == "\"\"");
     assert(javdex::jsonString("字幕\"\\\n\t\x01") == "\"字幕\\\"\\\\\\u000a\\u0009\\u0001\"");
@@ -39,7 +72,7 @@ int main() {
     value.u.list = nullptr; assert(nodeJson(value) == "[]");
     value.format = MPV_FORMAT_NODE_MAP; assert(nodeJson(value) == "{}");
 
-    const std::string generatedHeader = "Style: Default,Microsoft YaHei,42,x\n";
+    const std::string generatedHeader = "Style: Default,sans-serif,42,x\n";
     const std::string currentCue = "Dialogue: 0,0:00:00.00,0:00:10.00,Default,,0,0,0,,中文\\N{\\fs34}日本語\n";
     auto timeline = javdex::parseGeneratedSubtitles(generatedHeader + currentCue);
     const auto visibleText = javdex::generatedTextAt(timeline, 5);
@@ -73,11 +106,7 @@ int main() {
     event = {MPV_EVENT_FILE_LOADED, 0, 0, nullptr};
     core.consume(event); core.consume(event); assert(core.loads() == 2);
     assert(!core.updateRequested()); assert(!core.render(0, 0));
-    core.queue("seek-relative", -5);
-    const auto transport = core.stateJson();
-    assert(transport.find("\"actions\":[{\"kind\":\"seek-relative\",\"value\":-5.000000}]") != std::string::npos);
-    assert(core.stateJson().find("\"actions\":[]") != std::string::npos);
-    assert(transport.find("\"time-pos\":null") == std::string::npos); // invalidated value omitted
+
     assert(javdex::optionalSubtitleCommand({"sub-add", "/fixture.ass", "select"}));
     assert(javdex::optionalSubtitleCommand({"sub-reload", "2"}));
     assert(javdex::optionalSubtitleCommand({"set", "sid", "2"}));

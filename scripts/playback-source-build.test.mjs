@@ -1,15 +1,79 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
-import { playbackBuildFingerprint, playbackLinuxAssDependency, playbackPkgConfigEnvironment, playbackSourceNativePlan, playbackSourcePlan, playbackWindowsExportNames, staticPlaybackDependencies, verifyPlaybackSource } from './playback-source-build.mjs'
+import { playbackMpvRenderFenceFix, playbackBuildFingerprint, playbackLinuxAssDependency, playbackLinuxVaapiRenderDependency, playbackPkgConfigEnvironment, playbackSourceNativePlan, playbackSourcePlan, playbackWindowsExportNames, playbackWindowsSourceEnvironment, stageWindowsStaticZlib, staticPlaybackDependencies, verifyPlaybackSource } from './playback-source-build.mjs'
 import { mergeTargets } from './dist.mjs'
 import packagingConfig from '../electron-builder.config.mjs'
 
 const input = { arch: 'x64', source: '/sources', build: '/build', prefix: '/prefix', tools: '/tools', jobs: 2 }
+
+function windowsStaticFixture(t) {
+  const root = mkdtempSync(path.join(tmpdir(), 'javdex-windows-static-'))
+  t.after(() => {
+    assert.equal(path.dirname(path.resolve(root)), path.resolve(tmpdir()))
+    rmSync(root, { recursive: true, force: true })
+  })
+  mkdirSync(path.join(root, 'lib'))
+  writeFileSync(path.join(root, 'lib/libzs.a'), '!<arch>\n')
+  return root
+}
+
+test('static-only Windows zlib supplies the canonical -lz archive and refuses unrelated replacements', t => {
+  const root = windowsStaticFixture(t)
+  const result = stageWindowsStaticZlib(root)
+  assert.deepEqual(readFileSync(path.join(root, result.source)), readFileSync(path.join(root, result.destination)))
+  assert.deepEqual(stageWindowsStaticZlib(root), result)
+  writeFileSync(path.join(root, 'lib/libz.a'), 'unrelated archive')
+  assert.throws(() => stageWindowsStaticZlib(root), /different Windows zlib/)
+})
+
+test('Windows source linking retains a moved CRT fenv default only when the toolchain defines it', () => {
+  for (const [symbols, expected] of [['00000000 R __mingw_fe_dfl_env\r\n', true], [' U __mingw_fe_dfl_env\n', false], ['', false]]) {
+    const result = playbackWindowsSourceEnvironment('/prefix', symbols)
+    assert.equal(result.fenvDefault, expected)
+    assert.equal(result.linkArgs.includes('-Wl,--undefined=__mingw_fe_dfl_env'), expected)
+  }
+})
+
+test('real MinGW source search and floating-point DLL survive the current CRT symbol layout', {
+  skip: process.platform !== 'win32' || process.arch !== 'x64' || !process.env.JAVDEX_PLAYBACK_MSYS2_ROOT
+    ? 'requires the configured Windows UCRT64 source-build toolchain' : false
+}, t => {
+  const root = windowsStaticFixture(t), tools = path.join(process.env.JAVDEX_PLAYBACK_MSYS2_ROOT, 'ucrt64/bin')
+  stageWindowsStaticZlib(root)
+  writeFileSync(path.join(root, 'lib/libiconv.a'), '!<arch>\n')
+  const env = { ...process.env }, pathKey = Object.keys(env).find(k => k.toLowerCase() === 'path') ?? 'Path'
+  env[pathKey] = tools + path.delimiter + (env[pathKey] ?? '')
+  const run = (name, args, overrides = {}) => {
+    const r = spawnSync(path.join(tools, name), args, { encoding: 'utf8', env: { ...env, ...overrides }, timeout: 30000 })
+    assert.equal(r.status, 0, `${name}: ${r.stderr || r.error?.message}`)
+    return r.stdout.trim()
+  }
+  const runtime = run('gcc.exe', ['-print-file-name=libmingw32.a'])
+  const symbols = run('nm.exe', ['--defined-only', '--extern-only', runtime])
+  const windows = playbackWindowsSourceEnvironment(root, symbols)
+  env.LIBRARY_PATH = windows.libraryPath
+  for (const name of ['libiconv.a', 'libz.a']) assert.equal(path.resolve(run('gcc.exe', ['-print-file-name=' + name])), path.resolve(root, 'lib', name))
+  const source = path.join(root, 'fenv.c'), dll = path.join(root, 'fenv.dll')
+  writeFileSync(source, '#include <fenv.h>\n__declspec(dllexport) int probe(void) { fenv_t e; return fegetenv(&e) || fesetenv(&e); }\n')
+  run('gcc.exe', ['-shared', source, '-o', dll, ...windows.linkArgs])
+  run('python.exe', ['-c', 'import ctypes,sys; assert ctypes.CDLL(sys.argv[1]).probe() == 0', dll])
+})
+
+test('macOS release source plan builds the same sole Canvas producer as normal development', () => {
+  for (const arch of ['x64', 'arm64']) {
+    const steps = playbackSourceNativePlan({ ...input, platform: 'darwin', arch, root: '/repo', include: '/sdk', output: '/output' })
+    const addon = steps.filter(step => step.command === 'clang++' && step.args.includes('-shared'))
+    assert.equal(addon.length, 2)
+    assert.ok(addon[0].args.includes(path.join('/repo', 'apps/desktop/src/main/player/native/macSharedTexture.mm')))
+    assert.equal(addon[0].args.at(-1), path.join('/output', 'playback.node'))
+    assert.ok(addon[0].args.includes('CoreFoundation') && addon[0].args.includes('IOSurface'))
+  }
+})
 test('Windows import library reads old and current GNU export name tables with LF or CRLF', () => {
   // Binutils peXXigen.c prints ordinal/base/hint columns in the current format.
   const tables = [
@@ -122,7 +186,7 @@ test('compiled cache identity changes with source/recipe, SDK, compiler or archi
 })
 test('recipes build codecs/subtitles from source, disable implicit downloads and enable native audio/TLS', () => {
   for (const [platform, audio, tls] of [['darwin', '-Dcoreaudio=enabled', '--enable-securetransport'],
-    ['win32', '-Dwasapi=enabled', '--enable-schannel'], ['linux', '-Dalsa=enabled', '--enable-openssl']]) {
+    ['win32', '-Dwasapi=enabled', '--enable-schannel'], ['linux', '-Dpulse=enabled', '--enable-openssl']]) {
     const plan = playbackSourcePlan({ ...input, platform })
     const commands = plan.flatMap(step => step.args)
     for (const id of ['libass', 'libplacebo', 'dav1d', 'mpv']) {
@@ -182,4 +246,53 @@ test('Debian package declares native OS prerequisites without replacing Electron
   for (const name of ['libgtk-3-0', 'libnss3', 'libsecret-1-0', 'libasound2', 'libva2', 'libva-x11-2', 'libva-drm2', 'libxpresent1', 'libopengl0'])
     assert.ok(dependencies.includes(name))
   assert.ok(!dependencies.some(name => /mpv|ffmpeg/.test(name)))
+})
+
+test('Dedicated Linux DMA-BUF profile excludes window-system outputs and uses Pulse protocol', () => {
+  const plan = playbackSourcePlan({ ...input, platform: 'linux', linuxProfile: 'dmabuf' })
+  const mpv = plan.find(s => s.args[0] === 'setup' && s.args.includes(path.join('/sources', 'mpv')))
+  for (const flag of ['-Dplain-gl=enabled', '-Dpulse=enabled', '-Dalsa=disabled', '-Dx11=disabled', '-Dgl-x11=disabled', '-Dvaapi=enabled', '-Dvaapi-x11=disabled', '-Dvaapi-drm=enabled']) assert.ok(mpv.args.includes(flag), flag)
+  const defaults = playbackSourcePlan({ ...input, platform: 'linux' }).find(s => s.args[0] === 'setup' && s.args.includes(path.join('/sources', 'mpv')))
+  assert.ok(defaults.args.includes('-Dx11=disabled'))
+  assert.throws(() => playbackSourcePlan({ ...input, platform: 'linux', linuxProfile: 'x11' }), /Unsupported Linux playback profile/)
+  assert.throws(() => playbackSourcePlan({ ...input, platform: 'darwin', linuxProfile: 'dmabuf' }), /requires Linux/)
+})
+
+test('VAAPI render dependency patch removes only the native KMS prerequisite', () => {
+  const recipe = "get_option('vaapi-drm').require(libva.found() and features['drm'])"
+  assert.equal(playbackLinuxVaapiRenderDependency(recipe), "get_option('vaapi-drm').require(libva.found())")
+  assert.throws(() => playbackLinuxVaapiRenderDependency('changed upstream recipe'), /recipe drift/)
+})
+
+test('CPU profile disables graphics rendering and hardware decoding while retaining Pulse audio', () => {
+  const steps = playbackSourcePlan({ platform: 'linux', arch: 'x64', source: '/src', build: '/build', prefix: '/prefix', tools: '/tools', jobs: 2, linuxProfile: 'software' })
+  const ff = steps.find(s => s.args.includes(path.join('/src', 'ffmpeg/configure'))).args
+  assert(ff.includes('--disable-vaapi')); assert(ff.includes('--disable-hwaccels'))
+  const mpv = steps.find(s => s.args.includes(path.join('/src', 'mpv'))).args
+  for (const flag of ['-Dgl=disabled', '-Dplain-gl=disabled', '-Dvaapi=disabled', '-Dpulse=enabled', '-Dx11=disabled']) assert(mpv.includes(flag))
+})
+
+test('Linux GPU enables NVDEC copy support from pinned headers without contaminating CPU or other platforms', () => {
+  for (const profile of ['dmabuf', 'software']) {
+    const steps = playbackSourcePlan({ ...input, platform: 'linux', linuxProfile: profile })
+    const ff = steps.find(s => s.args.includes(path.join('/sources', 'ffmpeg/configure'))).args
+    const mpv = steps.find(s => s.args[0] === 'setup' && s.args.includes(path.join('/sources', 'mpv'))).args
+    const install = steps.find(s => s.cwd === path.join('/sources', 'nv_codec_headers'))
+    assert.equal(Boolean(install), profile === 'dmabuf')
+    assert(ff.includes(profile === 'dmabuf' ? '--enable-nvdec' : '--disable-nvdec'))
+    assert(ff.includes(profile === 'dmabuf' ? '--enable-ffnvcodec' : '--disable-ffnvcodec'))
+    assert(mpv.includes(profile === 'dmabuf' ? '-Dcuda-hwaccel=enabled' : '-Dcuda-hwaccel=disabled'))
+    assert(mpv.includes(profile === 'dmabuf' ? '-Dcuda-interop=enabled' : '-Dcuda-interop=disabled'))
+  }
+  for (const platform of ['darwin', 'win32']) {
+    const steps = playbackSourcePlan({ ...input, platform })
+    assert(!steps.some(s => s.cwd === path.join('/sources', 'nv_codec_headers')))
+  }
+})
+
+test('mpv fence backport preserves native swapchain and rejects source drift', () => {
+  const source = '    if (gl->FenceSync) {\n        GLsync fence = gl->FenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);\n        if (fence) append(fence);\n    }'
+  const fixed = playbackMpvRenderFenceFix(source)
+  assert.equal(fixed, source.replace('if (gl->FenceSync)', 'if (gl->FenceSync && p->params.swap_buffers)'))
+  for (const changed of ['', source + source, fixed]) assert.throws(() => playbackMpvRenderFenceFix(changed), /source drift/)
 })

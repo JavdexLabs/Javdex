@@ -830,3 +830,29 @@ test('a newer operation failure arriving during successful copy retains the curr
   assert.equal(renderer!.root.findAllByProps({ role: 'alert' }).length, 1)
   assert.ok(JSON.stringify(renderer!.toJSON()).includes('操作失败，请查看错误详情'))
 })
+
+test('Intel Mac environments distinguish CPU-only text from system Metal speech support', async () => {
+  sharedEnvironment()
+  for (const environment of state.environments!) {
+    environment.gpu = { state: 'platform', backend: environment.group === 'speech' ? 'metal' : undefined }
+    environment.components = environment.components.filter(item => item.backend === 'cpu' || item.backend === 'common')
+  }
+  await mount()
+  const text = renderedText(renderer!.root)
+  assert.ok(text.includes('当前文本运行库仅支持 CPU。'))
+  assert.ok(text.includes('macOS 内置 Metal 加速支持，无需额外安装。实际启用状态见模型验证结果。'))
+  assert.equal(renderer!.root.findAllByType('button').some(node => String(node.props['aria-label']).includes('安装 GPU 加速支持')), false)
+})
+
+test('Metal CPU fallback remains visible without a CUDA or Vulkan device inventory', async () => {
+  sharedEnvironment()
+  state.acceleration!.devices = []
+  state.acceleration!.supported = false
+  for (const environment of state.environments!) environment.gpu = { state: 'platform', backend: 'metal' }
+  const variant = state.models[0].variants[0]
+  variant.validation = { state: 'passed', execution: { backend: 'cpu', reason: 'GPU 显存分配失败，已自动回退 CPU' } }
+  await mount()
+  assert.match(renderedText(row(variant.id)), /CPU 可用 · 显卡未启用/)
+  assert.match(renderedText(row(variant.id)), /显存不足，已验证 CPU/)
+  assert.equal(renderer!.root.findAllByType('button').some(node => renderedText(node) === '修复并验证'), false)
+})

@@ -14,7 +14,7 @@
 
 CPU、GPU 工具和权重分别校验与维护。基础运行环境是必需项，GPU 支持可选；模型下载不隐式安装 GPU 工具。共享运行库修复、迁移、删除和推理租约互斥，失败不先删除可用旧安装。
 
-Windows x64 NVIDIA 优先 CUDA，其他通过检测的独显使用 Vulkan；macOS 自动模式沿用 Metal，Linux 保留 CPU 路径。模型权重共用，各平台工具独立。Windows Whisper Vulkan 固定从 [Javdex Runtime whisper-b5130-r1](https://github.com/JavdexLabs/javdex-runtime/releases/tag/whisper-b5130-r1) 按需下载，主安装包不再内置它；完整旧 b5130 安装可复用。文本 Vulkan 仍由固定 llama.cpp 上游包提供，不能把两套引擎或它们的许可混为一谈。
+Windows x64 NVIDIA 优先 CUDA，其他通过检测的独显使用 Vulkan；macOS 自动模式沿用 Metal。Linux x64 支持 NVIDIA CUDA 与经原生后端确认的 Vulkan 显卡（含硬件核显，排除软件渲染器），保留独立 CPU 回退；Linux arm64 暂保留 CPU。模型权重共用，各平台工具独立。Windows Whisper Vulkan 固定从 [Javdex Runtime whisper-b5130-r1](https://github.com/JavdexLabs/javdex-runtime/releases/tag/whisper-b5130-r1) 按需下载，主安装包不再内置它；完整旧 b5130 安装可复用。文本 Vulkan 仍由固定 llama.cpp 上游包提供，不能把两套引擎或它们的许可混为一谈。
 
 地址、哈希、目标架构、平铺包文件闭包及接口由 [gpuManifest.ts](../apps/desktop/src/main/services/localModels/gpuManifest.ts)、[runtimeManifest.ts](../apps/desktop/src/main/services/localModels/runtimeManifest.ts) 和安装器验证。macOS 随包识别及音频 CLI 继续按原签名流程分发；模型许可与运行库许可分别保留，见[第三方声明](THIRD_PARTY_NOTICES.md#本地-ai-运行库)。
 
@@ -32,8 +32,14 @@ Windows x64 NVIDIA 优先 CUDA，其他通过检测的独显使用 Vulkan；macO
 
 ## 平台与验证
 
-运行要求以 [runtimeManifest.ts](../apps/desktop/src/main/services/localModels/runtimeManifest.ts) 为准：Windows x64、macOS 13.3+ arm64／x64，Linux arm64／x64 需要 glibc 2.38+、GCC 14 C++ 运行库和 xz-utils。支持文件管理不代表宿主满足推理条件；拒绝不兼容环境，不静默选择旧引擎。
+运行要求以 [runtimeManifest.ts](../apps/desktop/src/main/services/localModels/runtimeManifest.ts) 为准：Windows x64、macOS 13.3+ arm64／x64，Linux arm64／x64 需要 glibc 2.38+、GCC 14 C++ 运行库。支持文件管理不代表宿主满足推理条件；拒绝不兼容环境，不静默选择旧引擎。
 
 实现入口为 `services/localModels`、`services/aiSubtitles`、播放共用原生字幕层及对应同名测试。定向测试按目录、安装/回滚、用途、租约、取消、缓存和显示选择，重放命令与历史 CPU/GPU、Windows、macOS/Linux 证据见[实施与验收历史](archive/local-ai/implementation-and-validation-2026-10.md)。
 
 当前固定运行库与整套 0.9.0 的发布 CI、来源及替换边界见[迁移审计](reviews/whisper-vulkan-runtime-migration.md)。历史 GPU 实测只证明当时设备与分发路径，新按需发行的托管 CPU 烟测不冒充物理 GPU 通过；独立公开软件产物验收按用户要求未执行。
+
+## 固定依赖分发
+
+已发布的平台语音、翻译、音频提取工具及小型 VAD 辅助模型由 Javdex Runtime 固定发行供应，客户端仍在源码中锁定附件大小和 SHA-256，不从远程清单自动换库。macOS AI 工具不再随应用打包；首次准备能力包含真实网络下载计划。原生构建、签名和对应源码移至运行库仓库，模型权重、用途、设备策略和 CPU 回退流程不变。有效旧 macOS b5130 Whisper 经完整逐文件验证后复用，损坏时下载固定发行修复。
+
+Linux 新增文本 GPU 包暂固定使用 llama.cpp b11435 官方 Linux 发行（CUDA 12.8、Vulkan 和 CUDA 运行依赖），大小与 SHA-256 来自对应发行附件。Whisper Linux CUDA/Vulkan 固定使用已发布的 `whisper-b5130-linux-gpu-r1`，两种后端均通过本机实际推理与安装验证。构建配方与验收见 [Linux AI GPU 验收](reviews/linux-local-ai-gpu-20261023.md)。

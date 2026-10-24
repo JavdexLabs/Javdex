@@ -23,6 +23,14 @@ description: 汇总 Javdex 常见报错与排查指南：操作系统安全放�
 
 ---
 
+### 3. 图形驱动故障导致主界面无法显示
+
+以下启动保护为当前源码新增功能，尚未包含在已发布的 `0.9.1-beta.1` 安装包中。
+
+Windows、macOS 和 Linux 使用相同规则：首次显示主窗口前，若检测到明确的 GPU 进程启动故障，最多自动重启一次，暂时使用软件界面与 CPU 视频。恢复后的提示可继续使用、重新尝试 GPU 或查看启动日志。再次失败会停止自动重试并显示日志位置；普通初始化错误不会被当作显卡故障切换。
+
+也可以完全退出应用后，在启动命令末尾添加 `--javdex-software`，手动使用兼容模式。它同时影响界面与视频；`--javdex-cpu` 仅强制视频使用 CPU。启动日志通常位于用户数据目录的 `logs/startup.log`，以错误提示中的实际路径为准。此模式不能修复缺失运行库或不受支持的系统版本。
+
 ## 内置播放与本地 AI 字幕问题
 
 ### 1. Linux 下点击内置播放提示“需要 X11 / XWayland 环境”
@@ -38,17 +46,17 @@ description: 汇总 Javdex 常见报错与排查指南：操作系统安全放�
 ### 2. 本地 AI 日中字幕在 macOS 或 Linux 上提示系统环境不支持
 - **原因**：`runtimeInstaller.ts` 在启动本地 AI 运行库前会检查宿主系统基线：
   - **macOS**：本地 AI 字幕与本地模型翻译要求 **macOS 13.3+（Ventura，`Darwin >= 22.4`）**（普通内置视频播放仅需 macOS 12.0+）。
-  - **Linux**：要求 **`glibc >= 2.38`**、GCC 14 兼容的 `libstdc++6` 以及用于解压运行库的 **`xz-utils`**。
+  - **Linux**：要求 **`glibc >= 2.38`**、GCC 14 兼容的 `libstdc++6`。
 - **解决方式**：
-  - Linux 用户可通过 `ldd --version` 核对 glibc 版本，并执行 `sudo apt-get install xz-utils` 安装解压工具。
+  - Linux 用户可通过 `ldd --version` 核对 glibc 版本，并检查 GCC C++ 运行库版本。工具从 Javdex Runtime 按需下载，不需要额外安装 `xz-utils`。
 
 ### 3. 开启 CUDA / Vulkan 加速后为什么实际回退到了 CPU 推理？
-- **原因**：为防止显存溢出（OOM）导致播放器或显卡驱动崩溃，`runtimeAcceleration.ts` 在每次启动推理前会计算安全显存预算：
-  $$\text{可用显存} = \text{设备总显存} - 2048\text{ MiB} - \text{当前已用显存}$$
-  - 语音识别（`kotoba`）要求可用显存 $\ge \lceil \text{模型体积} \times 3 + 1024 \rceil\text{ MiB}$。
-  - 字幕/文本翻译（`hy-mt2-7b` / `qwen3`）要求可用显存 $\ge \lceil \text{模型体积} \times 1.4 + 1024 \rceil\text{ MiB}$。
-- **解决方式**：
-  - 如果你的显卡显存为 6GB ~ 8GB，建议在“设置 -> AI 服务 -> 功能”中将翻译模型从体积较大的 `HY-MT2 7B` 切换为轻量快速的 **`Qwen3 1.7B`**（默认量化 `qwen3-q4_k_m`），并关闭其他占用大量显存的游戏或程序。
+
+GPU 运行库未安装、驱动不兼容、设备不可用或显存预算不足都可能触发 CPU 回退。“已检测到显卡”只代表枚举成功，应以所选模型下方的实际验证结果为准。
+
+- 在“设置 → AI 服务 → 本地模型”安装对应的 GPU 加速支持，再点击“重新检测并验证”。Linux 的 CUDA 运行依赖随可选运行库下载，无需安装完整开发工具包；Vulkan 仍需要系统的加载器和厂商驱动。
+- 查看该模型显示的回退原因。可以选择更小的模型或量化精度、关闭其他占用显存的程序后再试。
+- 文本引擎可只将部分层放在 GPU；显存预算不足不一定意味着完全不能加速。语音和文本分别验证，不能将其中一个成功当作另一个已通过。
 
 ---
 
@@ -62,7 +70,7 @@ description: 汇总 Javdex 常见报错与排查指南：操作系统安全放�
 - **原因**：容器内业务进程默认以 `UID 1000` / `GID 1000` 运行，且每个媒体库根目录必须可写以创建 `.javdex-root` 身份标记文件。
 - **解决方式**：
   1. 检查 `docker-compose.yml` 中媒体目录是否以 `:rw`（读写）而非 `:ro` 挂载。
-  2. 将 `JAVDEX_BUSINESS_UID` 与 `JAVDEX_BUSINESS_GID` 环境变量设置为宿主机上拥有该媒体目录读写权限的实际 UID/GID。
+  2. 将 `JAVDEX_SERVER_UID` 与 `JAVDEX_SERVER_GID` 环境变量设置为宿主机上拥有该媒体目录读写权限的实际 UID/GID。
 
 ### 3. 桌面端连接远程服务端报错 `JAVDEX_CERTIFICATE_MISMATCH`（证书指纹不匹配）
 - **原因**：桌面端首次连接服务端时会通过 TOFU（Trust On First Use）机制将 `/program/state/tls/` 中的自签名证书 SHA-256 指纹固定在本地 `server-certificates.bin` 中。如果服务端删除或重建了 `/program` 卷，新生成的证书指纹与本地记录不一致，客户端会自动阻断请求以防御中间人攻击。

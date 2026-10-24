@@ -2,7 +2,7 @@
 // prerequisites; no package-manager codec or Homebrew libmpv enters this plan.
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { readFileSync, statSync } from 'node:fs'
+import { copyFileSync, existsSync, readFileSync, statSync } from 'node:fs'
 import path from 'node:path'
 import { playbackFileSha256 } from './playback-runtime.mjs'
 import { playbackNativeBuild } from './playback-native-build.mjs'
@@ -31,6 +31,27 @@ export function playbackPkgConfigEnvironment(prefix, platform, arch) {
   }
 }
 
+export function playbackWindowsSourceEnvironment(prefix, runtimeSymbols) {
+  // Meson's built-in dependency lookups also inspect GCC's library search
+  // directories. -L in LDFLAGS alone does not keep them out of MSYS2 codecs.
+  const fenvDefault = /\b[RDS]\s+__mingw_fe_dfl_env(?:\r?\n|$)/.test(runtimeSymbols)
+  return { libraryPath: path.join(prefix, 'lib'), fenvDefault,
+    linkArgs: ['-static', '-static-libgcc', '-static-libstdc++',
+      // Recent MinGW CRTs put this definition in CRT_fp10.o. DLL startup does
+      // not pull it in before fesetenv; retain the real CRT definition.
+      ...(fenvDefault ? ['-Wl,--undefined=__mingw_fe_dfl_env'] : [])] }
+}
+
+export function stageWindowsStaticZlib(prefix) {
+  const source = path.join(prefix, 'lib/libzs.a'), destination = path.join(prefix, 'lib/libz.a')
+  assert.ok(existsSync(source), 'Missing pinned Windows static zlib archive')
+  const sha256 = playbackFileSha256(source)
+  if (existsSync(destination)) assert.equal(playbackFileSha256(destination), sha256, 'Refusing to replace a different Windows zlib archive')
+  else copyFileSync(source, destination)
+  // zlib 1.3.2 gives static Windows archives an s suffix, but its .pc uses -lz.
+  return { source: 'lib/libzs.a', destination: 'lib/libz.a', sha256 }
+}
+
 export function playbackBuildFingerprint({ platform, arch, electronVersion, toolchain, files }) {
   const hash = createHash('sha256').update(JSON.stringify({ platform, arch, electronVersion, toolchain }))
   for (const file of [...files].sort()) hash.update(file).update(readFileSync(file))
@@ -53,9 +74,11 @@ export function playbackSourceNativePlan(input) {
   return steps
 }
 
-export function playbackSourcePlan({ platform, arch, source, build, prefix, tools, jobs }) {
+export function playbackSourcePlan({ platform, arch, source, build, prefix, tools, jobs, linuxProfile = platform === 'linux' ? 'dmabuf' : undefined }) {
   assert.ok(['darwin', 'linux', 'win32'].includes(platform), 'Unsupported playback host')
   assert.ok(['x64', 'arm64'].includes(arch) && (platform !== 'win32' || arch === 'x64'), 'Unsupported playback architecture')
+  assert.ok(linuxProfile === undefined || ['dmabuf', 'software'].includes(linuxProfile), 'Unsupported Linux playback profile')
+  assert.ok(linuxProfile === undefined || platform === 'linux', 'DMA-BUF profile requires Linux')
   const steps = [], dir = id => path.join(source, id), output = id => path.join(build, id)
   const step = (command, args, cwd) => steps.push({ command, args, cwd })
   const make = cwd => { step('make', [`-j${jobs}`], cwd); step('make', ['install'], cwd) }
@@ -89,20 +112,26 @@ export function playbackSourcePlan({ platform, arch, source, build, prefix, tool
       '--openssldir=/etc/ssl', '--libdir=lib', 'no-shared', 'no-tests', 'no-module', '-fPIC'], output('openssl'))
     step('make', [`-j${jobs}`], output('openssl')); step('make', ['install_sw'], output('openssl'))
   }
+  // Header-only API shim: the NVIDIA driver stays on the host. No CUDA toolkit.
+  if (platform === 'linux' && linuxProfile === 'dmabuf') {
+    step('make', [`PREFIX=${prefix}`, 'install'], dir('nv_codec_headers'))
+  }
   configure('ffmpeg', ['--enable-static', '--disable-shared', '--enable-pic', '--enable-gpl', '--enable-version3', '--disable-autodetect',
     `--pkg-config=${path.join(prefix, 'bin', platform === 'win32' ? 'pkgconf.exe' : 'pkgconf')}`,
     '--disable-programs', '--disable-doc', '--disable-debug', '--disable-avdevice', '--disable-encoders', '--enable-encoder=png,mjpeg',
     '--disable-muxers', '--enable-muxer=image2', '--enable-libdav1d', '--enable-zlib', '--pkg-config-flags=--static',
     ...({ darwin: ['--enable-videotoolbox', '--enable-audiotoolbox', '--enable-securetransport'],
       win32: ['--target-os=mingw32', '--enable-schannel', '--enable-d3d11va', '--enable-dxva2', '--enable-d3d12va'],
-      linux: ['--enable-openssl', '--enable-vaapi'] }[platform])])
+      linux: ['--enable-openssl', linuxProfile === 'software' ? '--disable-vaapi' : '--enable-vaapi', ...(linuxProfile === 'dmabuf' ? ['--enable-ffnvcodec', '--enable-nvdec', '--enable-cuda', '--disable-nvenc'] : ['--disable-ffnvcodec', '--disable-nvdec', '--disable-cuda']), ...(linuxProfile === 'software' ? ['--disable-hwaccels'] : [])] }[platform])])
   step('make', ['-C', path.join(dir('lua'), 'src'), `-j${jobs}`, 'liblua.a',
     `MYCFLAGS=-O2 -fPIC ${platform === 'win32' ? '-DLUA_DL_DLL' : '-DLUA_USE_POSIX -DLUA_USE_DLOPEN'}`])
-  meson('mpv', ['-Dlibmpv=true', '-Dcplayer=false', '-Dgpl=true', '-Dbuild-date=false', '-Dgl=enabled', '-Dplain-gl=enabled',
+  meson('mpv', ['-Dlibmpv=true', '-Dcplayer=false', '-Dgpl=true', '-Dbuild-date=false', `-Dgl=${linuxProfile === 'software' ? 'disabled' : 'enabled'}`, `-Dplain-gl=${linuxProfile === 'software' ? 'disabled' : 'enabled'}`,
     '-Diconv=enabled', '-Dzlib=enabled', '-Dlua=lua5.2',
     ...({ darwin: ['-Dcocoa=enabled', '-Dswift-build=enabled', `-Dswift-flags=-target ${arch === 'x64' ? 'x86_64' : 'arm64'}-apple-macos12.0`, '-Dgl-cocoa=enabled', '-Dcoreaudio=enabled', '-Dvideotoolbox-gl=enabled'],
       win32: ['-Dwin32-threads=enabled', '-Dgl-win32=enabled', '-Dwasapi=enabled', '-Dd3d-hwaccel=enabled', '-Dd3d9-hwaccel=enabled'],
-      linux: ['-Dalsa=enabled', '-Dx11=enabled', '-Dgl-x11=enabled', '-Dvaapi=enabled', '-Dvaapi-x11=enabled'] }[platform])], 'shared')
+      linux: linuxProfile === 'software'
+        ? ['-Dcuda-hwaccel=disabled', '-Dcuda-interop=disabled', '-Dpulse=enabled', '-Dalsa=disabled', '-Dx11=disabled', '-Dgl-x11=disabled', '-Dvaapi=disabled', '-Dvaapi-x11=disabled', '-Dvaapi-drm=disabled']
+        : ['-Dcuda-hwaccel=enabled', '-Dcuda-interop=enabled', '-Dpulse=enabled', '-Dalsa=disabled', '-Dx11=disabled', '-Dgl-x11=disabled', '-Dvaapi=enabled', '-Dvaapi-x11=disabled', '-Dvaapi-drm=enabled'] }[platform])], 'shared')
   return steps
 }
 
@@ -132,4 +161,21 @@ libass = declare_dependency(
     link_args: run_command(find_program(${executable}),
         '--libs-only-l', '--libs-only-other', '--static', 'libass',
         check: true).stdout().strip().split())`)
+}
+
+// libmpv's VAAPI DRM display creation needs libva-drm and a render fd, not
+// mpv's KMS window output, VT switching, EDID parser or libdisplay-info.
+export function playbackLinuxVaapiRenderDependency(text) {
+  const before = "get_option('vaapi-drm').require(libva.found() and features['drm'])"
+  assert.equal(text.split(before).length, 2, 'Pinned VAAPI DRM recipe drift')
+  return text.replace(before, "get_option('vaapi-drm').require(libva.found())")
+}
+
+// Backport mpv f74adc4243bd9e1a8ee96d187c939e6232510650 (#17217).
+// Render API clients have no native swap_buffers callback to retire this queue.
+export function playbackMpvRenderFenceFix(source) {
+  const before = '    if (gl->FenceSync) {\n        GLsync fence = gl->FenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);'
+  const after = before.replace('if (gl->FenceSync)', 'if (gl->FenceSync && p->params.swap_buffers)')
+  assert.equal(source.split(before).length, 2, 'Pinned mpv render fence source drift')
+  return source.replace(before, after)
 }

@@ -10,8 +10,9 @@ import type { LocalModelRef, LocalModelUsage, LocalModelReadiness, LocalAccelera
 import type { LocalModelGroup, LocalRuntimeComponent, LocalRuntimeEnvironment, LocalPreparationPlan, LocalDependencyCheck } from '@shared/desktop/localModels'
 import { createAiRuntimeInstaller, localModelRuntimeSupported } from './runtimeInstaller'
 import { AI_RUNTIME_PLATFORM_MESSAGE, currentAiRuntimeTarget } from './runtimeManifest'
+import { runtimeSupportsMetal } from './runtimeDistributionAssets'
 import { gpuRuntimeAssets } from './gpuManifest'
-import { detectLocalGpuDevices, type LocalGpuRuntime } from './runtimeAcceleration'
+import { localGpuTargetSupported, detectLocalGpuDevices, type LocalGpuRuntime } from './runtimeAcceleration'
 import { AI_RUNTIME_LICENSES } from './runtimeLicenses'
 import { atomicWrite } from '../../utils/atomicWrite'
 import { MODEL_STORE_ENTRIES, canonicalStoragePath, localAiDirectories, ensureModelStore, ensureStorageDirectory, cleanModelTemporaryFiles, writeModelManifest, runtimeAssetDirectory, modelDownloadFile } from './modelStorage'
@@ -62,7 +63,6 @@ export function createLocalModelManager(userData: string, options: {
   installer?: typeof createAiRuntimeInstaller
   inference?: (paths: Parameters<typeof createLocalTextInference>[0]) => TextEngine
   runtimeSupported?: typeof localModelRuntimeSupported
-  bundleRoot?: string
   detectDevices?: typeof detectLocalGpuDevices
   validate?: typeof validateModelRuntime
 } = {}) {
@@ -120,9 +120,9 @@ export function createLocalModelManager(userData: string, options: {
   let subtitleLeaseInstaller: ReturnType<typeof createAiRuntimeInstaller> | null = null
   const listeners = new Set<() => void>()
   const supported = options.runtimeSupported ?? localModelRuntimeSupported
-  const installer = (selection = selected, model = translationModel) => (options.installer ?? createAiRuntimeInstaller)(directory, undefined, localModelAssets(selection, model, undefined, downloadSource), { bundleRoot: options.bundleRoot })
+  const installer = (selection = selected, model = translationModel) => (options.installer ?? createAiRuntimeInstaller)(directory, undefined, localModelAssets(selection, model, undefined, downloadSource))
   const gpuInstaller = (backend: 'cuda' | 'vulkan') => (options.installer ?? createAiRuntimeInstaller)(directory, undefined,
-    [...gpuRuntimeAssets(currentAiRuntimeTarget(), backend), ...localModelAssets(selected, translationModel).filter(asset => !asset.archive)], { bundleRoot: options.bundleRoot })
+    [...gpuRuntimeAssets(currentAiRuntimeTarget(), backend), ...localModelAssets(selected, translationModel).filter(asset => !asset.archive)])
   const runtimePaths = (runtime: ReturnType<typeof createAiRuntimeInstaller>, refs = {
     recognition: usage.subtitleRecognition.variant, translation: usage.subtitleTranslation.variant
   }) => {
@@ -163,15 +163,15 @@ export function createLocalModelManager(userData: string, options: {
       target: currentAiRuntimeTarget(), supported: supported(), installed: variant => installedVariants.get(variant) === true, resumed: id => resumed.get(id) ?? 0 })
     return { ...value, items: value.items.map(item => ({ ...item, source: sourceUrl(item.source) })) }
   }
-  const detectionComplete = (): boolean => devices.length > 0 || !!gpuRuntimes.vulkan?.translator || process.platform !== 'win32'
+  const detectionComplete = (): boolean => (process.platform !== 'linux' && devices.length > 0) || !!gpuRuntimes.vulkan?.translator || !localGpuTargetSupported()
   function environments(): LocalRuntimeEnvironment[] {
     return (['speech', 'text'] as const).map(group => {
       const backend = runtimeBackend(group, accelerationPolicy, devices, components)
       const shared = components.filter(item => item.group === group)
       const gpuItems = shared.filter(item => item.backend === backend)
       return { group, components: shared.map(item => ({ ...item, source: sourceUrl(item.source) })), cpuReady: supported() && shared.filter(item => item.backend === 'cpu' || item.backend === 'common').every(item => item.installed),
-        gpu: { backend: process.platform === 'darwin' && accelerationPolicy.mode === 'auto' ? 'metal' : backend,
-          state: accelerationPolicy.mode === 'cpu' ? 'disabled' : process.platform !== 'win32' ? 'platform' : backend
+        gpu: { backend: accelerationPolicy.mode === 'auto' && runtimeSupportsMetal(currentAiRuntimeTarget(), group === 'speech' ? 'whisper' : 'translator') ? 'metal' : backend,
+          state: accelerationPolicy.mode === 'cpu' ? 'disabled' : !localGpuTargetSupported() || !shared.some(item => item.backend === 'cuda' || item.backend === 'vulkan') ? 'platform' : backend
             ? gpuItems.length > 0 && gpuItems.every(item => item.installed) ? 'ready' : 'missing'
             : detectionComplete() ? 'unavailable' : 'unchecked' },
         preparation: plan([group]), gpuPreparation: plan([group], [], true) }
@@ -199,7 +199,7 @@ export function createLocalModelManager(userData: string, options: {
     [usage.subtitleTranslation.model]: usage.subtitleTranslation.variant })
   const subtitleInstaller = (): ReturnType<typeof createAiRuntimeInstaller> => subtitleLeaseInstaller ?? installer(subtitleSelection(), usage.subtitleTranslation.model)
   const snapshotValue = (): LocalModelSnapshot => ({ revision, usage: structuredClone(usage), supported: supported(), directory, defaultDirectory, downloadSource,
-    acceleration: { supported: process.platform === 'win32' && process.arch === 'x64', policy: { ...accelerationPolicy }, devices: structuredClone(devices), detectionComplete: detectionComplete(), ...structuredClone(executionStatus), error: accelerationError },
+    acceleration: { supported: localGpuTargetSupported(), policy: { ...accelerationPolicy }, devices: structuredClone(devices), detectionComplete: detectionComplete(), ...structuredClone(executionStatus), error: accelerationError },
     environments: environments(), checkingDependencies, preparation: preparation && structuredClone(preparation),
     storage: storage && structuredClone(storage), operationError: error && operationError?.message === error ? structuredClone(operationError) : undefined,
     translation, translationModel, operation, activeModel, activeVariant, downloadBytes, downloadTotal, downloadLabel, downloadKind, error,
@@ -664,7 +664,7 @@ export function createLocalModelManager(userData: string, options: {
     },
     async prepareAcceleration(model?: LocalModelId, requestedVariant?: string): Promise<void> {
       await ready; await validation.pause(); available([...LOCAL_MODEL_IDS])
-      if (process.platform !== 'win32' || process.arch !== 'x64') throw new Error('当前平台沿用已有 CPU／Metal 运行库')
+      if (!localGpuTargetSupported() || process.arch !== 'x64') throw new Error('当前平台沿用已有 CPU／Metal 运行库')
       if (configInvalid) throw new Error('本地模型配置损坏，请先重新保存用途设置')
       if (model) localModelVariant(model, requestedVariant ?? selected[model])
       const groups: LocalModelGroup[] = model ? [model === 'kotoba' ? 'speech' : 'text'] : ['speech', 'text']

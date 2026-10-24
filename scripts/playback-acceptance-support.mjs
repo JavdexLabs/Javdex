@@ -9,7 +9,8 @@ import { _electron } from 'playwright-core'
 export { recordAcceptanceCleanup } from './playback-acceptance-cleanup.mjs'
 
 export const root = process.cwd()
-export const output = path.join(root, 'out/playback-acceptance')
+export const output = process.env.JAVDEX_PLAYBACK_ACCEPTANCE_OUTPUT
+  ? path.resolve(process.env.JAVDEX_PLAYBACK_ACCEPTANCE_OUTPUT) : path.join(root, 'out/playback-acceptance')
 const acceptanceProcesses = new WeakMap()
 export const acceptanceProcess = application => acceptanceProcesses.get(application) ?? application.process()
 
@@ -22,7 +23,7 @@ export function createAcceptanceDirectory(suffix = '') {
 function macAcceptanceBundle(originalPlist) {
   const version = /<key>CFBundleVersion<\/key>\s*<string>([^<]+)/.exec(originalPlist)?.[1]
   assert.match(version ?? '', /^\d+\.\d+\.\d+(?:[.-][a-zA-Z0-9.-]+)?$/, 'Electron bundle has a safe version')
-  return path.join(output, `Javdex Playback Acceptance-${version}.app`)
+  return path.join(root, 'out/playback-acceptance', `Javdex Playback Acceptance-${version}.app`)
 }
 
 export function seedAcceptanceCatalog(directory, media) {
@@ -37,9 +38,10 @@ export function seedAcceptanceCatalog(directory, media) {
 }
 
 export async function launchAcceptance(directory, logName = 'application.log', args = []) {
-  assert.ok(['darwin', 'win32'].includes(process.platform), 'this acceptance host covers macOS and Windows only')
+  assert.ok(['darwin', 'win32', 'linux'].includes(process.platform), 'unsupported desktop acceptance host')
   assert.match(logName, /^[a-z-]+\.log$/)
-  if (process.platform === 'win32') {
+  if (process.platform !== 'darwin' || process.env.JAVDEX_PLAYBACK_ACCEPTANCE_EXECUTABLE) {
+    if (process.platform === 'linux' && !args.some(v => /^--javdex-(?:x11|wayland)$/.test(v))) args = [...args, process.env.WAYLAND_DISPLAY && !process.env.DISPLAY ? '--javdex-wayland' : '--javdex-x11']
     const env = { ...process.env, JAVDEX_TEST_USER_DATA: directory }
     delete env.ELECTRON_RUN_AS_NODE
     const packaged = process.env.JAVDEX_PLAYBACK_ACCEPTANCE_EXECUTABLE
@@ -47,7 +49,7 @@ export async function launchAcceptance(directory, logName = 'application.log', a
     if (packaged) {
       assert.ok(path.isAbsolute(packaged) && fs.statSync(packaged).isFile(), 'packaged acceptance executable must exist')
       const pathKey = Object.keys(env).find(key => key.toLowerCase() === 'path') ?? 'Path'
-      env[pathKey] = path.join(process.env.SystemRoot, 'System32') + path.delimiter + process.env.SystemRoot
+      env[pathKey] = process.platform === 'win32' ? path.join(process.env.SystemRoot, 'System32') + path.delimiter + process.env.SystemRoot : '/usr/bin:/bin'
       delete env.JAVDEX_MPV_PREFIX
       cwd = path.join(directory, 'empty-cwd')
       fs.mkdirSync(cwd, { recursive: true })
@@ -94,26 +96,71 @@ export async function waitForValue(read, predicate, description, timeout = 20000
 export const waitForState = (page, predicate, description, timeout) =>
   waitForValue(() => page.evaluate(() => window.api.playback.snapshot()), predicate, description, timeout)
 
-// Only observation: inspect() cannot consume the main session's events or actions.
-// Keep diagnostics projected; raw tracks can contain local paths or signed locators.
-export const nativeEvidence = application => application.evaluate(({ app }) => {
-  const require = process.getBuiltinModule('module').createRequire(app.getAppPath() + '/package.json')
-  const state = require(app.isPackaged ? process.resourcesPath + '/native-playback/playback.node' : app.getAppPath() + '/out/native-playback/playback.node').inspect()
-  return { alive: state.alive, loadedFiles: state.loadedFiles, presentedFrames: state.presentedFrames,
+// Read the active isolated host; observing evidence must never load libmpv into
+// Electron main. Project fields because raw tracks can contain private locators.
+export const nativeEvidence = application => application.evaluate(() => {
+  const request = { cpu: { alive: false }, gpu: { alive: false } }
+  process.getBuiltinModule('diagnostics_channel').channel('javdex.playback.host.statistics').publish(request)
+  const state = request.cpu.alive ? request.cpu : request.gpu
+  // Native production does not prove physical screen presentation.
+  return { alive: state.alive, loadedFiles: state.loadedFiles, pid: state.pid,
+    renderedFrames: state.nativeFrames, presentedFrames: undefined,
+    pixelWidth: state.pixelWidth, pixelHeight: state.pixelHeight,
+    subtitleId: state.sid, subtitleCommandsPending: state.subtitleCommandsPending,
     commandErrors: state.commandErrors, position: state['time-pos'], audioPosition: state['audio-pts'],
     audioTracks: JSON.parse(state['track-list'] ?? '[]').filter(track => track.type === 'audio').map(track => ({
       id: track.id, title: track.title, language: track.lang, codec: track.codec, channels: track['demux-channel-count']
     })) }
 })
 
+// Session selection is optimistic; wait for the actual producer and current
+// physical viewport before comparing subtitle pixels.
+export const waitForNativeFrame = (application, page, subtitleId) => waitForValue(async () => {
+  const native = await nativeEvidence(application)
+  const canvas = await page.evaluate(() => {
+    const c = document.querySelector('canvas[data-playback-surface]'), r = c.getBoundingClientRect()
+    return { width: c.width, height: c.height, expectedWidth: Math.round(r.width * devicePixelRatio), expectedHeight: Math.round(r.height * devicePixelRatio) }
+  })
+  return { native, canvas }
+}, ({ native, canvas }) => native.alive && native.renderedFrames > 0
+  && canvas.width === canvas.expectedWidth && canvas.height === canvas.expectedHeight
+  && native.pixelWidth === canvas.width && native.pixelHeight === canvas.height
+  && (subtitleId === undefined || native.subtitleId === String(subtitleId ?? 'no') && native.subtitleCommandsPending === 0),
+'native frame geometry/subtitle acknowledgement', 5000)
+
+export const captureAcceptanceImage = (application, projection) => waitForValue(() => application.evaluate(async (dependencies, projection) => {
+  const { BrowserWindow } = dependencies
+  const window = BrowserWindow.getAllWindows()[0]
+  const geometry = `(() => {
+    const canvas = document.querySelector('canvas[data-playback-surface]'), r = canvas.getBoundingClientRect();
+    const root = canvas.closest('[data-playback-session]');
+    const toolbar = root.querySelector('input[aria-label="播放进度"]')?.parentElement.parentElement;
+    const rendererFullscreen = root.dataset.rendererFullscreen === 'true';
+    const controlsTop = rendererFullscreen && root.dataset.controlsVisible === 'true' && toolbar ? toolbar.getBoundingClientRect().top - r.y : undefined;
+    return { x: r.x, y: r.y, width: r.width, height: r.height, windowWidth: innerWidth,
+      controlsTop, rendererFullscreen };
+  })()`
+  const rect = await window.webContents.executeJavaScript(geometry)
+  const image = await window.webContents.capturePage()
+  const after = await window.webContents.executeJavaScript(geometry)
+  if (JSON.stringify(rect) !== JSON.stringify(after)) return null
+  const scale = image.getSize().width / rect.windowWidth
+  const crop = image.crop({ x: Math.round(rect.x * scale), y: Math.round(rect.y * scale), width: Math.round(rect.width * scale), height: Math.round(rect.height * scale) })
+  const frame = { ...crop.getSize(), data: crop.toBitmap(),
+    controlsTop: rect.controlsTop === undefined ? undefined : Math.round(rect.controlsTop * scale), rendererFullscreen: rect.rendererFullscreen }
+  // Inspect large bitmaps where they were captured. A 5K BGRA frame is 59 MB;
+  // serializing it to the controller and back can exhaust a readiness deadline
+  // on the first stale image, before the actual new frame has been sampled.
+  return projection ? (0, eval)('(' + projection.inspect + ')')(dependencies, { ...projection.options, frame }) : frame
+}, projection), Boolean, 'stable compositor capture geometry', 5000)
+
 // One-shot render readback for acceptance only. Frames never cross product IPC.
 export async function captureAcceptanceFrame(application, directory, name, { baseline = false, compare = false, whiteBounds = false } = {}) {
   assert.match(name, /^[a-z0-9-]+$/)
   const relative = path.relative(output, path.resolve(directory))
   assert.ok(!relative.startsWith('..') && !path.isAbsolute(relative), 'frame output must remain in ignored acceptance artifacts')
-  return application.evaluate(({ app, nativeImage }, { directory, name, baseline, compare, whiteBounds }) => {
+  const inspect = ({ app, nativeImage }, { directory, name, baseline, compare, whiteBounds, frame }) => {
     const require = process.getBuiltinModule('module').createRequire(app.getAppPath() + '/package.json')
-    const frame = require(app.isPackaged ? process.resourcesPath + '/native-playback/playback.node' : app.getAppPath() + '/out/native-playback/playback.node').capture()
     require('node:fs').writeFileSync(require('node:path').join(directory, name + '.png'),
       nativeImage.createFromBitmap(frame.data, { width: frame.width, height: frame.height }).toPNG())
     let visiblePixels = 0, differentPixels = 0, bottom = -1
@@ -124,30 +171,35 @@ export async function captureAcceptanceFrame(application, directory, name, { bas
     if (compare && (!previous || previous.width !== frame.width || previous.height !== frame.height)) throw new Error('frame comparison geometry changed')
     for (let y = 0; y < frame.height; y++) for (let x = 0; x < frame.width; x++) {
       const offset = (y * frame.width + x) * 4
-      if ([0, 1, 2].some(channel => frame.data[offset + channel] > 30)) visiblePixels++
-      if (compare && [0, 1, 2].some(channel => Math.abs(frame.data[offset + channel] - previous.data[offset + channel]) > 50)) {
+      const blue = frame.data[offset], green = frame.data[offset + 1], red = frame.data[offset + 2]
+      if (blue > 30 || green > 30 || red > 30) visiblePixels++
+      if (compare && (Math.abs(blue - previous.data[offset]) > 50 || Math.abs(green - previous.data[offset + 1]) > 50 || Math.abs(red - previous.data[offset + 2]) > 50)) {
         differentPixels++; bottom = y
         differentQuadrants[(y < frame.height / 2 ? 'top' : 'bottom') + (x < frame.width / 2 ? 'Left' : 'Right')]++
-        const [blue, green, red] = frame.data.subarray(offset, offset + 3)
-        if (blue > 180 && green > 180 && red < 80) changedColors.cyan++
-        if (blue > 180 && red > 180 && green < 80) changedColors.magenta++
-        if (green > 180 && blue < 80 && red < 80) changedColors.green++
-        if (red > 180 && green > 180 && blue < 80) changedColors.yellow++
-        if (red > 180 && green < 80 && blue < 80) changedColors.red++
+        // Small ASS glyphs can consist entirely of antialiased coverage over
+        // gray. Identify their hue by channel separation, not full opacity.
+        if (blue > 96 && green > 96 && blue > red + 48 && green > red + 48) changedColors.cyan++
+        if (blue > 96 && red > 96 && blue > green + 48 && red > green + 48) changedColors.magenta++
+        if (green > 96 && green > blue + 48 && green > red + 48) changedColors.green++
+        if (red > 96 && green > 96 && red > blue + 48 && green > blue + 48) changedColors.yellow++
+        if (red > 96 && red > green + 48 && red > blue + 48) changedColors.red++
         if (red > 180 && green > 180 && blue > 180) changedColors.white++
       }
-      if (whiteBounds && [0, 1, 2].every(channel => frame.data[offset + channel] > 220)) {
+      if (whiteBounds && blue > 220 && green > 220 && red > 220) {
         whitePixels++
         left = Math.min(left, x); top = Math.min(top, y); right = Math.max(right, x); whiteBottom = Math.max(whiteBottom, y)
       }
     }
     if (baseline) globalThis.playbackAcceptanceBaseline = frame
-    if (compare) delete globalThis.playbackAcceptanceBaseline
-    return { width: frame.width, height: frame.height, controlsTop: frame.controlsTop, visiblePixels, differentPixels, bottom,
+    // Keep the baseline for bounded readiness reads. A later explicit baseline
+    // replaces it; consuming it on the first stale frame prevents real retries.
+    return { width: frame.width, height: frame.height, controlsTop: frame.controlsTop, rendererFullscreen: frame.rendererFullscreen,
+      visiblePixels, differentPixels, bottom,
       differentQuadrants, changedColors, whitePixels,
       whiteBounds: whiteBounds && right >= left ? { x: left, y: top, width: right - left + 1, height: whiteBottom - top + 1 } : null,
       sha256: require('node:crypto').createHash('sha256').update(frame.data).digest('hex') }
-  }, { directory: path.resolve(directory), name, baseline, compare, whiteBounds })
+  }
+  return captureAcceptanceImage(application, { inspect: inspect.toString(), options: { directory: path.resolve(directory), name, baseline, compare, whiteBounds } })
 }
 
 export async function closeAcceptance(application) {

@@ -49,3 +49,17 @@ test('runtime inventory paths reject non-portable paths', () => {
   for (const name of ['', '.', '..', '../bin', '/bin', 'a//b', 'a/../b', 'a\\b', 'C:bin', 'a\0b']) assert.equal(safeRuntimePath(name), false)
   assert.equal(safeRuntimePath('lib/libaudio.so.1'), true)
 })
+
+test('POSIX extraction validates caller limits before opening an archive', async () => {
+  for (const limit of [0, -1, 0.5, NaN, Infinity, 3 * 1024 ** 3 + 1]) {
+    await assert.rejects(extractPosixRuntime('missing', 'missing', 'release', new AbortController().signal, limit), /上限无效/)
+  }
+})
+test('POSIX extraction enforces an explicit smaller limit including ignored entries', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'javdex-runtime-limit-'))
+  try {
+    const archive = path.join(root, 'fixture.tar.gz')
+    await fs.writeFile(archive, runtimeTar([{ path: 'release/ignored', contents: '12345' }]))
+    await assert.rejects(extractPosixRuntime(archive, root, 'release', new AbortController().signal, 4), /安全限制/)
+  } finally { await fs.rm(root, { recursive: true, force: true }) }
+})

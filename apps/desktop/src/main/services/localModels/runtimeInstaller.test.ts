@@ -5,9 +5,10 @@ import os from 'node:os'
 import path from 'node:path'
 import { test } from 'node:test'
 import { createAiRuntimeInstaller, type RuntimeInstallEvent } from './runtimeInstaller'
-import { LOCAL_MODEL_ASSETS, AI_MAC_BUNDLE_VERSION, aiRuntimeAssets, type AiRuntimeAsset } from './runtimeManifest'
+import { LOCAL_MODEL_ASSETS, aiRuntimeAssets, type AiRuntimeAsset } from './runtimeManifest'
 import { modelAssetDirectory, modelDownloadFile, runtimeAssetDirectory } from './modelStorage'
 import { runtimeTar } from './runtimeArchiveFixtures'
+import { gpuRuntimeAssets } from './gpuManifest'
 
 const contents = Buffer.from('model fixture data')
 function asset(filename: string): AiRuntimeAsset {
@@ -224,28 +225,83 @@ test('native archive installs validate inventories, repair missing libraries, an
   } finally { await fs.rm(root, { recursive: true, force: true }) }
 })
 
-test('macOS copies only the matching bundled tool, rejects damaged bundles and never downloads Windows executables', async () => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'javdex-runtime-bundle-'))
+test('mirrored POSIX CPU tools install offline or resume the pre-upgrade archive cache', async t => {
+  const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'javdex-posix-cache-'))
+  t.after(() => fs.rm(temporary, { recursive: true, force: true }))
+  for (const platform of ['darwin', 'linux']) for (const arch of ['arm64', 'x64']) for (const id of ['whisper', 'translator'] as const) {
+    const target = { platform, arch }
+    const asset = aiRuntimeAssets(target).find(entry => entry.id === id)!
+    const name = id === 'whisper' ? 'whisper-cli' : 'llama-server'
+    const packed = runtimeTar([{ path: `${asset.archivePrefix ? `${asset.archivePrefix}/` : ''}${name}`, contents: 'cached native tool' }])
+    const fixture = { ...asset, bytes: packed.length, sha256: createHash('sha256').update(packed).digest('hex') }
+    for (const offset of [packed.length, Math.floor(packed.length / 2)]) {
+      const root = path.join(temporary, `${platform}-${arch}-${id}-${offset}`)
+      const oldPartial = modelDownloadFile(root, { ...fixture, filename: `${id}.tar.gz` })
+      await fs.mkdir(path.dirname(oldPartial), { recursive: true })
+      await fs.writeFile(oldPartial, packed.subarray(0, offset))
+      let requests = 0
+      const installer = createAiRuntimeInstaller(root, async (_input, init) => {
+        requests++
+        assert.notEqual(offset, packed.length, 'complete cached archives must work offline')
+        assert.equal(new Headers(init?.headers).get('range'), `bytes=${offset}-`)
+        return new Response(packed.subarray(offset), { status: 206,
+          headers: { 'content-range': `bytes ${offset}-${packed.length - 1}/${packed.length}` } })
+      }, [fixture], { target })
+      await installer.install(new AbortController().signal, () => {}, [id])
+      assert.equal(await installer.assetsInstalled([id]), true)
+      assert.equal(requests, offset === packed.length ? 0 : 1)
+    }
+  }
+})
+
+test('macOS downloads and verifies its own native archive without an application bundle', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'javdex-mac-download-'))
+  t.after(() => fs.rm(root, { recursive: true, force: true }))
   const target = { platform: 'darwin', arch: 'arm64' }
-  try {
-    const bundleRoot = path.join(root, 'bundle'), bundle = path.join(bundleRoot, 'darwin-arm64'), source = path.join(bundle, 'whisper', 'whisper-cli')
-    await fs.mkdir(path.dirname(source), { recursive: true }); await fs.writeFile(source, contents)
-    const inventory = { version: AI_MAC_BUNDLE_VERSION, target: 'darwin-arm64', assets: { whisper: { files: [{ name: 'whisper-cli', bytes: contents.length, sha256: asset('unused').sha256 }] } } }
-    await fs.writeFile(path.join(bundle, 'bundle.json'), JSON.stringify(inventory))
-    let requests = 0
-    const installer = createAiRuntimeInstaller(root, async () => { requests++; throw new Error('Unexpected download') }, undefined, { target, bundleRoot })
-    assert.equal(await installer.assetsInstalled(['whisper']), false)
-    await installer.install(new AbortController().signal, () => {}, ['whisper'])
-    assert.equal(await installer.assetsInstalled(['whisper']), true)
-    assert.equal(requests, 0)
-    await installer.removeAsset('whisper')
-    await fs.writeFile(source, Buffer.alloc(contents.length))
-    await assert.rejects(installer.install(new AbortController().signal, () => {}, ['whisper']), /完整性校验/)
-    assert.equal(await installer.assetsInstalled(['whisper']), false)
-    const intel = createAiRuntimeInstaller(root, undefined, undefined, { target: { platform: 'darwin', arch: 'x64' }, bundleRoot })
-    assert.equal(await intel.assetsInstalled(['whisper']), false)
-    await assert.rejects(intel.install(new AbortController().signal, () => {}, ['whisper']), /缺少 macOS/)
-  } finally { await fs.rm(root, { recursive: true, force: true }) }
+  const packed = runtimeTar([{ path: 'mac-arm64/whisper-cli', contents: 'native whisper' }, { path: 'mac-arm64/LICENSE', contents: 'MIT' }])
+  const nativeAsset: AiRuntimeAsset = { id: 'whisper', label: '语音引擎', archive: true, filename: 'whisper.tar.gz', archivePrefix: 'mac-arm64',
+    bytes: packed.length, sha256: createHash('sha256').update(packed).digest('hex'), url: 'https://example.invalid/mac-arm64.tar.gz' }
+  const manifest = [...aiRuntimeAssets(target).filter(asset => asset.id !== 'whisper'), nativeAsset]
+  let requests = 0
+  const installer = createAiRuntimeInstaller(root, async input => { assert.equal(String(input), nativeAsset.url); requests++; return new Response(packed) }, manifest, { target })
+  assert.equal(await installer.assetsInstalled(['whisper']), false)
+  await installer.install(new AbortController().signal, () => {}, ['whisper'])
+  assert.equal(await installer.assetsInstalled(['whisper']), true)
+  assert.equal(await fs.readFile(installer.paths().whisper, 'utf8'), 'native whisper')
+  await installer.install(new AbortController().signal, () => {}, ['whisper'])
+  assert.equal(requests, 1)
+  const changed = createAiRuntimeInstaller(root, async () => new Response(Buffer.alloc(packed.length)), manifest, { target })
+  await changed.removeAsset('whisper')
+  await assert.rejects(changed.install(new AbortController().signal, () => {}, ['whisper']), /完整性校验/)
+  assert.equal(await changed.assetsInstalled(['whisper']), false)
+})
+
+test('installed Linux llama GPU tools survive the mirror move without downloading or rewriting', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'javdex-linux-llama-mirror-'))
+  t.after(() => fs.rm(root, { recursive: true, force: true }))
+  const target = { platform: 'linux', arch: 'x64' }
+  for (const backend of ['cuda', 'vulkan'] as const) {
+    for (const entry of gpuRuntimeAssets(target, backend).filter(asset => asset.id === 'translator' || asset.id === 'cuda')) {
+      const directory = runtimeAssetDirectory(root, entry.id, target, backend)
+      await fs.mkdir(directory, { recursive: true })
+      const names = entry.id === 'cuda' ? ['libcudart.so.12', 'libcublas.so.12', 'libcublasLt.so.12'] : ['llama-server']
+      if (backend === 'cuda') names.push('NOTICE-CUDA.txt')
+      const files = []
+      for (const name of names) {
+        const value = Buffer.from(`installed fixture ${name}`)
+        await fs.writeFile(path.join(directory, name), value, { mode: 0o755 })
+        files.push({ name, bytes: value.length, sha256: createHash('sha256').update(value).digest('hex') })
+      }
+      const marker = JSON.stringify({ sha256: entry.sha256, target: 'linux-x64', files })
+      await fs.writeFile(path.join(directory, 'asset.json'), marker)
+      let requests = 0
+      const runtime = createAiRuntimeInstaller(root, async () => { requests++; throw Error('unexpected download') }, [entry], { target })
+      assert.equal(await runtime.assetsInstalled([entry.id]), true)
+      await runtime.install(new AbortController().signal, () => {}, [entry.id])
+      assert.equal(requests, 0)
+      assert.equal(await fs.readFile(path.join(directory, 'asset.json'), 'utf8'), marker)
+    }
+  }
 })
 
 test('a valid previously installed Windows Vulkan tool survives the distribution move without downloading or rewriting', async t => {
@@ -276,4 +332,27 @@ test('a valid previously installed Windows Vulkan tool survives the distribution
   assert.equal(await runtime.assetsInstalled(['whisper']), false)
   await assert.rejects(runtime.install(new AbortController().signal, () => {}, ['whisper']), /fixture download failure/)
   assert.equal(await fs.readFile(path.join(directory, 'whisper-cli.exe'), 'utf8'), 'legacy fixture whisper-cli.exe')
+})
+
+test('verified existing macOS Whisper survives download delivery but same-size mutations require repair', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'javdex-mac-legacy-'))
+  t.after(() => fs.rm(root, { recursive: true, force: true }))
+  const target = { platform: 'darwin', arch: 'arm64' }
+  const legacy = 'whisper-b5130-ffmpeg-8.1.3-v1:darwin-arm64:whisper'
+  const packed = runtimeTar([{ path: 'mac/whisper-cli', contents: 'new engine' }])
+  const entry: AiRuntimeAsset = { id: 'whisper', label: '语音引擎', filename: 'mac.tar.gz', archive: true, archivePrefix: 'mac',
+    bytes: packed.length, sha256: createHash('sha256').update(packed).digest('hex'), url: 'https://github.com/JavdexLabs/javdex-runtime/releases/download/whisper-b5130-r2/whisper-b5130-r2-darwin-arm64.tar.gz', legacyInstalledIdentity: legacy }
+  const base = runtimeAssetDirectory(root, 'whisper', target), file = path.join(base, 'whisper-cli')
+  await fs.mkdir(base, { recursive: true }); await fs.writeFile(file, contents, { mode: 0o755 })
+  const marker = JSON.stringify({ sha256: legacy, target: 'darwin-arm64', files: [{ name: 'whisper-cli', bytes: contents.length, sha256: createHash('sha256').update(contents).digest('hex') }] })
+  await fs.writeFile(path.join(base, 'asset.json'), marker)
+  let requests = 0
+  const manager = createAiRuntimeInstaller(root, async () => { requests++; return new Response(packed) }, [...aiRuntimeAssets(target).filter(a => a.id !== 'whisper'), entry], { target })
+  assert.equal(await manager.assetsInstalled(['whisper']), true)
+  await manager.install(new AbortController().signal, () => {}, ['whisper'])
+  assert.equal(requests, 0); assert.equal(await fs.readFile(path.join(base, 'asset.json'), 'utf8'), marker)
+  await fs.writeFile(file, Buffer.alloc(contents.length), { mode: 0o755 })
+  assert.equal(await manager.assetsInstalled(['whisper']), false)
+  await manager.install(new AbortController().signal, () => {}, ['whisper'])
+  assert.equal(requests, 1); assert.equal(await fs.readFile(file, 'utf8'), 'new engine')
 })

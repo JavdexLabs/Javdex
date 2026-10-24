@@ -88,7 +88,9 @@ try {
       await page.getByRole('button', { name: '静音', exact: true }).click()
       await page.getByRole('button', { name: '取消静音', exact: true }).waitFor()
       await page.waitForFunction(() => window.fixtureViewports.some(value => value.presentation === 'fullscreen'
-        && value.visible && value.occlusions?.some(area => area.width > 0 && area.height > 0)))
+        && value.visible && value.rect.width > 0 && value.rect.height > 0))
+      assert.equal(await page.evaluate(() => window.fixtureViewports.some(value => Object.hasOwn(value, 'occlusions'))), false,
+        'HTML fullscreen controls keep a complete Canvas viewport without native cutouts')
       await page.getByRole('button', { name: '退出全屏', exact: true }).click()
       await page.getByRole('button', { name: '全屏', exact: true }).click()
       await page.mouse.move(viewport.width / 2, 5)
@@ -104,7 +106,7 @@ try {
       ])
     }
     assert.deepEqual(errors, [])
-    console.log(`Playback settings portal select UI: ${viewport.width}x${viewport.height}/${fullscreen ? 'fullscreen AX/keyboard/controls/cutouts' : 'expanded'} PASS (synthetic RPC, no native decoder or screen-reader claim)`)
+    console.log(`Playback settings portal select UI: ${viewport.width}x${viewport.height}/${fullscreen ? 'fullscreen AX/keyboard/controls/Canvas' : 'expanded'} PASS (synthetic RPC, no native decoder or screen-reader claim)`)
     await page.close()
     }
   }

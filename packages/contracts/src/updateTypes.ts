@@ -3,6 +3,7 @@ export type UpdateCheckStatus = 'idle' | 'checking' | 'up-to-date' | 'available'
 export type ProjectPage = 'project' | 'releases' | 'license'
 
 export type UpdateCheckErrorCode =
+  | 'experimental-build'
   | 'network-unavailable'
   | 'rate-limited'
   | 'invalid-response'

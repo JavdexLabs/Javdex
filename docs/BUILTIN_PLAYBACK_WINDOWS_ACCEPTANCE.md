@@ -1,8 +1,10 @@
 # 内置播放 Windows 验收记录
 
+本文保留 2026-10-03 至 2026-10-04 的旧 HWND 路径验收证据，下面的状态与命令均属于该轮构建。当前 Windows 默认采用 Canvas，现行入口见 [开发与打包合同](DEVELOPMENT.md)，本机新包验收见 [2026-10-24 Canvas 默认播放记录](reviews/windows-canvas-default-2026-10-24.md)。已移除的旧脚本不再作为当前运行入口。
+
 日期：2026-10-03 至 2026-10-04。用户授权完成 Windows 平台验收，并授权自行准备运行库矩阵。范围包含 Windows x64 开发应用、对应源码/许可材料、实际 ZIP 解压版及 NSIS 安装版；全部在同一 Windows 开发机和隔离合成媒体上检查。
 
-**当前状态：本机 Windows 开发应用及未签名 ZIP/NSIS 的验收范围通过，源码/许可运行库矩阵已自行准备。** 最新四项优化包为 NSIS 152.4 MB、ZIP 208.0 MB；重新编译播放库后，实际安装版通过本地 14 组、远程 8 组及 601.25 秒 4K/60 长测（59.94 fps、丢帧 17），实际卸载通过，详见下方进一步精简记录。前两轮包及对应证据保持历史范围，安装文件与独立源码包分别交付。完整设备、人工听感/读屏、可信签名及独立干净机器验收仍未完成；最新汇总为 `out/playback-acceptance/windows-playback-optimization/distribution-acceptance.json`。
+**该轮状态：本机 Windows 开发应用及未签名 ZIP/NSIS 的验收范围通过，源码/许可运行库矩阵已自行准备。** 最新四项优化包为 NSIS 152.4 MB、ZIP 208.0 MB；重新编译播放库后，实际安装版通过本地 14 组、远程 8 组及 601.25 秒 4K/60 长测（59.94 fps、丢帧 17），实际卸载通过，详见下方进一步精简记录。前两轮包及对应证据保持历史范围，安装文件与独立源码包分别交付。完整设备、人工听感/读屏、可信签名及独立干净机器验收仍未完成；最新汇总为 `out/playback-acceptance/windows-playback-optimization/distribution-acceptance.json`。
 
 ## 环境与构建
 

@@ -1,3 +1,5 @@
+import type { PlaybackRenderMode } from './playback'
+
 export type DesktopSettingsScope = 'thisComputer' | 'currentCatalog'
 
 export interface ThisComputerSettings {
@@ -7,6 +9,7 @@ export interface ThisComputerSettings {
   theme: string
   playerPath: string | null
   playerPreference: 'external' | 'builtin'
+  playbackRenderMode?: PlaybackRenderMode
   playbackVolume: number
   resumePlayback: boolean
   proxyUrl: string
@@ -20,6 +23,7 @@ export interface ThisComputerSettingsPatch {
   remoteBaseUrl?: string | null
   playerPath?: string | null
   playerPreference?: 'external' | 'builtin'
+  playbackRenderMode?: PlaybackRenderMode
   resumePlayback?: boolean
 }
 

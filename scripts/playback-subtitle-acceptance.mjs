@@ -5,7 +5,7 @@ import { closeAcceptance, recordAcceptanceCleanup, createAcceptanceDirectory, la
 import { prepareMediaFixtures } from './playback-media-fixtures.mjs'
 import { checkBitmapSubtitlePixels, checkComplexSubtitlePixels } from './playback-subtitle-checks.mjs'
 
-assert.ok(['darwin', 'win32'].includes(process.platform), 'this runner accepts macOS and Windows only')
+assert.ok(['darwin', 'win32', 'linux'].includes(process.platform), 'unsupported desktop acceptance host')
 const fixtures = prepareMediaFixtures()
 const directory = createAcceptanceDirectory('subtitles-')
 const bitmapOnly = process.argv.includes('--bitmap-only')
@@ -17,7 +17,7 @@ const report = { status: 'running', platform: `${process.platform}/${process.arc
   bitmapReference: fixtures.bitmapReference, checks: [] }
 let application
 try {
-  application = await launchAcceptance(directory, 'subtitle-application.log')
+  application = await launchAcceptance(directory, 'subtitle-application.log', process.argv.includes('--javdex-cpu') ? ['--javdex-cpu'] : [])
   const page = await application.firstWindow()
   const errors = []
   page.on('pageerror', error => errors.push(error.message))

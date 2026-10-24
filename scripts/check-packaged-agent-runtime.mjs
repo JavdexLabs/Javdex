@@ -11,6 +11,7 @@ import {
   PORTABLE_ELECTRON_LANGUAGES,
   macElectronLocaleNames
 } from './packaging-runtime.mjs'
+import { verifyAsarUnpackedFiles } from './packaged-asar.mjs'
 
 const root = path.resolve(process.argv[2] ?? 'dist')
 const smokeScript = path.resolve(
@@ -135,6 +136,7 @@ if (archives.length === 0) {
 }
 
 for (const archive of archives) {
+  verifyAsarUnpackedFiles(archive)
   const entries = listPackage(archive).map((entry) => entry.replaceAll('\\', '/'))
   const required = [
     /^\/out\/main\/chunks\/piRuntime-.*\.js$/,

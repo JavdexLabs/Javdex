@@ -8,6 +8,7 @@ import type { PendingAuditIds, PendingScanQueueQuery } from '../../../../package
 import type { WebAccessInput } from '../../../../packages/contracts/src/webTypes'
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { IPC } from '../../../../packages/contracts/src/ipc-channels'
+import { installSharedTextureReceiver } from './sharedTextureReceiver'
 import type { UpdateCheckState } from '../../../../packages/contracts/src/updateTypes'
 import type {
   AppIpcArgs,
@@ -219,6 +220,8 @@ function onScrapeEvent<Channel extends ScrapeIpcEventChannel>(
   ipcRenderer.on(channel, listener)
   return () => ipcRenderer.removeListener(channel, listener)
 }
+
+const bindSharedTextureSurface = installSharedTextureReceiver()
 
 const api = {
   nfoExport: {
@@ -861,6 +864,7 @@ const api = {
     end: (token: string) => invokeScrape(IPC.AVATAR_AUTO_CROP_BATCH_END, token)
   },
   playback: {
+    bindSharedTextureSurface,
     availability: () => invokeApp(IPC.PLAYBACK_AVAILABILITY),
     open: (target: import('@shared/desktop/playback').PlaybackTarget) => invokeApp(IPC.PLAYBACK_OPEN, target),
     snapshot: async () => (await invokeApp(IPC.PLAYBACK_SNAPSHOT)).snapshot,

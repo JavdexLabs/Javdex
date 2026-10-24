@@ -14,7 +14,8 @@ const retained = (name: string): boolean => /^(whisper-cli|llama-server|ffmpeg|f
 
 /** Never create archive symlinks: resolve bounded in-archive aliases to regular copies.
  * Keeping bin/lib directories preserves upstream $ORIGIN/../lib loader paths. */
-export async function extractPosixRuntime(archive: string, destination: string, prefix: string, signal: AbortSignal): Promise<void> {
+export async function extractPosixRuntime(archive: string, destination: string, prefix: string, signal: AbortSignal, expandedBytes = 1024 ** 3): Promise<void> {
+  if (!Number.isSafeInteger(expandedBytes) || expandedBytes <= 0 || expandedBytes > 3 * 1024 ** 3) throw new Error('运行库解压上限无效')
   const parser = new Parser({ strict: true, maxMetaEntrySize: 64 * 1024 })
   const selected = new Map<string, { name: string; link?: string }>()
   const writes: Promise<void>[] = []
@@ -27,7 +28,7 @@ export async function extractPosixRuntime(archive: string, destination: string, 
   parser.on('entry', entry => {
     try {
       signal.throwIfAborted()
-      if (++entries > 5000 || !Number.isSafeInteger(entry.size) || entry.size < 0 || (total += entry.size) > 1024 ** 3) throw new Error('运行库压缩包超过安全限制')
+      if (++entries > 5000 || !Number.isSafeInteger(entry.size) || entry.size < 0 || (total += entry.size) > expandedBytes) throw new Error('运行库压缩包超过安全限制')
       const name = relative(entry.path)
       if (entry.type === 'Directory') { entry.resume(); return }
       if (!['File', 'OldFile', 'SymbolicLink', 'Link'].includes(entry.type)) throw new Error('运行库包含不支持的文件类型')

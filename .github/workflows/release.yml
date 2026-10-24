@@ -152,6 +152,13 @@ jobs:
           test -s /etc/apt/sources.list.d/javdex-sources.list
           sudo apt-get update
           sudo apt-get install -y rpm build-essential cmake nasm patchelf pkg-config xz-utils python3-venv libx11-dev libxft-dev libxext-dev libxrandr-dev libxss-dev libxpresent-dev libgl1-mesa-dev libegl1-mesa-dev libgbm-dev libdrm-dev libfontconfig1-dev libpulse-dev libva-dev fonts-dejavu-core
+          # The private distribution closure comes from these font/audio clients.
+          # Hosted images may retain versions removed from the current source
+          # index. Upgrade their installed dependency closure before inventory,
+          # so each copied binary still gets its exact source version.
+          mapfile -t playback_clients < <(apt-cache depends --recurse --installed --important libfontconfig1 libpulse0 fonts-dejavu-core | sed -nE '/^[A-Za-z0-9][A-Za-z0-9+.:_-]*$/p' | sort -u)
+          test "${#playback_clients[@]}" -gt 0
+          sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=l apt-get install --only-upgrade -y "${playback_clients[@]}"
 
       - uses: actions/setup-python@v5
         with:
@@ -213,6 +220,9 @@ jobs:
         run: node scripts/run-electron-tests.mjs apps/desktop/src/main/player/macSharedTextureNative.test.ts apps/desktop/src/main/player/macSoftwareNative.test.ts
         env:
           JAVDEX_TEST_MAC_PLAYBACK_NATIVE: ${{ github.workspace }}/out/playback-runtime/darwin-${{ matrix.arch }}/playback.node
+          # A missing accelerated format is an explicit capability result,
+          # not a successful GPU test. CPU and Mach transport must still pass.
+          JAVDEX_TEST_MAC_ALLOW_NO_GPU: '1'
 
       - name: Cache verified Linux source downloads
         if: matrix.platform == 'linux'

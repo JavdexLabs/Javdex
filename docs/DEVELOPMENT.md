@@ -143,6 +143,8 @@ Linux x64 的 llama.cpp b11435 CUDA 12.8、Vulkan 和 CUDA/cuBLAS 依赖固定�
 
 ### 内置播放运行库
 
+Linux 发布 runner 会先升级字体／音频客户端的已安装依赖闭包，再复制库并按实际 `source:Version` 获取源码，避免预装库旧补丁已从当前 APT 源索引移除。此准备只发生在临时 CI runner，不用新源码替代旧二进制的对应源码。
+
 Windows、macOS 与 Linux 的正常内置播放均通过主窗口 Canvas 与 HTML 控件合成。Windows 使用 D3D11 共享纹理生产端，故障时自动使用 CPU 内存帧；旧 HWND 视频子窗口、原生工具栏和滑块实现已移除。
 
 Windows Canvas 无需启动开关，使用正常 DirectComposition；不再按 addon 是否存在选择旧合成路径。同一个 `playback.node` 仅导出 `sharedTexture` 和 `software`，经 WGL 私有 D3D11 bridge、GPU copy、三个 BGRA NT 导出槽和 Electron 共享纹理进入现有 Canvas2D。不宣称零复制。生产完成、消费者 GPU 释放及 `allReferencesReleased` 分别确认；设备或同步状态不明时保持旧 GPU 租约有界隔离，不强行释放。历史试验材料见 [Windows Canvas 接入记录](reviews/windows-canvas-implementation-2026-10-23.md)。
@@ -163,7 +165,7 @@ Windows CMake 同时构建生产 addon、仅导入资源的 interop addon，以�
 
 完成原生和桌面构建后，Windows 可运行 `node scripts/windows-canvas-acceptance.mjs` 检查真实生产／Canvas 提交、暂停 seek、全屏、慢消费和停止重开。三平台共用 `node scripts/playback-color-fixtures.mjs <ffmpeg> <新目录>` 与 `node scripts/playback-color-acceptance.mjs <素材目录> gpu|cpu|recovery`；CPU 可加 `--compare=<GPU 报告>`，比较五组 SDR／HDR10／HLG／缺失元数据样本在八种播放状态中的 RGB 输出。每个截图都验证实际播放路径，不能把自动回退后的画面当作 GPU 结果。这些检查不代表物理 HDR 输出或显示器校准。 `node scripts/playback-load-acceptance.mjs <合成媒体> gpu|cpu` 记录可见窗口短时负载、实际尺寸、帧生产、丢帧及资源归还；Windows/macOS 的 `playback-mode-acceptance.mjs <合成媒体>` 验证真实模式切换和初始化失败。
 
-`node scripts/run-electron-tests.mjs apps/desktop/src/main/player/macSharedTextureNative.test.ts apps/desktop/src/main/player/macSoftwareNative.test.ts` 自动使用本机正常构建的 addon，检查真实 CGL/IOSurface 的线程保护、事件合并、三槽、resize、destroy 与跨会话租约，以及独立 CPU 帧的物理尺寸、行对齐／清零、线程保护和重开；非 macOS 或缺少编译产物时明确跳过。Release CI 用 `JAVDEX_TEST_MAC_PLAYBACK_NATIVE=<审核矩阵中的 playback.node 绝对路径>` 检查刚构建的同架构 GPU／CPU 运行库，显式输入缺失即失败。`node scripts/software-playback-acceptance.mjs --mode=forced <合成媒体...>` 检查真实 CPU Canvas；`disabled`、`initialization`、`producer-fault` 和 `gpu-fault` 分别检查禁用加速、初始化失败、隔离宿主退出和自有 GPU 子进程退出。`host-stall` 检查宿主心跳超时；`producer-fault` 每次只传一个素材；所有宿主使用隔离资料目录，不改系统驱动。
+`node scripts/run-electron-tests.mjs apps/desktop/src/main/player/macSharedTextureNative.test.ts apps/desktop/src/main/player/macSoftwareNative.test.ts` 自动使用本机正常构建的 addon，检查真实 CGL/IOSurface 的线程保护、事件合并、三槽、resize、destroy 与跨会话租约，以及独立 CPU 帧的物理尺寸、行对齐／清零、线程保护和重开；非 macOS 或缺少编译产物时明确跳过。Release CI 用 `JAVDEX_TEST_MAC_PLAYBACK_NATIVE=<审核矩阵中的 playback.node 绝对路径>` 检查刚构建的同架构 GPU／CPU 运行库，显式输入缺失即失败。 发布 CI 显式设置 `JAVDEX_TEST_MAC_ALLOW_NO_GPU=1` 时，仅允许将“没有加速 OpenGL pixel format”这一能力缺失记为结果，并将两个 GPU 租约／重绘用例明确标为跳过；默认实机运行仍要求 GPU，其他创建、加载或绘制错误继续失败。CPU、线程保护和 Mach 资源传输不随之跳过。`node scripts/software-playback-acceptance.mjs --mode=forced <合成媒体...>` 检查真实 CPU Canvas；`disabled`、`initialization`、`producer-fault` 和 `gpu-fault` 分别检查禁用加速、初始化失败、隔离宿主退出和自有 GPU 子进程退出。`host-stall` 检查宿主心跳超时；`producer-fault` 每次只传一个素材；所有宿主使用隔离资料目录，不改系统驱动。
 
 `node scripts/mac-shared-texture-acceptance.mjs <同目录下的合成媒体...> --fps=24,30,60` 通过不带后端参数的正常应用入口，捕获真实 Chromium 窗口并核对视频／Canvas 速率、VideoToolbox、暂停、连续 seek、轨道、全屏、焦点、缩放与停止释放。fps 数量需与文件对应；多音轨夹具的真实速率以文件为准。`--color` 检查四种参考色块；`--stress` 对首个文件运行五轮 1.5 秒阻塞消费、立即停止与重开；`--crash` 只崩溃自有验收 renderer，检查未知引用隔离到退出。正常退出须无强制结束、exit=0、无信号；实际故障隔离不代表自动恢复。物理上屏、声音听感、多显示器、长时间能耗及正式包另行判断。
 

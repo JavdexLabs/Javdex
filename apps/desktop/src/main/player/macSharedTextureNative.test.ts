@@ -8,6 +8,7 @@ import path from 'node:path'
 const addon = path.resolve(process.env.JAVDEX_TEST_MAC_PLAYBACK_NATIVE ?? 'out/native-playback/playback.node')
 if (process.platform === 'darwin' && process.env.JAVDEX_TEST_MAC_PLAYBACK_NATIVE) assert.ok(existsSync(addon), 'explicit native test input must exist')
 const enabled = process.platform === 'darwin' && existsSync(addon)
+let graphicsUnavailable = false
 
 test('the main-process IOSurface dispatcher cannot be initialized by a worker environment', {
   timeout: 5000,
@@ -26,11 +27,31 @@ test('the main-process IOSurface dispatcher cannot be initialized by a worker en
   assert.match(result, /main thread/, 'another Node environment cannot replace the main dispatcher')
 })
 
+test('macOS GPU initialization either succeeds or reports the explicitly permitted headless runner', {
+  skip: !enabled ? 'requires a compiled macOS IOSurface addon' : false
+}, t => {
+  const native = createRequire(import.meta.url)(addon)
+  try {
+    native.create({ width: 32, height: 16, scale: 1 })
+    assert.equal(native.inspect().alive, true)
+  } catch (error) {
+    // Hosted Mac VMs can lack an accelerated pixel format. Only that precise
+    // capability failure is allowed; loading, context and render errors fail.
+    if (process.env.JAVDEX_TEST_MAC_ALLOW_NO_GPU !== '1'
+      || !(error instanceof Error) || error.message !== 'No accelerated macOS OpenGL pixel format') throw error
+    assert.equal(native.inspect().alive, false, 'a rejected GPU create leaves no live session')
+    assert.equal(native.inspect().outstandingSurfaces, 0)
+    graphicsUnavailable = true
+    t.diagnostic('No accelerated OpenGL on this runner; GPU leases/redraws remain unverified. CPU and Mach transport checks are mandatory.')
+  } finally { native.destroy() }
+})
+
 // Native run uses the normal compiled addon, never a substituted CPU/GL mock.
 test('macOS IOSurface producer bounds leases across resize, reset, destroy and reopen', {
   skip: !enabled
     ? 'requires a compiled macOS IOSurface addon and real OpenGL device' : false
-}, () => {
+}, t => {
+  if (graphicsUnavailable) { t.skip('runner has no accelerated OpenGL; requires a Mac with GPU access'); return }
   const native = createRequire(import.meta.url)(addon) as {
     create(bounds: { width: number; height: number; scale: number }): void
     setBounds(bounds: { width: number; height: number; scale: number }): void
@@ -77,7 +98,8 @@ test('macOS IOSurface producer bounds leases across resize, reset, destroy and r
 test('macOS callbacks pump non-video events, coalesce redraws and cannot call a closed session', {
   skip: !enabled
     ? 'requires a compiled macOS IOSurface addon and real OpenGL device' : false
-}, async () => {
+}, async t => {
+  if (graphicsUnavailable) { t.skip('runner has no accelerated OpenGL; requires a Mac with GPU access'); return }
   const native = createRequire(import.meta.url)(addon) as {
     create(bounds: { width: number; height: number; scale: number }): void
     setBounds(bounds: { width: number; height: number; scale: number }): void

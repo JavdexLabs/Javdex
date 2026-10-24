@@ -25,6 +25,10 @@ on:
         description: "Exact checked source SHA required for the controlled 0.9.0 replacement."
         type: string
         required: false
+      resume_server_run_id:
+        description: "Resume an unpublished candidate with successful desktop/source/arm64 jobs and only an amd64 server-test failure."
+        type: string
+        required: false
   push:
     branches:
       - "release-*"
@@ -47,7 +51,21 @@ env:
   RELEASE_PRERELEASE: ${{ inputs.prerelease }}
 
 jobs:
+  resume-server:
+    if: ${{ inputs.resume_server_run_id != '' && !inputs.verify_only && !inputs.replace_published_090 }}
+    uses: ./.github/workflows/release-resume-server.yml
+    permissions:
+      actions: read
+      contents: write
+      packages: write
+    with:
+      run_id: ${{ inputs.resume_server_run_id }}
+      release_tag: ${{ inputs.release_tag }}
+      prerelease: ${{ inputs.prerelease }}
+    secrets: inherit
+
   metadata:
+    if: ${{ !inputs.resume_server_run_id }}
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.meta.outputs.tag }}
@@ -60,7 +78,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: node --test scripts/release-metadata.test.mjs scripts/release-publication.test.mjs scripts/release-replacement.test.mjs scripts/release-replacement-process.test.mjs
+      - run: node --test scripts/release-metadata.test.mjs scripts/release-publication.test.mjs scripts/release-replacement.test.mjs scripts/release-replacement-process.test.mjs scripts/release-resume.test.mjs
       - id: meta
         run: node scripts/release-metadata.mjs
         env:

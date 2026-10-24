@@ -29,17 +29,17 @@
 
 共用核心拥有 mpv 生命周期、异步命令、状态、事件和字幕叠加层；macOS 使用 IOSurface 共享纹理到 Canvas，Windows 默认使用 D3D11 共享纹理到主窗口 Canvas，并提供 CPU 内存帧到 Canvas 的兜底；旧 HWND 显示和原生工具栏已移除；Linux 的 X11／XWayland 和原生 Wayland 共用共享纹理／CPU 内存帧到 Canvas 的显示方式。正常关闭由实际接受的窗口关闭与退出生命周期释放内核，不在可能被否决的 `close` 回调提前拆除活跃视图。
 
-Windows 在图形初始化失败、可检测的原生视频渲染／共享纹理故障，或 Electron 已禁用硬件加速时，自动改用同一运行库中的独立 CPU 后端；`--javdex-cpu` 可在启动时强制使用它（`--` 后不生效）。该后端使用 `hwdec=no`、libmpv SW Render API 和复制的 RGBA 帧，preload 在新建的软件 Canvas 上通过 `putImageData` 绘制，防止继承失效的加速画布；不创建 GL context、D3D 设备或共享 GPU 纹理。最多两帧在途，与 Linux 一样按 `round(逻辑尺寸 × 缩放)` 渲染实际显示帧，不额外降至 1080p；保留单边 8192、单帧 256 MiB 的安全边界，超出时拒绝。高分辨率输入仍由 CPU 解码，流畅度取决于处理器和编码复杂度，不提供 HDR 直通保证。
+Windows 与 macOS 在图形初始化失败、可检测的原生视频渲染／共享纹理故障，或 Electron 已禁用硬件加速时，自动改用同一运行库中的独立 CPU 后端；`--javdex-cpu` 可在启动时强制使用它（`--` 后不生效）。该后端使用 `hwdec=no`、libmpv SW Render API 和复制的 RGBA 帧，preload 在新建的软件 Canvas 上通过 `putImageData` 绘制，防止继承失效的加速画布；不创建播放端 GL context、D3D 设备或共享 GPU 纹理。最多两帧在途，与 Linux 一样按 `round(逻辑尺寸 × 缩放)` 渲染实际显示帧，不额外降至 1080p；保留单边 8192、单帧 256 MiB 的安全边界，超出时拒绝。高分辨率输入仍由 CPU 解码，流畅度取决于处理器和编码复杂度，不提供 HDR 直通保证；系统窗口合成不属于播放端 CPU 渲染保证。
 
 回退复用当前已授权来源，重新打开后恢复可定位资源的位置、暂停／播放意图、音量、静音、倍速、音轨、外挂字幕和 AI 字幕时间轴；停止或新来源取消旧恢复。一次图形故障后，本次应用运行继续使用 CPU，重启才重新尝试 GPU。旧 GPU 的未知租约保持隔离，不强行复用；页面已关闭、媒体／授权／音频错误及 CPU 自身故障不进入反复回退。线程被驱动完全挂死等不可检测故障不保证进程内恢复。实测与边界见 [Windows CPU 记录](reviews/windows-cpu-fallback-2026-10-24.md)。
 
 Windows GPU Canvas 的色彩目标固定为 8-bit BGRA、BT.709 primaries／sRGB transfer／RGB full range，SDR 参考白为 203nit；HDR 使用基于片源元数据的 BT.2390 映射，显式关闭自动峰值/平均亮度检测，避免 compute/SSBO 能力不同导致亮度变化。该目标不读取物理 HDR 显示器峰值，也不提供 HDR 直通。CPU 继续使用独立的 FFmpeg 感知映射到 BT.709 SDR，保留软件回退能力；两条映射曲线不保证相同亮度或逐像素一致。定位与实测见 [Windows HDR 映射修复](reviews/windows-hdr-mapping-2026-10-24.md)。
 
-macOS 正常构建和启动使用唯一的共享纹理 Canvas2D 路径，无需试验参数；旧 NSOpenGLView 显示后端及其原生全屏控件已移除。`playback.node` 在主进程以 CGL/OpenGL 把 libmpv 输出写入三槽 IOSurface；`hwdec=auto` 保持原策略，不使用 Linux DMA-BUF、CPU 回退或原生子窗口。Electron 在主进程导入当前进程的 IOSurfaceRef，随后用公开的 `SharedTextureImportedSubtle` 转移对象交给隔离 preload；原始指针不进入应用 JSON、页面或共用播放合同。Canvas、全屏、键盘、滑杆与焦点使用现有 HTML 面板。
+macOS 正常构建和启动默认使用共享纹理 Canvas2D，无需试验参数；旧 NSOpenGLView 显示后端及其原生全屏控件已移除。GPU 路径的 `playback.node` 在主进程以 CGL/OpenGL 把 libmpv 输出写入三槽 IOSurface，`hwdec=auto` 保持原策略；独立 `software` 导出提供 CPU 回退，不使用 Linux DMA-BUF 或原生子窗口。Electron 在主进程导入当前进程的 IOSurfaceRef，随后用公开的 `SharedTextureImportedSubtle` 转移对象交给隔离 preload；原始指针不进入应用 JSON、页面或共用播放合同。Canvas、全屏、键盘、滑杆与焦点使用现有 HTML 面板。
 
 该 addon 只允许主线程初始化。mpv 的帧通知与非视频事件经长度为一的非阻塞队列合并唤醒主线程，几何、可见性、时间线变化及租约归还也能唤醒；mpv 回调不执行 JS 或 GL。250ms 兜底继续处理故障、背压及事件，正常 200ms 状态观察保留，但不再为这个自驱动后端另设 16ms 渲染检查。兜底不是视频帧率上限，字幕、暂停 seek 和隐藏时的 skip 仍由正常内核处理。
 
-生产端以 `glFinish` 建立完成边界。Canvas2D 使用 `copy` 覆盖，解绑清理 backing store。消费端关闭 VideoFrame 后，从 `subtle.release` 的 GPU 完成回调确认释放；main 再释放源引用，最后在 `allReferencesReleased` 中归还原生租约。提交回执、`drawImage`、转移消息已发送都不能提前复用槽位。窗口正常停止仍接收迟到释放；消费进程崩溃或交付结果不明时隔离最多三张未确认表面，需退出应用清理，不猜测已释放或静默换 CPU。正式采用不代表这类故障可自动恢复。
+GPU 生产端以 `glFinish` 建立完成边界。Canvas2D 使用 `copy` 覆盖，解绑清理 backing store。消费端关闭 VideoFrame 后，从 `subtle.release` 的 GPU 完成回调确认释放；main 再释放源引用，最后在 `allReferencesReleased` 中归还原生租约。提交回执、`drawImage`、转移消息已发送都不能提前复用槽位。窗口正常停止仍接收迟到释放；交付结果不明时隔离最多三张未确认表面，最终由应用退出清理。可检测图形故障可在保留原 GPU 租约的同时切换独立 CPU 输出；renderer 页面关闭不触发回退，不能靠软件模式恢复已经消失的页面。
 
 macOS 输出固定为 8-bit BGRA、opaque、BT.709 primaries／sRGB transfer／RGB full range，并将相同标记交给 Electron，Canvas 为 `alpha:false, colorSpace:srgb`。HDR 由 libmpv 映射到该 SDR 目标，不提供 HDR 直通或广色域保证。原生生产者仍是 OpenGL；Chromium 的 ANGLE Metal 消费后端不代表 IOSurface 本身是 Metal，也不证明全链路零拷贝或物理扫描输出。既有短时对照的播放态 CPU 高于旧原生视图；采用此路径是统一合成与交互的取舍，不是性能优化结论。范围与证据见 [正式化记录](reviews/macos-canvas-default-2026-10-23.md)，构建与验证入口见[开发指南](DEVELOPMENT.md#内置播放运行库)。
 

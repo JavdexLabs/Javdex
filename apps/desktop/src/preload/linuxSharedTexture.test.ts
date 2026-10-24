@@ -18,7 +18,7 @@ test('pixel diagnostic distinguishes opaque black from colored and transparent s
   assert.deepEqual(JSON.parse(JSON.stringify(exports.summarizePixels(data, 2, 2, 12))),
     { samples: 4, nonblack: 2, maximum: 255, opaque: 3 })
 })
-function fixture(options: { platform?: 'linux' | 'darwin' | 'win32'; registerFails?: boolean; contextFails?: boolean; probePixels?: 'valid' | 'black' | 'throw'; clockShift?: number; clockDelays?: number[]; copyWait?: Promise<void> } = {}) {
+function fixture(options: { platform?: 'linux' | 'darwin' | 'win32'; mainFrame?: boolean; registerFails?: boolean; contextFails?: boolean; probePixels?: 'valid' | 'black' | 'throw'; clockShift?: number; clockDelays?: number[]; copyWait?: Promise<void> } = {}) {
   let nextToken = 0, draws = 0, closes = 0, releases = 0, clears = 0, drawFails = false
   let gpuReleased: (() => void) | undefined
   const transferCalls: string[] = []
@@ -39,7 +39,7 @@ function fixture(options: { platform?: 'linux' | 'darwin' | 'win32'; registerFai
       return { set globalCompositeOperation(value: string) { compositeOperation = value }, getImageData: () => { if (options.probePixels === 'throw') throw Error('readback'); const data = new Uint8ClampedArray(640 * 360 * 4); if (options.probePixels === 'valid') for (let i = 0; i < data.length; i += 4) data.set([64, 191, 128, 255], i); return { data } }, createImageData: (w: number, h: number) => ({ data: new Uint8ClampedArray(w * h * 4) }), putImageData: (image: { data: Uint8ClampedArray }) => { cpuPixels = image.data; draws++ }, drawImage: () => { if (drawFails) throw new Error('draw failed'); draws++ }, clearRect: () => { clears++ } }
     } }
   const exports = {} as typeof import('./sharedTextureReceiver')
-  runInNewContext(code, { exports, Uint8Array, performance, setTimeout, clearTimeout, process: { platform: options.platform ?? 'linux', isMainFrame: true },
+  runInNewContext(code, { exports, Uint8Array, performance, setTimeout, clearTimeout, process: { platform: options.platform ?? 'linux', isMainFrame: options.mainFrame ?? true },
     crypto: { randomUUID: () => `33333333-3333-4333-8333-${String(++nextToken).padStart(12, '0')}` },
     document: { querySelectorAll: () => [canvas] },
     require(id: string) {
@@ -215,7 +215,7 @@ test('CPU frames strip row padding, distinguish submission from release and reje
   assert.equal(f.messages.at(-2)?.channel, 'playback:shared-texture-failed')
 })
 
-for (const platform of ['linux', 'win32'] as const) test(`${platform}: CPU canvas remains usable without shared-texture receiver registration`, () => {
+for (const platform of ['linux', 'win32', 'darwin'] as const) test(`${platform}: CPU canvas remains usable without shared-texture receiver registration`, () => {
   const f = fixture({ registerFails: true, platform }), cpuToken = 'cpu:' + token
   f.canvas.dataset.playbackSurface = cpuToken
   f.bind(cpuToken)
@@ -224,6 +224,14 @@ for (const platform of ['linux', 'win32'] as const) test(`${platform}: CPU canva
   assert.equal(f.messages.at(-1)?.channel, 'playback:shared-texture-ready')
   f.cpu({ ...binding, sequence: 1, width: 1, height: 1, stride: 64, size: 64, pixels: new Uint8Array(64) })
   assert.equal(f.counts().draws, 1)
+})
+
+for (const options of [{ mainFrame: false }, { contextFails: true }]) test(`Mac CPU binding still rejects unsafe or missing drawing targets (${JSON.stringify(options)})`, () => {
+  const f = fixture({ platform: 'darwin', registerFails: true, ...options }), cpuToken = 'cpu:' + token
+  f.canvas.dataset.playbackSurface = cpuToken
+  f.bind(cpuToken)
+  assert.equal(f.messages.at(-1)?.channel, 'playback:shared-texture-failed')
+  assert.equal(f.counts().draws, 0)
 })
 
 test('scheduled GPU frames wait for target time and receipt reports submission, not presentation', async () => {

@@ -830,3 +830,16 @@ test('a newer operation failure arriving during successful copy retains the curr
   assert.equal(renderer!.root.findAllByProps({ role: 'alert' }).length, 1)
   assert.ok(JSON.stringify(renderer!.toJSON()).includes('操作失败，请查看错误详情'))
 })
+
+test('Intel Mac environments distinguish CPU-only text from system Metal speech support', async () => {
+  sharedEnvironment()
+  for (const environment of state.environments!) {
+    environment.gpu = { state: 'platform', backend: environment.group === 'speech' ? 'metal' : undefined }
+    environment.components = environment.components.filter(item => item.backend === 'cpu' || item.backend === 'common')
+  }
+  await mount()
+  const text = renderedText(renderer!.root)
+  assert.ok(text.includes('当前文本运行库仅支持 CPU。'))
+  assert.ok(text.includes('macOS 内置 Metal 加速支持，无需额外安装。实际启用状态见模型验证结果。'))
+  assert.equal(renderer!.root.findAllByType('button').some(node => String(node.props['aria-label']).includes('安装 GPU 加速支持')), false)
+})

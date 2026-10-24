@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- macOS 内置播放新增 CPU 软件显示和图形故障自动回退，保留 GPU 默认路径；恢复播放位置、暂停意图及音轨字幕设置，并支持 `--javdex-cpu` 强制使用兼容模式。
+
 - 修复 Windows Canvas 的 HDR 转 SDR 亮度随 OpenGL 能力变化：固定 SDR 目标及基于元数据的 BT.2390 映射，关闭自动峰值/平均亮度检测；保留 Canvas 显示与图形故障后的 CPU 回退。
 
 - Windows 内置播放器正式使用共享纹理 Canvas，移除旧 HWND 视频子窗口、原生工具栏和试验启动开关；保留核显字幕修复与 GPU 故障后的纯 CPU 自动回退。

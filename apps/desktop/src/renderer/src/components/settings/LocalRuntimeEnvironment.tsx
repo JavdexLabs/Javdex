@@ -63,7 +63,7 @@ export default function LocalRuntimeEnvironment({ environment, state, disabled, 
   const missingDevice = state.acceleration?.policy.mode === 'gpu' && !state.acceleration.devices.some(item => item.id === state.acceleration!.policy.device)
   const gpuDescription = gpu.state === 'disabled' ? '当前使用 CPU，GPU 暂不使用。'
     : gpu.state === 'unavailable' ? missingDevice ? '指定显卡不可用，请重新选择运行方式。' : '未检测到受支持的 GPU，可使用 CPU。'
-      : gpu.state === 'platform' ? gpu.backend === 'metal' ? 'Metal 由系统提供，无需单独安装。' : '当前平台未提供此引擎的 GPU 运行库，使用 CPU。'
+      : gpu.state === 'platform' ? gpu.backend === 'metal' ? 'macOS 内置 Metal 加速支持，无需额外安装。实际启用状态见模型验证结果。' : environment.group === 'text' ? '当前文本运行库仅支持 CPU。' : '当前平台未提供此引擎的 GPU 运行库，使用 CPU。'
         : gpu.state === 'unchecked' ? '安装检测组件后继续识别显卡。'
           : [gpu.backend?.toUpperCase(), device?.name].filter(Boolean).join(' · ')
   const groupName = environment.group === 'speech' ? '语音' : '文本'

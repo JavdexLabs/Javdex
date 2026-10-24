@@ -197,9 +197,9 @@ jobs:
         env:
           JAVDEX_PLAYBACK_MSYS2_ROOT: ${{ steps.msys2.outputs.msys2-location }}
 
-      - name: Verify macOS native lease and thread contracts
+      - name: Verify macOS GPU leases and CPU rendering contracts
         if: matrix.platform == 'mac'
-        run: node scripts/run-electron-tests.mjs apps/desktop/src/main/player/macSharedTextureNative.test.ts
+        run: node scripts/run-electron-tests.mjs apps/desktop/src/main/player/macSharedTextureNative.test.ts apps/desktop/src/main/player/macSoftwareNative.test.ts
         env:
           JAVDEX_TEST_MAC_PLAYBACK_NATIVE: ${{ github.workspace }}/out/playback-runtime/darwin-${{ matrix.arch }}/playback.node
 

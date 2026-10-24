@@ -10,6 +10,7 @@ import type { LocalModelRef, LocalModelUsage, LocalModelReadiness, LocalAccelera
 import type { LocalModelGroup, LocalRuntimeComponent, LocalRuntimeEnvironment, LocalPreparationPlan, LocalDependencyCheck } from '@shared/desktop/localModels'
 import { createAiRuntimeInstaller, localModelRuntimeSupported } from './runtimeInstaller'
 import { AI_RUNTIME_PLATFORM_MESSAGE, currentAiRuntimeTarget } from './runtimeManifest'
+import { runtimeSupportsMetal } from './runtimeDistributionAssets'
 import { gpuRuntimeAssets } from './gpuManifest'
 import { localGpuTargetSupported, detectLocalGpuDevices, type LocalGpuRuntime } from './runtimeAcceleration'
 import { AI_RUNTIME_LICENSES } from './runtimeLicenses'
@@ -169,7 +170,7 @@ export function createLocalModelManager(userData: string, options: {
       const shared = components.filter(item => item.group === group)
       const gpuItems = shared.filter(item => item.backend === backend)
       return { group, components: shared.map(item => ({ ...item, source: sourceUrl(item.source) })), cpuReady: supported() && shared.filter(item => item.backend === 'cpu' || item.backend === 'common').every(item => item.installed),
-        gpu: { backend: process.platform === 'darwin' && accelerationPolicy.mode === 'auto' ? 'metal' : backend,
+        gpu: { backend: accelerationPolicy.mode === 'auto' && runtimeSupportsMetal(currentAiRuntimeTarget(), group === 'speech' ? 'whisper' : 'translator') ? 'metal' : backend,
           state: accelerationPolicy.mode === 'cpu' ? 'disabled' : !localGpuTargetSupported() || !shared.some(item => item.backend === 'cuda' || item.backend === 'vulkan') ? 'platform' : backend
             ? gpuItems.length > 0 && gpuItems.every(item => item.installed) ? 'ready' : 'missing'
             : detectionComplete() ? 'unavailable' : 'unchecked' },

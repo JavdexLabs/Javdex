@@ -278,6 +278,9 @@ export function createPlaybackSession(deps: Dependencies) {
       const raw = deps.native.read()
       if (!raw.alive) { fail(new PlaybackFailure('native').message); return }
       if (raw.error) { fail(new PlaybackFailure(raw.errorKind ?? 'load').message); return }
+      // A replacement decoder can report loadedFiles=0 until its load replies.
+      // Give that one backend transition a fresh deadline, not the old movie's.
+      if (raw.playbackMode === 'cpu' && raw.playbackFallback && state.info.playbackMode !== 'cpu') openedAt = now()
       state.paused = raw.pause ?? state.paused
       state.phase = raw['eof-reached'] ? 'ended' : raw.loadedFiles ? raw['paused-for-cache'] ? 'buffering' : state.paused ? 'paused' : 'playing' : 'opening'
       if (state.phase === 'opening' && now() - openedAt >= 30000) { fail(new PlaybackFailure('openingTimeout').message); return }

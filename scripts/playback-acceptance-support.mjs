@@ -101,7 +101,7 @@ export const nativeEvidence = application => application.evaluate(({ app }) => {
   const require = process.getBuiltinModule('module').createRequire(app.getAppPath() + '/package.json')
   const addon = require(app.isPackaged ? process.resourcesPath + '/native-playback/playback.node' : app.getAppPath() + '/out/native-playback/playback.node')
   const canvas = process.platform === 'darwin' || process.platform === 'win32'
-  const state = (process.platform === 'win32' ? addon.software.inspect().alive ? addon.software : addon.sharedTexture : addon).inspect()
+  const state = (addon.software?.inspect().alive ? addon.software : process.platform === 'win32' ? addon.sharedTexture : addon).inspect()
   // This is a producer render counter, not proof of physical screen presentation.
   return { alive: state.alive, loadedFiles: state.loadedFiles,
     renderedFrames: canvas ? state.nativeFrames : state.presentedFrames,

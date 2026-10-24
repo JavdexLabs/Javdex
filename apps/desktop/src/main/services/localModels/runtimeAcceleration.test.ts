@@ -56,7 +56,7 @@ test('automatic and explicit unavailable GPUs use a CPU executable without requi
   for (const policy of [{ mode: 'auto' }, { mode: 'gpu', device: 'absent' }, { mode: 'cpu' }] as const) {
     const selected = await selectLocalExecution('/cpu', '/missing-weight', 'translation', { policy, devices: [], runtimes: {} })
     assert.equal(selected.executable, '/cpu')
-    if (process.platform === 'darwin' && policy.mode === 'auto') assert.equal(selected.backend, 'metal')
+    if (process.platform === 'darwin' && process.arch === 'arm64' && policy.mode === 'auto') assert.equal(selected.backend, 'metal')
     else assert.ok(selected.args.includes('none'))
     assert.ok(!selected.env.CUDA_VISIBLE_DEVICES)
   }

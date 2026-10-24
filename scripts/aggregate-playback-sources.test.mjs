@@ -18,7 +18,7 @@ function write(root, name, bytes) {
   fs.mkdirSync(path.dirname(path.join(root, name)), { recursive: true })
   fs.writeFileSync(path.join(root, name), bytes)
 }
-async function fixture(t, windowsEntry = 'windowsPlaybackAddon.cpp') {
+async function fixture(t, windowsEntry = 'windowsPlaybackAddon.cpp', omitCpuHeader = false) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-combined-sources-test-'))
   t.after(() => fs.rmSync(root, { recursive: true, force: true }))
   const inputs = []
@@ -44,6 +44,11 @@ async function fixture(t, windowsEntry = 'windowsPlaybackAddon.cpp') {
       'apps/desktop/src/main/player/native/windowsSharedTexture.cpp', 'apps/desktop/src/main/player/native/windowsSoftwarePlayback.cpp', 'apps/desktop/src/main/player/native/windowsTextureTickets.h',
       'apps/desktop/src/main/player/native/windowsTextureTickets.test.cpp',
       'apps/desktop/src/main/player/native/linuxX11Playback.cpp', 'electron-sdk/include/node/node.h', 'win_delay_load_hook.cc', 'node-gyp-LICENSE']) write(native, name, 'fixture ' + name)
+    if (windowsEntry === 'windowsPlaybackAddon.cpp') {
+      for (const entry of ['macSharedTexture.mm', 'windowsSoftwarePlayback.cpp'])
+        write(native, 'apps/desktop/src/main/player/native/' + entry, '#include "softwarePlayback.h"\n')
+      if (!omitCpuHeader) write(native, 'apps/desktop/src/main/player/native/softwarePlayback.h', 'fixture shared software renderer')
+    }
     write(native, 'package.json', JSON.stringify({ version }))
     write(native, 'package-lock.json', JSON.stringify({ version }))
     write(native, 'build/playback-sources.json', JSON.stringify({ sdk, sources: sourcePins }))
@@ -138,6 +143,11 @@ test('aggregation rejects missing platforms and tampered input archives', async 
   const value = JSON.parse(fs.readFileSync(sidecar)); value.sourceBundle.sha256 = '0'.repeat(64)
   fs.writeFileSync(sidecar, JSON.stringify(value))
   await assert.rejects(aggregatePlaybackSources(f.directory, version), /AssertionError/)
+})
+
+test('new CPU producers cannot omit the shared implementation from preferred sources', async t => {
+  const f = await fixture(t, 'windowsPlaybackAddon.cpp', true)
+  await assert.rejects(aggregatePlaybackSources(f.directory, version), /softwarePlayback\.h/)
 })
 
 test('aggregation rejects binary/source binding mismatches', async t => {

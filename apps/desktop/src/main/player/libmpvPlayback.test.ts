@@ -8,6 +8,7 @@ import type { BrowserWindow } from 'electron'
 import { ModuleKind, ScriptTarget, transpileModule } from 'typescript'
 import type { NativePlaybackState } from './nativePlayback'
 import type { PlaybackOcclusion, PlaybackSnapshot } from '@shared/desktop/playback'
+import { createGraphicsPlaybackFallback } from './graphicsPlaybackFallback'
 
 // Exercise the production wrapper with isolated import adapters, without loading
 // Electron or a native binary, changing process.platform, or adding a production seam.
@@ -28,6 +29,7 @@ function fixture(platform: 'darwin' | 'win32' | 'linux', software = false) {
   let pending = 0, replies = 0, errors = 2, generatedErrors = 0, held = false
   let generatedPending = 0, generatedReplies = 0
   let overlayRevision = 0
+  let inspectionFailed = false
   const overlays: Array<{ operation: string; document: string; visible: boolean; revision: number }> = []
   let sid = '7', aid = '2'
   const waiting: Array<{ args: string[]; generated: boolean }> = []
@@ -58,6 +60,7 @@ function fixture(platform: 'darwin' | 'win32' | 'linux', software = false) {
     setBounds(bounds: unknown) { viewports.push(bounds) },
     setVisible() {},
     setPresentation() {},
+    render() {},
     setOcclusions(rects: PlaybackOcclusion[]) { occlusions.push(rects) },
     command(args: string[], generated = false) {
       commands.push([...args])
@@ -68,7 +71,7 @@ function fixture(platform: 'darwin' | 'win32' | 'linux', software = false) {
         else complete(args, generated)
       }
     },
-    inspect: () => frozen ?? snapshot(),
+    inspect: () => { if (inspectionFailed) throw new Error('GPU playback bridge is unavailable'); return frozen ?? snapshot() },
     generatedSubtitles(operation: string, document: string, visible: boolean, revision: number) {
       overlays.push({ operation, document, visible, revision })
       const args = ['overlay', operation, document, String(visible), String(revision)]
@@ -96,7 +99,7 @@ function fixture(platform: 'darwin' | 'win32' | 'linux', software = false) {
         case 'node:fs': return { existsSync: () => true }
         case 'node:path': return path
         case 'node:timers/promises': return { setTimeout: delay }
-        case 'node:module': return { createRequire: () => (filename: string) => { loaded.push(filename); return platform === 'win32' ? { sharedTexture: sharedProducer, software: sharedProducer } : bridge } }
+        case 'node:module': return { createRequire: () => (filename: string) => { loaded.push(filename); return platform === 'win32' ? { sharedTexture: sharedProducer, software: sharedProducer } : Object.assign(bridge, { software: sharedProducer }) } }
         case './playbackDisplay': return { linuxPlaybackBackend: () => 'dmabuf' }
         case './linuxPlaybackBridge': return { createLinuxPlaybackBridge: () => bridge }
         case './linuxSharedTexture': return { createLinuxSharedTexture: () => { throw new Error('Wrapper fixture does not materialize its deferred frame channel') } }
@@ -106,6 +109,9 @@ function fixture(platform: 'darwin' | 'win32' | 'linux', software = false) {
           assert.equal(producer, sharedProducer); assert.equal(platform, 'win32'); return bridge
         } }
         case './windowsSoftwarePlayback': return { createWindowsSoftwarePlaybackBridge: (producer: unknown) => { assert.equal(producer, sharedProducer); return bridge } }
+        case './softwarePlayback': return { createSoftwarePlaybackBridge: (producer: unknown, _window: unknown, selected: string) => {
+          assert.equal(platform, 'darwin'); assert.equal(selected, 'darwin'); assert.equal(producer, sharedProducer); return bridge
+        } }
         case './linuxPlaybackDevice': return { linuxPlaybackRenderNode: () => '/dev/dri/renderD129' }
         default: throw new Error(`Unexpected playback wrapper dependency: ${id}`)
       }
@@ -121,6 +127,7 @@ function fixture(platform: 'darwin' | 'win32' | 'linux', software = false) {
   native.create()
   assert.equal(created, true, 'the real wrapper must load the fixture bridge')
   return { native, commands, overlays, viewports, occlusions, loaded, handles, queue: (pending: typeof actions): void => { actions.push(...pending) },
+    failInspection: (): void => { inspectionFailed = true },
     hold: (): void => { held = true },
     observeSelection: (sub: string, audio = aid): void => { sid = sub; aid = audio },
     freeze: (): void => { frozen = snapshot() }, thaw: (): void => { frozen = null },
@@ -141,13 +148,20 @@ test('Linux keeps its accessible controls and popup geometry contract', t => {
   }
 })
 
-test('macOS normal playback always uses the shared Canvas addon and DOM controls without switches', t => {
+test('macOS default playback uses the shared Canvas addon and DOM controls without switches', t => {
   const f = fixture('darwin'); t.after(f.native.destroy)
   assert.equal(f.native.read().rendererFullscreenControls, true)
   assert.equal(f.native.renderPolling, false)
   assert.deepEqual(f.loaded, [path.resolve('fixture-app/out/native-playback/playback.node')])
   f.native.viewport({ x: 0, y: 0, width: 640, height: 360 }, true, { presentation: 'expanded' } as PlaybackSnapshot)
   assert.equal((f.viewports[0] as { scale?: number }).scale, 1)
+})
+
+test('macOS software playback selects the independent software export without a GPU surface', t => {
+  const f = fixture('darwin', true); t.after(f.native.destroy)
+  assert.equal(f.native.read().rendererFullscreenControls, true)
+  assert.equal(f.native.renderPolling, false)
+  assert.deepEqual(f.loaded, [path.resolve('fixture-app/out/native-playback/playback.node')])
 })
 test('Windows normal playback uses the shared Canvas producer without an HWND or startup switch', t => {
   const f = fixture('win32'); t.after(f.native.destroy)
@@ -165,6 +179,36 @@ test('Windows software playback uses copied Canvas pixels without requesting an 
 })
 
 const timeline = 'generated timeline fixture'
+for (const platform of ['darwin', 'win32'] as const) {
+  for (const lostInspection of [false, true]) {
+    for (const selection of ['refresh', 'hidden', 'sidecar', 'reselected'] as const) {
+      test(`${platform}: CPU recovery preserves AI overlay selection after ${selection} (lost inspection: ${lostInspection})`, async t => {
+        const gpu = fixture(platform), cpu = fixture(platform, true)
+        let failed = false
+        const native = createGraphicsPlaybackFallback({ ...gpu.native, render() {
+          if (failed) throw new Error('OpenGL frame rendering failed')
+          gpu.native.render()
+        } }, { ...cpu.native, read: () => ({ ...cpu.native.read(), loadedFiles: 1, seekable: false }) },
+        { forceCpu: () => false, gpuAvailable: () => true }, platform)
+        t.after(() => native.destroy())
+        native.create(); native.load('/fixture.mkv')
+        // The real AI controller selects once, then refreshes with select=false.
+        await native.updateGeneratedSubtitle!(subtitleFile, true, undefined, timeline)
+        await native.updateGeneratedSubtitle!(subtitleFile, false, undefined, timeline + ' future cues')
+        if (selection === 'hidden' || selection === 'reselected') native.command({ kind: 'track', type: 'sub', id: 3 })
+        if (selection === 'sidecar') native.addSubtitle(newSubtitleFile)
+        if (selection === 'reselected') native.command({ kind: 'track', type: 'sub', id: Number.MAX_SAFE_INTEGER })
+        const selected = selection === 'refresh' || selection === 'reselected'
+        assert.equal(gpu.native.generatedSubtitleSelected!(subtitleFile), selected)
+        if (lostInspection) gpu.failInspection()
+        failed = true; native.render(); native.read()
+        await delay(50)
+        assert.equal(cpu.overlays.find(item => item.operation === 'update')?.document, timeline + ' future cues')
+        assert.equal(cpu.native.generatedSubtitleSelected!(subtitleFile), selected, 'CPU must preserve actual visibility, not the refresh select argument')
+      })
+    }
+  }
+}
 for (const platform of ['darwin', 'win32', 'linux'] as const) {
   test(`${platform}: persistent AI display keeps virtual selection, manual ownership and native input`, async t => {
     const f = fixture(platform)

@@ -71,3 +71,17 @@ test('Linux CUDA setup includes Vulkan enumeration for secondary integrated GPUs
   assert.ok(makePlan({ mode: 'auto' }).items.some(item => item.id === 'cuda-cuda'))
   assert.ok(!makePlan({ mode: 'cpu' }).items.some(item => item.id.endsWith('-vulkan') || item.id.endsWith('-cuda')))
 })
+
+test('macOS plans reflect each pinned engine capability on Intel and Apple Silicon', () => {
+  for (const arch of ['x64', 'arm64']) {
+    const target = { platform: 'darwin', arch }
+    const inventory = runtimeComponentDefinitions(target).map(({ component }) => ({ ...component, installed: false }))
+    for (const group of ['speech', 'text'] as const) {
+      for (const mode of ['auto', 'cpu'] as const) {
+        const plan = preparationPlan({ groups: [group], components: inventory, policy: { mode }, devices: [],
+          target, supported: true, installed: () => false })
+        assert.equal(plan.backend, mode === 'auto' && (arch === 'arm64' || group === 'speech') ? 'metal' : 'cpu')
+      }
+    }
+  }
+})

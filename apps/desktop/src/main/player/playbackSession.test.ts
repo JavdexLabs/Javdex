@@ -64,6 +64,24 @@ test('track projection retains bounded container channel hints and never externa
   assert.equal(JSON.stringify(state).includes('/private/subtitle.ass'), false)
 })
 
+test('automatic CPU decoder replacement refreshes its opening deadline once, not on every observation', async () => {
+  const f = fixture()
+  await f.session.open(target)
+  f.raw({ playbackMode: 'gpu' }); f.session.tick(); f.advance(31000)
+  f.raw({ playbackMode: 'cpu', playbackFallback: true, loadedFiles: 0 }); f.session.tick()
+  assert.equal(f.session.snapshot()!.phase, 'opening')
+  f.advance(29000); f.session.tick(); assert.equal(f.session.snapshot()!.phase, 'opening')
+  f.advance(1001); f.session.tick(); assert.equal(f.session.snapshot()!.phase, 'error')
+})
+
+test('ordinary or forced CPU loading still has the original bounded opening deadline', async () => {
+  const f = fixture()
+  await f.session.open(target)
+  f.raw({ playbackMode: 'cpu', playbackFallback: false, loadedFiles: 0 })
+  f.advance(31000); f.session.tick()
+  assert.equal(f.session.snapshot()!.phase, 'error')
+})
+
 test('paused PGS refresh waits for selection feedback and keeps the intended position rather than the reinit clock', async () => {
   const f = fixture()
   await f.session.open(target)

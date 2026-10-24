@@ -23,3 +23,9 @@ export function runtimeDistributionAssets(target: AiRuntimeTarget, backend?: 'cu
       ? { legacyInstalledIdentity: `whisper-b5130-ffmpeg-8.1.3-v1:${target.platform}-${target.arch}:whisper` } : {})
   }))
 }
+
+/** The pinned llama x64 build disables Metal; its arm64 base package includes it.
+ * Distribution backend labels also classify base downloads, so CPU does not imply CPU-only. */
+export function runtimeSupportsMetal(target: AiRuntimeTarget, id: 'whisper' | 'translator'): boolean {
+  return target.platform === 'darwin' && (target.arch === 'arm64' || target.arch === 'x64' && id === 'whisper')
+}

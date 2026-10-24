@@ -24,7 +24,8 @@ function deferred() {
   return { promise, resolve }
 }
 
-function fixture(t: TestContext, pause: 'recent' | 'playlist', renderPolling = true, platform: NodeJS.Platform = process.platform) {
+function fixture(t: TestContext, pause: 'recent' | 'playlist', renderPolling = true, platform: NodeJS.Platform = process.platform,
+  startup: { args?: readonly string[]; gpuAvailable?: boolean } = {}) {
   const root = mkdtempSync(path.join(os.tmpdir(), 'javdex-playback-start-'))
   const entered = deferred(), release = deferred(), finished = deferred()
   const removals: Array<{ catalog: string; videoId: number }> = []
@@ -48,11 +49,13 @@ function fixture(t: TestContext, pause: 'recent' | 'playlist', renderPolling = t
   const source = { target: { libraryId: 1, videoId: 7, resourceId: 9 }, title: 'Synthetic', mode: 'remote',
     locator: 'https://fixture.invalid/video', identityKey: playbackCatalogKey(backend), revision: '1', resumeKey: 'a'.repeat(64) }
   let raw: NativePlaybackState = { alive: true, loadedFiles: 1, pause: false, seekable: true, duration: 300, 'time-pos': 1, presentedFrames: 1 }
-  const native = { renderPolling, create() {}, destroy() {}, command() {}, load() {}, read: () => ({ ...raw }), render() {}, viewport() {}, addSubtitle() {} }
+  let gpuCreates = 0, cpuCreates = 0
+  const native = { renderPolling, create() { gpuCreates++ }, destroy() {}, command() {}, load() {}, read: () => ({ ...raw }), render() {}, viewport() {}, addSubtitle() {} }
+  const cpu = { ...native, create() { cpuCreates++ } }
   let session!: ReturnType<typeof createPlaybackSession>
   const mocks: Record<string, unknown> = {
-    electron: { app: { getPath: () => root, isHardwareAccelerationEnabled: () => true }, dialog: {}, shell: {}, powerSaveBlocker: { start: () => 1, stop() {} }, powerMonitor: { on() {}, off() {} } },
-    './libmpvPlayback': { builtinPlaybackAvailability: () => ({ available: true }), createLibmpvPlayback: () => native },
+    electron: { app: { getPath: () => root, isHardwareAccelerationEnabled: () => startup.gpuAvailable ?? true }, dialog: {}, shell: {}, powerSaveBlocker: { start: () => 1, stop() {} }, powerMonitor: { on() {}, off() {} } },
+    './libmpvPlayback': { builtinPlaybackAvailability: () => ({ available: true }), createLibmpvPlayback: (_window: unknown, selected?: string) => selected === 'software' ? cpu : native },
     './playbackSource': { playbackCatalogKey, createPlaybackSourceResolver: () => ({
       resolve: async (target: PlaybackSource['target']) => { resolutions++; return { ...structuredClone(source), target } },
       validate: async () => { validations++ }, release: (value: PlaybackSource) => { released.push(value) }
@@ -73,7 +76,7 @@ function fixture(t: TestContext, pause: 'recent' | 'playlist', renderPolling = t
     } }
   }
   const exports = {} as typeof import('./desktopPlayback')
-  runInNewContext(code, { exports, Buffer, process: { ...process, platform }, console,
+  runInNewContext(code, { exports, Buffer, process: { ...process, platform, argv: [process.execPath, ...(startup.args ?? [])] }, console,
     setInterval: (callback: () => void, ms: number) => { timers.set(ms, callback); return { unref() {} } }, clearInterval() {},
     require: (name: string) => Object.hasOwn(mocks, name) ? mocks[name] : requireDependency(name)
   }, { filename: 'desktopPlayback.ts' })
@@ -82,6 +85,7 @@ function fixture(t: TestContext, pause: 'recent' | 'playlist', renderPolling = t
   t.after(async () => { release.resolve(); await exports.disposeBuiltinPlayback(); rmSync(root, { recursive: true, force: true }) })
   return { removals, entered, release, finished, open, source, released, native, timers, snapshot: () => session.snapshot(), subtitles: () => subtitleDependencies,
     resolutions: () => resolutions, validations: () => validations, subtitleStops: () => subtitleStops,
+    creates: () => ({ gpu: gpuCreates, cpu: cpuCreates }),
     restore: () => { identity.catalogId = 'catalog-B'; generation++; exports.stopBuiltinPlayback() },
     start: async () => {
       assert.equal((await open(source.target)).ok, true)
@@ -91,6 +95,31 @@ function fixture(t: TestContext, pause: 'recent' | 'playlist', renderPolling = t
       await entered.promise
     } }
 }
+
+for (const [name, startup, expected] of [
+  ['default', {}, 'gpu'],
+  ['forced', { args: ['--javdex-cpu'] }, 'cpu'],
+  ['disabled acceleration', { gpuAvailable: false }, 'cpu'],
+  ['argument after --', { args: ['--', '--javdex-cpu'] }, 'gpu']
+] as const) test(`macOS ${name} selects the correct backend through the production registration`, async t => {
+  const f = fixture(t, 'recent', false, 'darwin', startup)
+  assert.equal((await f.open(f.source.target)).ok, true)
+  f.timers.get(200)!()
+  assert.equal(f.snapshot()!.info.playbackMode, expected)
+  assert.deepEqual(f.creates(), { gpu: expected === 'gpu' ? 1 : 0, cpu: expected === 'cpu' ? 1 : 0 })
+})
+
+test('macOS graphics failure recovers in CPU without requesting another authorization', async t => {
+  const f = fixture(t, 'recent', false, 'darwin')
+  assert.equal((await f.open(f.source.target)).ok, true)
+  f.timers.get(200)!()
+  f.native.read = () => { throw Object.assign(new Error('macOS 共享视频帧消费失败'), { playbackFailureKind: 'graphics' }) }
+  f.timers.get(200)!()
+  assert.equal(f.snapshot()!.info.playbackMode, 'cpu')
+  assert.equal(f.snapshot()!.info.playbackFallback, true)
+  assert.equal(f.resolutions(), 1)
+  assert.deepEqual(f.creates(), { gpu: 1, cpu: 1 })
+})
 
 test('self-driven native hosts omit the render poll but still publish controlled failures through state observation', async t => {
   // The self-driven host is macOS; Linux deliberately wraps its native hosts

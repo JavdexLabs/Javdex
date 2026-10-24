@@ -10,7 +10,7 @@ import { createRequire } from 'node:module'
 import { availableParallelism } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { playbackBuildFingerprint, playbackMpvRenderFenceFix, playbackLinuxAssDependency, playbackLinuxVaapiRenderDependency, playbackPkgConfigEnvironment, playbackSourceNativePlan, playbackSourcePlan, playbackWindowsExportNames, staticPlaybackDependencies, verifyPlaybackSource } from './playback-source-build.mjs'
+import { playbackBuildFingerprint, playbackMpvRenderFenceFix, playbackLinuxAssDependency, playbackLinuxVaapiRenderDependency, playbackPkgConfigEnvironment, playbackSourceNativePlan, playbackSourcePlan, playbackWindowsExportNames, playbackWindowsSourceEnvironment, stageWindowsStaticZlib, staticPlaybackDependencies, verifyPlaybackSource } from './playback-source-build.mjs'
 import { playbackFileSha256, validatePlaybackRuntime } from './playback-runtime.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'), require = createRequire(import.meta.url)
@@ -56,11 +56,14 @@ function run(command, args = [], cwd = root, capture = false, overrides = {}) {
 }
 const compiler = platform === 'win32' ? 'gcc' : 'cc'
 const python = platform === 'win32' && process.env.pythonLocation ? path.join(process.env.pythonLocation, 'python.exe') : 'python3'
+const windowsRuntimeSymbols = platform === 'win32'
+  ? run('nm', ['--defined-only', '--extern-only', run(compiler, ['-print-file-name=libmingw32.a'], root, true)], root, true) : ''
 environment.CC = compiler; environment.CXX = platform === 'win32' ? 'g++' : 'c++'
 const toolchain = { compiler: run(compiler, ['--version'], root, true), cmake: run('cmake', ['--version'], root, true),
   python: run(python, ['--version'], root, true), make: run('make', ['--version'], root, true),
   ...(arch === 'x64' ? { nasm: run('nasm', ['--version'], root, true) } : {}),
-  ...(platform === 'win32' ? { msysRoot, vcToolsVersion: process.env.VCToolsVersion, windowsSdkVersion: process.env.WindowsSDKVersion } : {}),
+  ...(platform === 'win32' ? { msysRoot, vcToolsVersion: process.env.VCToolsVersion, windowsSdkVersion: process.env.WindowsSDKVersion,
+    mingwRuntimePackages: run('pacman', ['-Q', 'mingw-w64-ucrt-x86_64-gcc', 'mingw-w64-ucrt-x86_64-crt', 'mingw-w64-ucrt-x86_64-headers'], root, true) } : {}),
   ...(platform === 'linux' ? { systemApis: run(portable ? '/usr/bin/pkg-config' : 'pkg-config', ['--modversion', ...(software ? ['fontconfig', 'libpulse'] : portable ? ['fontconfig', 'libpulse', 'libva', 'libva-drm', 'egl', 'gbm', 'libdrm'] : ['x11', 'xft', 'fontconfig', 'alsa', 'libva'])], root, true) } : {}),
   ...(platform === 'darwin' ? { sdk: run('xcrun', ['--show-sdk-version'], root, true), swift: run('swiftc', ['--version'], root, true), deploymentTarget: '12.0' } : {}) }
 if (platform === 'darwin') environment.MACOSX_DEPLOYMENT_TARGET = '12.0'
@@ -176,12 +179,19 @@ environment.PKG_CONFIG = posix(environment.PKG_CONFIG)
 environment.CFLAGS = '-O2 -fPIC'; environment.CXXFLAGS = '-O2 -fPIC'
 environment.CPPFLAGS = `-I${posix(path.join(prefix, 'include'))}`
 environment.LDFLAGS = `-L${posix(path.join(prefix, 'lib'))}`
-if (platform === 'win32') environment.LDFLAGS += ' -static -static-libgcc -static-libstdc++'
+if (platform === 'win32') {
+  const windows = playbackWindowsSourceEnvironment(prefix, windowsRuntimeSymbols)
+  environment.LIBRARY_PATH = windows.libraryPath
+  environment.LDFLAGS += ' ' + windows.linkArgs.join(' ')
+}
 const jobs = Math.min(availableParallelism(), 8)
 const plan = playbackSourcePlan({ platform, arch, source: sourceRoot, build, prefix, tools, jobs, linuxProfile: platform === 'linux' ? software ? 'software' : 'dmabuf' : undefined })
 for (const step of plan) {
   console.log(`Source build: ${step.command} ${step.args.join(' ')}`)
   run(step.command, step.args, step.cwd)
+  if (platform === 'win32' && step.command === 'cmake' && step.args[0] === '--install' && step.args[1] === path.join(build, 'zlib')) {
+    patches.push({ id: 'zlib', operation: 'Install canonical static-only Windows archive for -lz', ...stageWindowsStaticZlib(prefix) })
+  }
   if (step.command === 'make' && step.args.includes('liblua.a')) {
     const lua = path.join(sourceRoot, 'lua/src'), include = path.join(prefix, 'include/lua5.2')
     mkdirSync(include, { recursive: true })
@@ -189,6 +199,10 @@ for (const step of plan) {
     cpSync(path.join(lua, 'liblua.a'), path.join(prefix, 'lib/liblua.a'))
     writeFileSync(path.join(prefix, 'lib/pkgconfig/lua5.2.pc'), `prefix=${prefix.replaceAll('\\', '/')}\nName: Lua\nDescription: Lua 5.2\nVersion: 5.2.4\nLibs: -L\${prefix}/lib -llua\nLibs.private: -lm${platform === 'linux' ? ' -ldl' : ''}\nCflags: -I\${prefix}/include/lua5.2\n`)
   }
+}
+if (platform === 'win32') for (const name of ['libiconv.a', 'libz.a']) {
+  assert.equal(realpathSync(run(compiler, ['-print-file-name=' + name], root, true)), realpathSync(path.join(prefix, 'lib', name)),
+    'Preferred source-built archive was shadowed by a toolchain library: ' + name)
 }
 // Matching Electron SDK in a task-owned cache; node-gyp verifies its checksums.
 const rebuildRequire = createRequire(require.resolve('@electron/rebuild'))
@@ -221,7 +235,12 @@ if (platform === 'win32') {
   // Visual Studio tools are added by the CI developer-command-prompt step.
   run('lib.exe', ['/machine:x64', `/def:${definition}`, `/out:${path.join(prefix, 'lib/mpv.lib')}`])
 }
-if (platform === 'win32') { environment.CC = 'cl'; environment.CXX = 'cl'; delete environment.CMAKE_GENERATOR }
+if (platform === 'win32') {
+  environment.CC = 'cl'; environment.CXX = 'cl'
+  // CMake supplies the MSVC include/link paths and /MT explicitly. Do not
+  // carry the dependency compiler's GCC flags into this separate toolchain.
+  for (const key of ['CMAKE_GENERATOR', 'CFLAGS', 'CXXFLAGS', 'CPPFLAGS', 'LDFLAGS', 'LIBRARY_PATH']) delete environment[key]
+}
 const adapterPlan = playbackSourceNativePlan({ platform, arch, root, prefix, include,
   nodeLibrary: path.join(sdk, arch, 'node.lib'), delayHook, output: addon })
 for (const step of adapterPlan) {

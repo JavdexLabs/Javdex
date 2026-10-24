@@ -26,7 +26,7 @@ test('macOS normal build executes shared-core regression then its sole IOSurface
 test('Windows command plan selects installed inputs and CMake, without macOS flags', () => {
   for (const [arch, cmakeArch] of [['x64', 'x64'], ['arm64', 'ARM64']]) {
     const steps = playbackNativeBuild({ ...input, platform: 'win32', arch })
-    assert.deepEqual(steps.map(step => step.command), ['cmake', 'cmake', path.join(input.output, 'mpv-core-test.exe'), path.join(input.output, 'slider-feedback-test.exe'), path.join(input.output, 'windows-texture-tickets-test.exe')])
+    assert.deepEqual(steps.map(step => step.command), ['cmake', 'cmake', path.join(input.output, 'mpv-core-test.exe'), path.join(input.output, 'windows-texture-tickets-test.exe')])
     assert.equal(steps[0].args[steps[0].args.indexOf('-A') + 1], cmakeArch)
     assert.ok(steps[0].args.includes(`-DELECTRON_NODE_LIBRARY=${input.nodeLibrary}`))
     assert.ok(steps[0].args.includes(`-DELECTRON_DELAY_LOAD_HOOK=${input.delayHook}`))
@@ -37,7 +37,7 @@ test('Windows command plan selects installed inputs and CMake, without macOS fla
 })
 test('Windows addon installs the Electron import hook directly in its delayed-load module', () => {
   const cmake = readFileSync(new URL('../apps/desktop/src/main/player/native/CMakeLists.txt', import.meta.url), 'utf8')
-  assert.ok(cmake.includes('add_library(playback MODULE windowsPlayback.cpp windowsSharedTexture.cpp windowsSoftwarePlayback.cpp "${ELECTRON_DELAY_LOAD_HOOK}")'))
+  assert.ok(cmake.includes('add_library(playback MODULE windowsPlaybackAddon.cpp windowsSharedTexture.cpp windowsSoftwarePlayback.cpp "${ELECTRON_DELAY_LOAD_HOOK}")'))
   assert.ok(cmake.includes('HOST_BINARY="node.exe"'))
   assert.ok(cmake.includes('target_link_options(playback PRIVATE /DELAYLOAD:node.exe)'))
   assert.match(cmake, /target_link_libraries\(playback PRIVATE "\$\{ELECTRON_NODE_LIBRARY\}" delayimp /)

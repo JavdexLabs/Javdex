@@ -5,12 +5,15 @@ import { existsSync } from 'node:fs'
 import { Worker } from 'node:worker_threads'
 import { test } from 'node:test'
 
-const file = path.resolve('out/native-playback/playback.node')
+const file = path.resolve(process.env.JAVDEX_TEST_WINDOWS_PLAYBACK_NATIVE ?? 'out/native-playback/playback.node')
 test('real Windows CPU producer bounds frames, clears padding and survives a rejected worker import', {
-  skip: process.platform !== 'win32' || !existsSync(file) ? 'requires the compiled Windows playback addon' : false,
+  skip: process.platform !== 'win32' || (!process.env.JAVDEX_TEST_WINDOWS_PLAYBACK_NATIVE && !existsSync(file))
+    ? 'requires the compiled Windows playback addon' : false,
   timeout: 10000
 }, async t => {
-  const native = createRequire(import.meta.url)(file).software as {
+  const addon = createRequire(import.meta.url)(file)
+  assert.deepEqual(Object.getOwnPropertyNames(addon).sort(), ['sharedTexture', 'software'], 'only Canvas producers may be exported')
+  const native = addon.software as {
     create(bounds: { width: number; height: number; scale: number }): void
     setBounds(bounds: { width: number; height: number; scale: number }): void
     setVisible(value: boolean): void

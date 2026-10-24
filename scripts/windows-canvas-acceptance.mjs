@@ -22,14 +22,14 @@ const reportFile = path.join(output, 'windows-canvas-report.json')
 let application, surfaceToken
 const save = () => fs.writeFileSync(reportFile, JSON.stringify(report, null, 2))
 try {
-  application = await launchAcceptance(directory, 'windows-canvas-application.log', ['--javdex-windows-canvas'])
+  application = await launchAcceptance(directory, 'windows-canvas-application.log', [])
   const page = await application.firstWindow()
   await page.waitForFunction(() => window.api?.playback && document.querySelector('nav'))
   await prepareNonRecordingPlayback(page)
   await application.evaluate(({ app }) => {
     assertStartup()
     function assertStartup() {
-      if (!app.commandLine.hasSwitch('javdex-windows-canvas') || app.commandLine.hasSwitch('disable-direct-composition'))
+      if (app.commandLine.hasSwitch('disable-direct-composition'))
         throw Error('Canvas startup selection/composition is incorrect')
     }
   })

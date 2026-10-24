@@ -18,7 +18,7 @@ import { checkSyntheticCanvasFrame } from './windows-canvas-checks.mjs'
 assert.equal(process.platform, 'win32')
 const mode = process.argv.find(v => v.startsWith('--mode='))?.slice(7) ?? 'disabled'
 const playingFault = process.argv.includes('--playing-fault')
-assert(['disabled', 'forced', 'initialization', 'gpu-fault', 'producer-fault', 'legacy'].includes(mode))
+assert(['disabled', 'forced', 'initialization', 'gpu-fault', 'producer-fault'].includes(mode))
 const recoveringFault = mode === 'gpu-fault' || mode === 'producer-fault'
 const media = process.argv.slice(2).filter(v => !v.startsWith('--')).map(v => path.resolve(v))
 assert(media.length > 0, 'Pass synthetic media files for the acceptance catalog')
@@ -29,13 +29,13 @@ fs.mkdirSync(output, { recursive: true })
 const directory = createAcceptanceDirectory('windows-cpu-'), targets = seedAcceptanceCatalog(directory, media)
 const report = { passed: false, mode, playingFault, directory, checks: [], pending: ['physical GPU-less machine', 'additional GPU/driver/display combinations', 'long playback', 'signed package'] }
 const nativeFile = process.env.JAVDEX_PLAYBACK_ACCEPTANCE_EXECUTABLE
-  ? path.join(path.dirname(process.env.JAVDEX_PLAYBACK_ACCEPTANCE_EXECUTABLE), 'resources/native-playback/playback.node')
-  : 'out/native-playback/playback.node'
+  ? path.join(path.dirname(path.resolve(process.env.JAVDEX_PLAYBACK_ACCEPTANCE_EXECUTABLE)), 'resources/native-playback/playback.node')
+  : path.resolve('out/native-playback/playback.node')
 report.nativeSha256 = createHash('sha256').update(fs.readFileSync(nativeFile)).digest('hex')
 const save = () => fs.writeFileSync(path.join(output, `windows-cpu-${mode}.json`), JSON.stringify(report, null, 2) + '\n')
 let application
 try {
-  const args = mode === 'disabled' ? ['--disable-gpu'] : mode === 'forced' ? ['--javdex-cpu'] : recoveringFault ? ['--javdex-windows-canvas'] : []
+  const args = mode === 'disabled' ? ['--disable-gpu'] : mode === 'forced' ? ['--javdex-cpu'] : []
   application = await launchAcceptance(directory, `windows-cpu-${mode}.log`, args)
   const page = await application.firstWindow()
   await page.waitForFunction(() => window.api?.playback && document.querySelector('nav'))
@@ -55,7 +55,8 @@ try {
     const file = require.resolve(app.isPackaged ? process.resourcesPath + '/native-playback/playback.node' : app.getAppPath() + '/out/native-playback/playback.node'), original = require(file)
     const injected = Object.create(null)
     for (const name of Object.getOwnPropertyNames(original)) injected[name] = original[name]
-    injected.create = () => { throw new Error('OpenGL 3.2 core context is unavailable (acceptance injection)') }
+    injected.sharedTexture = Object.fromEntries(Object.getOwnPropertyNames(original.sharedTexture).map(key => [key, original.sharedTexture[key]]))
+    injected.sharedTexture.create = () => { throw new Error('OpenGL 3.2 core context is unavailable (acceptance injection)') }
     require.cache[file].exports = injected
   })
   if (mode === 'producer-fault') await application.evaluate(({ app }) => {
@@ -79,7 +80,7 @@ try {
       position: s['time-pos'], audioPosition: s['audio-pts'], decoder: s['hwdec-current'], audio: s['current-ao'],
       volume: s.volume, muted: s.mute, speed: s.speed, sid: s.sid, aid: s.aid,
       droppedFrames: s['frame-drop-count'],
-      error: s.error, loaded: s.loadedFiles, legacyAlive: addon.inspect().alive, canvasAlive: addon.sharedTexture.inspect().alive }
+      error: s.error, loaded: s.loadedFiles, canvasAlive: addon.sharedTexture.inspect().alive }
   })
   const capture = async name => {
     const png = await page.locator('canvas[data-playback-surface]').screenshot()
@@ -95,10 +96,6 @@ try {
     assert.equal(opened.ok, true, opened.error)
     let state = await waitForState(page, s => s?.phase === 'playing' && s.position > .7, label)
     const control = value => page.evaluate(({ id, value }) => window.api.playback.control(id, value), { id: state.sessionId, value })
-    if (mode === 'legacy') {
-      assert.equal(state.info.playbackMode, 'gpu'); assert.equal(state.info.playbackFallback, false)
-      check.info = state.info; await control({ kind: 'stop' }); report.checks.push(check); save(); continue
-    }
     if (recoveringFault) {
       assert.equal(state.info.playbackMode, 'gpu')
       const faultPosition = mode === 'producer-fault' ? pausedPosition : 3
@@ -152,7 +149,7 @@ try {
     assert(Math.abs(check.native.width - check.canvasSize.expectedWidth) <= 1 && Math.abs(check.native.height - check.canvasSize.expectedHeight) <= 1,
       'CPU renderer must match the physical viewport without downscaling')
     assert.equal(check.native.decoder, 'no'); assert.equal(check.native.error, '')
-    if (!recoveringFault) { assert.equal(check.native.legacyAlive, false); assert.equal(check.native.canvasAlive, false) }
+    if (!recoveringFault) assert.equal(check.native.canvasAlive, false)
     const sub = state.tracks.find(t => t.type === 'sub')
     if (sub) {
       await control({ kind: 'track', type: 'sub', id: null }); await page.waitForTimeout(200)

@@ -22,6 +22,8 @@ npm run dev
 
 Linux Electron 图片元数据读取和缩略图使用 Sharp 官方 WASM 后端，避免 Electron 系统 GLib 与原生 libvips 的符号冲突；普通 Node（含独立服务器）和其他桌面平台继续使用原生后端。补丁绑定 Sharp 0.35.5 的 loader 摘要，升级不匹配时中止，禁止静默退回冲突后端。跳过安装脚本后需运行 `npm run prepare:sharp`；测试和打包入口会检查补丁。`node scripts/check-sharp-runtime.cjs` 验证 Node，`ELECTRON_RUN_AS_NODE=1 <Electron或已解包的Javdex可执行文件> scripts/check-sharp-runtime.cjs [resources/app.asar]` 验证实际桌面运行库及 PNG/JPEG/WebP/GIF/AVIF 像素处理。WASM 不支持原生文字渲染和瓦片输出，现有服务图片/缩略图路径不使用这些功能。
 
+桌面打包按平台保留 Sharp 后端：Windows／macOS 不携带 `@img/sharp-wasm32`，保留原生 addon 与 libvips；Linux 继续携带 WASM。此过滤仅影响桌面分发，不改变开发依赖安装、Linux 专用 loader 补丁或独立 Node 服务端的原生图像处理。新增平台文件匹配器必须继承桌面产物白名单，避免仅含排除项时默认收进整个仓库。
+
 开发启动使用应用的用户数据目录，测试隔离机制见 [appIdentity.ts](../packages/contracts/src/appIdentity.ts) 与相关测试。调试数据库、扫描或删除行为前，使用测试资料与独立测试目录。
 
 ## 数据格式与数据库迁移
@@ -139,19 +141,19 @@ Whisper b5130 的 macOS arm64／x64 工具保留静态运行库、Metal／Accele
 
 ### 内置播放运行库
 
-Windows 默认原生 adapter 使用 rendererFullscreenControls 和覆盖区域裁剪。macOS 以 IOSurface 共享纹理到 Canvas2D，Linux 以共享纹理或 CPU 帧到 Canvas；两者的视频、控制栏与菜单均由 renderer 合成，不使用原生子窗口或原生全屏工具栏。Windows 原生视图与输入行为保留。
+Windows、macOS 与 Linux 的正常内置播放均通过主窗口 Canvas 与 HTML 控件合成。Windows 使用 D3D11 共享纹理生产端，故障时自动使用 CPU 内存帧；旧 HWND 视频子窗口、原生工具栏和滑块实现已移除。
 
-Windows 候选 GPU Canvas 路径通过启动参数 `--javdex-windows-canvas` 显式启用，默认关闭；在 `--` 后、拼接值或其他平台上不启用。完整退出后移除参数即可重新选择原 HWND 后端。候选路径保留正常 DirectComposition，不套用旧 HWND 的禁用开关；使用同一个 `playback.node` 的 `sharedTexture` 导出对象，经 WGL 私有 D3D11 bridge、GPU copy、三个 BGRA NT 导出槽和 Electron 共享纹理进入现有 Canvas2D。不宣称零复制。生产完成、消费者 GPU 释放及 `allReferencesReleased` 分别确认；设备或同步状态不明时保持旧 GPU 租约有界隔离，不强行释放。实现与历史验收见 [Windows Canvas 接入记录](reviews/windows-canvas-implementation-2026-10-23.md)。
+Windows Canvas 无需启动开关，使用正常 DirectComposition；不再按 addon 是否存在选择旧合成路径。同一个 `playback.node` 仅导出 `sharedTexture` 和 `software`，经 WGL 私有 D3D11 bridge、GPU copy、三个 BGRA NT 导出槽和 Electron 共享纹理进入现有 Canvas2D。不宣称零复制。生产完成、消费者 GPU 释放及 `allReferencesReleased` 分别确认；设备或同步状态不明时保持旧 GPU 租约有界隔离，不强行释放。历史试验材料见 [Windows Canvas 接入记录](reviews/windows-canvas-implementation-2026-10-23.md)。
 
-Windows 默认和候选 GPU 路径均有独立的 CPU 故障回退，另可使用启动参数 `--javdex-cpu`。同一 addon 的 `software` 导出执行纯 CPU 解码／SW 渲染，通过最多两帧复制通道交给现有 preload Canvas，无需图形驱动互操作；与 Linux 一样按实际物理 viewport 渲染，保留 8192 单边／256 MiB 单帧边界，不额外限制 1080p。图形故障后恢复当前授权来源和播放状态，本次进程继续使用 CPU；页面销毁、媒体／授权／音频错误与 CPU 故障不触发循环重试。`node scripts/windows-software-acceptance.mjs --mode=disabled <合成媒体...>` 使用禁用 GPU 加速的真实应用验收；`initialization` 只注入 GL 创建失败，`gpu-fault` 实际终止自有测试宿主的 GPU 子进程，`legacy` 检查默认路径。`producer-fault` 在真实 Canvas 播放后注入一次原生 `nextFrame` 异常，经正常共享帧桥验证 CPU 接管、字幕及控制状态恢复；每次只传一个素材并使用新宿主，因为回退会保持到进程重启。均使用隔离资料库，不改系统显卡设置。结果与未测范围见 [Windows CPU 记录](reviews/windows-cpu-fallback-2026-10-24.md)。
+Windows GPU 路径有独立的 CPU 故障回退，另可使用启动参数 `--javdex-cpu`。同一 addon 的 `software` 导出执行纯 CPU 解码／SW 渲染，通过最多两帧复制通道交给现有 preload Canvas，无需图形驱动互操作；与 Linux 一样按实际物理 viewport 渲染，保留 8192 单边／256 MiB 单帧边界，不额外限制 1080p。图形故障后恢复当前授权来源和播放状态，本次进程继续使用 CPU；页面销毁、媒体／授权／音频错误与 CPU 故障不触发循环重试。`node scripts/windows-software-acceptance.mjs --mode=disabled <合成媒体...>` 使用禁用 GPU 加速的真实应用验收；`initialization` 只注入 GL 创建失败，`gpu-fault` 实际终止自有测试宿主的 GPU 子进程。`producer-fault` 在真实 Canvas 播放后注入一次原生 `nextFrame` 异常，经正常共享帧桥验证 CPU 接管、字幕及控制状态恢复；每次只传一个素材并使用新宿主，因为回退会保持到进程重启。均使用隔离资料库，不改系统显卡设置。使用 `JAVDEX_PLAYBACK_ACCEPTANCE_EXECUTABLE` 检查实际包内程序时，原生诊断也从该包加载；`windowsSoftwareNative.test.ts` 可通过 `JAVDEX_TEST_WINDOWS_PLAYBACK_NATIVE` 指定新构建的 addon，显式路径缺失即失败。结果与未测范围见 [Windows CPU 记录](reviews/windows-cpu-fallback-2026-10-24.md)。
 
-Windows Canvas 与 HWND 后端均显式创建 OpenGL 3.2 core context；旧兼容 context 在 Arc B390 上可播放视频，却会在 mpv 绘制 ASS／PGS 时产生 GL 1282。共享帧桥在主进程错误对象中保留 `playbackFailureKind`，图形故障回退不依赖本地化错误文案，页面退出仍单独排除。`windows-canvas-acceptance.mjs` 还检查 ASS／PGS 在展开和全屏状态的字幕开关像素差异、GPU 模式及停止后引用归零。本机修复与实际打包复验见 [Arc B390 Canvas 字幕修复](reviews/windows-arc-b390-canvas-fix-2026-10-24.md)。
+Windows Canvas 显式创建 OpenGL 3.2 core context；旧兼容 context 在 Arc B390 上可播放视频，却会在 mpv 绘制 ASS／PGS 时产生 GL 1282。共享帧桥在主进程错误对象中保留 `playbackFailureKind`，图形故障回退不依赖本地化错误文案，页面退出仍单独排除。`windows-canvas-acceptance.mjs` 还检查 ASS／PGS 在展开和全屏状态的字幕开关像素差异、GPU 模式及停止后引用归零。本机修复与实际打包复验见 [Arc B390 Canvas 字幕修复](reviews/windows-arc-b390-canvas-fix-2026-10-24.md)。
 
 内置播放行为与平台边界见 [播放合同](BUILTIN_PLAYBACK.md)，实际源码构建及发布证据见下文。`npm run playback:native:build` 只生成链接本机开发库的运行文件：macOS/Windows 为 addon，Linux 为独立 `playback-helper`；正式打包输入由 `npm run playback:runtime:build` 从固定源码构建。普通桌面打包明确排除 `out/native-playback`、`out/playback-acceptance`、`out/libmpv-prototype` 与 `out/playback-runtime`，审核后的运行库通过打包钩子复制到 Resources，不把构建目录、合成素材、截图或临时 Electron bundle 收入 `app.asar`。
 
-原生核心的初始化、异步命令、事件复制、状态缓存与帧计数共用 `native/mpvCore.h`；Windows WGL 拥有平台窗口、GL context 和原生输入，macOS CGL 只生产离屏 IOSurface，Linux 使用独立 helper。macOS 构建先编译运行 C++ 核心回归，再将 `macSharedTexture.mm` 编译为唯一的 `playback.node`；Linux CMake 构建运行共用核心与 DMA-BUF 协议／槽位回归。`npm run test:playback:build` 检查构建命令选择，已纳入根测试；它本身不编译其它平台源码，也不证明可播放。
+原生核心的初始化、异步命令、事件复制、状态缓存与帧计数共用 `native/mpvCore.h`；Windows WGL 只拥有共享生产所需的私有 drawable 和 GL context，macOS CGL 只生产离屏 IOSurface，Linux 使用独立 helper。macOS 构建先编译运行 C++ 核心回归，再将 `macSharedTexture.mm` 编译为唯一的 `playback.node`；Linux CMake 构建运行共用核心与 DMA-BUF 协议／槽位回归。`npm run test:playback:build` 检查构建命令选择，已纳入根测试；它本身不编译其它平台源码，也不证明可播放。
 
-Windows CMake 同时编译旧 HWND 与新 D3D11 生产端，仍保留 Electron delay-load hook，新增的 `d3d11.dll`、`dxgi.dll` 使用系统 ABI，不下载或随包复制图形驱动。原生构建计划运行核心、slider 及三 ticket 生命周期回归；源码聚合要求新增生产源码和 ticket 合同，加载烟测检查两套导出。Mac 上的 ticket C++ 测试仅验证无平台依赖的状态机，不替代 Windows 源码编译。后续在解锁的 Windows 桌面完成正常原生构建和桌面构建后，可运行 `node scripts/windows-canvas-acceptance.mjs`；该入口显式选择候选后端、隔离资料库并检查真实生产／Canvas 提交、暂停 seek、全屏、慢消费和停止重开，非 Windows 直接拒绝。它不代替后续色彩、驱动故障或安装包检查。
+Windows CMake 编译 D3D11 共享生产端和 CPU 生产端，仍保留 Electron delay-load hook，新增的 `d3d11.dll`、`dxgi.dll` 使用系统 ABI，不下载或随包复制图形驱动。原生构建计划运行核心及三 ticket 生命周期回归；源码聚合要求新增生产源码和 ticket 合同，加载烟测检查两套导出。Mac 上的 ticket C++ 测试仅验证无平台依赖的状态机，不替代 Windows 源码编译。后续在解锁的 Windows 桌面完成正常原生构建和桌面构建后，可运行 `node scripts/windows-canvas-acceptance.mjs`；该入口显式选择候选后端、隔离资料库并检查真实生产／Canvas 提交、暂停 seek、全屏、慢消费和停止重开，非 Windows 直接拒绝。它不代替后续色彩、驱动故障或安装包检查。
 
 macOS 正常运行 `npm run playback:native:build`，生成 `out/native-playback/playback.node`；完成 `npm run build` 后通过普通应用入口启动，无须试验参数。正式源码构建也复用同一原生编译计划，打包仍使用原有审核矩阵、许可材料和签名门禁；不会用本机开发 addon 替代正式运行库输入。旧 NSOpenGLView 后端及其专属构建目标已移除，不再有进程内旧后端切换或自动回退。
 
@@ -163,9 +165,9 @@ macOS 正常运行 `npm run playback:native:build`，生成 `out/native-playback
 
 旧新后端对照、阶段剥离和 WebGL/video/WebGPU 候选已停止维护并移出活动入口；脚本、失败记录、profile 与逐文件哈希保留在 [正式化记录](reviews/macos-canvas-default-2026-10-23.md)指向的可恢复归档，不销毁研究证据。既有播放态 CPU 对照没有显示采用 Canvas 的性能收益，历史数字按一核满载为 100% 计量，不是整机归一化百分比。需要按需排查时仍可拉取 `javdex.playback.mac-shared-texture.statistics` 现有主进程统计；它不暴露原生句柄或媒体位置，也不是物理上屏回执。
 
-Windows WGL 适配已在 Windows 11 x64 用 MSVC 实际编译，并在 Electron 中加载、播放本地与 loopback 远程合成素材；范围及剩余关口见 [Windows 验收记录](BUILTIN_PLAYBACK_WINDOWS_ACCEPTANCE.md)。开发构建需要 Windows 本机的 MSVC、Visual Studio CMake generator、同架构 libmpv headers/import library/DLL，以及对应 Electron 的 headers 和 `node.lib`。设置 `JAVDEX_MPV_PREFIX` 为已安装开发前缀；默认 Electron 输入为 `~/.electron-gyp/<version>/include/node` 与 `<arch>/node.lib`，可分别用 `JAVDEX_ELECTRON_HEADERS` / `JAVDEX_ELECTRON_NODE_LIBRARY` 覆盖。Windows 开发构建完成后按实际 PE 导入闭包，从该前缀的 `bin` 复制所需 DLL 到 `out/native-playback`，普通 `npm run dev` / `npm start` 无需额外配置 libmpv PATH；缺失依赖或架构不匹配会拒绝构建，前缀中的 Mesa `opengl32.dll` 不复制，以保留系统 WGL。旧的 addon-only 开发产物需重新构建并正常退出、重启应用。构建器不下载依赖、不修改用户系统环境；这些开发文件仍排除在正式安装包之外。WGL 不等于 ANGLE 直接硬解，本轮 H.264/HEVC Main10 的实际内核状态为 `d3d11va-copy`。
+历史 Windows WGL 子窗口适配曾在 Windows 11 x64 用 MSVC 实际编译，并在 Electron 中加载、播放本地与 loopback 远程合成素材；范围及剩余关口见 [Windows 验收记录](BUILTIN_PLAYBACK_WINDOWS_ACCEPTANCE.md)。开发构建需要 Windows 本机的 MSVC、Visual Studio CMake generator、同架构 libmpv headers/import library/DLL，以及对应 Electron 的 headers 和 `node.lib`。设置 `JAVDEX_MPV_PREFIX` 为已安装开发前缀；默认 Electron 输入为 `~/.electron-gyp/<version>/include/node` 与 `<arch>/node.lib`，可分别用 `JAVDEX_ELECTRON_HEADERS` / `JAVDEX_ELECTRON_NODE_LIBRARY` 覆盖。Windows 开发构建完成后按实际 PE 导入闭包，从该前缀的 `bin` 复制所需 DLL 到 `out/native-playback`，普通 `npm run dev` / `npm start` 无需额外配置 libmpv PATH；缺失依赖或架构不匹配会拒绝构建，前缀中的 Mesa `opengl32.dll` 不复制，以保留系统 WGL。旧的 addon-only 开发产物需重新构建并正常退出、重启应用。构建器不下载依赖、不修改用户系统环境；这些开发文件仍排除在正式安装包之外。WGL 不等于 ANGLE 直接硬解，本轮 H.264/HEVC Main10 的实际内核状态为 `d3d11va-copy`。
 
-Windows 正常桌面入口检测到 `out/native-playback/playback.node`（开发）或 `resources/native-playback/playback.node`（分发）时，会在应用 ready 前选择 Chromium 的非 DirectComposition 合成路径，避免 WGL 主窗口 child 被遮挡。没有原生 addon 的包及刮削 helper 不改变该选择；仍保留 GPU compositing、rasterization 和视频硬解，不是关闭硬件加速或用户设置项。原生 adapter 用标准 Win32 child/sibling 裁剪，释放时还原其添加的样式位；暂停 resize 在尺寸提交后重绘，最小化恢复也重绘已有帧。libmpv 新帧通知通过 `PostMessage` 唤醒拥有 HWND/WGL 的线程，避免依靠 JavaScript 定时轮询限制 60fps 提交；回调本身不执行 GL 或 N-API。新构建需正常退出再启动，不能在 ready 后切换该后端。
+Windows 的播放、全屏、滑块与键盘输入均由现有 HTML 面板处理，不再创建显示用的原生子窗口、原生全屏工具栏或裁剪弹层。共享生产端的隐藏 WGL drawable 只服务 GPU 互操作，不承载输入或呈现。主线程通过有界唤醒消费 mpv 帧通知，常规观察继续处理故障；正常启动保留 Chromium DirectComposition，不再注入 `disable-direct-composition`。
 
 默认 Windows MSVC 构建直接编入已安装 `@electron/rebuild` 所依赖的 node-gyp 延迟加载钩子，并链接 `delayimp`、`/DELAYLOAD:node.exe`；仅链接 `node.lib` 不足以在 Electron 或改名后的应用可执行文件中加载。构建器解析依赖自身的钩子路径，不下载或修改上游文件，缺少钩子时停止。CMake 也支持 LLVM MinGW/CLANG64：使用 Ninja、显式指定匹配的 `clang++.exe` 与 libmpv 前缀、Electron headers/node.lib，编入仓库的 `windowsElectronDelayHook.cpp` 并使用 `--delayload=node.exe`。npm 开发构建命令仍默认 MSVC。两条路径均重定向到当前应用宿主；MinGW 路径已在实际改名的 ZIP/NSIS 应用中加载。MSVC 钩子许可见 [第三方说明](THIRD_PARTY_NOTICES.md#node-gyp-延迟加载钩子)，宿主要求见 [Electron 原生模块说明](https://www.electronjs.org/docs/latest/tutorial/using-native-node-modules#a-note-about-win_delay_load_hook)。
 
@@ -203,7 +205,11 @@ Release 分别在 Windows x64、macOS Intel、macOS arm64、Linux x64 的本架�
 
 Windows 的自建 pkgconf 仅为构建工具，静态配置显式声明 `PKGCONFIG_IS_STATIC`，同时覆盖它的库和 CLI，避免 DLL 导入声明与静态归档不一致；该定义不传播到播放依赖。Linux 原生核心/控制/helper 测试发生在搬移之前，只对这些测试子进程传入私有前缀的 `LD_LIBRARY_PATH`；不修改全局构建环境。正式 helper 保持 `$ORIGIN`，搬移后的运行库与包内加载/解码检查仍清除开发搜索路径。
 
+Windows 源码构建还通过私有 `LIBRARY_PATH` 固定 GCC 的静态库搜索目录，避免 Meson 内置探测选中 MSYS2 自带的 iconv/zlib。zlib 1.3.2 在 Windows 生成 `libzs.a`，安装后以同一字节副本提供其 pkg-config 所声明的 `libz.a`，拒绝覆盖不同内容，并将摘要写入构建记录。构建结束核对编译器实际解析的两个归档均来自本次前缀。新版 MinGW 把 `__mingw_fe_dfl_env` 移入 `libmingw32.a` 后，只有检测到真实定义时才显式保留该 CRT 符号；不提供替代浮点环境实现。工具链指纹包含 GCC、CRT 与头文件包版本。
+
 Windows 的 MSVC 导入库从此次自建 DLL 的导出名称表生成，不从其它 SDK 获取。解析同时支持 GNU objdump 旧格式及带 base/hint 列的新格式，只接收名称表中的安全 `mpv_*` 符号；导出数量、真实链接/加载和解码门禁不因工具输出格式变化而放宽。
+
+Windows 依赖库由 GCC 构建，适配器另用 MSVC；进入适配器阶段前清除前者的编译／链接及库搜索变量，由 CMake 显式提供头文件、导入库和静态 CRT 设置，避免 GCC 专用参数传入 MSVC 后被静默忽略。
 
 Linux 构建基线为 Ubuntu 22.04：libass 等自建依赖保持 PIC 静态库，系统 fontconfig 字体提供者采用动态 ABI，避免 Meson 递归选择非 PIC 的系统 UUID 静态库；没有改用系统 libass/FFmpeg 或放宽运行库闭包。macOS C/Swift 最低部署目标均显式为 12.0；这些基线不是对应旧系统的实际安装验收。根打包入口增加 `--arch x64|arm64`，各 macOS 任务只生产自己的 DMG。缓存键包含源码清单、构建/原生代码及依赖锁；构建器还核对编译器、SDK、Python、工具版本与架构，每次命中后重验精确文件、依赖和实际加载，不把缓存命中当作可信证明。
 
@@ -378,7 +384,7 @@ Javdex 使用 Electron、React、TypeScript、Vite 和 `better-sqlite3`。主要
 
 原生播放区域、弹层遮挡和全屏指针坐标使用 Electron 当前显示器的有效 `scaleFactor`，再结合网页 `zoomFactor` 换算。不能只用 `GetDpiForWindow / 96`：Windows 辅助功能文字缩放可能让 Chromium 的有效缩放与 HWND DPI 不同，例如 175% 显示缩放加 110% 文字缩放时为 192.5%。网页 DPR 变化时，即使 CSS 矩形未变，也需重新上报播放区域。
 
-构建原生运行库后，在未设置 `ELECTRON_RUN_AS_NODE` 的环境运行 `node_modules/electron/dist/electron.exe scripts/playback-windows-geometry-acceptance.cjs`。该检查使用隔离空窗口，不读取个人资料库，核对底栏／展开／全屏模式下多档显示和网页缩放的实际 HWND 位置与尺寸；不代替真实跨屏移动和播放画面验收。更新原生运行库与主进程后须完整退出并重新启动应用。
+Windows 正常 Canvas 验收使用 `node scripts/windows-canvas-acceptance.mjs`，另以 `scripts/windows-software-acceptance.mjs` 检查 CPU 和故障恢复；关闭生命周期用 `scripts/playback-close-acceptance.mjs`。旧 HWND 的综合、几何、原生焦点和长播脚本已退出活动入口，本机可恢复材料及逐文件摘要在 `out/windows-hwnd-archive-20261024/inventory.json`；历史实测记录保留，不作为新 Canvas 的验收证据。
 
 Linux x86_64 当前标准包的双播放运行库构建与验收见 [LINUX_COMPATIBLE_PLAYBACK.md](LINUX_COMPATIBLE_PLAYBACK.md)；CPU 专用源构建参数为 `--linux-software`，不修改系统驱动。旧第一阶段独立包仍可按原文档复现。
 

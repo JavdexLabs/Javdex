@@ -25,7 +25,7 @@
 
 ## 原生与远程边界
 
-共用核心拥有 mpv 生命周期、异步命令、状态、事件和字幕叠加层；macOS 使用 IOSurface 共享纹理到 Canvas，Windows 默认保留主窗口 child，并提供 CPU 内存帧到 Canvas 的兜底；Linux 的 X11／XWayland 和原生 Wayland 共用共享纹理／CPU 内存帧到 Canvas 的显示方式。正常关闭由实际接受的窗口关闭与退出生命周期释放内核，不在可能被否决的 `close` 回调提前拆除活跃视图。
+共用核心拥有 mpv 生命周期、异步命令、状态、事件和字幕叠加层；macOS 使用 IOSurface 共享纹理到 Canvas，Windows 默认使用 D3D11 共享纹理到主窗口 Canvas，并提供 CPU 内存帧到 Canvas 的兜底；旧 HWND 显示和原生工具栏已移除；Linux 的 X11／XWayland 和原生 Wayland 共用共享纹理／CPU 内存帧到 Canvas 的显示方式。正常关闭由实际接受的窗口关闭与退出生命周期释放内核，不在可能被否决的 `close` 回调提前拆除活跃视图。
 
 Windows 在图形初始化失败、可检测的原生视频渲染／共享纹理故障，或 Electron 已禁用硬件加速时，自动改用同一运行库中的独立 CPU 后端；`--javdex-cpu` 可在启动时强制使用它（`--` 后不生效）。该后端使用 `hwdec=no`、libmpv SW Render API 和复制的 RGBA 帧，preload 在新建的软件 Canvas 上通过 `putImageData` 绘制，防止继承失效的加速画布；不创建 GL context、D3D 设备或共享 GPU 纹理。最多两帧在途，与 Linux 一样按 `round(逻辑尺寸 × 缩放)` 渲染实际显示帧，不额外降至 1080p；保留单边 8192、单帧 256 MiB 的安全边界，超出时拒绝。高分辨率输入仍由 CPU 解码，流畅度取决于处理器和编码复杂度，不提供 HDR 直通保证。
 

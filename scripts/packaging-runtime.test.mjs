@@ -200,7 +200,7 @@ test('desktop packaging keeps bundled Photon WASM and LAN web while excluding th
   }
 })
 
-for (const platform of ['win', 'linux']) test(`normalized ${platform} desktop matchers do not default to including the repository`, () => {
+for (const platform of ['win', 'mac', 'linux']) test(`normalized ${platform} desktop matchers do not default to including the repository`, () => {
   const root = process.cwd()
   const config = doMergeConfigs([buildConfig()])
   const debugLogger = { isEnabled: false }
@@ -213,6 +213,21 @@ for (const platform of ['win', 'linux']) test(`normalized ${platform} desktop ma
   }
   for (const file of ['out/main/index.js', 'out/web/index.html', 'out/main/chunks/photon_rs_bg.wasm']) {
     assert.equal(selected(file), true, `${file} must remain in the application`)
+  }
+})
+
+test('desktop Sharp packaging keeps WASM for Linux and native image libraries for Windows and macOS', () => {
+  const root = process.cwd(), config = buildConfig()
+  for (const platform of ['win', 'mac', 'linux']) {
+    const filter = new FileMatcher(root, '/unused-package-output', value => value.replaceAll('${arch}', 'x64'),
+      ['node_modules/**/*', ...config.files, ...config[platform].files]).createFilter()
+    const selected = file => filter(path.join(root, file), { isDirectory: () => false })
+    for (const file of ['node_modules/@img/sharp-wasm32/package.json', 'node_modules/@img/sharp-wasm32/lib/sharp-wasm32-0.35.5.node.wasm'])
+      assert.equal(selected(file), platform === 'linux', `${platform}: ${file}`)
+    assert.equal(selected('node_modules/sharp/dist/sharp.cjs'), true, `${platform} requires the Sharp loader`)
+    const native = platform === 'win' ? 'win32-x64' : platform === 'mac' ? 'darwin-x64' : 'linux-x64'
+    assert.equal(selected(`node_modules/@img/sharp-${native}/lib/sharp.node`), true, `${platform} requires its native backend`)
+    if (platform === 'win') assert.equal(selected(`node_modules/@img/sharp-${native}/lib/libvips-42.dll`), true)
   }
 })
 

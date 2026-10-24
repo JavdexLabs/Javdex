@@ -17,7 +17,7 @@ const wrapperCode = transpileModule(readFileSync(new URL('./libmpvPlayback.ts', 
 const subtitleFile = path.resolve('fixture-subtitles', 'AI 日中字幕.ass')
 const newSubtitleFile = path.resolve('fixture-subtitles', 'new.ass')
 
-function fixture(platform: 'darwin' | 'win32' | 'linux', windowsCanvas = false, software = false) {
+function fixture(platform: 'darwin' | 'win32' | 'linux', software = false) {
   const commands: string[][] = []
   const loaded: string[] = []
   let actions: NonNullable<NativePlaybackState['actions']> = []
@@ -96,8 +96,8 @@ function fixture(platform: 'darwin' | 'win32' | 'linux', windowsCanvas = false, 
         case 'node:fs': return { existsSync: () => true }
         case 'node:path': return path
         case 'node:timers/promises': return { setTimeout: delay }
-        case 'node:module': return { createRequire: () => (filename: string) => { loaded.push(filename); return windowsCanvas || software ? { ...bridge, sharedTexture: sharedProducer, software: sharedProducer } : bridge } }
-        case './playbackDisplay': return { linuxPlaybackBackend: () => 'dmabuf', windowsCanvasPlayback: () => windowsCanvas }
+        case 'node:module': return { createRequire: () => (filename: string) => { loaded.push(filename); return platform === 'win32' ? { sharedTexture: sharedProducer, software: sharedProducer } : bridge } }
+        case './playbackDisplay': return { linuxPlaybackBackend: () => 'dmabuf' }
         case './linuxPlaybackBridge': return { createLinuxPlaybackBridge: () => bridge }
         case './linuxSharedTexture': return { createLinuxSharedTexture: () => { throw new Error('Wrapper fixture does not materialize its deferred frame channel') } }
         case './linuxGpuImport': return { linuxGpuImportLoader: () => undefined }
@@ -113,7 +113,7 @@ function fixture(platform: 'darwin' | 'win32' | 'linux', windowsCanvas = false, 
   }, { filename: 'libmpvPlayback.ts' })
   const window = {
     isDestroyed: () => false,
-    getNativeWindowHandle: () => { assert.equal(platform, 'win32', 'only Windows requests a native window handle'); return Buffer.alloc(4) },
+    getNativeWindowHandle: () => { throw new Error('Canvas playback must never request an HWND') },
     getBounds: () => ({ x: 0, y: 0, width: 1, height: 1 }),
     webContents: { getZoomFactor: () => 1 }
   } as unknown as BrowserWindow
@@ -128,8 +128,8 @@ function fixture(platform: 'darwin' | 'win32' | 'linux', windowsCanvas = false, 
     release: (): void => { held = false; for (const value of waiting.splice(0)) complete(value.args, value.generated) } }
 }
 
-test('Linux and Windows enable the shared accessible fullscreen controls and pass popup cutouts', t => {
-  for (const platform of ['linux', 'win32'] as const) {
+test('Linux keeps its accessible controls and popup geometry contract', t => {
+  for (const platform of ['linux'] as const) {
     const f = fixture(platform)
     t.after(() => f.native.destroy())
     assert.equal(f.native.read().rendererFullscreenControls, true, `${platform} must enable the existing renderer controls`)
@@ -149,17 +149,16 @@ test('macOS normal playback always uses the shared Canvas addon and DOM controls
   f.native.viewport({ x: 0, y: 0, width: 640, height: 360 }, true, { presentation: 'expanded' } as PlaybackSnapshot)
   assert.equal((f.viewports[0] as { scale?: number }).scale, 1)
 })
-test('Windows keeps legacy polling by default and selects the shared producer only by startup opt-in', t => {
-  const legacy = fixture('win32'), canvas = fixture('win32', true)
-  t.after(legacy.native.destroy); t.after(canvas.native.destroy)
-  assert.equal(legacy.native.renderPolling, undefined)
-  assert.equal(canvas.native.renderPolling, false)
-  assert.deepEqual(legacy.handles, [4]); assert.deepEqual(canvas.handles, [0], 'Canvas must not receive an HWND')
-  assert.deepEqual(canvas.loaded, [path.resolve('fixture-app/out/native-playback/playback.node')])
+test('Windows normal playback uses the shared Canvas producer without an HWND or startup switch', t => {
+  const f = fixture('win32'); t.after(f.native.destroy)
+  assert.equal(f.native.renderPolling, false)
+  assert.deepEqual(f.handles, [0], 'Canvas must not receive an HWND')
+  assert.deepEqual(f.loaded, [path.resolve('fixture-app/out/native-playback/playback.node')])
+  assert.equal(f.native.read().rendererFullscreenControls, true)
 })
 
 test('Windows software playback uses copied Canvas pixels without requesting an HWND', t => {
-  const f = fixture('win32', false, true); t.after(f.native.destroy)
+  const f = fixture('win32', true); t.after(f.native.destroy)
   assert.equal(f.native.renderPolling, false); assert.deepEqual(f.handles, [0])
   assert.deepEqual(f.loaded, [path.resolve('fixture-app/out/native-playback/playback.node')])
   assert.equal(f.native.read().rendererFullscreenControls, true)

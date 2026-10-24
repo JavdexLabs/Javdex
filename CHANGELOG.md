@@ -2,7 +2,11 @@
 
 ## Unreleased
 
+- Windows 内置播放器正式使用共享纹理 Canvas，移除旧 HWND 视频子窗口、原生工具栏和试验启动开关；保留核显字幕修复与 GPU 故障后的纯 CPU 自动回退。
+
 - 修复 Windows 候选 Canvas 播放在 Intel 核显上绘制 ASS／PGS 字幕失败：使用 OpenGL 3.2 core context，并保留共享帧故障分类，避免本地化错误信息阻止自动 CPU 回退和播放状态恢复。
+
+- Windows／macOS 安装包移除仅供 Linux Electron 使用的 Sharp WASM 后端，保留各平台原生图像处理；Linux 的 WASM 兼容方案保持不变。
 
 - Windows 内置播放新增纯 CPU 兼容路径：图形初始化或可检测的运行故障后自动回退并恢复播放位置与控制状态；软件解码、渲染和字幕合成不依赖 OpenGL／D3D 互操作，与 Linux 一样按实际显示尺寸渲染。
 

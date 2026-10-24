@@ -162,12 +162,16 @@ export async function aggregatePlaybackSources(directory, version) {
       }
       const native = path.join(temporary, 'native-' + target)
       await unpack(path.join(input, 'reviewed-runtime/sources/javdex-native.tar.gz'), native)
+      // Preserve restoration of already-distributed source archives after the
+      // Windows display implementation was removed from new builds.
+      const windowsEntry = fs.existsSync(path.join(native, 'apps/desktop/src/main/player/native/windowsPlaybackAddon.cpp'))
+        ? 'windowsPlaybackAddon.cpp' : 'windowsPlayback.cpp'
       const requiredNative = ['package.json', 'package-lock.json', 'build/playback-sources.json', 'LICENSE', 'NOTICE',
         'scripts/build-playback-runtime.mjs', 'scripts/playback-source-build.mjs', 'scripts/playback-runtime.mjs',
         'scripts/playback-source-materials.mjs', 'scripts/packaging-runtime.mjs', 'scripts/playback-native-build.mjs',
         'scripts/check-playback-load.mjs', 'scripts/playback-linux-helper-smoke.mjs',
         'apps/desktop/src/main/player/native/CMakeLists.txt', 'apps/desktop/src/main/player/native/mpvCore.h',
-        `apps/desktop/src/main/player/native/${{ win32: 'windowsPlayback.cpp', darwin: 'macSharedTexture.mm', linux: 'linuxX11Playback.cpp' }[runtime.platform]}`,
+        `apps/desktop/src/main/player/native/${{ win32: windowsEntry, darwin: 'macSharedTexture.mm', linux: 'linuxX11Playback.cpp' }[runtime.platform]}`,
         'electron-sdk/include/node/node.h', 'electron-sdk/include/node/node_version.h',
         ...(runtime.platform === 'win32' ? ['win_delay_load_hook.cc', 'node-gyp-LICENSE',
           'apps/desktop/src/main/player/native/windowsSharedTexture.cpp',

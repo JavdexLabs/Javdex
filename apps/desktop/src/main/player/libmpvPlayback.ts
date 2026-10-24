@@ -5,7 +5,7 @@ import { createRequire } from 'node:module'
 import { setTimeout as delay } from 'node:timers/promises'
 import type { PlaybackAvailability, PlaybackControl, PlaybackOcclusion, PlaybackSnapshot } from '@shared/desktop/playback'
 import type { NativePlayback, NativePlaybackState } from './nativePlayback'
-import { linuxPlaybackBackend, windowsCanvasPlayback } from './playbackDisplay'
+import { linuxPlaybackBackend } from './playbackDisplay'
 import { createLinuxPlaybackBridge } from './linuxPlaybackBridge'
 import { createLinuxSharedTexture } from './linuxSharedTexture'
 import { linuxPlaybackRenderNode } from './linuxPlaybackDevice'
@@ -49,7 +49,7 @@ export function builtinPlaybackAvailability(backend = linuxPlaybackBackend()): P
 }
 export function createLibmpvPlayback(getWindow: () => BrowserWindow | null, backend = linuxPlaybackBackend()): NativePlayback {
   const windowsSoftware = process.platform === 'win32' && backend === 'software'
-  const canvas = process.platform === 'darwin' || process.platform === 'win32' && (windowsCanvasPlayback() || windowsSoftware)
+  const canvas = process.platform === 'darwin' || process.platform === 'win32'
   const generatedId = Number.MAX_SAFE_INTEGER
   let bridge: Bridge | null = null
   let alive = false
@@ -131,22 +131,21 @@ export function createLibmpvPlayback(getWindow: () => BrowserWindow | null, back
         createRequire(path.join(app.getAppPath(), 'package.json'))(runtimePath(undefined, backend)), window)
       else if (windowsSoftware) bridge = createWindowsSoftwarePlaybackBridge(
         createRequire(path.join(app.getAppPath(), 'package.json'))(runtimePath(undefined, backend)).software, window)
-      else if (process.platform === 'win32' && canvas) bridge = createNativeSharedTextureBridge(
+      else if (process.platform === 'win32') bridge = createNativeSharedTextureBridge(
         createRequire(path.join(app.getAppPath(), 'package.json'))(runtimePath(undefined, backend)).sharedTexture, window, 'win32')
-      else bridge = process.platform === 'linux' ? createLinuxPlaybackBridge(runtimePath(undefined, backend), backend !== null
+      else bridge = createLinuxPlaybackBridge(runtimePath(undefined, backend), backend !== null
         ? onError => {
           const current = getWindow()
           if (!current || current.isDestroyed()) throw new Error('主窗口不可用')
           return createLinuxSharedTexture(current, runtimePath('playback-fd.node', backend), onError, backend === 'software')
         } : undefined, backend === 'dmabuf' ? linuxPlaybackRenderNode() : undefined, backend === 'dmabuf' ? linuxGpuImportLoader(app) : undefined)
-        : createRequire(path.join(app.getAppPath(), 'package.json'))(runtimePath(undefined, backend)) as Bridge
       if (canvas) bridge.create(Buffer.alloc(0), { x: 0, y: 0, width: 1, height: 1,
         scale: screen.getDisplayMatching(window.getBounds()).scaleFactor })
-      else if (process.platform === 'linux') {
+      else {
         const selectedBackend = backend ?? 'dmabuf'
         bridge.create(Buffer.alloc(0), { x: 0, y: 0, width: 1, height: 1,
           scale: screen.getDisplayMatching(window.getBounds()).scaleFactor }, { backend: selectedBackend })
-      } else bridge.create(window.getNativeWindowHandle(), { x: 0, y: 0, width: 1, height: 1 })
+      }
       bridge.setRendererControls?.(true)
       generatedRepliesExpected = 0
       overlayRevision = 0; generated = null

@@ -146,11 +146,11 @@ test('full-frame pixel inspection hides overlay chrome without changing playback
 for (const platform of ['darwin', 'win32']) test(`${platform} evidence names render/presentation counters without confusing Canvas production with screen presentation`, async () => {
   const state = { alive: true, loadedFiles: 1, presentedFrames: platform === 'darwin' ? 0 : 70, nativeFrames: 100 }
   const application = { evaluate: callback => vm.runInNewContext(`(${callback.toString()})({app})`, {
-    app: { getAppPath: () => '/app', commandLine: { hasSwitch: () => false } }, process: { platform, getBuiltinModule: () => ({ createRequire: () => () => ({ inspect: () => state }) }) }
+    app: { getAppPath: () => '/app', commandLine: { hasSwitch: () => false } }, process: { platform, getBuiltinModule: () => ({ createRequire: () => () => ({ inspect: () => state, sharedTexture: { inspect: () => state }, software: { inspect: () => ({ alive: false }) } }) }) }
   }) }
   const result = await nativeEvidence(application)
-  assert.equal(result.renderedFrames, platform === 'darwin' ? 100 : 70)
-  assert.equal(result.presentedFrames, platform === 'darwin' ? undefined : 70)
+  assert.equal(result.renderedFrames, 100)
+  assert.equal(result.presentedFrames, undefined)
 })
 
 for (const platform of ['darwin', 'win32'])
@@ -181,11 +181,11 @@ for (const { visible, fullscreen } of [{ visible: true, fullscreen: true }, { vi
   assert.equal(result.rendererFullscreen, fullscreen)
 })
 
-test('Windows Canvas evidence observes its producer instead of the idle legacy backend', async () => {
+test('Windows Canvas evidence observes the selected producer without startup switches', async () => {
   const application = { evaluate: callback => vm.runInNewContext(`(${callback.toString()})({app})`, {
-    app: { getAppPath: () => '/app', commandLine: { hasSwitch: name => name === 'javdex-windows-canvas' } },
+    app: { getAppPath: () => '/app' },
     process: { platform: 'win32', getBuiltinModule: () => ({ createRequire: () => () => ({
-      inspect: () => { throw Error('legacy backend must not be observed') },
+      software: { inspect: () => ({ alive: false }) },
       sharedTexture: { inspect: () => ({ alive: true, nativeFrames: 23, presentedFrames: 0 }) }
     }) }) }
   }) }
@@ -193,18 +193,17 @@ test('Windows Canvas evidence observes its producer instead of the idle legacy b
   assert.equal(result.alive, true); assert.equal(result.renderedFrames, 23)
   assert.equal(result.presentedFrames, undefined)
 })
-test('Windows formal capture keeps the existing native adapter in development and packaged hosts', async () => {
-  for (const packaged of [false, true]) {
-    const files = [], frame = { width: 2, height: 1, data: Buffer.alloc(8) }
-    const application = { evaluate: callback => vm.runInNewContext(`(${callback.toString()})(dependencies)`, {
-      dependencies: { app: { isPackaged: packaged, getAppPath: () => '/app', commandLine: { hasSwitch: () => false } } },
-      process: { platform: 'win32', resourcesPath: '/resources', getBuiltinModule: () => ({ createRequire: () => file => {
-        files.push(file); return { capture: () => frame }
-      } }) }
-    }) }
-    assert.equal(await captureAcceptanceImage(application), frame)
-    assert.deepEqual(files, [packaged ? '/resources/native-playback/playback.node' : '/app/out/native-playback/playback.node'])
-  }
+test('Windows CPU evidence observes actual software frames after automatic recovery', async () => {
+  const application = { evaluate: callback => vm.runInNewContext(`(${callback.toString()})({app})`, {
+    app: { getAppPath: () => '/app' },
+    process: { platform: 'win32', getBuiltinModule: () => ({ createRequire: () => () => ({
+      sharedTexture: { inspect: () => { throw Error('inactive GPU must not be observed') } },
+      software: { inspect: () => ({ alive: true, nativeFrames: 19 }) }
+    }) }) }
+  }) }
+  const result = await nativeEvidence(application)
+  assert.equal(result.alive, true); assert.equal(result.renderedFrames, 19)
+  assert.equal(result.presentedFrames, undefined)
 })
 
 test('non-recording playback explicitly changes the real fresh default, not product policy', async () => {
@@ -270,7 +269,7 @@ test('formal cleanup failure still saves the original playback error', async () 
 })
 
 test('local playback entry points explicitly prepare their non-recording scenario', () => {
-  for (const file of ['playback-acceptance.mjs', 'playback-media-acceptance.mjs']) {
+  for (const file of ['windows-canvas-acceptance.mjs', 'playback-media-acceptance.mjs']) {
     const source = fs.readFileSync(new URL(file, import.meta.url), 'utf8')
     assert.match(source, /await prepareNonRecordingPlayback\(page\)/, file)
   }

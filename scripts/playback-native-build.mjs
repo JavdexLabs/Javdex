@@ -63,7 +63,6 @@ export function playbackNativeBuild({ platform, arch, root, prefix, include, nod
         `-DMPV_PREFIX=${prefix}`, `-DPLAYBACK_OUTPUT_DIR=${output}`] },
       { command: 'cmake', args: ['--build', build, '--config', 'Release'] },
       { command: path.join(output, 'mpv-core-test.exe'), args: [] },
-      { command: path.join(output, 'slider-feedback-test.exe'), args: [] },
       { command: path.join(output, 'windows-texture-tickets-test.exe'), args: [] }
     ]
   }

@@ -1,15 +1,69 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
-import { playbackMpvRenderFenceFix, playbackBuildFingerprint, playbackLinuxAssDependency, playbackLinuxVaapiRenderDependency, playbackPkgConfigEnvironment, playbackSourceNativePlan, playbackSourcePlan, playbackWindowsExportNames, staticPlaybackDependencies, verifyPlaybackSource } from './playback-source-build.mjs'
+import { playbackMpvRenderFenceFix, playbackBuildFingerprint, playbackLinuxAssDependency, playbackLinuxVaapiRenderDependency, playbackPkgConfigEnvironment, playbackSourceNativePlan, playbackSourcePlan, playbackWindowsExportNames, playbackWindowsSourceEnvironment, stageWindowsStaticZlib, staticPlaybackDependencies, verifyPlaybackSource } from './playback-source-build.mjs'
 import { mergeTargets } from './dist.mjs'
 import packagingConfig from '../electron-builder.config.mjs'
 
 const input = { arch: 'x64', source: '/sources', build: '/build', prefix: '/prefix', tools: '/tools', jobs: 2 }
+
+function windowsStaticFixture(t) {
+  const root = mkdtempSync(path.join(tmpdir(), 'javdex-windows-static-'))
+  t.after(() => {
+    assert.equal(path.dirname(path.resolve(root)), path.resolve(tmpdir()))
+    rmSync(root, { recursive: true, force: true })
+  })
+  mkdirSync(path.join(root, 'lib'))
+  writeFileSync(path.join(root, 'lib/libzs.a'), '!<arch>\n')
+  return root
+}
+
+test('static-only Windows zlib supplies the canonical -lz archive and refuses unrelated replacements', t => {
+  const root = windowsStaticFixture(t)
+  const result = stageWindowsStaticZlib(root)
+  assert.deepEqual(readFileSync(path.join(root, result.source)), readFileSync(path.join(root, result.destination)))
+  assert.deepEqual(stageWindowsStaticZlib(root), result)
+  writeFileSync(path.join(root, 'lib/libz.a'), 'unrelated archive')
+  assert.throws(() => stageWindowsStaticZlib(root), /different Windows zlib/)
+})
+
+test('Windows source linking retains a moved CRT fenv default only when the toolchain defines it', () => {
+  for (const [symbols, expected] of [['00000000 R __mingw_fe_dfl_env\r\n', true], [' U __mingw_fe_dfl_env\n', false], ['', false]]) {
+    const result = playbackWindowsSourceEnvironment('/prefix', symbols)
+    assert.equal(result.fenvDefault, expected)
+    assert.equal(result.linkArgs.includes('-Wl,--undefined=__mingw_fe_dfl_env'), expected)
+  }
+})
+
+test('real MinGW source search and floating-point DLL survive the current CRT symbol layout', {
+  skip: process.platform !== 'win32' || process.arch !== 'x64' || !process.env.JAVDEX_PLAYBACK_MSYS2_ROOT
+    ? 'requires the configured Windows UCRT64 source-build toolchain' : false
+}, t => {
+  const root = windowsStaticFixture(t), tools = path.join(process.env.JAVDEX_PLAYBACK_MSYS2_ROOT, 'ucrt64/bin')
+  stageWindowsStaticZlib(root)
+  writeFileSync(path.join(root, 'lib/libiconv.a'), '!<arch>\n')
+  const env = { ...process.env }, pathKey = Object.keys(env).find(k => k.toLowerCase() === 'path') ?? 'Path'
+  env[pathKey] = tools + path.delimiter + (env[pathKey] ?? '')
+  const run = (name, args, overrides = {}) => {
+    const r = spawnSync(path.join(tools, name), args, { encoding: 'utf8', env: { ...env, ...overrides }, timeout: 30000 })
+    assert.equal(r.status, 0, `${name}: ${r.stderr || r.error?.message}`)
+    return r.stdout.trim()
+  }
+  const runtime = run('gcc.exe', ['-print-file-name=libmingw32.a'])
+  const symbols = run('nm.exe', ['--defined-only', '--extern-only', runtime])
+  const windows = playbackWindowsSourceEnvironment(root, symbols)
+  env.LIBRARY_PATH = windows.libraryPath
+  for (const name of ['libiconv.a', 'libz.a']) assert.equal(path.resolve(run('gcc.exe', ['-print-file-name=' + name])), path.resolve(root, 'lib', name))
+  const source = path.join(root, 'fenv.c'), dll = path.join(root, 'fenv.dll')
+  writeFileSync(source, '#include <fenv.h>\n__declspec(dllexport) int probe(void) { fenv_t e; return fegetenv(&e) || fesetenv(&e); }\n')
+  run('gcc.exe', ['-shared', source, '-o', dll, ...windows.linkArgs])
+  run('python.exe', ['-c', 'import ctypes,sys; assert ctypes.CDLL(sys.argv[1]).probe() == 0', dll])
+})
+
 test('macOS release source plan builds the same sole Canvas producer as normal development', () => {
   for (const arch of ['x64', 'arm64']) {
     const steps = playbackSourceNativePlan({ ...input, platform: 'darwin', arch, root: '/repo', include: '/sdk', output: '/output' })

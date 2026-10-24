@@ -70,7 +70,7 @@ async function main() {
       for (const key of ['JAVDEX_MPV_PREFIX', 'DYLD_LIBRARY_PATH', 'DYLD_FALLBACK_LIBRARY_PATH', 'LD_LIBRARY_PATH', 'LD_PRELOAD', 'NODE_OPTIONS']) delete environment[key]
       const pathKey = Object.keys(environment).find(key => key.toLowerCase() === 'path') ?? 'PATH'
       environment[pathKey] = platform === 'win32' ? `${process.env.SystemRoot}/System32` : '/usr/bin:/bin'
-      const script = `const a=require(${JSON.stringify(path.join(runtime.directory, 'playback.node'))});for(const k of ['create','destroy','state'])if(typeof a[k]!=='function')throw Error('Missing native export '+k);console.log('Playback loaded by packaged application: '+process.execPath)`
+      const script = `const a=require(${JSON.stringify(path.join(runtime.directory, 'playback.node'))});const api=process.platform==='win32'?a.sharedTexture:a;for(const k of ['create','destroy','state'])if(typeof api?.[k]!=='function')throw Error('Missing native export '+k);console.log('Playback loaded by packaged application: '+process.execPath)`
       const loaded = spawnSync(executable, ['-e', script], { env: environment, encoding: 'utf8', timeout: 30000, maxBuffer: 1024 * 1024 })
       if (loaded.error) throw loaded.error
       assert.equal(loaded.status, 0, 'Packaged executable could not load playback: ' + loaded.stderr)

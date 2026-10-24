@@ -67,7 +67,7 @@ struct Gl {
             const std::string padded = std::string(" ") + (extensions ? extensions : "") + " ";
             return padded.find(std::string(" ") + extension + " ") != std::string::npos;
         };
-        if (!has("WGL_NV_DX_interop") || !has("WGL_NV_DX_interop2")) throw std::runtime_error("WGL_NV_DX_interop2 is unavailable; restart without --javdex-windows-canvas");
+        if (!has("WGL_NV_DX_interop") || !has("WGL_NV_DX_interop2")) throw std::runtime_error("WGL_NV_DX_interop2 is unavailable");
         genRenderbuffers = load<decltype(genRenderbuffers)>("glGenRenderbuffers"); deleteRenderbuffers = load<decltype(deleteRenderbuffers)>("glDeleteRenderbuffers");
         bindRenderbuffer = load<decltype(bindRenderbuffer)>("glBindRenderbuffer"); genFrames = load<decltype(genFrames)>("glGenFramebuffers");
         deleteFrames = load<decltype(deleteFrames)>("glDeleteFramebuffers"); bindFrame = load<decltype(bindFrame)>("glBindFramebuffer");
@@ -255,7 +255,7 @@ napi_value create(napi_env env, napi_callback_info info) {
         checked(dxgi->GetAdapter(adapter.put()), "Get producer adapter"); DXGI_ADAPTER_DESC adapterDesc{};
         checked(adapter->GetDesc(&adapterDesc), "Get producer adapter LUID"); s.adapter = adapterDesc.AdapterLuid;
         s.interop = s.gl.open(s.device.value);
-        if (!s.interop) throw std::runtime_error("GL cannot access the selected D3D11 adapter; restart without --javdex-windows-canvas");
+        if (!s.interop) throw std::runtime_error("GL cannot access the selected D3D11 adapter");
         D3D11_QUERY_DESC query{D3D11_QUERY_EVENT, 0}; checked(s.device->CreateQuery(&query, s.query.put()), "Create GPU completion query");
         s.playback.initialize(mpvProc, nullptr, false, notify, &wakeup, "auto", false, "0.02", true);
         s.playback.setEventWakeup(notify, &wakeup);

@@ -9,7 +9,7 @@ Javdex 默认使用基于 **libmpv** 的内置播放器，支持本机与远程�
 
 ## 内置 `libmpv` 渲染架构与三态视图
 
-macOS 将 libmpv 输出经 IOSurface 与 Electron 共享纹理绘制到 Canvas2D，画面和 HTML 控件在同一窗口合成，无需试验启动参数；Windows 保留原生视频区域，Linux 使用共享纹理或 CPU 兼容 Canvas。影片解码不由 HTML `<video>` 承担。
+macOS 将 libmpv 输出经 IOSurface 与 Electron 共享纹理绘制到 Canvas2D，画面和 HTML 控件在同一窗口合成，无需试验启动参数；Windows 使用 D3D11 共享纹理到 Canvas，Linux 使用共享纹理或 CPU 兼容 Canvas；画面、全屏与播放控件均在主窗口合成，无需额外启用参数。影片解码不由 HTML `<video>` 承担。
 
 Windows 在检测到显卡／驱动不支持当前播放路径或发生可恢复的图形故障时，自动切换到 CPU 兼容播放，并恢复播放位置、音量、倍速和字幕。播放信息中会显示“CPU 兼容（自动回退）”；本次应用运行保持 CPU 模式，重启后重新尝试 GPU。CPU 兼容模式按实际显示尺寸绘制，高分辨率、高帧率影片的流畅度取决于 CPU 性能。
 

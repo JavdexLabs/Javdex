@@ -32,7 +32,8 @@ try {
     const traceFile = path.join(output, 'windows-close-trace.json')
     await application.evaluate(({ app, BrowserWindow }, traceFile) => {
       const require = process.getBuiltinModule('module').createRequire(app.getAppPath() + '/package.json')
-      const bridge = require(app.isPackaged ? process.resourcesPath + '/native-playback/playback.node' : app.getAppPath() + '/out/native-playback/playback.node')
+      const addon = require(app.isPackaged ? process.resourcesPath + '/native-playback/playback.node' : app.getAppPath() + '/out/native-playback/playback.node')
+      const bridge = addon.software.inspect().alive ? addon.software : addon.sharedTexture
       const window = BrowserWindow.getAllWindows()[0]
       const trace = { events: [] }
       const save = () => require('node:fs').writeFileSync(traceFile, JSON.stringify(trace, null, 2))

@@ -94,6 +94,9 @@ const base = {
   win: {
     icon: 'build/icon.ico',
     files: [
+      // Linux Electron needs the WASM backend to avoid GLib symbol collisions.
+      // Windows uses the native backend and must not ship that Linux fallback.
+      '!node_modules/@img/sharp-wasm32/**/*',
       '!node_modules/@mariozechner/clipboard-{android,darwin,freebsd,linux}-*/**/*',
       '!node_modules/@mariozechner/clipboard-win32-!(${arch})-*/**/*',
       '!node_modules/@earendil-works/pi-tui/native/!(win32)/**/*',
@@ -120,6 +123,7 @@ const base = {
   },
   mac: {
     icon: 'build/icon.icns',
+    files: ['!node_modules/@img/sharp-wasm32/**/*'],
     identity: '-',
     electronLanguages: MAC_ELECTRON_LANGUAGES,
     category: 'public.app-category.entertainment',
@@ -176,6 +180,7 @@ export default function buildConfig() {
   // Platform files form a separate matcher in electron-builder. An exclusions-
   // only matcher defaults to **/*, so retain the desktop allowlist here too.
   config.win.files.unshift(...config.files)
+  config.mac.files.unshift(...config.files)
   config.linux.files.unshift(...config.files)
 
   config.beforePack = async context => {

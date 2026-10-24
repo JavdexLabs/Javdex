@@ -2,7 +2,7 @@
 // prerequisites; no package-manager codec or Homebrew libmpv enters this plan.
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { readFileSync, statSync } from 'node:fs'
+import { copyFileSync, existsSync, readFileSync, statSync } from 'node:fs'
 import path from 'node:path'
 import { playbackFileSha256 } from './playback-runtime.mjs'
 import { playbackNativeBuild } from './playback-native-build.mjs'
@@ -29,6 +29,27 @@ export function playbackPkgConfigEnvironment(prefix, platform, arch) {
     // that -L/-I as "system" paths, causing Meson to choose host static FFmpeg.
     PKG_CONFIG_ALLOW_SYSTEM_LIBS: '1', PKG_CONFIG_ALLOW_SYSTEM_CFLAGS: '1'
   }
+}
+
+export function playbackWindowsSourceEnvironment(prefix, runtimeSymbols) {
+  // Meson's built-in dependency lookups also inspect GCC's library search
+  // directories. -L in LDFLAGS alone does not keep them out of MSYS2 codecs.
+  const fenvDefault = /\b[RDS]\s+__mingw_fe_dfl_env(?:\r?\n|$)/.test(runtimeSymbols)
+  return { libraryPath: path.join(prefix, 'lib'), fenvDefault,
+    linkArgs: ['-static', '-static-libgcc', '-static-libstdc++',
+      // Recent MinGW CRTs put this definition in CRT_fp10.o. DLL startup does
+      // not pull it in before fesetenv; retain the real CRT definition.
+      ...(fenvDefault ? ['-Wl,--undefined=__mingw_fe_dfl_env'] : [])] }
+}
+
+export function stageWindowsStaticZlib(prefix) {
+  const source = path.join(prefix, 'lib/libzs.a'), destination = path.join(prefix, 'lib/libz.a')
+  assert.ok(existsSync(source), 'Missing pinned Windows static zlib archive')
+  const sha256 = playbackFileSha256(source)
+  if (existsSync(destination)) assert.equal(playbackFileSha256(destination), sha256, 'Refusing to replace a different Windows zlib archive')
+  else copyFileSync(source, destination)
+  // zlib 1.3.2 gives static Windows archives an s suffix, but its .pc uses -lz.
+  return { source: 'lib/libzs.a', destination: 'lib/libz.a', sha256 }
 }
 
 export function playbackBuildFingerprint({ platform, arch, electronVersion, toolchain, files }) {

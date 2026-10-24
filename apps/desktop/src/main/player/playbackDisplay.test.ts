@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { it } from 'node:test'
-import { configurePlaybackDisplay, linuxPlaybackBackend, windowsCanvasPlayback } from './playbackDisplay'
+import { configurePlaybackDisplay, linuxPlaybackBackend } from './playbackDisplay'
 
 function host(selected = '', ready = false) {
   const switches: string[][] = []
@@ -10,40 +10,13 @@ function host(selected = '', ready = false) {
   } }
 }
 
-it('selects a Windows composition path that exposes installed WGL child surfaces before ready', () => {
-  const windows = host()
-  configurePlaybackDisplay(windows, { platform: 'win32', windowsNativePlayback: true })
-  assert.deepEqual(windows.switches, [['disable-direct-composition', '']])
-  assert.equal(linuxPlaybackBackend(), null)
-  assert.throws(() => configurePlaybackDisplay(host('', true), { platform: 'win32', windowsNativePlayback: true }), /重新启动/)
-})
-
-it('Windows Canvas opt-in is exact, before ready and does not disable DirectComposition', () => {
-  const canvas = host()
-  configurePlaybackDisplay(canvas, { platform: 'win32', windowsNativePlayback: true, argv: ['electron', '--javdex-windows-canvas'] })
-  assert.equal(windowsCanvasPlayback(), true); assert.deepEqual(canvas.switches, [])
-  assert.throws(() => configurePlaybackDisplay(host('', true), { platform: 'win32', argv: ['electron', '--javdex-windows-canvas'] }), /重新启动/)
-  for (const argv of [['electron'], ['--javdex-windows-canvas'], ['electron', '--javdex-windows-canvas=false'],
-    ['electron', '--other=--javdex-windows-canvas'], ['electron', ' \t--\r\n', '--javdex-windows-canvas']]) {
-    const legacy = host()
-    configurePlaybackDisplay(legacy, { platform: 'win32', windowsNativePlayback: true, argv })
-    assert.equal(windowsCanvasPlayback(), false); assert.deepEqual(legacy.switches, [['disable-direct-composition', '']])
-  }
-  configurePlaybackDisplay(host(), { platform: 'darwin', argv: ['electron', '--javdex-windows-canvas'] })
-  assert.equal(windowsCanvasPlayback(), false)
-})
-it('preserves normal composition without a Windows native runtime and on other platforms', () => {
+it('Windows and macOS retain normal Chromium composition without playback startup flags', () => {
   for (const platform of ['win32', 'darwin'] as const) {
-    const withoutRuntime = host()
-    configurePlaybackDisplay(withoutRuntime, { platform })
-    assert.deepEqual(withoutRuntime.switches, [])
+    const current = host()
+    configurePlaybackDisplay(current, { platform, argv: ['electron'] })
+    assert.deepEqual(current.switches, [])
+    assert.equal(linuxPlaybackBackend(), null)
   }
-  const mac = host()
-  configurePlaybackDisplay(mac, { platform: 'darwin', windowsNativePlayback: true })
-  assert.deepEqual(mac.switches, [])
-  const linux = host()
-  configurePlaybackDisplay(linux, { platform: 'linux', argv: ['electron', '--javdex-x11'], windowsNativePlayback: true })
-  assert.deepEqual(linux.switches, [['ozone-platform', 'x11']])
 })
 
 it('does not mistake Electron defaults for an explicit X11 startup choice', () => {

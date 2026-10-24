@@ -18,7 +18,7 @@ function write(root, name, bytes) {
   fs.mkdirSync(path.dirname(path.join(root, name)), { recursive: true })
   fs.writeFileSync(path.join(root, name), bytes)
 }
-async function fixture(t) {
+async function fixture(t, windowsEntry = 'windowsPlaybackAddon.cpp') {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-combined-sources-test-'))
   t.after(() => fs.rmSync(root, { recursive: true, force: true }))
   const inputs = []
@@ -40,7 +40,7 @@ async function fixture(t) {
       'scripts/playback-runtime.mjs', 'scripts/playback-source-materials.mjs', 'scripts/packaging-runtime.mjs',
       'scripts/playback-native-build.mjs', 'scripts/check-playback-load.mjs', 'scripts/playback-linux-helper-smoke.mjs',
       'apps/desktop/src/main/player/native/CMakeLists.txt', 'apps/desktop/src/main/player/native/mpvCore.h',
-      'apps/desktop/src/main/player/native/windowsPlayback.cpp', 'apps/desktop/src/main/player/native/macSharedTexture.mm',
+      `apps/desktop/src/main/player/native/${windowsEntry}`, 'apps/desktop/src/main/player/native/macSharedTexture.mm',
       'apps/desktop/src/main/player/native/windowsSharedTexture.cpp', 'apps/desktop/src/main/player/native/windowsSoftwarePlayback.cpp', 'apps/desktop/src/main/player/native/windowsTextureTickets.h',
       'apps/desktop/src/main/player/native/windowsTextureTickets.test.cpp',
       'apps/desktop/src/main/player/native/linuxX11Playback.cpp', 'electron-sdk/include/node/node.h', 'win_delay_load_hook.cc', 'node-gyp-LICENSE']) write(native, name, 'fixture ' + name)
@@ -103,8 +103,8 @@ function refreshProof(f, index) {
   fs.writeFileSync(file, JSON.stringify(proof))
 }
 
-test('one combined archive deduplicates content, retains variants and restores all four platform inputs', async t => {
-  const f = await fixture(t)
+for (const entry of ['windowsPlaybackAddon.cpp', 'windowsPlayback.cpp']) test(`combined source archive restores all platforms with Windows entry ${entry}`, async t => {
+  const f = await fixture(t, entry)
   const combined = await aggregatePlaybackSources(f.directory, version)
   const unpacked = path.join(f.root, 'combined'); fs.mkdirSync(unpacked)
   await extractTar({ cwd: unpacked, file: combined })

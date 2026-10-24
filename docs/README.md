@@ -20,6 +20,7 @@
 ## 决策与证据
 
 - [ADR](adr) 保存架构选择及其理由；现行实现以相应合同和代码为准。
+- [三平台播放统一与接续方案](adr/0033-unify-desktop-playback-capabilities.md)已确认目标，等待 Mac CPU 播放开发完成并推送；本机先整合最新实现，再启动统一改造。
 - [发布与评审记录](reviews/README.md) 保存原始发布、0.9.0 整套替换、回归及来源证据，不将历史通过次数当作新版本结论。
 - [性能工作索引](performance/README.md) 区分已实施批次、原始基准与仍未完成的工作；不能因文档清理关闭未验证项。
 - [服务端历史](archive/server-mode/README.md)、[本地 AI 历史](archive/local-ai/implementation-and-validation-2026-10.md)及[播放平台历史](archive/playback/platform-validation-2026-10.md)只用于追溯，不是当前操作步骤。

@@ -2,6 +2,10 @@
 
 本目录保留特定源码、日期、平台及检查范围的证据，不是当前开发待办。用户操作见文档站，发布流程见[发布规范](../VERSIONING_AND_RELEASE.md)。
 
+## 0.9.1 Beta
+
+[0.9.1-beta.1 发布审计](v0.9.1-beta.1-release-audit.md)及[公开附件证据](v0.9.1-beta.1-release-evidence.json)记录原候选源码、复用的四平台产物、服务端接续验证、成功发布 CI 和实际附件摘要。最新正式版及默认下载入口仍为 0.9.0；真机播放范围按审计与发布说明区分。
+
 ## 0.9.0 正式发布
 
 0.9.0 首次正式发行见[原始发布审计](v0.9.0-release-audit.md)。随后经维护者明确授权，仅一次整套重建替换原始 0.9.0；当前公开版本的源码、运行库、完整 CI 和原资产归档见[Whisper Vulkan 迁移审计](whisper-vulkan-runtime-migration.md)及[发布元数据](whisper-vulkan-runtime-release-evidence.json)。原始审计中的源码和资产身份不代表替换后的版本。

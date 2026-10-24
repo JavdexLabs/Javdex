@@ -1,0 +1,107 @@
+{
+  "version": "0.9.1-beta.1",
+  "source": "6e800b3a85459a9fbbf3fcd89e2f0794d0eb54ee",
+  "tag": "v0.9.1-beta.1",
+  "tagObject": "00d94ba046f306e42b6ad03d02e9aeba2688e580",
+  "release": {
+    "id": 422761940,
+    "url": "https://github.com/JavdexLabs/Javdex/releases/tag/v0.9.1-beta.1",
+    "draft": false,
+    "prerelease": true,
+    "publishedAt": "2026-10-24T13:55:01Z",
+    "targetCommitishMetadata": "main"
+  },
+  "baseRun": 40093198256,
+  "amd64ValidationRun": 40097972665,
+  "imageManifestRun": 40098595678,
+  "publicationRun": 40099899960,
+  "recoverySource": "93eea8e960b81fca9561949af61d1993e18f6de2",
+  "latestStable": "v0.9.0",
+  "image": {
+    "name": "ghcr.io/javdexlabs/javdex-server:0.9.1-beta.1",
+    "digest": "sha256:7611e2a3c1ffdff75a92937f6486c9fc6e424c708461137ca34cd58493ebce6c",
+    "platforms": [
+      "linux/amd64",
+      "linux/arm64"
+    ],
+    "anonymousLocalProbe": "not completed: local TLS reset / timeout"
+  },
+  "assets": [
+    {
+      "id": 672397243,
+      "name": "Javdex-0.9.1-beta.1-amd64.deb",
+      "size": 164688408,
+      "digest": "sha256:d14bd3bdf3b54f0686263fdc5da165e053affe073cc08a4f496710e2c695af9d",
+      "state": "uploaded"
+    },
+    {
+      "id": 672397247,
+      "name": "Javdex-0.9.1-beta.1-arm64.dmg",
+      "size": 165150759,
+      "digest": "sha256:8df54e10943276a10feda50e68fdc9c32b7ef8eb1ca0b2e41d2149d86bccbeb8",
+      "state": "uploaded"
+    },
+    {
+      "id": 672397246,
+      "name": "Javdex-0.9.1-beta.1-x64.dmg",
+      "size": 173709269,
+      "digest": "sha256:27ae2a7f00f242796ae83c1ca06eb45e5221bf6d7b5b62f2e50e7255ee1aa2bf",
+      "state": "uploaded"
+    },
+    {
+      "id": 672397239,
+      "name": "Javdex-0.9.1-beta.1-x86_64.AppImage",
+      "size": 188196326,
+      "digest": "sha256:3ad401104496de74dfb073144d689346a5226868023de696d2d7cea83d01e301",
+      "state": "uploaded"
+    },
+    {
+      "id": 672397248,
+      "name": "Javdex-Playback-Sources-0.9.1-beta.1.tar.gz",
+      "size": 1628488344,
+      "digest": "sha256:b0fdba2b45823e8dc01d01762727956715b3b5d01164b0e1aa7781e1222c8a71",
+      "state": "uploaded"
+    },
+    {
+      "id": 672397241,
+      "name": "Javdex-server-0.9.1-beta.1-linux-amd64.javdex-update",
+      "size": 24923098,
+      "digest": "sha256:2a1de2f19c1699dcc00e19947e63c194b1c2daa34f7c23015ac3fa5a8eeb090a",
+      "state": "uploaded"
+    },
+    {
+      "id": 672397251,
+      "name": "Javdex-server-0.9.1-beta.1-linux-arm64.javdex-update",
+      "size": 25179278,
+      "digest": "sha256:b3eabc6503f968eedf6242734e4997a6fa00f3bad842fd9ea474ec3582ca662c",
+      "state": "uploaded"
+    },
+    {
+      "id": 672397249,
+      "name": "Javdex-Setup-0.9.1-beta.1-x64.exe",
+      "size": 140472951,
+      "digest": "sha256:1b707cd4062afd3af549b4d0af11cc5269f27a9b3766b518a7de2213d44c403a",
+      "state": "uploaded"
+    },
+    {
+      "id": 672397244,
+      "name": "Javdex-Setup-0.9.1-beta.1-x64.zip",
+      "size": 190781757,
+      "digest": "sha256:a9c6b875befcfadf23d3aaa4fb4c290d729dff6092adf8b217ebe16d9c151bf2",
+      "state": "uploaded"
+    },
+    {
+      "id": 672397245,
+      "name": "SHA256SUMS.txt",
+      "size": 936,
+      "digest": "sha256:c81ec3e3f3d6e43989f159e336946b550ac9b8c36f7bcbebca3ee831443e7e64",
+      "state": "uploaded"
+    }
+  ],
+  "validation": {
+    "assetDigestComparison": "all 9 published asset digests match the independently downloaded checksum file; checksum file digest/size also match GitHub",
+    "publicLargeAssetDownload": "not performed",
+    "independentPackageGUI": "not performed",
+    "verifiedAt": "2026-10-24T13:57:03.964Z"
+  }
+}

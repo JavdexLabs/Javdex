@@ -26,7 +26,8 @@ if (process.platform === 'linux') {
 } else {
   const exports = ['create', 'destroy', 'state', ...(process.platform === 'darwin' ? ['setWakeup', 'nextFrame', 'releaseFrame', 'resetTiming', 'setRenderBudget', 'generatedSubtitles'] : [])]
   const sharedExports = ['create', 'destroy', 'state', 'inspect', 'setBounds', 'setVisible', 'setWakeup', 'nextFrame', 'releaseFrame', 'resetTiming', 'setRenderBudget', 'command', 'generatedSubtitles']
-  const script = `const a=require(${JSON.stringify(path.join(directory, 'playback.node'))});for(const k of ${JSON.stringify(exports)})if(typeof a[k]!=='function')throw Error('Missing native export '+k);if(process.platform==='win32')for(const k of ${JSON.stringify(sharedExports)})if(typeof a.sharedTexture?.[k]!=='function')throw Error('Missing Windows shared export '+k);console.log('Playback addon loaded in Electron '+process.versions.electron)`
+  const softwareExports = ['create', 'destroy', 'state', 'inspect', 'setBounds', 'setVisible', 'nextFrame', 'command', 'generatedSubtitles']
+  const script = `const a=require(${JSON.stringify(path.join(directory, 'playback.node'))});for(const k of ${JSON.stringify(exports)})if(typeof a[k]!=='function')throw Error('Missing native export '+k);if(process.platform==='win32'){for(const k of ${JSON.stringify(sharedExports)})if(typeof a.sharedTexture?.[k]!=='function')throw Error('Missing Windows shared export '+k);for(const k of ${JSON.stringify(softwareExports)})if(typeof a.software?.[k]!=='function')throw Error('Missing Windows CPU export '+k)}console.log('Playback addon loaded in Electron '+process.versions.electron)`
   run(require('electron'), ['-e', script], { ...environment, ELECTRON_RUN_AS_NODE: '1' })
 }
 const matrix = path.resolve(process.env.JAVDEX_PLAYBACK_RUNTIME_DIR ?? path.join(root, 'out/playback-runtime'))

@@ -3,8 +3,8 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { captureAcceptanceFrame, closeAcceptance, recordAcceptanceCleanup, createAcceptanceDirectory, launchAcceptance, nativeEvidence, seedAcceptanceCatalog, waitForState, waitForValue } from './playback-acceptance-support.mjs'
 import { prepareMediaFixtures } from './playback-media-fixtures.mjs'
-import { checkBitmapSubtitlePixels, checkComplexSubtitlePixels } from './playback-subtitle-checks.mjs'
-import { openPlaybackSettings, closePlaybackSettings, selectPlaybackSetting, playbackSettingLabels, revealFullscreenControls, hideFullscreenControls } from './playback-settings-ui.mjs'
+import { checkBitmapSubtitlePixels, checkComplexSubtitlePixels, fullscreenSubtitleComposition } from './playback-subtitle-checks.mjs'
+import { openPlaybackSettings, closePlaybackSettings, selectPlaybackSetting, playbackSettingLabels, hideFullscreenControls } from './playback-settings-ui.mjs'
 import { prepareNonRecordingPlayback } from './playback-acceptance-settings.mjs'
 
 assert.ok(['darwin', 'win32'].includes(process.platform), 'this runner accepts macOS and Windows only')
@@ -109,20 +109,19 @@ try {
   await page.getByRole('button', { name: '全屏', exact: true }).click()
   await waitForState(page, state => state.presentation === 'fullscreen' && state.paused, 'ASS fullscreen')
   await page.waitForTimeout(1500)
-  await revealFullscreenControls(page)
-  // An options pane changes geometry, so take a fresh baseline in native fullscreen.
   const sid = multi.tracks.find(track => track.codec === 'ass').id
-  await page.evaluate(id => window.api.playback.control(id, { kind: 'track', type: 'sub', id: null }), multi.sessionId)
-  await waitForState(page, state => !state.tracks.some(track => track.type === 'sub' && track.selected), 'fullscreen ASS off')
-  await page.waitForTimeout(300)
-  await frame('ass-fullscreen-off', { baseline: true })
-  await page.evaluate(({ id, sid }) => window.api.playback.control(id, { kind: 'track', type: 'sub', id: sid }), { id: multi.sessionId, sid })
-  await waitForState(page, state => state.tracks.some(track => track.type === 'sub' && track.selected), 'fullscreen ASS on')
-  await page.waitForTimeout(300)
-  const assFullscreen = await frame('ass-fullscreen-on', { compare: true })
-  assert.ok(assFullscreen.differentPixels > 200)
-  assert.ok(Number.isFinite(assFullscreen.controlsTop))
-  assert.ok(assFullscreen.bottom < assFullscreen.controlsTop, 'ASS cannot overlap native fullscreen controls')
+  const assFullscreen = await fullscreenSubtitleComposition(application, page, fixtures.directory, 'ass', async () => {
+    await page.evaluate(id => window.api.playback.control(id, { kind: 'track', type: 'sub', id: null }), multi.sessionId)
+    await waitForState(page, state => !state.tracks.some(track => track.type === 'sub' && track.selected), 'fullscreen ASS off')
+    await page.waitForTimeout(300)
+    await frame('ass-fullscreen-off', { baseline: true })
+    await page.evaluate(({ id, sid }) => window.api.playback.control(id, { kind: 'track', type: 'sub', id: sid }), { id: multi.sessionId, sid })
+    await waitForState(page, state => state.tracks.some(track => track.type === 'sub' && track.selected), 'fullscreen ASS on')
+    await page.waitForTimeout(300)
+    const captured = await frame('ass-fullscreen-on', { compare: true })
+    assert.ok(captured.differentPixels > 200)
+    return captured
+  })
   report.checks.push({ name: 'ASS styled pixels, disabled size, delay and fullscreen clearance', expanded: assFrame, fullscreen: assFullscreen })
   await page.evaluate(id => window.api.playback.control(id, { kind: 'presentation', value: 'expanded' }), multi.sessionId)
   await page.waitForTimeout(1500)

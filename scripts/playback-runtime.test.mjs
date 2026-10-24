@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
@@ -195,9 +195,14 @@ test('runtime inventory rejects escaping paths, symlinks and binaries without ow
   f.manifest.files['../outside'] = 'a'.repeat(64); f.save()
   assert.throws(check, /invalid playback inventory path/)
   delete f.manifest.files['../outside']; f.save()
-  symlinkSync('playback.node', path.join(f.directory, 'alias.node'))
+  const alias = path.join(f.directory, 'alias.node')
+  // Windows directory junctions exercise the same reject-before-traversal
+  // branch without requiring file-symlink privileges or Developer Mode.
+  if (process.platform === 'win32') symlinkSync(path.join(f.directory, 'lib'), alias, 'junction')
+  else symlinkSync('playback.node', alias)
+  assert.equal(lstatSync(alias).isSymbolicLink(), true)
   assert.throws(check, /symlink/)
-  rmSync(path.join(f.directory, 'alias.node'))
+  rmSync(alias)
   f.manifest.components[1].binaries = ['lib/libfixture.dylib']; f.save()
   assert.throws(check, /duplicate playback binary ownership/)
   f.manifest.components.pop(); f.save()

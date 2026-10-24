@@ -38,7 +38,7 @@ test('experimental default profile cannot silently open the production Javdex di
     })
     api.configureAppIdentity()
     assert.deepEqual(calls, [['name', experimental ? 'Javdex Linux Texture Experimental' : 'Javdex'],
-      ['userData', experimental ? '/config/Javdex-Linux-Texture-Experimental' : '/config/Javdex']])
+      ['userData', path.join('/config', experimental ? 'Javdex-Linux-Texture-Experimental' : 'Javdex')]])
   }
 })
 test('experimental update checks and release navigation make no network or external calls', async () => {

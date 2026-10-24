@@ -37,7 +37,7 @@ test('Windows command plan selects installed inputs and CMake, without macOS fla
 })
 test('Windows addon installs the Electron import hook directly in its delayed-load module', () => {
   const cmake = readFileSync(new URL('../apps/desktop/src/main/player/native/CMakeLists.txt', import.meta.url), 'utf8')
-  assert.ok(cmake.includes('add_library(playback MODULE windowsPlayback.cpp windowsSharedTexture.cpp "${ELECTRON_DELAY_LOAD_HOOK}")'))
+  assert.ok(cmake.includes('add_library(playback MODULE windowsPlayback.cpp windowsSharedTexture.cpp windowsSoftwarePlayback.cpp "${ELECTRON_DELAY_LOAD_HOOK}")'))
   assert.ok(cmake.includes('HOST_BINARY="node.exe"'))
   assert.ok(cmake.includes('target_link_options(playback PRIVATE /DELAYLOAD:node.exe)'))
   assert.match(cmake, /target_link_libraries\(playback PRIVATE "\$\{ELECTRON_NODE_LIBRARY\}" delayimp /)

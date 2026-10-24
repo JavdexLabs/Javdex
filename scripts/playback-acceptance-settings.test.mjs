@@ -3,13 +3,66 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import vm from 'node:vm'
+import crypto from 'node:crypto'
 import { test } from 'node:test'
 import { createThisComputerSettingsStore, thisComputerSettingsPath } from '../apps/desktop/src/main/desktop/thisComputerSettingsStore.ts'
 import { prepareNonRecordingPlayback } from './playback-acceptance-settings.mjs'
 import { assertOrdinaryAcceptanceExit, closeAcceptanceAndSave } from './playback-acceptance-cleanup.mjs'
-import { captureAcceptanceImage, nativeEvidence } from './playback-acceptance-support.mjs'
+import { captureAcceptanceImage, captureAcceptanceFrame, nativeEvidence, output } from './playback-acceptance-support.mjs'
 import { revealFullscreenControls, hideFullscreenControls } from './playback-settings-ui.mjs'
 import { installCanvasSubmissionObserver, checkSyntheticCanvasFrame } from './windows-canvas-checks.mjs'
+import { checkLocalSubtitlePicker, whiteBitmapCoverage } from './playback-subtitle-checks.mjs'
+
+function localSrtPickerFixture({ value = 136, pixels = 1000 } = {}) {
+  const state = { sessionId: 'fixture', source: 'remote', paused: true, position: 4, tracks: [], subtitleSize: 38 }
+  const api = { playback: { snapshot: () => structuredClone(state), control: async (_id, command) => {
+    if (command.kind === 'track') state.tracks[0].selected = command.id !== null
+    if (command.kind === 'presentation') state.presentation = command.value
+  } } }
+  const page = { evaluate: async (callback, args) => vm.runInNewContext(`(${callback.toString()})(args)`, { window: { api }, args }),
+    waitForTimeout: async () => {}, getByRole: (_role, { name }) => ({ isDisabled: async () => false, click: async () => {
+      if (name === '选择本机外挂字幕') state.tracks.push({ type: 'sub', id: 2, codec: 'subrip', selected: true })
+      if (name === '收起到底栏') state.presentation = 'docked'
+      if (name === '恢复展开') state.presentation = 'expanded'
+      if (name === '全屏') state.presentation = 'fullscreen'
+    } }) }
+  let fullscreenPrefix, ready = false
+  const context = { assert, process, path, whiteBitmapCoverage, application: {}, page,
+    // Filtered small glyphs can have substantial coverage without bright cores.
+    sharp: file => ({ ensureAlpha: () => ({ raw: () => ({ toBuffer: async () =>
+      Buffer.alloc(pixels * 4, Buffer.from(file.endsWith('-on.png') ? [value, value, value, 255] : [17, 17, 17, 255])) }) }) }),
+    openPlaybackSettings: async () => {}, closePlaybackSettings: async () => {},
+    selectPlaybackSetting: async () => { state.subtitleSize = 40 },
+    waitForState: async (_page, predicate, description) => { assert.ok(predicate(state), description); return structuredClone(state) },
+    nativeEvidence: async () => ({ loadedFiles: 1 }),
+    captureAcceptanceFrame: async () => ({ changedColors: { white: 3 } }),
+    fullscreenSubtitleComposition: async (_app, _page, _dir, prefix, compare) => { fullscreenPrefix = prefix; return compare() },
+    ready: () => { ready = true } }
+  return { run: async () => {
+    const result = await vm.runInNewContext(`(${checkLocalSubtitlePicker.toString()})(application,page,'/fixture','external.srt',ready)`, context)
+    return { result, ready, fullscreenPrefix, state }
+  } }
+}
+
+test('remote local-SRT picker reaches fullscreen composition with its own evidence prefix', async () => {
+  const { result, ready, fullscreenPrefix, state } = await localSrtPickerFixture().run()
+  assert.equal(ready, true)
+  assert.equal(fullscreenPrefix, 'remote-local-srt')
+  assert.equal(result.size, 40)
+  assert.equal(state.paused, true)
+  assert.equal(state.position, 4)
+})
+
+for (const value of [17, 18]) test(`local SRT pixels reject absent text over a ${value === 17 ? 'stable' : 'slightly drifting'} background`, async () => {
+  await assert.rejects(localSrtPickerFixture({ value, pixels: 100000 }).run(), /actual local SRT must render white coverage/)
+})
+
+test('bitmap area integrates filtered white coverage and subtracts the unchanged background', () => {
+  const rgba = values => Buffer.from(values.flatMap(value => [value, value, value, 255]))
+  assert.equal(whiteBitmapCoverage(rgba([255, 136, 17, 136]), rgba([17, 17, 17, 17])), 2)
+  assert.equal(whiteBitmapCoverage(rgba([32, 64, 128, 255]), rgba([32, 64, 128, 255])), 0)
+  assert.equal(whiteBitmapCoverage(rgba([17, 17]), rgba([17, 17])), 0, 'cleared cue has no area')
+})
 
 test('Windows follow-up submissions belong to the current surface, not any previous open', () => {
   let receive
@@ -31,6 +84,26 @@ const animatedPixels = () => {
   for (let pixel = 0; pixel < 256; pixel++) data.set([[0, 0, 255, 255], [0, 255, 0, 255], [255, 0, 0, 255], [255, 255, 255, 255]][pixel % 4], pixel * 4)
   return { width: 16, height: 16, data }
 }
+
+test('subtitle pixel inspection recognizes antialiased hues without counting neutral gray as colored', async () => {
+  let colored = false
+  const hues = [[144, 144, 16], [144, 16, 144], [16, 144, 16], [16, 144, 144], [16, 16, 144], [220, 220, 220]]
+  const context = vm.createContext({ Buffer, dependencies: { app: { getAppPath: () => process.cwd() },
+    nativeImage: { createFromBitmap: () => ({ toPNG: () => Buffer.alloc(0) }) } },
+  process: { getBuiltinModule: () => ({ createRequire: () => id => ({
+    'node:fs': { writeFileSync() {} }, 'node:path': path, 'node:crypto': crypto
+  })[id] }) } })
+  const application = { evaluate: async (callback, args) => {
+    if (!args) return { width: 6, height: 2, data: Buffer.from(Array.from({ length: 12 }, (_, i) =>
+      [...(colored ? i < 6 ? hues[i] : [128, 128, 128] : [32, 32, 32]), 255]).flat()) }
+    context.args = args
+    return vm.runInContext(`(${callback.toString()})(dependencies,args)`, context)
+  } }
+  await captureAcceptanceFrame(application, path.join(output, 'pixel-check'), 'off', { baseline: true })
+  colored = true
+  const result = await captureAcceptanceFrame(application, path.join(output, 'pixel-check'), 'on', { compare: true })
+  assert.deepEqual(JSON.parse(JSON.stringify(result.changedColors)), { cyan: 1, magenta: 1, green: 1, yellow: 1, red: 1, white: 1 })
+})
 test('Windows follow-up rejects black, blank and transparent synthetic screenshots', () => {
   for (const bgra of [[0, 0, 0, 255], [200, 200, 200, 255], [0, 0, 255, 255], [0, 0, 0, 0]]) {
     const image = animatedPixels()

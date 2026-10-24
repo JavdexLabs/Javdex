@@ -1007,11 +1007,13 @@ test('shared-texture canvas stays in the video control and binds only to the cur
   await act(async () => changed({ ...current, position: 2 }))
   await act(async () => changed({ ...current, presentation: 'fullscreen', rendererFullscreenControls: true }))
   assert.deepEqual(boundSurfaces, ['first-surface'], 'clock and presentation changes preserve the mounted receiver')
+  assert.equal(renderer!.root.findByType('canvas'), canvas, 'ordinary updates keep the same canvas backing')
   await act(async () => button('视频画面，单击播放或暂停，双击全屏').props.onClick())
   assert.deepEqual(controls.at(-1), { id: 'first', command: { kind: 'pause', paused: true } })
   await act(async () => changed({ ...snapshot('replacement'), sharedTextureSurface: 'second-surface' }))
   assert.deepEqual(releasedSurfaces, ['first-surface'])
   assert.deepEqual(boundSurfaces, ['first-surface', 'second-surface'])
+  assert.notEqual(renderer!.root.findByType('canvas'), canvas, 'another surface cannot inherit a lost accelerated context')
   await act(async () => changed({ ...snapshot('replacement'), sharedTextureSurface: 'second-surface', phase: 'error', error: 'GPU stopped' }))
   assert.equal(renderer!.root.findAllByType('canvas').length, 0)
   assert.deepEqual(releasedSurfaces, ['first-surface', 'second-surface'])
@@ -1019,6 +1021,16 @@ test('shared-texture canvas stays in the video control and binds only to the cur
   await act(async () => changed(null))
   assert.equal(renderer!.root.findAllByType('canvas').length, 0)
   assert.deepEqual(releasedSurfaces, ['first-surface', 'second-surface', 'third-surface'])
+})
+
+test('CPU recovery replaces the GPU canvas within the same playback session', async () => {
+  await mount()
+  await act(async () => changed({ ...snapshot(), sharedTextureSurface: 'gpu-surface' }))
+  const gpuCanvas = renderer!.root.findByType('canvas')
+  await act(async () => changed({ ...snapshot(), sharedTextureSurface: 'cpu:software-surface' }))
+  assert.notEqual(renderer!.root.findByType('canvas'), gpuCanvas)
+  assert.deepEqual(releasedSurfaces, ['gpu-surface'])
+  assert.deepEqual(boundSurfaces, ['gpu-surface', 'cpu:software-surface'])
 })
 
 

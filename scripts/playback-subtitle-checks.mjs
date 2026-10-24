@@ -6,7 +6,20 @@ import { captureAcceptanceFrame, nativeEvidence, waitForState, waitForValue } fr
 import { bitmapFixture } from './playback-pgs-fixture.mjs'
 import { openPlaybackSettings, closePlaybackSettings, selectPlaybackSetting, revealFullscreenControls, hideFullscreenControls } from './playback-settings-ui.mjs'
 
-async function fullscreenSubtitleComposition(application, page, directory, prefix, compare) {
+// Integrate alpha coverage against the subtitle-off image. Counting only bright
+// interior pixels loses filtered edges when a bitmap is smaller than its source.
+export function whiteBitmapCoverage(current, baseline, minimumDelta = 0) {
+  assert.equal(current.length, baseline.length)
+  let coverage = 0
+  for (let at = 0; at < current.length; at += 4) {
+    const before = Math.min(baseline[at], baseline[at + 1], baseline[at + 2])
+    const after = Math.min(current[at], current[at + 1], current[at + 2])
+    if (before < 255 && after - before > minimumDelta) coverage += Math.max(0, Math.min(1, (after - before) / (255 - before)))
+  }
+  return coverage
+}
+
+export async function fullscreenSubtitleComposition(application, page, directory, prefix, compare) {
   await revealFullscreenControls(page)
   const controls = await captureAcceptanceFrame(application, directory, `${prefix}-fullscreen-controls`)
   assert.ok(Number.isFinite(controls.controlsTop), 'visible fullscreen toolbar geometry must be measured')
@@ -82,9 +95,10 @@ export async function checkBitmapSubtitlePixels(application, page, directory, pr
     // rounding and filtered edge pixels allow at most one source pixel (min 3px).
     for (const key of ['x', 'y', 'width', 'height']) assert.ok(Math.abs(frame.whiteBounds[key] - expected[key]) <= tolerance,
       `PGS ${key} must follow positioned video-space coordinates: ${frame.whiteBounds[key]} vs ${expected[key]}`)
-    assert.ok(Math.abs(frame.whitePixels / (3648 * scale * scale) - 1) < 0.16, 'PGS visible area must scale with the same fitted video')
     const current = await sharp(path.join(directory, `${prefix}-${name}.png`)).ensureAlpha().raw().toBuffer()
     const baseline = await sharp(path.join(directory, `${prefix}-${name.replace(/-on$/, '-off')}.png`)).ensureAlpha().raw().toBuffer()
+    const coverage = whiteBitmapCoverage(current, baseline)
+    assert.ok(Math.abs(coverage / (3648 * scale * scale) - 1) < 0.16, 'PGS visible area must scale with the same fitted video')
     const { hole } = object
     const points = [
       ['left border', 1.5, object.height / 2], ['right border', object.width - 1.5, object.height / 2],
@@ -98,7 +112,7 @@ export async function checkBitmapSubtitlePixels(application, page, directory, pr
       assert.ok(delta <= 16, `PGS ${name} must remain transparent over the original video, not become an opaque black patch: ${delta}`)
       return { name, x: px, y: py, delta }
     })
-    return { ...frame, expected, transparency }
+    return { ...frame, expected, coverage, transparency }
   }
   const compare = async (name, cue) => {
     const beforeToggle = await ready(`${name}-before-toggle`, cue)
@@ -293,11 +307,15 @@ export async function checkLocalSubtitlePicker(application, page, directory, fil
     await waitForState(page, state => state.tracks.some(track => track.id === sid && track.type === 'sub' && track.selected), 'local SRT on')
     await page.waitForTimeout(300)
     const frame = await captureAcceptanceFrame(application, directory, `remote-local-srt-${name}-on`, { compare: true })
-    assert.ok(frame.changedColors.white > minimum, 'the actual local SRT must render white pixels over remote media')
-    const current = await page.evaluate(() => window.api.playback.snapshot())
-    assert.equal(current.sessionId, before.sessionId)
-    assert.equal(current.paused, true)
-    assert.ok(Math.abs(current.position - before.position) < 0.15)
+    const current = await sharp(path.join(directory, `remote-local-srt-${name}-on.png`)).ensureAlpha().raw().toBuffer()
+    const baseline = await sharp(path.join(directory, `remote-local-srt-${name}-off.png`)).ensureAlpha().raw().toBuffer()
+    // Retain the original >50 contrast guard: tiny whole-frame drift is not text.
+    frame.whiteCoverage = whiteBitmapCoverage(current, baseline, 50)
+    assert.ok(frame.whiteCoverage > minimum, 'the actual local SRT must render white coverage over remote media')
+    const state = await page.evaluate(() => window.api.playback.snapshot())
+    assert.equal(state.sessionId, before.sessionId)
+    assert.equal(state.paused, true)
+    assert.ok(Math.abs(state.position - before.position) < 0.15)
     assert.equal((await nativeEvidence(application)).loadedFiles, 1)
     return frame
   }
@@ -311,7 +329,7 @@ export async function checkLocalSubtitlePicker(application, page, directory, fil
   await page.getByRole('button', { name: '全屏', exact: true }).click()
   await waitForState(page, state => state.presentation === 'fullscreen' && state.paused, 'local SRT remote fullscreen')
   await page.waitForTimeout(1500)
-  const fullscreen = await fullscreenSubtitleComposition(application, page, directory, prefix, () => compare('fullscreen', 150))
+  const fullscreen = await fullscreenSubtitleComposition(application, page, directory, 'remote-local-srt', () => compare('fullscreen', 150))
   await control({ kind: 'presentation', value: 'expanded' })
   await waitForState(page, state => state.presentation === 'expanded', 'local SRT fullscreen exit')
   await page.waitForTimeout(1500)

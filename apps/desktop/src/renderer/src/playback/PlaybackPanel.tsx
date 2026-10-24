@@ -372,7 +372,7 @@ export default function PlaybackPanel(): JSX.Element | null {
             cancelVideoClick()
             control({ kind: 'presentation', value: fullscreen ? 'expanded' : 'fullscreen' })
           } : undefined}>
-          {sharedTextureSurface && <canvas className={styles.sharedTexture} data-playback-surface={sharedTextureSurface} aria-hidden="true" />}
+          {sharedTextureSurface && <canvas key={sharedTextureSurface} className={styles.sharedTexture} data-playback-surface={sharedTextureSurface} aria-hidden="true" />}
         </button>}
         {options && !docked && !nativeFullscreen && state.phase !== 'error' && <aside className={styles.options} aria-label="播放设置" id={settingsId} data-native-playback-occluder={rendererFullscreen || undefined}>
           <div className={styles.optionsHeader}><span>播放设置</span><IconButton size="sm" icon={<X size={16} />} label="关闭播放设置" onClick={() => presentationHistory.setOptions(false)} /></div>

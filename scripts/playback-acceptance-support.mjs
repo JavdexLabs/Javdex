@@ -157,11 +157,13 @@ export async function captureAcceptanceFrame(application, directory, name, { bas
         differentPixels++; bottom = y
         differentQuadrants[(y < frame.height / 2 ? 'top' : 'bottom') + (x < frame.width / 2 ? 'Left' : 'Right')]++
         const [blue, green, red] = frame.data.subarray(offset, offset + 3)
-        if (blue > 180 && green > 180 && red < 80) changedColors.cyan++
-        if (blue > 180 && red > 180 && green < 80) changedColors.magenta++
-        if (green > 180 && blue < 80 && red < 80) changedColors.green++
-        if (red > 180 && green > 180 && blue < 80) changedColors.yellow++
-        if (red > 180 && green < 80 && blue < 80) changedColors.red++
+        // Small ASS glyphs can consist entirely of antialiased coverage over
+        // gray. Identify their hue by channel separation, not full opacity.
+        if (blue > 96 && green > 96 && blue > red + 48 && green > red + 48) changedColors.cyan++
+        if (blue > 96 && red > 96 && blue > green + 48 && red > green + 48) changedColors.magenta++
+        if (green > 96 && green > blue + 48 && green > red + 48) changedColors.green++
+        if (red > 96 && green > 96 && red > blue + 48 && green > blue + 48) changedColors.yellow++
+        if (red > 96 && red > green + 48 && red > blue + 48) changedColors.red++
         if (red > 180 && green > 180 && blue > 180) changedColors.white++
       }
       if (whiteBounds && [0, 1, 2].every(channel => frame.data[offset + channel] > 220)) {

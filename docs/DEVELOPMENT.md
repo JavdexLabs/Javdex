@@ -141,7 +141,9 @@ Whisper b5130 的 macOS arm64／x64 工具保留静态运行库、Metal／Accele
 
 Windows 默认原生 adapter 使用 rendererFullscreenControls 和覆盖区域裁剪。macOS 以 IOSurface 共享纹理到 Canvas2D，Linux 以共享纹理或 CPU 帧到 Canvas；两者的视频、控制栏与菜单均由 renderer 合成，不使用原生子窗口或原生全屏工具栏。Windows 原生视图与输入行为保留。
 
-Windows 候选 Canvas 路径通过启动参数 `--javdex-windows-canvas` 显式启用，默认关闭；在 `--` 后、拼接值或其他平台上不启用。完整退出后移除参数即可回到原 HWND 后端，运行中不自动改后端。候选路径保留正常 DirectComposition，不套用旧 HWND 的禁用开关；使用同一个 `playback.node` 的 `sharedTexture` 导出对象，经 WGL 私有 D3D11 bridge、GPU copy、三个 BGRA NT 导出槽和 Electron 共享纹理进入现有 Canvas2D。不是把 IOSurface 或裸 HANDLE 传给页面，也不宣称零复制。生产完成、消费者 GPU 释放及 `allReferencesReleased` 分别确认；设备或同步状态不明时有界隔离并要求重启。实现、实际 Mac 检查和后续 Windows 准入见 [Windows Canvas 接入记录](reviews/windows-canvas-implementation-2026-10-23.md)。
+Windows 候选 GPU Canvas 路径通过启动参数 `--javdex-windows-canvas` 显式启用，默认关闭；在 `--` 后、拼接值或其他平台上不启用。完整退出后移除参数即可重新选择原 HWND 后端。候选路径保留正常 DirectComposition，不套用旧 HWND 的禁用开关；使用同一个 `playback.node` 的 `sharedTexture` 导出对象，经 WGL 私有 D3D11 bridge、GPU copy、三个 BGRA NT 导出槽和 Electron 共享纹理进入现有 Canvas2D。不宣称零复制。生产完成、消费者 GPU 释放及 `allReferencesReleased` 分别确认；设备或同步状态不明时保持旧 GPU 租约有界隔离，不强行释放。实现与历史验收见 [Windows Canvas 接入记录](reviews/windows-canvas-implementation-2026-10-23.md)。
+
+Windows 默认和候选 GPU 路径均有独立的 CPU 故障回退，另可使用启动参数 `--javdex-cpu`。同一 addon 的 `software` 导出执行纯 CPU 解码／SW 渲染，通过最多两帧复制通道交给现有 preload Canvas，无需图形驱动互操作；与 Linux 一样按实际物理 viewport 渲染，保留 8192 单边／256 MiB 单帧边界，不额外限制 1080p。图形故障后恢复当前授权来源和播放状态，本次进程继续使用 CPU；页面销毁、媒体／授权／音频错误与 CPU 故障不触发循环重试。`node scripts/windows-software-acceptance.mjs --mode=disabled <合成媒体...>` 使用禁用 GPU 加速的真实应用验收；`initialization` 只注入 GL 创建失败，`gpu-fault` 实际终止自有测试宿主的 GPU 子进程，`legacy` 检查默认路径。均使用隔离资料库，不改系统显卡设置。结果与未测范围见 [Windows CPU 记录](reviews/windows-cpu-fallback-2026-10-24.md)。
 
 内置播放行为与平台边界见 [播放合同](BUILTIN_PLAYBACK.md)，实际源码构建及发布证据见下文。`npm run playback:native:build` 只生成链接本机开发库的运行文件：macOS/Windows 为 addon，Linux 为独立 `playback-helper`；正式打包输入由 `npm run playback:runtime:build` 从固定源码构建。普通桌面打包明确排除 `out/native-playback`、`out/playback-acceptance`、`out/libmpv-prototype` 与 `out/playback-runtime`，审核后的运行库通过打包钩子复制到 Resources，不把构建目录、合成素材、截图或临时 Electron bundle 收入 `app.asar`。
 

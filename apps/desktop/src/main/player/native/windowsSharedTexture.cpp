@@ -1,6 +1,9 @@
 // Main-process Windows producer. No HWND is embedded in the player page.
 // WGL renders into a PRIVATE D3D11 bridge; copy/query completes before export.
 // Electron duplicates our NT handle and transports it, not its numeric bytes.
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif

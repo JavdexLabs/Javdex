@@ -742,6 +742,7 @@ void cleanup(void *) { try { destroyPlayer(); } catch (...) { /* Environment is 
 } // namespace
 
 napi_value initializeWindowsSharedTexture(napi_env env, napi_value exports);
+napi_value initializeWindowsSoftwarePlayback(napi_env env, napi_value exports);
 napi_value initialize(napi_env env, napi_value exports) {
     napi_property_descriptor methods[] = {
         {"create", nullptr, create, nullptr, nullptr, nullptr, napi_default, nullptr},
@@ -760,6 +761,9 @@ napi_value initialize(napi_env env, napi_value exports) {
     };
     napi_define_properties(env, exports, sizeof(methods) / sizeof(methods[0]), methods);
     napi_add_env_cleanup_hook(env, cleanup, nullptr);
-    return initializeWindowsSharedTexture(env, exports);
+    // A rejected worker import must not register another environment's CPU
+    // cleanup hook against the main process's live software session.
+    const auto initialized = initializeWindowsSharedTexture(env, exports);
+    return initialized ? initializeWindowsSoftwarePlayback(env, initialized) : nullptr;
 }
 NAPI_MODULE(NODE_GYP_MODULE_NAME, initialize)

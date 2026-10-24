@@ -22,7 +22,7 @@ interface PlaybackCanvas {
   height: number
   isConnected: boolean
   dataset: { playbackSurface?: string }
-  getContext(kind: '2d', options: { alpha: boolean; colorSpace: 'srgb' }): CanvasContext | null
+  getContext(kind: '2d', options: { alpha: boolean; colorSpace: 'srgb'; willReadFrequently?: boolean }): CanvasContext | null
   getBoundingClientRect(): { width: number; height: number }
 }
 declare const document: { querySelectorAll(selector: string): Iterable<PlaybackCanvas> }
@@ -37,6 +37,7 @@ interface MountedSurface extends SurfaceBinding {
   clockOffset?: number
   bestRtt: number
   clockSamples: number
+  clockRequestedAt: number
   cancellations: Set<() => void>
 }
 const token = (value: unknown): value is string => typeof value === 'string' && /^(?:cpu:)?[\da-f-]{36}$/.test(value)
@@ -63,9 +64,12 @@ export function installSharedTextureReceiver(): (surfaceToken: string) => () => 
     && typeof sharedTexture?.setSharedTextureReceiver === 'function'
   // Monotonic-clock calibration: no wall clock, no synchronous renderer IPC.
   // Midpoint mapping has bounded RTT uncertainty; choose the best of 3 probes.
-  const requestClock = (target: MountedSurface): void => ipcRenderer.send('playback:frame-clock', {
-    surfaceToken: target.surfaceToken, bindingToken: target.bindingToken, sentAt: performance.now()
-  })
+  const requestClock = (target: MountedSurface): void => {
+    target.clockRequestedAt = performance.now()
+    ipcRenderer.send('playback:frame-clock', {
+      surfaceToken: target.surfaceToken, bindingToken: target.bindingToken, sentAt: target.clockRequestedAt
+    })
+  }
   ipcRenderer.on('playback:frame-clock', (_event, value: unknown) => {
     const target = mounted
     const v = value as SurfaceBinding & { sentAt: number; mainTime: number }
@@ -79,6 +83,19 @@ export function installSharedTextureReceiver(): (surfaceToken: string) => () => 
   const cancel = (target: MountedSurface): void => {
     for (const stop of target.cancellations) stop()
     target.cancellations.clear()
+  }
+  const retire = (target: MountedSurface): void => {
+    cancel(target)
+    try { target.context.clearRect(0, 0, target.canvas.width, target.canvas.height) }
+    finally {
+      // Reset the backing store on direct rebind as well as effect cleanup.
+      // clearRect alone can retain the last VideoFrame in a deferred display
+      // list. Actual ticket release still waits for its consumer GPU callback.
+      target.canvas.width = 0; target.canvas.height = 0; target.image = undefined
+      ipcRenderer.send('playback:shared-texture-removed', {
+        surfaceToken: target.surfaceToken, bindingToken: target.bindingToken
+      })
+    }
   }
   const delay = (target: MountedSurface, ms: number): Promise<void> => new Promise(resolve => {
     const stop = (): void => { clearTimeout(timer); target.cancellations.delete(stop); resolve() }
@@ -100,6 +117,10 @@ export function installSharedTextureReceiver(): (surfaceToken: string) => () => 
       while (target.clockOffset === undefined || target.bestRtt > 20) {
         if (!current(target, metadata)) return false
         if (performance.now() - arrivedAt > 1000) throw new Error('Frame clock calibration failed')
+        // A busy startup can make all initial probes uncertain. Retry at most
+        // every 50ms across concurrent frames, retaining the same 20ms bound
+        // and one-second deadline rather than failing forever on those samples.
+        if (performance.now() - target.clockRequestedAt >= 50) requestClock(target)
         await delay(target, 2)
       }
       const due = metadata.targetTime + target.clockOffset
@@ -244,6 +265,10 @@ export function installSharedTextureReceiver(): (surfaceToken: string) => () => 
     try {
       imported = sharedTexture.subtle.finishTransferSharedTexture(metadata.transfer)
       const source = imported
+      // Windows Canvas can wait on the renderer's newly imported SharedImage
+      // before that channel has flushed its acquisition fence. Verification
+      // flushes that fence; release still waits for the consumer GPU callback.
+      if (nativeTransfer === 'windows') source.getFrameCreationSyncToken()
       void receive({ importedSharedTexture: {
         textureId: '', subtle: source, getVideoFrame: source.getVideoFrame,
         release: () => { if (!released) { released = true; source.release(acknowledge) } }
@@ -263,7 +288,7 @@ export function installSharedTextureReceiver(): (surfaceToken: string) => () => 
     const binding: SurfaceBinding = { surfaceToken, bindingToken: crypto.randomUUID() }
     const previous = mounted
     mounted = null
-    if (previous) { cancel(previous); ipcRenderer.send('playback:shared-texture-removed', { surfaceToken: previous.surfaceToken, bindingToken: previous.bindingToken }) }
+    if (previous) retire(previous)
     // Ready also identifies a failed binding, so main can authenticate failure
     // without trusting an arbitrary error string from page code.
     ipcRenderer.send('playback:shared-texture-ready', binding)
@@ -274,25 +299,23 @@ export function installSharedTextureReceiver(): (surfaceToken: string) => () => 
         .find(element => element.dataset.playbackSurface === surfaceToken)
       // Make the browser default explicit; this does not convert untagged
       // producer bytes from BT.709 transfer or certify GPU color management.
-      context = canvas?.getContext('2d', { alpha: false, colorSpace: 'srgb' })
+      // CPU recovery gets a fresh canvas from React and requests software
+      // backing. Reusing an accelerated 2D context after a GPU exit can accept
+      // putImageData yet keep presenting a lost GPU resource.
+      context = canvas?.getContext('2d', { alpha: false, colorSpace: 'srgb',
+        ...(surfaceToken.startsWith('cpu:') ? { willReadFrequently: true } : {}) })
     } catch { /* Treat context creation failure like an unavailable receiver. */ }
-    if ((!supported && !(surfaceToken.startsWith('cpu:') && process.platform === 'linux' && process.isMainFrame)) || !canvas || !context) {
+    if ((!supported && !(surfaceToken.startsWith('cpu:') && ['linux', 'win32'].includes(process.platform) && process.isMainFrame)) || !canvas || !context) {
       ipcRenderer.send('playback:shared-texture-failed', binding)
       return () => {}
     }
-    const target: MountedSurface = { ...binding, canvas, context, sequence: 0, timeline: 0, bestRtt: Infinity, clockSamples: 0, cancellations: new Set() }
+    const target: MountedSurface = { ...binding, canvas, context, sequence: 0, timeline: 0, bestRtt: Infinity, clockSamples: 0, clockRequestedAt: 0, cancellations: new Set() }
     mounted = target
     requestClock(target)
     return () => {
       if (mounted !== target) return
       mounted = null
-      cancel(target)
-      target.context.clearRect(0, 0, target.canvas.width, target.canvas.height)
-      // clearRect can leave the last VideoFrame in a deferred Canvas display
-      // list after DOM removal. Discard that backing store on final unbind so
-      // GPU-complete release callbacks need not wait for incidental GC/paint.
-      target.canvas.width = 0; target.canvas.height = 0
-      ipcRenderer.send('playback:shared-texture-removed', binding)
+      retire(target)
     }
   }
 }

@@ -41,7 +41,7 @@ async function fixture(t) {
       'scripts/playback-native-build.mjs', 'scripts/check-playback-load.mjs', 'scripts/playback-linux-helper-smoke.mjs',
       'apps/desktop/src/main/player/native/CMakeLists.txt', 'apps/desktop/src/main/player/native/mpvCore.h',
       'apps/desktop/src/main/player/native/windowsPlayback.cpp', 'apps/desktop/src/main/player/native/macSharedTexture.mm',
-      'apps/desktop/src/main/player/native/windowsSharedTexture.cpp', 'apps/desktop/src/main/player/native/windowsTextureTickets.h',
+      'apps/desktop/src/main/player/native/windowsSharedTexture.cpp', 'apps/desktop/src/main/player/native/windowsSoftwarePlayback.cpp', 'apps/desktop/src/main/player/native/windowsTextureTickets.h',
       'apps/desktop/src/main/player/native/windowsTextureTickets.test.cpp',
       'apps/desktop/src/main/player/native/linuxX11Playback.cpp', 'electron-sdk/include/node/node.h', 'win_delay_load_hook.cc', 'node-gyp-LICENSE']) write(native, name, 'fixture ' + name)
     write(native, 'package.json', JSON.stringify({ version }))

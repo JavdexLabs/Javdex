@@ -12,6 +12,7 @@ import { linuxPlaybackRenderNode } from './linuxPlaybackDevice'
 import { linuxGpuImportLoader } from './linuxGpuImport'
 import { createMacSharedTextureBridge } from './macSharedTexture'
 import { createNativeSharedTextureBridge } from './nativeSharedTexture'
+import { createWindowsSoftwarePlaybackBridge } from './windowsSoftwarePlayback'
 
 interface Bridge {
   create(handle: Buffer, bounds: { x: number; y: number; width: number; height: number; scale?: number }, host?: { backend: 'dmabuf' | 'software' }): void
@@ -28,11 +29,12 @@ interface Bridge {
   destroy(): void
 }
 function runtimePath(name?: string, backend = linuxPlaybackBackend()): string {
+  const linuxSoftware = process.platform === 'linux' && backend === 'software'
   const filename = name ?? (process.platform === 'linux'
     ? backend === 'software' ? 'playback-software-helper' : 'playback-dmabuf-helper' : 'playback.node')
   const experimental = filename === 'playback-dmabuf-helper' || filename === 'playback-fd.node'
-  return app.isPackaged ? path.join(process.resourcesPath, backend === 'software' ? 'linux-software-playback' : experimental ? 'linux-texture-experimental' : 'native-playback', filename)
-    : path.join(app.getAppPath(), 'out', ...(backend === 'software' ? ['linux-software-runtime', 'linux-x64'] : ['native-playback']), filename)
+  return app.isPackaged ? path.join(process.resourcesPath, linuxSoftware ? 'linux-software-playback' : experimental ? 'linux-texture-experimental' : 'native-playback', filename)
+    : path.join(app.getAppPath(), 'out', ...(linuxSoftware ? ['linux-software-runtime', 'linux-x64'] : ['native-playback']), filename)
 }
 export function builtinPlaybackAvailability(backend = linuxPlaybackBackend()): PlaybackAvailability {
   if (!['darwin', 'win32', 'linux'].includes(process.platform)) return { available: false, reason: '此平台的原生播放适配尚未实现，请显式使用外部播放器' }
@@ -46,7 +48,8 @@ export function builtinPlaybackAvailability(backend = linuxPlaybackBackend()): P
       : '未安装内置播放运行库；开发构建可运行 npm run playback:native:build' }
 }
 export function createLibmpvPlayback(getWindow: () => BrowserWindow | null, backend = linuxPlaybackBackend()): NativePlayback {
-  const canvas = process.platform === 'darwin' || process.platform === 'win32' && windowsCanvasPlayback()
+  const windowsSoftware = process.platform === 'win32' && backend === 'software'
+  const canvas = process.platform === 'darwin' || process.platform === 'win32' && (windowsCanvasPlayback() || windowsSoftware)
   const generatedId = Number.MAX_SAFE_INTEGER
   let bridge: Bridge | null = null
   let alive = false
@@ -126,6 +129,8 @@ export function createLibmpvPlayback(getWindow: () => BrowserWindow | null, back
       if (!window || window.isDestroyed()) throw new Error('主窗口不可用')
       if (process.platform === 'darwin') bridge = createMacSharedTextureBridge(
         createRequire(path.join(app.getAppPath(), 'package.json'))(runtimePath(undefined, backend)), window)
+      else if (windowsSoftware) bridge = createWindowsSoftwarePlaybackBridge(
+        createRequire(path.join(app.getAppPath(), 'package.json'))(runtimePath(undefined, backend)).software, window)
       else if (process.platform === 'win32' && canvas) bridge = createNativeSharedTextureBridge(
         createRequire(path.join(app.getAppPath(), 'package.json'))(runtimePath(undefined, backend)).sharedTexture, window, 'win32')
       else bridge = process.platform === 'linux' ? createLinuxPlaybackBridge(runtimePath(undefined, backend), backend !== null

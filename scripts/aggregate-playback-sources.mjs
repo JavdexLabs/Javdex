@@ -171,6 +171,7 @@ export async function aggregatePlaybackSources(directory, version) {
         'electron-sdk/include/node/node.h', 'electron-sdk/include/node/node_version.h',
         ...(runtime.platform === 'win32' ? ['win_delay_load_hook.cc', 'node-gyp-LICENSE',
           'apps/desktop/src/main/player/native/windowsSharedTexture.cpp',
+          'apps/desktop/src/main/player/native/windowsSoftwarePlayback.cpp',
           'apps/desktop/src/main/player/native/windowsTextureTickets.h',
           'apps/desktop/src/main/player/native/windowsTextureTickets.test.cpp'] : [])]
       for (const name of requiredNative) assert.ok(fs.statSync(path.join(native, name)).size > 0, 'Missing preferred native source/SDK: ' + name)

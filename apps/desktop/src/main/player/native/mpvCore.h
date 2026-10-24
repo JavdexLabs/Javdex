@@ -242,7 +242,7 @@ public:
             {MPV_RENDER_PARAM_OPENGL_INIT_PARAMS, &gl}, {MPV_RENDER_PARAM_INVALID, nullptr}};
         mpv_render_param software[] = {{MPV_RENDER_PARAM_API_TYPE, (void *)MPV_RENDER_API_TYPE_SW}, {MPV_RENDER_PARAM_INVALID, nullptr}};
         error = mpv_render_context_create(&renderer, handle, cpuRendering ? software : params);
-        if (error < 0) throw std::runtime_error(mpv_error_string(error));
+        if (error < 0) throw std::runtime_error(std::string(cpuRendering ? "CPU render context: " : "OpenGL render context: ") + mpv_error_string(error));
         const char *numbers[] = {"time-pos", "duration", "volume", "speed", "width", "height", "audio-pts", "frame-drop-count", "sub-delay", "sub-font-size"};
         const char *strings[] = {"hwdec-current", "video-codec", "audio-codec", "audio-device", "current-ao", "sid", "aid"};
         const char *flags[] = {"pause", "mute", "eof-reached", "core-idle", "seekable", "seeking", "paused-for-cache"};

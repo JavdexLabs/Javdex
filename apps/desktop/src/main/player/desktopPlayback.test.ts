@@ -51,7 +51,7 @@ function fixture(t: TestContext, pause: 'recent' | 'playlist', renderPolling = t
   const native = { renderPolling, create() {}, destroy() {}, command() {}, load() {}, read: () => ({ ...raw }), render() {}, viewport() {}, addSubtitle() {} }
   let session!: ReturnType<typeof createPlaybackSession>
   const mocks: Record<string, unknown> = {
-    electron: { app: { getPath: () => root }, dialog: {}, shell: {}, powerSaveBlocker: { start: () => 1, stop() {} }, powerMonitor: { on() {}, off() {} } },
+    electron: { app: { getPath: () => root, isHardwareAccelerationEnabled: () => true }, dialog: {}, shell: {}, powerSaveBlocker: { start: () => 1, stop() {} }, powerMonitor: { on() {}, off() {} } },
     './libmpvPlayback': { builtinPlaybackAvailability: () => ({ available: true }), createLibmpvPlayback: () => native },
     './playbackSource': { playbackCatalogKey, createPlaybackSourceResolver: () => ({
       resolve: async (target: PlaybackSource['target']) => { resolutions++; return { ...structuredClone(source), target } },

@@ -1,4 +1,5 @@
 import { createLinuxPlaybackFallback, type LinuxPlaybackMode } from './linuxPlaybackFallback'
+import { createWindowsPlaybackFallback } from './windowsPlaybackFallback'
 import { app, dialog, shell, powerSaveBlocker, powerMonitor, type BrowserWindow } from 'electron'
 import path from 'node:path'
 import type { CatalogBackend } from '../application/catalogBackend'
@@ -32,7 +33,11 @@ export function disposeBuiltinPlayback(): Promise<void> {
 
 export function registerBuiltinPlayback(backend: CatalogBackend, getWindow: () => BrowserWindow | null, settings: DesktopSettingsStore, recentStarted?: (videoId: number) => Promise<void>): (target: PlaybackTarget) => Promise<PlayResult> {
   let linuxMode: LinuxPlaybackMode = process.argv.includes('--javdex-cpu') ? 'cpu' : 'auto'
-  const native = process.platform === 'linux' ? createLinuxPlaybackFallback(createLibmpvPlayback(getWindow), createLibmpvPlayback(getWindow, 'software'), () => linuxMode) : createLibmpvPlayback(getWindow)
+  const native = process.platform === 'linux' ? createLinuxPlaybackFallback(createLibmpvPlayback(getWindow), createLibmpvPlayback(getWindow, 'software'), () => linuxMode)
+    : process.platform === 'win32' ? createWindowsPlaybackFallback(createLibmpvPlayback(getWindow), createLibmpvPlayback(getWindow, 'software'), {
+      forceCpu: () => process.argv.slice(1, process.argv.indexOf('--') < 0 ? undefined : process.argv.indexOf('--')).includes('--javdex-cpu'),
+      gpuAvailable: () => app.isHardwareAccelerationEnabled()
+    }) : createLibmpvPlayback(getWindow)
   const resolver = createPlaybackSourceResolver(backend)
   const volume = createPlaybackVolume(settings)
   let recordingEnabled = false

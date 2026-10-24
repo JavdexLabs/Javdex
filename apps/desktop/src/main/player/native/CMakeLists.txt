@@ -36,13 +36,13 @@ if(WIN32)
   # executable) exports those symbols itself. Compile the appropriate hook
   # into this module; a hook in another DLL cannot redirect its imports.
   if(MSVC)
-    add_library(playback MODULE windowsPlayback.cpp windowsSharedTexture.cpp "${ELECTRON_DELAY_LOAD_HOOK}")
+    add_library(playback MODULE windowsPlayback.cpp windowsSharedTexture.cpp windowsSoftwarePlayback.cpp "${ELECTRON_DELAY_LOAD_HOOK}")
     target_compile_options(playback PRIVATE /utf-8 /EHsc /W4)
     target_link_options(playback PRIVATE /DELAYLOAD:node.exe)
   else()
     # node-gyp's hook is guarded by _MSC_VER. The MinGW build supplies the
     # same host redirection through its own delayimp hook and LLVM's linker.
-    add_library(playback MODULE windowsPlayback.cpp windowsSharedTexture.cpp windowsElectronDelayHook.cpp)
+    add_library(playback MODULE windowsPlayback.cpp windowsSharedTexture.cpp windowsSoftwarePlayback.cpp windowsElectronDelayHook.cpp)
     target_compile_options(playback PRIVATE -Wall -Wextra -Wpedantic)
     target_link_options(playback PRIVATE -Wl,--delayload=node.exe)
   endif()

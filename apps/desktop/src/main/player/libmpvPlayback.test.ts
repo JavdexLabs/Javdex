@@ -17,7 +17,7 @@ const wrapperCode = transpileModule(readFileSync(new URL('./libmpvPlayback.ts', 
 const subtitleFile = path.resolve('fixture-subtitles', 'AI 日中字幕.ass')
 const newSubtitleFile = path.resolve('fixture-subtitles', 'new.ass')
 
-function fixture(platform: 'darwin' | 'win32' | 'linux', windowsCanvas = false) {
+function fixture(platform: 'darwin' | 'win32' | 'linux', windowsCanvas = false, software = false) {
   const commands: string[][] = []
   const loaded: string[] = []
   let actions: NonNullable<NativePlaybackState['actions']> = []
@@ -96,7 +96,7 @@ function fixture(platform: 'darwin' | 'win32' | 'linux', windowsCanvas = false) 
         case 'node:fs': return { existsSync: () => true }
         case 'node:path': return path
         case 'node:timers/promises': return { setTimeout: delay }
-        case 'node:module': return { createRequire: () => (filename: string) => { loaded.push(filename); return windowsCanvas ? { ...bridge, sharedTexture: sharedProducer } : bridge } }
+        case 'node:module': return { createRequire: () => (filename: string) => { loaded.push(filename); return windowsCanvas || software ? { ...bridge, sharedTexture: sharedProducer, software: sharedProducer } : bridge } }
         case './playbackDisplay': return { linuxPlaybackBackend: () => 'dmabuf', windowsCanvasPlayback: () => windowsCanvas }
         case './linuxPlaybackBridge': return { createLinuxPlaybackBridge: () => bridge }
         case './linuxSharedTexture': return { createLinuxSharedTexture: () => { throw new Error('Wrapper fixture does not materialize its deferred frame channel') } }
@@ -105,6 +105,7 @@ function fixture(platform: 'darwin' | 'win32' | 'linux', windowsCanvas = false) 
         case './nativeSharedTexture': return { createNativeSharedTextureBridge: (producer: unknown, _window: unknown, platform: string) => {
           assert.equal(producer, sharedProducer); assert.equal(platform, 'win32'); return bridge
         } }
+        case './windowsSoftwarePlayback': return { createWindowsSoftwarePlaybackBridge: (producer: unknown) => { assert.equal(producer, sharedProducer); return bridge } }
         case './linuxPlaybackDevice': return { linuxPlaybackRenderNode: () => '/dev/dri/renderD129' }
         default: throw new Error(`Unexpected playback wrapper dependency: ${id}`)
       }
@@ -116,7 +117,7 @@ function fixture(platform: 'darwin' | 'win32' | 'linux', windowsCanvas = false) 
     getBounds: () => ({ x: 0, y: 0, width: 1, height: 1 }),
     webContents: { getZoomFactor: () => 1 }
   } as unknown as BrowserWindow
-  const native = moduleExports.createLibmpvPlayback(() => window)
+  const native = software ? moduleExports.createLibmpvPlayback(() => window, 'software') : moduleExports.createLibmpvPlayback(() => window)
   native.create()
   assert.equal(created, true, 'the real wrapper must load the fixture bridge')
   return { native, commands, overlays, viewports, occlusions, loaded, handles, queue: (pending: typeof actions): void => { actions.push(...pending) },
@@ -155,6 +156,13 @@ test('Windows keeps legacy polling by default and selects the shared producer on
   assert.equal(canvas.native.renderPolling, false)
   assert.deepEqual(legacy.handles, [4]); assert.deepEqual(canvas.handles, [0], 'Canvas must not receive an HWND')
   assert.deepEqual(canvas.loaded, [path.resolve('fixture-app/out/native-playback/playback.node')])
+})
+
+test('Windows software playback uses copied Canvas pixels without requesting an HWND', t => {
+  const f = fixture('win32', false, true); t.after(f.native.destroy)
+  assert.equal(f.native.renderPolling, false); assert.deepEqual(f.handles, [0])
+  assert.deepEqual(f.loaded, [path.resolve('fixture-app/out/native-playback/playback.node')])
+  assert.equal(f.native.read().rendererFullscreenControls, true)
 })
 
 const timeline = 'generated timeline fixture'

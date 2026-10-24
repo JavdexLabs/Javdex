@@ -15,8 +15,8 @@ test('macOS release source plan builds the same sole Canvas producer as normal d
     const steps = playbackSourceNativePlan({ ...input, platform: 'darwin', arch, root: '/repo', include: '/sdk', output: '/output' })
     const addon = steps.filter(step => step.command === 'clang++' && step.args.includes('-shared'))
     assert.equal(addon.length, 1)
-    assert.ok(addon[0].args.includes('/repo/apps/desktop/src/main/player/native/macSharedTexture.mm'))
-    assert.equal(addon[0].args.at(-1), '/output/playback.node')
+    assert.ok(addon[0].args.includes(path.join('/repo', 'apps/desktop/src/main/player/native/macSharedTexture.mm')))
+    assert.equal(addon[0].args.at(-1), path.join('/output', 'playback.node'))
     assert.ok(addon[0].args.includes('Foundation') && addon[0].args.includes('IOSurface'))
   }
 })
@@ -196,9 +196,9 @@ test('Debian package declares native OS prerequisites without replacing Electron
 
 test('Dedicated Linux DMA-BUF profile excludes window-system outputs and uses Pulse protocol', () => {
   const plan = playbackSourcePlan({ ...input, platform: 'linux', linuxProfile: 'dmabuf' })
-  const mpv = plan.find(s => s.args[0] === 'setup' && s.args.includes('/sources/mpv'))
+  const mpv = plan.find(s => s.args[0] === 'setup' && s.args.includes(path.join('/sources', 'mpv')))
   for (const flag of ['-Dplain-gl=enabled', '-Dpulse=enabled', '-Dalsa=disabled', '-Dx11=disabled', '-Dgl-x11=disabled', '-Dvaapi=enabled', '-Dvaapi-x11=disabled', '-Dvaapi-drm=enabled']) assert.ok(mpv.args.includes(flag), flag)
-  const defaults = playbackSourcePlan({ ...input, platform: 'linux' }).find(s => s.args[0] === 'setup' && s.args.includes('/sources/mpv'))
+  const defaults = playbackSourcePlan({ ...input, platform: 'linux' }).find(s => s.args[0] === 'setup' && s.args.includes(path.join('/sources', 'mpv')))
   assert.ok(defaults.args.includes('-Dx11=disabled'))
   assert.throws(() => playbackSourcePlan({ ...input, platform: 'linux', linuxProfile: 'x11' }), /Unsupported Linux playback profile/)
   assert.throws(() => playbackSourcePlan({ ...input, platform: 'darwin', linuxProfile: 'dmabuf' }), /requires Linux/)
@@ -212,18 +212,18 @@ test('VAAPI render dependency patch removes only the native KMS prerequisite', (
 
 test('CPU profile disables graphics rendering and hardware decoding while retaining Pulse audio', () => {
   const steps = playbackSourcePlan({ platform: 'linux', arch: 'x64', source: '/src', build: '/build', prefix: '/prefix', tools: '/tools', jobs: 2, linuxProfile: 'software' })
-  const ff = steps.find(s => s.args.includes('/src/ffmpeg/configure')).args
+  const ff = steps.find(s => s.args.includes(path.join('/src', 'ffmpeg/configure'))).args
   assert(ff.includes('--disable-vaapi')); assert(ff.includes('--disable-hwaccels'))
-  const mpv = steps.find(s => s.args.includes('/src/mpv')).args
+  const mpv = steps.find(s => s.args.includes(path.join('/src', 'mpv'))).args
   for (const flag of ['-Dgl=disabled', '-Dplain-gl=disabled', '-Dvaapi=disabled', '-Dpulse=enabled', '-Dx11=disabled']) assert(mpv.includes(flag))
 })
 
 test('Linux GPU enables NVDEC copy support from pinned headers without contaminating CPU or other platforms', () => {
   for (const profile of ['dmabuf', 'software']) {
     const steps = playbackSourcePlan({ ...input, platform: 'linux', linuxProfile: profile })
-    const ff = steps.find(s => s.args.includes('/sources/ffmpeg/configure')).args
-    const mpv = steps.find(s => s.args[0] === 'setup' && s.args.includes('/sources/mpv')).args
-    const install = steps.find(s => s.cwd === '/sources/nv_codec_headers')
+    const ff = steps.find(s => s.args.includes(path.join('/sources', 'ffmpeg/configure'))).args
+    const mpv = steps.find(s => s.args[0] === 'setup' && s.args.includes(path.join('/sources', 'mpv'))).args
+    const install = steps.find(s => s.cwd === path.join('/sources', 'nv_codec_headers'))
     assert.equal(Boolean(install), profile === 'dmabuf')
     assert(ff.includes(profile === 'dmabuf' ? '--enable-nvdec' : '--disable-nvdec'))
     assert(ff.includes(profile === 'dmabuf' ? '--enable-ffnvcodec' : '--disable-ffnvcodec'))
@@ -232,7 +232,7 @@ test('Linux GPU enables NVDEC copy support from pinned headers without contamina
   }
   for (const platform of ['darwin', 'win32']) {
     const steps = playbackSourcePlan({ ...input, platform })
-    assert(!steps.some(s => s.cwd === '/sources/nv_codec_headers'))
+    assert(!steps.some(s => s.cwd === path.join('/sources', 'nv_codec_headers')))
   }
 })
 

@@ -168,15 +168,16 @@ export function createPlaybackSession(deps: Dependencies) {
       commandNative({ kind: 'pause', paused: false })
     } else {
       commandNative(command)
-      // A paused PGS re-selection needs a same-time refresh, but issuing it in
-      // the same batch races decoder reinit. Wait for selected-track feedback;
-      // keep the intended time, not an intermediate clock from that reinit.
+      // Paused subtitle re-selection can leave an empty decoder even after
+      // track selection succeeds (ASS/text as well as PGS). Refresh the same
+      // time only after selection feedback, preserving the intended position
+      // rather than an intermediate clock from decoder reinit.
       if (command.kind === 'track' && command.type === 'sub') {
         subtitleRefresh = null
         if (command.id !== null && state.paused && state.seekable && state.position != null && state.resumePosition == null
           && state.phase !== 'opening' && state.phase !== 'ended') {
           const track = state.tracks.find(track => track.type === 'sub' && track.id === command.id)
-          if (track?.codec === 'hdmv_pgs_subtitle' && !track.selected) {
+          if (track && !track.selected) {
             subtitleRefresh = { id: command.id, target: pendingSeek?.target ?? state.position, requestedAt: now() }
             state.seeking = true; sample = null
           }

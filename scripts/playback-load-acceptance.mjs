@@ -6,11 +6,13 @@ import path from 'node:path'
 import { createAcceptanceDirectory, seedAcceptanceCatalog, launchAcceptance, waitForState,
   waitForValue, closeAcceptance, output } from './playback-acceptance-support.mjs'
 import { prepareNonRecordingPlayback } from './playback-acceptance-settings.mjs'
+import { checkLoadProduction } from './playback-load-quality.mjs'
 const [input, mode = 'gpu'] = process.argv.slice(2)
+const sourceFps = process.argv.find(value => value.startsWith('--source-fps='))?.slice('--source-fps='.length)
 assert(input && ['gpu', 'cpu'].includes(mode), 'Usage: node scripts/playback-load-acceptance.mjs MEDIA gpu|cpu')
 const file = path.resolve(input), directory = createAcceptanceDirectory('load-')
 const [target] = seedAcceptanceCatalog(directory, [file])
-const report = { passed: false, mode, platform: process.platform, file, stages: [],
+const report = { passed: false, mode, platform: process.platform, file, stages: [], productionQuality: 'not-assessed',
   limits: ['One local device and short synthetic load; no physical display timing or power measurement',
     'CPU percentages and working-set memory are Electron app metrics, not whole-system utilization'] }
 const save = () => fs.writeFileSync(path.join(output, `load-${mode}.json`), JSON.stringify(report, null, 2) + '\n')
@@ -49,6 +51,9 @@ try {
     else assert(Math.abs(stage.positionAdvance)<.25,'pause must hold its position')
     stage.droppedFrames = after.info.droppedFrames-before.info.droppedFrames
     report.stages.push(stage); save()
+    if (phase === 'playing' && sourceFps !== undefined) {
+      report.productionQuality = checkLoadProduction(stage, mode, Number(sourceFps)); save()
+    }
   }
   report.canvas = await page.evaluate(() => {const c=document.querySelector('canvas[data-playback-surface]');return {width:c.width,height:c.height}})
   await control({kind:'stop'}); await waitForState(page,s=>s===null,'load stopped')

@@ -11,7 +11,8 @@ import { assertOrdinaryAcceptanceExit, closeAcceptanceAndSave } from './playback
 import { captureAcceptanceImage, captureAcceptanceFrame, nativeEvidence, output } from './playback-acceptance-support.mjs'
 import { revealFullscreenControls, hideFullscreenControls } from './playback-settings-ui.mjs'
 import { installCanvasSubmissionObserver, checkSyntheticCanvasFrame } from './windows-canvas-checks.mjs'
-import { checkLocalSubtitlePicker, whiteBitmapCoverage } from './playback-subtitle-checks.mjs'
+import { checkLocalSubtitlePicker, whiteBitmapCoverage, bitmapTransparency } from './playback-subtitle-checks.mjs'
+import { bitmapFixture } from './playback-pgs-fixture.mjs'
 
 function localSrtPickerFixture({ value = 136, pixels = 1000 } = {}) {
   const state = { sessionId: 'fixture', source: 'remote', paused: true, position: 4, tracks: [], subtitleSize: 38 }
@@ -34,6 +35,8 @@ function localSrtPickerFixture({ value = 136, pixels = 1000 } = {}) {
     openPlaybackSettings: async () => {}, closePlaybackSettings: async () => {},
     selectPlaybackSetting: async () => { state.subtitleSize = 40 },
     waitForState: async (_page, predicate, description) => { assert.ok(predicate(state), description); return structuredClone(state) },
+    waitForNativeFrame: async () => {},
+    waitForValue: async (read, predicate, description) => { const value = await read(); assert.ok(predicate(value), description); return value },
     nativeEvidence: async () => ({ loadedFiles: 1 }),
     captureAcceptanceFrame: async () => ({ changedColors: { white: 3 } }),
     fullscreenSubtitleComposition: async (_app, _page, _dir, prefix, compare) => { fullscreenPrefix = prefix; return compare() },
@@ -62,6 +65,24 @@ test('bitmap area integrates filtered white coverage and subtracts the unchanged
   assert.equal(whiteBitmapCoverage(rgba([255, 136, 17, 136]), rgba([17, 17, 17, 17])), 2)
   assert.equal(whiteBitmapCoverage(rgba([32, 64, 128, 255]), rgba([32, 64, 128, 255])), 0)
   assert.equal(whiteBitmapCoverage(rgba([17, 17]), rgba([17, 17])), 0, 'cleared cue has no area')
+})
+
+test('small PGS transparency samples reject black patches without mistaking filtered white fringe for lost alpha', () => {
+  const frame = { width: 272, height: 182, whiteBounds: { x: 111, y: 141, width: 50, height: 14 } }
+  const baseline = Buffer.alloc(frame.width * frame.height * 4, Buffer.from([20, 20, 20, 255]))
+  const current = Buffer.from(baseline)
+  for (let x = 111; x < 161; x++) current.set([91, 91, 91, 255], (140 * frame.width + x) * 4)
+  assert.equal(bitmapTransparency(frame, current, baseline, bitmapFixture.cues[1]).length, 5)
+  current.set([0, 0, 0, 255], (147 * frame.width + 136) * 4)
+  assert.throws(() => bitmapTransparency(frame, current, baseline, bitmapFixture.cues[1]), /center hole.*opaque black patch/)
+})
+
+test('enlarged PGS transparency sampling stays beyond the scaled filter footprint', () => {
+  const frame = { width: 1280, height: 720, whiteBounds: { x: 520, y: 596, width: 240, height: 64 } }
+  const baseline = Buffer.alloc(frame.width * frame.height * 4, Buffer.from([20, 20, 20, 255]))
+  const current = Buffer.from(baseline)
+  current.set([117, 117, 117, 255], (628 * frame.width + 518) * 4)
+  assert.equal(bitmapTransparency(frame, current, baseline, bitmapFixture.cues[1]).length, 5)
 })
 
 test('Windows follow-up submissions belong to the current surface, not any previous open', () => {
@@ -103,6 +124,8 @@ test('subtitle pixel inspection recognizes antialiased hues without counting neu
   colored = true
   const result = await captureAcceptanceFrame(application, path.join(output, 'pixel-check'), 'on', { compare: true })
   assert.deepEqual(JSON.parse(JSON.stringify(result.changedColors)), { cyan: 1, magenta: 1, green: 1, yellow: 1, red: 1, white: 1 })
+  const repeated = await captureAcceptanceFrame(application, path.join(output, 'pixel-check'), 'on-ready', { compare: true })
+  assert.equal(repeated.differentPixels, result.differentPixels, 'bounded readiness reads must retain their subtitle-off baseline')
 })
 test('Windows follow-up rejects black, blank and transparent synthetic screenshots', () => {
   for (const bgra of [[0, 0, 0, 255], [200, 200, 200, 255], [0, 0, 255, 255], [0, 0, 0, 0]]) {
@@ -195,6 +218,23 @@ test('evidence observes CPU after GPU recovery and an empty state after stop', a
   const result = await nativeEvidence(evidenceApplication({gpu: {alive: false}, cpu: {alive: true, nativeFrames: 19}}))
   assert.equal(result.alive, true); assert.equal(result.renderedFrames, 19)
   assert.equal((await nativeEvidence(evidenceApplication({}))).alive, false)
+})
+
+test('a fullscreen layout change during capture retries before using crop geometry', async () => {
+  let height = 360, captures = 0
+  const crops = []
+  const dependencies = { BrowserWindow: { getAllWindows: () => [{ webContents: {
+    capturePage: async () => { captures++; height = 361; return {
+      getSize: () => ({ width: 1400, height: 900 }),
+      crop: rect => { crops.push(rect); return { getSize: () => rect, toBitmap: () => Buffer.alloc(0) } }
+    } },
+    executeJavaScript: async () => ({ x: 10, y: 20, width: 640, height, windowWidth: 700, rendererFullscreen: true })
+  } }] } }
+  const application = { evaluate: callback => vm.runInNewContext(`(${callback.toString()})(dependencies)`, { dependencies }) }
+  const frame = await captureAcceptanceImage(application)
+  assert.equal(captures, 2, 'do not combine the previous screenshot with the new fullscreen bounds')
+  assert.equal(crops.length, 1)
+  assert.equal(frame.height, 722)
 })
 
 test('non-recording playback explicitly changes the real fresh default, not product policy', async () => {

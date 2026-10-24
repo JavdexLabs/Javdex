@@ -17,7 +17,7 @@
 
 系统后退统一收起播放并关闭播放设置，保留会话与当前业务页面；Esc 依次关闭设置、退出全屏、收起播放。图片、播放与设置离开保护共同遵守[共享返回合同](ROUTING_DESIGN.md#overlay-history)，组件订阅或 Effect cleanup 不写历史。输入框、中文 IME、弹层和平台导航组合键优先于播放快捷键。
 
-音量、倍速、章节、选轨、定位和播放信息读取内核实际状态。未知时长不显示虚假百分比；ASS 与图像字幕不套用纯文本字号能力。手动字幕与 AI 字幕选择不能被迟到命令覆盖。
+音量、倍速、章节、选轨、定位和播放信息读取内核实际状态。未知时长不显示虚假百分比；ASS 与图像字幕不套用纯文本字号能力。暂停时重选字幕，在内核确认选轨后刷新原位置；保持暂停，不重开会话，也不绕过续播选择或不可定位限制。手动字幕与 AI 字幕选择不能被迟到命令覆盖。
 
 ## 续播与隐私
 
@@ -44,6 +44,8 @@ CPU 使用 `hwdec=no`、libmpv SW Render API 和 opaque RGBA，preload 通过新
 Windows/macOS 的 libmpv、GL 和软件生产者运行在独立 utility process；主进程只加载不链接 libmpv/GL/D3D 的资源互操作模块。Windows 复制子进程 NT 共享句柄，macOS 用 Mach right 传递 IOSurface；以每次分配的资源 ID 区分同一槽的后续分配，接收方保持稳定导入，直到实际引用释放后才退休。宿主退出或 5 秒无心跳按统一规则处理，关闭超时由主进程终止，不让原生调用阻塞界面。Linux 继续使用独立 helper、私有管道和 FD 通道；绑定变化直接通知可见性，不再依赖会话的 16ms 轮询。
 
 GPU/CPU 均以 BT.709 primaries、sRGB transfer、RGB full-range 的 8-bit SDR 为显示目标，参考白为 203nit，HDR 采用固定元数据和 BT.2390，不启用动态峰值统计。CPU 通过解码后、字幕合成前的 RGB16/四面体 LUT 转换，避免改变字幕颜色；不依赖 GL 或额外色彩运行库。缺失 PQ 亮度元数据按共同默认值处理。共同色彩验收入口为 `scripts/playback-color-fixtures.mjs` 与 `scripts/playback-color-acceptance.mjs`，GPU/CPU 输出允许最多 4 个字节值差异；截图不证明物理 HDR 输出或显示器校准。
+
+普通 BT.709 SDR 不需要色域或色调映射时，CPU 采用等价的 16-bit 每通道查表；HDR 和其他色域继续使用三维转换。软件画面按同一 bilinear 策略配置 swscale 与可用的 zimg，保留实际物理视口及帧内存上界。色彩数值验收读取显示器色彩转换前的 sRGB Canvas，窗口截图另行留存；两种取像来源不能混作同一比较基准。
 
 帧绑定与时钟交换由 `frameEndpoint.ts` 统一认证主 frame；预算和已知色块自检由共用模块处理。自检通过真实纹理/Canvas 通道采样固定 640×360 色块，不检查任意影片的黑色内容。异步复制中的帧保留独立时间信息，切换时间轴不能清零待发送帧的时间戳。应用生成字幕采用系统默认字体（`sans-serif`）；外挂 ASS 和内嵌字体保留片源样式。
 

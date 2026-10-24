@@ -103,17 +103,34 @@ export const nativeEvidence = application => application.evaluate(() => {
   process.getBuiltinModule('diagnostics_channel').channel('javdex.playback.host.statistics').publish(request)
   const state = request.cpu.alive ? request.cpu : request.gpu
   // Native production does not prove physical screen presentation.
-  return { alive: state.alive, loadedFiles: state.loadedFiles,
+  return { alive: state.alive, loadedFiles: state.loadedFiles, pid: state.pid,
     renderedFrames: state.nativeFrames, presentedFrames: undefined,
+    pixelWidth: state.pixelWidth, pixelHeight: state.pixelHeight,
+    subtitleId: state.sid, subtitleCommandsPending: state.subtitleCommandsPending,
     commandErrors: state.commandErrors, position: state['time-pos'], audioPosition: state['audio-pts'],
     audioTracks: JSON.parse(state['track-list'] ?? '[]').filter(track => track.type === 'audio').map(track => ({
       id: track.id, title: track.title, language: track.lang, codec: track.codec, channels: track['demux-channel-count']
     })) }
 })
 
-export const captureAcceptanceImage = application => application.evaluate(async ({ app, BrowserWindow }) => {
-  const window = BrowserWindow.getAllWindows()[0], image = await window.webContents.capturePage()
-  const rect = await window.webContents.executeJavaScript(`(() => {
+// Session selection is optimistic; wait for the actual producer and current
+// physical viewport before comparing subtitle pixels.
+export const waitForNativeFrame = (application, page, subtitleId) => waitForValue(async () => {
+  const native = await nativeEvidence(application)
+  const canvas = await page.evaluate(() => {
+    const c = document.querySelector('canvas[data-playback-surface]'), r = c.getBoundingClientRect()
+    return { width: c.width, height: c.height, expectedWidth: Math.round(r.width * devicePixelRatio), expectedHeight: Math.round(r.height * devicePixelRatio) }
+  })
+  return { native, canvas }
+}, ({ native, canvas }) => native.alive && native.renderedFrames > 0
+  && canvas.width === canvas.expectedWidth && canvas.height === canvas.expectedHeight
+  && native.pixelWidth === canvas.width && native.pixelHeight === canvas.height
+  && (subtitleId === undefined || native.subtitleId === String(subtitleId ?? 'no') && native.subtitleCommandsPending === 0),
+'native frame geometry/subtitle acknowledgement', 5000)
+
+export const captureAcceptanceImage = application => waitForValue(() => application.evaluate(async ({ BrowserWindow }) => {
+  const window = BrowserWindow.getAllWindows()[0]
+  const geometry = `(() => {
     const canvas = document.querySelector('canvas[data-playback-surface]'), r = canvas.getBoundingClientRect();
     const root = canvas.closest('[data-playback-session]');
     const toolbar = root.querySelector('input[aria-label="播放进度"]')?.parentElement.parentElement;
@@ -121,12 +138,16 @@ export const captureAcceptanceImage = application => application.evaluate(async 
     const controlsTop = rendererFullscreen && root.dataset.controlsVisible === 'true' && toolbar ? toolbar.getBoundingClientRect().top - r.y : undefined;
     return { x: r.x, y: r.y, width: r.width, height: r.height, windowWidth: innerWidth,
       controlsTop, rendererFullscreen };
-  })()`)
+  })()`
+  const rect = await window.webContents.executeJavaScript(geometry)
+  const image = await window.webContents.capturePage()
+  const after = await window.webContents.executeJavaScript(geometry)
+  if (JSON.stringify(rect) !== JSON.stringify(after)) return null
   const scale = image.getSize().width / rect.windowWidth
   const crop = image.crop({ x: Math.round(rect.x * scale), y: Math.round(rect.y * scale), width: Math.round(rect.width * scale), height: Math.round(rect.height * scale) })
   return { ...crop.getSize(), data: crop.toBitmap(),
     controlsTop: rect.controlsTop === undefined ? undefined : Math.round(rect.controlsTop * scale), rendererFullscreen: rect.rendererFullscreen }
-})
+}), Boolean, 'stable compositor capture geometry', 5000)
 
 // One-shot render readback for acceptance only. Frames never cross product IPC.
 export async function captureAcceptanceFrame(application, directory, name, { baseline = false, compare = false, whiteBounds = false } = {}) {
@@ -166,7 +187,8 @@ export async function captureAcceptanceFrame(application, directory, name, { bas
       }
     }
     if (baseline) globalThis.playbackAcceptanceBaseline = frame
-    if (compare) delete globalThis.playbackAcceptanceBaseline
+    // Keep the baseline for bounded readiness reads. A later explicit baseline
+    // replaces it; consuming it on the first stale frame prevents real retries.
     return { width: frame.width, height: frame.height, controlsTop: frame.controlsTop, rendererFullscreen: frame.rendererFullscreen,
       visiblePixels, differentPixels, bottom,
       differentQuadrants, changedColors, whitePixels,

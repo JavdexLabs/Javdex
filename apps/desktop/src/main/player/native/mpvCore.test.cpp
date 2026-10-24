@@ -35,6 +35,11 @@ int main() {
     assert(std::abs(javdex::color::convert({hlg100, hlg100, hlg100}, hlg)[0] * 255 - 185.8) < .5);
     assert(javdex::color::convert({0, 0, 0}, pq)[0] == 0);
     assert(std::abs(javdex::color::pqInverse(javdex::color::pq(10000)) - 10000) < .0001);
+    javdex::color::LutFiles colorFilters;
+    const auto sdrFilter = colorFilters.write({}, 0);
+    assert(sdrFilter.find("lutrgb=") != std::string::npos);
+    assert(sdrFilter.find("lut3d=") == std::string::npos);
+    assert(colorFilters.write(pq, 1).find("lut3d=") != std::string::npos);
     using javdex::nodeJson;
     assert(javdex::jsonString(nullptr) == "\"\"");
     assert(javdex::jsonString("字幕\"\\\n\t\x01") == "\"字幕\\\"\\\\\\u000a\\u0009\\u0001\"");

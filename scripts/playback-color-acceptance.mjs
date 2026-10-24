@@ -5,6 +5,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
 import { bt2390Srgb, bt1886Srgb, pqLuminance, hlgLuminance } from './playback-hdr-reference.mjs'
+import { meanByteDifference, sampleColorPatches } from './playback-pixel-math.mjs'
 import { createAcceptanceDirectory, seedAcceptanceCatalog, launchAcceptance, waitForState,
   waitForValue, closeAcceptance, output } from './playback-acceptance-support.mjs'
 import { prepareNonRecordingPlayback } from './playback-acceptance-settings.mjs'
@@ -32,15 +33,16 @@ const nativeDirectory = process.platform === 'linux' ? resources
 const entry = process.platform === 'linux' ? mode === 'cpu' ? 'playback-software-helper' : 'playback-dmabuf-helper' : 'playback.node'
 const library = fs.readdirSync(nativeDirectory).find(name => /^libmpv.*\.(?:dll|dylib|so(?:\.\d+)*)$/.test(name))
 assert(library, 'missing libmpv identity for the tested host')
-const report = { passed: false, platform: process.platform, mode, checks: [],
+const report = { passed: false, platform: process.platform, mode, pixelSource: 'srgb-canvas', checks: [],
   nativeSha256: createHash('sha256').update(fs.readFileSync(path.join(nativeDirectory, entry))).digest('hex'),
   libmpvSha256: createHash('sha256').update(fs.readFileSync(path.join(nativeDirectory, library))).digest('hex'),
   fixtureManifestSha256: createHash('sha256').update(fs.readFileSync(path.join(fixtureDirectory, 'manifest.json'))).digest('hex'),
-  limits: ['SDR compositor bytes only; no physical HDR output or display calibration',
+  limits: ['SDR Canvas bytes before display-profile conversion; no physical HDR output or display calibration',
+    'Bounded synthetic color readback can change Canvas acceleration; media/stress/load checks run separately without it',
     'GPU and CPU use the same static BT.2390 / 203 nit SDR reference'] }
 const comparisonFile = process.argv.find(v => v.startsWith('--compare='))?.slice('--compare='.length)
 const comparison = comparisonFile ? JSON.parse(fs.readFileSync(comparisonFile)) : undefined
-if (comparison) assert(comparison.passed && comparison.fixtureManifestSha256 === report.fixtureManifestSha256, 'comparison must be a passed run of the same fixtures')
+if (comparison) assert(comparison.passed && comparison.pixelSource === report.pixelSource && comparison.fixtureManifestSha256 === report.fixtureManifestSha256, 'comparison must be a passed run of the same fixtures and pixel source')
 const save = () => fs.writeFileSync(path.join(output, `color-${mode}.json`), JSON.stringify(report, null, 2) + '\n')
 let application
 try {
@@ -56,25 +58,29 @@ try {
     process.getBuiltinModule('diagnostics_channel').channel('javdex.playback.host.statistics').publish(request)
     return request
   })
-  const capture = name => application.evaluate(async ({ BrowserWindow }, { output, name }) => {
+  const capture = name => application.evaluate(async ({ BrowserWindow }, { output, name, sampler }) => {
     const window = BrowserWindow.getAllWindows()[0], image = await window.webContents.capturePage()
     const rect = await window.webContents.executeJavaScript(`(() => { const r = document.querySelector('canvas[data-playback-surface]').getBoundingClientRect(); const c=document.querySelector('canvas[data-playback-surface]'); return {x:r.x,y:r.y,width:r.width,height:r.height,viewport:innerWidth,intrinsicWidth:c.width,intrinsicHeight:c.height} })()`)
     const scale = image.getSize().width / rect.viewport
     const crop = image.crop({ x: Math.round(rect.x * scale), y: Math.round(rect.y * scale),
       width: Math.round(rect.width * scale), height: Math.round(rect.height * scale) })
     const { width, height } = crop.getSize(), bytes = crop.toBitmap()
-    const contentScale = Math.min(width / 16, height / 9), ox = (width - 16 * contentScale) / 2, oy = (height - 9 * contentScale) / 2
-    const rows = [.25, .75].map(v => Array.from({ length: 8 }, (_, index) => {
-      const x = Math.floor(ox + 16 * contentScale * (index + .5) / 8), y = Math.floor(oy + 9 * contentScale * v), sum = [0, 0, 0]
-      for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
-        const at = ((y + dy) * width + x + dx) * 4
-        for (let c = 0; c < 3; c++) sum[c] += bytes[at + 2 - c] / 25
-      }
-      return sum
-    }))
+    const sample = (0, eval)('(' + sampler + ')')
+    const rows = sample(bytes, width, height, true)
     process.getBuiltinModule('fs').writeFileSync(process.getBuiltinModule('path').join(output, name + '.png'), crop.toPNG())
-    return { width, height, intrinsicWidth: rect.intrinsicWidth, intrinsicHeight: rect.intrinsicHeight, gray: rows[0], colors: rows[1] }
-  }, { output, name })
+    // Window captures include monitor ICC/gamut conversion and its clipping or
+    // quantization. The application contract is sRGB Canvas bytes, so compare
+    // those while retaining the independently captured compositor evidence.
+    const canvas = await window.webContents.executeJavaScript(`(() => {
+      const c=document.querySelector('canvas[data-playback-surface]'),context=c.getContext('2d');
+      if(context.getContextAttributes().colorSpace !== 'srgb') throw new Error('Expected sRGB Canvas');
+      const rows=(${sampler})(context.getImageData(0,0,c.width,c.height).data,c.width,c.height);
+      return {width:c.width,height:c.height,gray:rows[0],colors:rows[1],png:c.toDataURL('image/png').split(',')[1]};
+    })()`)
+    process.getBuiltinModule('fs').writeFileSync(process.getBuiltinModule('path').join(output, name + '-canvas.png'), Buffer.from(canvas.png, 'base64'))
+    return { width: canvas.width, height: canvas.height, intrinsicWidth: rect.intrinsicWidth, intrinsicHeight: rect.intrinsicHeight,
+      gray: canvas.gray, colors: canvas.colors, compositor: { width, height, gray: rows[0], colors: rows[1] } }
+  }, { output, name, sampler: sampleColorPatches.toString() })
   for (const [index, fixture] of fixtures.entries()) {
     assert.equal((await page.evaluate(t => window.api.player.openResource(t.libraryId, t.resourceId, t.videoId), targets[index])).ok, true)
     let state = await waitForState(page, s => s?.phase === 'playing' && s.position > 1, 'HDR playback')
@@ -96,7 +102,7 @@ try {
       check.samples.push(sample); save()
       assert.equal(sample.session.info.playbackMode, mode === 'cpu' ? 'cpu' : 'gpu', 'every captured phase must retain the requested path')
       if (mode !== 'cpu') assert.equal(sample.session.info.playbackDiagnostics?.displayProbe, 'passed', 'captured GPU output must pass its display probe')
-      for (const rgb of sample.gray) assert(Math.max(...rgb) - Math.min(...rgb) <= 3, 'neutral HDR/SDR gray acquired a tint')
+      for (const rgb of sample.gray) assert(meanByteDifference(Math.max(...rgb), Math.min(...rgb)) <= 3, 'neutral HDR/SDR gray acquired a tint')
       if (fixture.shape !== 'uniform') {
         assert(sample.gray[0].every(v => v <= 3), 'black level lifted')
         assert(sample.gray.at(-1).every(v => v >= 230), 'SDR peak is too dim')
@@ -117,11 +123,11 @@ try {
         check.maxReferenceError = Math.max(check.maxReferenceError ?? 0, error)
         assert(error <= 4, `SDR mapping differs from the luminance reference: ${error}`)
       }
-      const drift = Math.max(...sample.gray.flatMap((rgb, i) => rgb.map((v, c) => Math.abs(v - check.samples[0].gray[i][c]))))
+      const drift = Math.max(...sample.gray.flatMap((rgb, i) => rgb.map((v, c) => meanByteDifference(v, check.samples[0].gray[i][c]))))
       if (comparison) {
         const reference = comparison.checks.find(c => c.fixture === fixture.name)?.samples.find(s => s.phase === phase)
         assert(reference, 'missing comparison phase')
-        const difference = Math.max(...['gray', 'colors'].flatMap(key => sample[key].flatMap((rgb, i) => rgb.map((v, c) => Math.abs(v - reference[key][i][c])))))
+        const difference = Math.max(...['gray', 'colors'].flatMap(key => sample[key].flatMap((rgb, i) => rgb.map((v, c) => meanByteDifference(v, reference[key][i][c])))))
         check.maxPathDifference = Math.max(check.maxPathDifference ?? 0, difference)
         assert(difference <= 4, `GPU/CPU color difference exceeds 4 bytes: ${difference}`)
       }

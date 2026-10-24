@@ -165,6 +165,18 @@ public:
         if (!directory.empty()) { std::error_code ignored; std::filesystem::remove_all(directory, ignored); directory.clear(); }
     }
     std::string write(const Profile &profile, int slot) {
+        const std::string output = ",setparams=color_primaries=bt709:color_trc=iec61966-2-1:colorspace=bt709:range=full";
+        if ((profile.primaries == "bt.709" || profile.primaries == "auto")
+            && (profile.transfer == "bt.1886" || profile.transfer == "auto")
+            && (profile.light == "auto" || profile.light == "display") && profile.peak <= 203) {
+            // With identical primaries and no tone mapping, the transform is
+            // separable: sRGB(pow(encoded, 2.4)). libavfilter builds 16-bit
+            // channel tables once, instead of a tetrahedral lookup per pixel.
+            // The upper sRGB branch cancels the 2.4 powers algebraically.
+            const std::string curve = "maxval*if(lte(pow(val/maxval,2.4),0.0031308),12.92*pow(val/maxval,2.4),1.055*val/maxval-0.055)";
+            const auto graph = "format=gbrp16le,lutrgb=r='" + curve + "':g='" + curve + "':b='" + curve + "'" + output;
+            return "lavfi=graph=%" + std::to_string(graph.size()) + "%" + graph;
+        }
         if (directory.empty()) {
             std::random_device random;
             for (int attempt = 0; attempt < 8; attempt++) {
@@ -189,8 +201,7 @@ public:
         std::string option, escaped;
         for (const char c : path.generic_u8string()) { if (c == ':' || c == '\'' || c == '\\') option += '\\'; option += c; }
         for (const char c : option) { if (std::string("\\'[],;").find(c) != std::string::npos) escaped += '\\'; escaped += c; }
-        const std::string graph = "format=gbrp16le,lut3d=file=" + escaped
-            + ":interp=tetrahedral,setparams=color_primaries=bt709:color_trc=iec61966-2-1:colorspace=bt709:range=full";
+        const std::string graph = "format=gbrp16le,lut3d=file=" + escaped + ":interp=tetrahedral" + output;
         return "lavfi=graph=%" + std::to_string(graph.size()) + "%" + graph;
     }
 };

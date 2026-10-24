@@ -267,6 +267,12 @@ public:
             if (timing < 0) throw std::runtime_error(mpv_error_string(timing));
             const int result = mpv_set_option_string(handle, "sws-scaler", "bilinear");
             if (result < 0) throw std::runtime_error(mpv_error_string(result));
+            // zimg can override sws-scaler. Honor the same bilinear choice in
+            // either converter without disabling its optimized threaded path.
+            const int scaler = mpv_set_option_string(handle, "zimg-scaler", "bilinear");
+            // Source-built runtimes may omit zimg entirely; swscale already
+            // received its required option above. Other errors remain fatal.
+            if (scaler < 0 && scaler != MPV_ERROR_OPTION_NOT_FOUND) throw std::runtime_error(mpv_error_string(scaler));
         }
         int error = mpv_initialize(handle);
         if (error < 0) throw std::runtime_error(mpv_error_string(error));

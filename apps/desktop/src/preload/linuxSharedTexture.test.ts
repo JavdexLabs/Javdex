@@ -119,7 +119,7 @@ test(`${platform} subtle transfer ACK waits for the consumer GPU release callbac
   f.listeners.get(`playback:${channel}-texture-transfer`)!(null, { ...binding, sequence: 1, transfer: { transfer: 'opaque' } })
   await Promise.resolve(); await Promise.resolve()
   assert.equal(f.counts().draws, 1)
-  assert.deepEqual(f.transferCalls, platform === 'win32' ? ['acquired', 'frame'] : ['frame'])
+  assert.deepEqual(f.transferCalls, ['acquired', 'frame'], 'both native transfers must verify acquisition before creating a VideoFrame')
   assert.equal(f.messages.filter(m => m.channel === `playback:${channel}-texture-released`).length, 0)
   f.gpuRelease()
   assert.equal(f.messages.filter(m => m.channel === `playback:${channel}-texture-released`).length, 1)

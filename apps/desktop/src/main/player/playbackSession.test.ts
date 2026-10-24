@@ -78,11 +78,11 @@ test('ordinary or forced CPU loading still has the original bounded opening dead
   assert.equal(f.session.snapshot()!.phase, 'error')
 })
 
-test('paused PGS refresh waits for selection feedback and keeps the intended position rather than the reinit clock', async () => {
+for (const codec of ['hdmv_pgs_subtitle', 'ass', 'subrip']) test(`paused ${codec} refresh waits for selection feedback and keeps the intended position rather than the reinit clock`, async () => {
   const f = fixture()
   await f.session.open(target)
   const id = f.session.snapshot()!.sessionId
-  f.raw({ pause: true, 'time-pos': 12, 'track-list': JSON.stringify([{ id: 1, type: 'sub', codec: 'hdmv_pgs_subtitle', selected: false }]) })
+  f.raw({ pause: true, 'time-pos': 12, 'track-list': JSON.stringify([{ id: 1, type: 'sub', codec, selected: false }]) })
   f.session.tick()
   const before = f.commands.length
   f.session.control(id, { kind: 'track', type: 'sub', id: 1 })
@@ -91,20 +91,20 @@ test('paused PGS refresh waits for selection feedback and keeps the intended pos
   assert.equal(f.session.snapshot()!.seeking, true)
   f.session.tick()
   assert.deepEqual(f.commands.slice(before), [{ kind: 'track', type: 'sub', id: 1 }], 'old track feedback must not dispatch a refresh')
-  f.raw({ 'time-pos': 10.417, 'track-list': JSON.stringify([{ id: 1, type: 'sub', codec: 'hdmv_pgs_subtitle', selected: true }]) })
+  f.raw({ 'time-pos': 10.417, 'track-list': JSON.stringify([{ id: 1, type: 'sub', codec, selected: true }]) })
   f.session.tick()
   assert.deepEqual(f.commands.slice(before), [{ kind: 'track', type: 'sub', id: 1 }, { kind: 'seek', seconds: 12 }])
   f.raw({ 'time-pos': 12 }); f.session.tick()
   assert.equal(f.session.snapshot()!.seeking, false)
   assert.equal(f.loads.length, 1)
   assert.equal(f.session.snapshot()!.sessionId, id)
-  f.raw({ 'track-list': JSON.stringify([{ id: 1, type: 'sub', codec: 'hdmv_pgs_subtitle', selected: false }]) }); f.session.tick()
+  f.raw({ 'track-list': JSON.stringify([{ id: 1, type: 'sub', codec, selected: false }]) }); f.session.tick()
   const pending = f.commands.length
   f.session.control(id, { kind: 'track', type: 'sub', id: 1 })
   f.session.control(id, { kind: 'seek', seconds: 19 })
-  f.raw({ 'track-list': JSON.stringify([{ id: 1, type: 'sub', codec: 'hdmv_pgs_subtitle', selected: true }]) }); f.session.tick()
+  f.raw({ 'track-list': JSON.stringify([{ id: 1, type: 'sub', codec, selected: true }]) }); f.session.tick()
   assert.deepEqual(f.commands.slice(pending), [{ kind: 'track', type: 'sub', id: 1 }, { kind: 'seek', seconds: 19 }, { kind: 'seek', seconds: 19 }],
-    'PGS refresh must not jump back to an old projected clock during an in-flight seek')
+    'subtitle refresh must not jump back to an old projected clock during an in-flight seek')
 })
 
 test('deferred PGS refresh is canceled by a newer track request, play, stop or source replacement', async () => {
@@ -146,8 +146,8 @@ test('missing PGS selection feedback has a bounded failure rather than saving a 
   assert.equal(f.commands.length, commands)
 })
 
-test('PGS refresh does not seek for playing, disabled/already-selected, unseekable, unknown-time or resume-choice sessions', async () => {
-  for (const scenario of ['playing', 'off', 'selected', 'unseekable', 'unknown', 'text', 'audio', 'ended', 'resume'] as const) {
+test('subtitle refresh does not seek for playing, disabled/already-selected, unseekable, unknown-time or resume-choice sessions', async () => {
+  for (const scenario of ['playing', 'off', 'selected', 'unseekable', 'unknown', 'audio', 'ended', 'resume'] as const) {
     const progress = scenario === 'resume' ? { prepare: async () => ({ enabled: true, point: { position: 60, duration: 120 } }),
       save: () => {}, clear: () => {} } : undefined
     const f = fixture(undefined, progress)
@@ -156,7 +156,7 @@ test('PGS refresh does not seek for playing, disabled/already-selected, unseekab
     const type = scenario === 'audio' ? 'audio' : 'sub'
     f.raw({ pause: scenario !== 'playing', 'time-pos': scenario === 'unknown' ? undefined : 12,
       seekable: scenario !== 'unseekable', 'eof-reached': scenario === 'ended',
-      'track-list': JSON.stringify([{ id: 1, type, codec: scenario === 'text' ? 'ass' : 'hdmv_pgs_subtitle', selected: scenario === 'selected' }]) })
+      'track-list': JSON.stringify([{ id: 1, type, codec: 'hdmv_pgs_subtitle', selected: scenario === 'selected' }]) })
     f.session.tick()
     const before = f.commands.length
     const command: PlaybackControl = { kind: 'track', type, id: scenario === 'off' ? null : 1 }

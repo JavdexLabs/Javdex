@@ -265,10 +265,10 @@ export function installSharedTextureReceiver(): (surfaceToken: string) => () => 
     try {
       imported = sharedTexture.subtle.finishTransferSharedTexture(metadata.transfer)
       const source = imported
-      // Windows Canvas can wait on the renderer's newly imported SharedImage
-      // before that channel has flushed its acquisition fence. Verification
-      // flushes that fence; release still waits for the consumer GPU callback.
-      if (nativeTransfer === 'windows') source.getFrameCreationSyncToken()
+      // Verify/flush acquisition on both native transfer paths before Canvas
+      // consumes the SharedImage. Transfer delivery alone is not acquisition;
+      // release still waits for the consumer GPU completion callback.
+      source.getFrameCreationSyncToken()
       void receive({ importedSharedTexture: {
         textureId: '', subtle: source, getVideoFrame: source.getVideoFrame,
         release: () => { if (!released) { released = true; source.release(acknowledge) } }

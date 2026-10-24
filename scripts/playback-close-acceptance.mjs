@@ -27,6 +27,7 @@ try {
   if (process.argv.includes('--javdex-cpu')) assert.equal(report.playbackMode, 'cpu')
   report.before = await nativeEvidence(application)
   assert.equal(report.before.alive, true)
+  assert.ok(Number.isSafeInteger(report.before.pid), 'normal close must observe the actual isolated producer PID')
   assert.ok(report.before.renderedFrames > 0)
   if (process.platform === 'win32') {
     // Windows quits on last-window close. Persist observations while the main
@@ -34,8 +35,11 @@ try {
     const traceFile = path.join(output, 'windows-close-trace.json')
     await application.evaluate(({ app, BrowserWindow }, traceFile) => {
       const require = process.getBuiltinModule('module').createRequire(app.getAppPath() + '/package.json')
-      const addon = require(app.isPackaged ? process.resourcesPath + '/native-playback/playback.node' : app.getAppPath() + '/out/native-playback/playback.node')
-      const bridge = addon.software.inspect().alive ? addon.software : addon.sharedTexture
+      const bridge = { inspect: () => {
+        const request = { cpu: { alive: false }, gpu: { alive: false } }
+        process.getBuiltinModule('diagnostics_channel').channel('javdex.playback.host.statistics').publish(request)
+        return request.cpu.alive ? request.cpu : request.gpu
+      } }
       const window = BrowserWindow.getAllWindows()[0]
       const trace = { events: [] }
       const save = () => require('node:fs').writeFileSync(traceFile, JSON.stringify(trace, null, 2))
@@ -58,9 +62,11 @@ try {
     report.checks.push('accepted close destroys Windows parent during active playback', 'native core released before normal process exit')
   } else {
   report.atClose = await application.evaluate(({ app, BrowserWindow }) => {
-    const require = process.getBuiltinModule('module').createRequire(app.getAppPath() + '/package.json')
-    const addon = require(app.isPackaged ? process.resourcesPath + '/native-playback/playback.node' : app.getAppPath() + '/out/native-playback/playback.node')
-    const bridge = addon.software?.inspect().alive ? addon.software : addon
+    const bridge = { inspect: () => {
+      const request = { cpu: { alive: false }, gpu: { alive: false } }
+      process.getBuiltinModule('diagnostics_channel').channel('javdex.playback.host.statistics').publish(request)
+      return request.cpu.alive ? request.cpu : request.gpu
+    } }
     const window = BrowserWindow.getAllWindows()[0]
     let observed
     globalThis.playbackCloseTrace = { originalId: window.id, events: [] }
@@ -79,6 +85,8 @@ try {
   assert.equal(report.atClose.parentDestroyed, false)
   await waitForValue(() => application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), value => value === 0, 'normal close destroys main window', 3000)
   assert.equal((await nativeEvidence(application)).alive, false)
+  await waitForValue(() => application.evaluate(({ app }) => app.getAppMetrics().map(metric => metric.pid)),
+    pids => !pids.includes(report.before.pid), 'closed window releases its isolated playback process', 3000)
   report.checks.push('accepted close actually destroys main window during active playback', 'last-window close releases native playback before process quit')
   report.closeTrace = await application.evaluate(() => globalThis.playbackCloseTrace)
   }

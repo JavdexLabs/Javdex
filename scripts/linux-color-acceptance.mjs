@@ -22,7 +22,7 @@ for (const fixture of manifest.cases) {
 }
 const profile=fs.mkdtempSync(path.join(os.tmpdir(),'javdex-playback-acceptance-colors-'))
 const targets=seedAcceptanceCatalog(profile,manifest.cases.map(c=>c.file))
-fs.writeFileSync(path.join(profile,'this-computer.json'),JSON.stringify({mode:'local',closeToTray:false,linuxPlaybackMode:mode,resumePlayback:false,playbackVolume:0}))
+fs.writeFileSync(path.join(profile,'this-computer.json'),JSON.stringify({mode:'local',closeToTray:false,playbackRenderMode:mode,resumePlayback:false,playbackVolume:0}))
 const nativeSize=nativeViewportProbe()
 const port=Number(process.env.JAVDEX_ACCEPTANCE_PORT||9577)
 try {await fetch(`http://127.0.0.1:${port}/json/version`);throw new Error('Port occupied')}catch(e){if(e.message==='Port occupied')throw e}

@@ -9,7 +9,7 @@ const input = { arch: 'x64', root: '/repo with spaces', prefix: '/mpv developmen
 
 test('macOS normal build executes shared-core regression then its sole IOSurface addon', () => {
   const steps = playbackNativeBuild({ ...input, platform: 'darwin' })
-  assert.equal(steps.length, 3)
+  assert.equal(steps.length, 6)
   assert.ok(steps[0].args.includes(path.join(input.root, 'apps/desktop/src/main/player/native/mpvCore.test.cpp')))
   assert.equal(steps[1].command, path.join(input.output, 'mpv-core-test'))
   assert.ok(steps[2].args.includes('-fobjc-arc'))

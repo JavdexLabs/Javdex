@@ -68,10 +68,10 @@ test('macOS release source plan builds the same sole Canvas producer as normal d
   for (const arch of ['x64', 'arm64']) {
     const steps = playbackSourceNativePlan({ ...input, platform: 'darwin', arch, root: '/repo', include: '/sdk', output: '/output' })
     const addon = steps.filter(step => step.command === 'clang++' && step.args.includes('-shared'))
-    assert.equal(addon.length, 1)
+    assert.equal(addon.length, 2)
     assert.ok(addon[0].args.includes(path.join('/repo', 'apps/desktop/src/main/player/native/macSharedTexture.mm')))
     assert.equal(addon[0].args.at(-1), path.join('/output', 'playback.node'))
-    assert.ok(addon[0].args.includes('Foundation') && addon[0].args.includes('IOSurface'))
+    assert.ok(addon[0].args.includes('CoreFoundation') && addon[0].args.includes('IOSurface'))
   }
 })
 test('Windows import library reads old and current GNU export name tables with LF or CRLF', () => {

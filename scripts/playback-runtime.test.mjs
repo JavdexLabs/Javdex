@@ -74,6 +74,7 @@ function fixture(t, runtimeTarget = target) {
   const libraryName = target.platformName === 'linux' ? 'lib/libfixture.so.1' : 'lib/libfixture.dylib'
   const runtimeName = target.platformName === 'linux' ? 'playback-helper' : 'playback.node'
   const payload = { [runtimeName]: 'synthetic runtime', [libraryName]: 'synthetic library',
+    ...(target.platformName !== 'linux' ? { 'playback-interop.node': 'synthetic interop' } : {}),
     'licenses/LICENSE.txt': 'test-only notice, not a license audit', 'sources/fixture.tar': 'unit-test source placeholder',
     'sources/build.txt': 'unit-test build placeholder' }
   for (const [file, value] of Object.entries(payload)) {
@@ -82,9 +83,9 @@ function fixture(t, runtimeTarget = target) {
   }
   if (target.platformName === 'linux') chmodSync(path.join(directory, runtimeName), 0o755)
   const component = { version: 'test', license: 'MIT', licenseFile: 'licenses/LICENSE.txt', sourceArchive: 'sources/fixture.tar', buildRecipe: 'sources/build.txt' }
-  const manifest = { schemaVersion: 1, hashStage: 'pre-sign', platform: target.platformName, arch: target.archName, electronVersion: target.electronVersion, mpvVersion: 'test',
+  const manifest = { schemaVersion: 1, playbackHostVersion: 1, hashStage: 'pre-sign', platform: target.platformName, arch: target.archName, electronVersion: target.electronVersion, mpvVersion: 'test',
     files: Object.fromEntries(Object.entries(payload).map(([name, data]) => [name, hash(data)])),
-    components: [{ ...component, name: 'mpv', binaries: [libraryName] }, { ...component, name: 'Javdex runtime', binaries: [runtimeName] }] }
+    components: [{ ...component, name: 'mpv', binaries: [libraryName] }, { ...component, name: 'Javdex runtime', binaries: target.platformName === 'linux' ? [runtimeName] : [runtimeName, 'playback-interop.node'] }] }
   const save = () => writeFileSync(path.join(directory, 'runtime.json'), JSON.stringify(manifest))
   save()
   const context = { electronPlatformName: target.platformName, arch: target.archName === 'x64' ? 1 : 3,
@@ -97,10 +98,10 @@ test('runtime inventory checks hashes, exact payload and binary/source ownership
   const f = fixture(t), inspected = []
   const options = { environment: f.environment, inspectBinary: (file, input) => inspected.push({ name: path.basename(file), arch: input.archName }) }
   const verified = verifyPackagedPlaybackRuntime(f.context, options)
-  assert.equal(verified.binaryCount, 2)
-  assert.equal(inspected.length, 2)
+  assert.equal(verified.binaryCount, 3)
+  assert.equal(inspected.length, 3)
   const staged = stagePackagedPlaybackRuntime(f.context, options)
-  assert.equal(staged.binaryCount, 2)
+  assert.equal(staged.binaryCount, 3)
   assert.ok(existsSync(path.join(staged.directory, 'playback.node')))
   assert.equal(staged.manifest.schemaVersion, 1)
   assert.equal(staged.manifest.sourceBundle.inputInventorySha256, hash(readFileSync(path.join(f.directory, 'runtime.json'))))
@@ -117,7 +118,7 @@ test('runtime inventory checks hashes, exact payload and binary/source ownership
   assert.equal(readFileSync(path.join(extracted, 'reviewed-runtime', 'sources', 'fixture.tar'), 'utf8'), 'unit-test source placeholder')
   assert.equal(readFileSync(path.join(extracted, 'reviewed-runtime', 'runtime.json'), 'utf8'), readFileSync(path.join(f.directory, 'runtime.json'), 'utf8'))
   assert.equal(existsSync(path.join(extracted, 'reviewed-runtime', 'playback.node')), false)
-  assert.equal(inspected.length, 6, 'staging rechecks both input and copied binaries')
+  assert.equal(inspected.length, 9, 'staging rechecks all input and copied binaries')
   assert.throws(() => stagePackagedPlaybackRuntime(f.context, options), /overwrite/)
   assert.equal(verifyPackagedPlaybackRuntime({}, { environment: {} }), null, 'ordinary development package has no implicit runtime')
 })
@@ -157,8 +158,8 @@ test('post-package playback gate rejects missing runtimes and missing or changed
   writeFileSync(path.join(resources, 'app.asar'), 'resource discovery fixture')
   assert.deepEqual(findPackagedResources(f.root), [resources])
   const checked = [], options = { inspectBinary: () => {}, verifyAppSignature: () => {}, verifySignature: file => checked.push(file) }
-  assert.equal(verifyPackagedPlaybackResources(resources, f.root, target, options).binaryCount, 2)
-  assert.equal(checked.length, 2, 'signed Mach-O binaries use signature checks, not stale pre-sign hashes')
+  assert.equal(verifyPackagedPlaybackResources(resources, f.root, target, options).binaryCount, 3)
+  assert.equal(checked.length, 3, 'signed Mach-O binaries use signature checks, not stale pre-sign hashes')
   assert.throws(() => verifyPackagedPlaybackResources(resources, f.root, target, {
     ...options, verifySignature: () => { throw new Error('invalid native signature') }
   }), /invalid native signature/)
@@ -245,6 +246,8 @@ function peFixture(t, { machine = 0x8664, imports = ['kernel32.dll', 'libmpv-2.d
 
 test('explicit local packaging stages only the real transitive playback closure', t => {
   const f = peFixture(t)
+  const interop = peFixture(t, { imports: ['kernel32.dll'], delayed: ['node.exe'] })
+  writeFileSync(path.join(f.directory, 'playback-interop.node'), interop.data)
   writeFileSync(f.file, f.data)
   const mpv = peFixture(t, { imports: ['kernel32.dll', 'helper.dll', 'opengl32.dll'], delayed: [] })
   writeFileSync(path.join(f.directory, 'libmpv-2.dll'), mpv.data)
@@ -263,7 +266,7 @@ test('explicit local packaging stages only the real transitive playback closure'
   writeFileSync(path.join(f.directory, 'helper.dll'), helper.data)
   const staged = stageLocalPlaybackRuntime(context, options)
   assert.equal(staged.manifest.purpose, 'local-development')
-  assert.deepEqual(Object.keys(staged.manifest.files).sort(), ['helper.dll', 'libmpv-2.dll', 'playback.node'])
+  assert.deepEqual(Object.keys(staged.manifest.files).sort(), ['helper.dll', 'libmpv-2.dll', 'playback-interop.node', 'playback.node'])
   for (const [name, expected] of Object.entries(staged.manifest.files)) {
     assert.equal(hash(readFileSync(path.join(staged.directory, name))), expected)
   }
@@ -280,6 +283,8 @@ test('local playback packaging remains opt-in and separate from reviewed release
 
 test('Windows development stages the transitive DLL closure and rejects missing/wrong-architecture libraries before copying', t => {
   const f = peFixture(t)
+  const interop = peFixture(t, { imports: ['kernel32.dll'], delayed: ['node.exe'] })
+  writeFileSync(path.join(f.directory, 'playback-interop.node'), interop.data)
   writeFileSync(f.file, f.data)
   const libraryDirectory = path.join(f.directory, 'prefix', 'bin')
   mkdirSync(libraryDirectory, { recursive: true })
@@ -327,6 +332,8 @@ test('PE rejects missing codec/CRT closure, nested-only DLLs and ambiguous filen
   clang.input.binaryFiles.add(path.join(clang.directory, 'libc++.dll'))
   clang.check()
   const f = peFixture(t)
+  const interop = peFixture(t, { imports: ['kernel32.dll'], delayed: ['node.exe'] })
+  writeFileSync(path.join(f.directory, 'playback-interop.node'), interop.data)
   f.input.binaryFiles.delete(path.join(f.directory, 'libmpv-2.dll'))
   f.input.binaryFiles.add(path.join(f.directory, 'lib', 'libmpv-2.dll'))
   assert.throws(f.check, /absent from the adjacent/)
@@ -347,6 +354,8 @@ test('PE rejects immediate Electron imports, missing delay hook contract and non
 
 test('PE parser fails closed on truncated headers, off-file RVAs and unterminated directories', t => {
   const f = peFixture(t)
+  const interop = peFixture(t, { imports: ['kernel32.dll'], delayed: ['node.exe'] })
+  writeFileSync(path.join(f.directory, 'playback-interop.node'), interop.data)
   f.data.writeUInt32LE(0xfffffff0, 60)
   assert.throws(f.check, /range/)
   f.data.writeUInt32LE(64, 60)
@@ -558,7 +567,9 @@ test('macOS Mach-O fixture loads its runtime-local dependency after relocation, 
     const addon = path.join(f.directory, 'playback.node')
     run('clang', ['-arch', arch, '-bundle', addonSource, library, '-o', addon])
     run('install_name_tool', ['-change', '@rpath/libfixture.dylib', '@loader_path/lib/libfixture.dylib', addon])
-    const binaryFiles = new Set([addon, library])
+    const interop = path.join(f.directory, 'playback-interop.node')
+    run('clang', ['-arch', arch, '-bundle', source, '-o', interop])
+    const binaryFiles = new Set([addon, interop, library])
     for (const file of binaryFiles) inspectMacPlaybackBinary(file, { directory: f.directory, archName: target.archName, binaryFiles })
     for (const [name] of Object.entries(f.manifest.files)) f.manifest.files[name] = hash(readFileSync(path.join(f.directory, name)))
     f.save()
@@ -582,7 +593,7 @@ test('macOS Mach-O fixture loads its runtime-local dependency after relocation, 
     run('codesign', ['--force', '--sign', '-', '--deep', '--timestamp=none', app])
     assert.notEqual(hash(readFileSync(path.join(signed.directory, 'playback.node'))), signed.manifest.files['playback.node'])
     const inventory = readFileSync(path.join(signed.directory, 'runtime.json'), 'utf8')
-    assert.equal(verifyPackagedPlaybackResources(resources, f.root, target).binaryCount, 2)
+    assert.equal(verifyPackagedPlaybackResources(resources, f.root, target).binaryCount, 3)
     assert.equal(readFileSync(path.join(signed.directory, 'runtime.json'), 'utf8'), inventory, 'verification cannot break the app resource seal')
     writeFileSync(path.join(signed.directory, 'playback.node'), 'tampered signed binary')
     assert.throws(() => verifyPackagedPlaybackResources(resources, f.root, target), /signature/)

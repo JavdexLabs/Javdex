@@ -9,7 +9,6 @@ import { createLinuxPlaybackBridge, encodePlaybackMessage, linuxSharedTextureFai
 const LIMIT = 1024 * 1024
 const bounds = { x: 11, y: 22, width: 333, height: 222, scale: 1.5 }
 const linuxOnly = { skip: process.platform !== 'linux' ? 'real executable helper fixtures require Linux' : false }
-const handle = (): Buffer => Buffer.alloc(0)
 function decode(frame: Buffer): string[] {
   assert.equal(frame.readUInt32LE(0), frame.length - 4)
   const count = frame.readUInt32LE(4), fields: string[] = []
@@ -114,7 +113,7 @@ process.stdin.on('error', () => {});
     }
   })
   const start = async (): Promise<number> => {
-    bridge.create(handle(), bounds, { backend: 'dmabuf' })
+    bridge.create(bounds)
     const state = await until(() => bridge.state(), state => state['track-list'] === '字幕🎬', 'fixture did not acknowledge create')
     assert.ok(state.loadedFiles)
     return state.loadedFiles
@@ -135,7 +134,6 @@ test('Linux protocol uses byte lengths and preserves special UTF-8 locators with
   assert.deepEqual(decode(encodePlaybackMessage(Array(16).fill(''))), Array(16).fill(''))
   assert.throws(() => encodePlaybackMessage([]), /无效/)
   assert.throws(() => encodePlaybackMessage(Array(17).fill('')), /无效/)
-  assert.deepEqual(decode(encodePlaybackMessage(['occlusions', ...Array(256).fill('0')])), ['occlusions', ...Array(256).fill('0')])
   assert.throws(() => encodePlaybackMessage(['occlusions', ...Array(257).fill('0')]), /无效/)
   assert.throws(() => encodePlaybackMessage(['command', 'nul\0byte']), /无效/)
   assert.equal(encodePlaybackMessage(['x'.repeat(LIMIT - 8)]).length, LIMIT + 4)
@@ -146,20 +144,11 @@ test('Linux protocol uses byte lengths and preserves special UTF-8 locators with
   assert.throws(() => encodePlaybackMessage(['generated-subtitles', 'update', 'x'.repeat(8 * LIMIT + 4096), '1', '30']), /过长/)
 })
 
-test('Linux bridge rejects native window handles and the removed X11 embedding backend', linuxOnly, t => {
-  const f = fixture(t)
-  assert.throws(() => f.bridge.create(handle(), bounds), /仅支持/)
-  for (const backend of ['dmabuf', 'software'] as const)
-    for (const size of [1, 3, 4, 8, 16]) assert.throws(() => f.bridge.create(Buffer.alloc(size), bounds, { backend }), /仅支持/)
-  assert.throws(() => f.bridge.create(Buffer.alloc(0), bounds, { backend: 'x11' as never }), /仅支持/)
-  assert.deepEqual(f.entries(), [])
-})
-
-test('Linux bridge exchanges real pipe messages, caches state, drains actions and coalesces viewport updates', linuxOnly, async t => {
+test('Linux bridge exchanges real pipe messages, caches state and coalesces viewport updates', linuxOnly, async t => {
   const f = fixture(t), pid = await f.start()
   assert.deepEqual(f.entries().slice(0, 2), [
     { pid, fields: ['startup', '--stdio-v1'] },
-    { pid, fields: ['create', '0', '11', '22', '333', '222', '1.5', 'dmabuf'] }
+    { pid, fields: ['create', '11', '22', '333', '222', '1.5', 'dmabuf'] }
   ])
   const locator = '/媒体 folder/a;$(touch ignored)\n"subtitle".mkv'
   f.bridge.command(['loadfile', locator, 'replace'])
@@ -170,15 +159,13 @@ test('Linux bridge exchanges real pipe messages, caches state, drains actions an
     ['generated-subtitles', 'update', '字幕\nDialogue: example', '1', '29'])
   f.bridge.setBounds(bounds); f.bridge.setBounds(bounds)
   f.bridge.setVisible(true); f.bridge.setVisible(true)
-  f.bridge.setPresentation('fullscreen'); f.bridge.setPresentation('fullscreen')
-  await until(f.entries, entries => entries.some(entry => entry.fields[0] === 'presentation'), 'viewport messages did not arrive')
+
+  await until(f.entries, entries => entries.some(entry => entry.fields[0] === 'visible'), 'viewport messages did not arrive')
   assert.deepEqual(f.entries().find(entry => entry.fields[0] === 'command')?.fields, ['command', 'loadfile', locator, 'replace'])
   assert.deepEqual(f.entries().find(entry => entry.fields[0] === 'generated-subtitle-command')?.fields, ['generated-subtitle-command', 'sub-reload', '7'])
-  for (const kind of ['bounds', 'visible', 'presentation']) assert.equal(f.entries().filter(entry => entry.fields[0] === kind).length, 1)
+  for (const kind of ['bounds', 'visible']) assert.equal(f.entries().filter(entry => entry.fields[0] === kind).length, 1)
   f.bridge.command(['actions'])
-  const state = await until(() => f.bridge.state(), value => value['time-pos'] === 11, 'actions did not arrive')
-  assert.deepEqual(state.actions, [{ kind: 'toggle-pause' }, { kind: 'seek-relative', value: 5 }, { kind: 'escape' }])
-  assert.deepEqual(f.bridge.state().actions, [])
+  await until(() => f.bridge.state(), value => value['time-pos'] === 11, 'actions did not arrive')
   assert.equal(f.bridge.state()['time-pos'], 11)
   f.bridge.render()
   f.bridge.destroy(); f.bridge.destroy()
@@ -193,26 +180,8 @@ test('Linux bridge ignores late output and exit from an old helper during reopen
   await until(() => f.alive(first), running => !running, 'old helper did not finish delayed destroy')
   assert.equal(f.bridge.state().alive, true)
   assert.equal(f.bridge.state().loadedFiles, second)
-  f.bridge.setBounds(bounds); f.bridge.setVisible(true); f.bridge.setPresentation('fullscreen')
-  await until(f.entries, entries => entries.some(entry => entry.pid === second && entry.fields[0] === 'presentation'), 'new helper did not receive viewport')
-})
-
-test('Linux bridge sends shared renderer mode and bounded rounded popup cutouts without duplicate messages', linuxOnly, async t => {
-  const f = fixture(t)
-  await f.start()
-  f.bridge.setRendererControls(true); f.bridge.setRendererControls(true)
-  const rects = [{ x: 12, y: -8, width: 90, height: 50, radii: [4, 6, 8, 10] as [number, number, number, number] }]
-  f.bridge.setOcclusions(rects); f.bridge.setOcclusions(rects)
-  await until(f.entries, entries => entries.some(entry => entry.fields[0] === 'occlusions'), 'popup cutout message did not arrive')
-  assert.deepEqual(f.entries().filter(entry => entry.fields[0] === 'renderer-controls').map(entry => entry.fields), [['renderer-controls', '1']])
-  assert.deepEqual(f.entries().filter(entry => entry.fields[0] === 'occlusions').map(entry => entry.fields),
-    [['occlusions', '12', '-8', '90', '50', '4', '6', '8', '10']])
-  f.bridge.setOcclusions(Array(32).fill(rects[0])); f.bridge.setOcclusions([])
-  await until(f.entries, entries => entries.filter(entry => entry.fields[0] === 'occlusions').length === 3, 'maximum cutouts and clear did not arrive')
-  assert.equal(f.entries().filter(entry => entry.fields[0] === 'occlusions')[1].fields.length, 257)
-  assert.deepEqual(f.entries().at(-1)?.fields, ['occlusions'])
-  assert.throws(() => f.bridge.setOcclusions(Array(33).fill(rects[0])), /过多/)
-  assert.throws(() => f.bridge.setOcclusions([{ ...rects[0], x: Number.NaN }]), /无效/)
+  f.bridge.setBounds(bounds); f.bridge.setVisible(true)
+  await until(f.entries, entries => entries.some(entry => entry.pid === second && entry.fields[0] === 'visible'), 'new helper did not receive viewport')
 })
 
 test('Linux helper failure is controlled and a subsequent create clears it', linuxOnly, async t => {
@@ -224,7 +193,7 @@ test('Linux helper failure is controlled and a subsequent create clears it', lin
   assert.equal(f.bridge.state().alive, true)
 })
 
-for (const command of ['invalid-json', 'invalid-state', 'invalid-actions', 'invalid-action-item', 'invalid-action-kind', 'invalid-action-value', 'too-many-actions', 'action-overflow', 'oversize']) {
+for (const command of ['invalid-json', 'invalid-state', 'oversize']) {
   test('Linux bridge rejects malformed helper output: ' + command, linuxOnly, async t => {
     const f = fixture(t), pid = await f.start()
     f.bridge.command([command])
@@ -236,7 +205,7 @@ for (const command of ['invalid-json', 'invalid-state', 'invalid-actions', 'inva
 test('Linux bridge reports spawn errors without an uncaught error event', linuxOnly, async t => {
   const f = fixture(t)
   rmSync(f.executable)
-  f.bridge.create(handle(), bounds, { backend: 'dmabuf' })
+  f.bridge.create(bounds)
   assert.match((await failure(f.bridge)).message, /无法启动/)
   f.bridge.destroy()
   assert.equal(f.bridge.state().alive, false)
@@ -274,11 +243,11 @@ test('DMA-BUF bridge inherits a private FD, never passes a native window handle,
       isReady() { return ready },
       destroy() { events.push('destroy'); if (!closed) { closeSync(fd); closed = true } } }
   })
-  f.bridge.create(Buffer.alloc(0), bounds, { backend: 'dmabuf' })
+  f.bridge.create(bounds)
   const state = await until(() => f.bridge.state(), state => Boolean(state.loadedFiles), 'shared helper create missing')
   const pid = state.loadedFiles!
   assert.equal(state.sharedTextureSurface, 'test-generation')
-  assert.deepEqual(f.entries()[1].fields, ['create', '0', '11', '22', '333', '222', '1.5', 'dmabuf'])
+  assert.deepEqual(f.entries()[1].fields, ['create', '11', '22', '333', '222', '1.5', 'dmabuf'])
   f.bridge.setVisible(true)
   assert.deepEqual(events, ['spawned', 'visible:true'])
   await until(f.entries, entries => entries.some(entry => entry.fields[0] === 'visible'), 'initial visibility missing')
@@ -297,7 +266,7 @@ test('DMA-BUF bridge inherits a private FD, never passes a native window handle,
 
 test('DMA-BUF selection fails closed without the private texture channel factory', linuxOnly, t => {
   const f = fixture(t, 'normal', null)
-  assert.throws(() => f.bridge.create(Buffer.alloc(0), bounds, { backend: 'dmabuf' }), /传输通道/)
+  assert.throws(() => f.bridge.create(bounds), /传输通道/)
   assert.deepEqual(f.entries(), [])
 })
 
@@ -311,7 +280,7 @@ test('CPU bridge invalidates scheduled work on hide/restore, pause and continuou
       resetTiming() { return ++timeline },
       destroy() { if (!closed) { closeSync(fd); closed = true } } }
   })
-  f.bridge.create(handle(), bounds, { backend: 'software' })
+  f.bridge.create(bounds)
   await until(() => f.bridge.state(), state => Boolean(state.loadedFiles), 'CPU helper create missing')
   f.bridge.setVisible(true); f.bridge.setVisible(false); f.bridge.setVisible(true)
   f.bridge.command(['set', 'pause', 'yes'])
@@ -342,7 +311,7 @@ test('DMA-BUF helper heartbeat terminates a hung producer with no outstanding fr
     return { surfaceToken: 'heartbeat-test', childFd: fd, spawned() { closeSync(fd) },
       setVisible() {}, isReady() { return false }, destroy() {} }
   })
-  f.bridge.create(Buffer.alloc(0), bounds, { backend: 'dmabuf' })
+  f.bridge.create(bounds)
   const state = await until(() => f.bridge.state(), state => Boolean(state.loadedFiles), 'shared helper create missing')
   const pid = state.loadedFiles!
   f.bridge.command(['hang'])

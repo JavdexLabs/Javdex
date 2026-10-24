@@ -217,10 +217,13 @@ export function inspectWindowsPlaybackBinary(file, { directory, archName, binary
     throw new Error('unterminated PE import directory')
   }
   const dependencies = imports(1, 20, false), delayedDependencies = imports(13, 32, true)
-  const entry = path.resolve(file) === path.join(directory, 'playback.node')
+  const producer = path.resolve(file) === path.join(directory, 'playback.node')
+  const interop = path.resolve(file) === path.join(directory, 'playback-interop.node')
+  const entry = producer || interop
   if (entry) {
     assert.ok(!dependencies.includes('node.exe') && delayedDependencies.includes('node.exe'), 'Windows addon must delay-load the Electron host')
-    assert.ok(dependencies.some(value => /^(lib)?mpv(?:-\d+)?\.dll$/.test(value)), 'Windows addon must import libmpv')
+    if (producer) assert.ok(dependencies.some(value => /^(lib)?mpv(?:-\d+)?\.dll$/.test(value)), 'Windows addon must import libmpv')
+    if (interop) assert.ok(!dependencies.some(value => /mpv|opengl|d3d|dxgi/i.test(value)), 'Main-process playback interop must not load decoding or graphics drivers')
   }
   const system = new Set(['kernel32.dll', 'user32.dll', 'gdi32.dll', 'opengl32.dll', 'comctl32.dll', 'advapi32.dll',
     'shell32.dll', 'ole32.dll', 'oleaut32.dll', 'comdlg32.dll', 'winmm.dll', 'ws2_32.dll', 'crypt32.dll', 'bcrypt.dll',
@@ -412,7 +415,12 @@ export function verifyPackagedPlaybackRuntime(context, { environment = process.e
   assert.ok(text(matrix), 'JAVDEX_PLAYBACK_RUNTIME_DIR must name a reviewed runtime matrix')
   const target = { platformName: context.electronPlatformName, archName: electronBuilderArchName(context.arch),
     electronVersion: context.packager.info.framework.version }
-  return validatePlaybackRuntime(path.join(path.resolve(matrix), target.platformName + '-' + target.archName), target, inspectBinary)
+  const input = validatePlaybackRuntime(path.join(path.resolve(matrix), target.platformName + '-' + target.archName), target, inspectBinary)
+  if (target.platformName !== 'linux') {
+    assert.equal(input.manifest.playbackHostVersion, 1, 'Playback runtime must be rebuilt for the isolated host')
+    assert.ok(Object.hasOwn(input.manifest.files, 'playback-interop.node'), 'Missing playback host resource interop')
+  }
+  return input
 }
 
 export function stagePackagedPlaybackRuntime(context, options) {

@@ -2,7 +2,7 @@
 #define JAVDEX_STANDALONE_PLAYBACK
 #include "mpvCore.h"
 #include "linuxDmaBuf.h"
-#include "linuxFrameTiming.h"
+#include "frameTiming.h"
 #include <algorithm>
 #include <chrono>
 #include <cstdlib>
@@ -36,9 +36,7 @@ using namespace javdex::dmabuf;
 MpvCore playback;
 Leases leases;
 Bounds requested;
-bool rendererControls = true;
 PublicationState publication;
-std::string presentation = "expanded";
 int wakeFd = -1, pixelWidth = 1, pixelHeight = 1;
 uint64_t now() { return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count(); }
 void wake(void *) {
@@ -85,14 +83,15 @@ public:
 int preparedSlot = -1;
 std::string preparedMetadata;
 uint64_t preparedSequence = 0;
-LinuxFrameTiming frameTiming;
+FrameTiming frameTiming;
 void destroyPlayer() {
     // Destroy never reuses outstanding memory. The host owns its copied pixels.
     playback.shutdown(); buffers.shutdown();
     preparedSlot = -1; preparedMetadata.clear(); publication.setVisible(false);
 }
 void updateBounds(const Bounds &rect) {
-    const int width = pixels(rect.width, rect.scale), height = pixels(rect.height, rect.scale);
+    const auto layout = frameLayout(rect.width, rect.height, rect.scale);
+    const int width = layout.width, height = layout.height;
     requested = rect;
     if (width != pixelWidth || height != pixelHeight) {
         pixelWidth = width; pixelHeight = height; publication.request();
@@ -104,13 +103,15 @@ void updateBounds(const Bounds &rect) {
 void create(const Bounds &rect) {
     if (playback.alive()) throw std::runtime_error("CPU playback is already initialized");
     updateBounds(rect);
-    playback.initialize(nullptr, nullptr, false, wake, nullptr, "no", true);
+    RenderConfig config; config.cpu = true; config.hardwareDecode = "no"; config.wakeup = wake;
+    playback.initialize(config);
     publication.request();
 }
 bool dispatch(const std::vector<std::string> &fields) {
     const auto &op = fields.at(0);
-    if (op == "create" && fields.size() == 8 && fields[1] == "0" && fields[7] == "software") create(rectangle(fields, 2));
+    if (op == "create" && fields.size() == 7 && fields[6] == "software") create(rectangle(fields, 1));
     else if (op == "destroy" && fields.size() == 1) { destroyPlayer(); return false; }
+    else if (op == "diagnostic-stall" && fields.size() == 1 && std::getenv("JAVDEX_PLAYBACK_DIAGNOSTICS") && std::string(std::getenv("JAVDEX_PLAYBACK_DIAGNOSTICS")) == "1") { for (;;) pause(); }
     else if (op == "timing-reset" && fields.size() == 2) {
         const double value = finiteNumber(fields[1]);
         if (value < 1 || value > maxSequence || std::floor(value) != value) throw std::runtime_error("Invalid timing epoch");
@@ -119,13 +120,8 @@ bool dispatch(const std::vector<std::string> &fields) {
     }
     else if (!playback.alive()) throw std::runtime_error("No CPU playback session");
     else if (op == "bounds" && fields.size() == 6) updateBounds(rectangle(fields, 1));
-    else if (op == "renderer-controls" && fields.size() == 2 && (fields[1] == "0" || fields[1] == "1")) rendererControls = fields[1] == "1";
-    else if (op == "occlusions" && fields.size() <= 257 && (fields.size() - 1) % 8 == 0) {
-        // Renderer composition handles occlusion; still validate the wire input.
-        for (size_t i = 1; i < fields.size(); i++) if (std::abs(finiteNumber(fields[i])) > 100000)
-            throw std::runtime_error("Invalid playback occlusion");
-    } else if (op == "visible" && fields.size() == 2 && (fields[1] == "0" || fields[1] == "1")) { publication.setVisible(fields[1] == "1"); }
-    else if (op == "presentation" && fields.size() == 2 && (fields[1] == "expanded" || fields[1] == "docked" || fields[1] == "fullscreen")) presentation = fields[1];
+    else if (op == "visible" && fields.size() == 2 && (fields[1] == "0" || fields[1] == "1")) { publication.setVisible(fields[1] == "1"); }
+
     else if ((op == "command" || op == "generated-subtitle-command") && fields.size() >= 2 && fields.size() <= 9)
         playback.command({fields.begin() + 1, fields.end()}, op == "generated-subtitle-command");
     else if (op == "generated-subtitles" && fields.size() == 5 && (fields[3] == "0" || fields[3] == "1")) {
@@ -139,7 +135,7 @@ std::string metadata(const Buffer &buffer, int slot, uint64_t sequence) {
     return "{\"protocol\":\"javdex-cpu-v1\",\"sequence\":" + std::to_string(sequence) + ",\"slot\":" + std::to_string(slot)
         + ",\"width\":" + std::to_string(buffer.width) + ",\"height\":" + std::to_string(buffer.height)
         + frameTiming.metadata()
-        + ",\"pixelFormat\":\"rgba\",\"colorContract\":\"bt709-sdr-rgb-full\",\"stride\":" + std::to_string(buffer.stride)
+        + ",\"pixelFormat\":\"rgba\",\"colorContract\":\"bt709-srgb-rgb-full\",\"stride\":" + std::to_string(buffer.stride)
         + ",\"size\":" + std::to_string(buffer.size) + '}';
 }
 void render() {
@@ -193,7 +189,6 @@ void render() {
 std::string state() {
     auto result = playback.stateJson(); result.pop_back();
     return result + ",\"backend\":\"linux-software\",\"pixelWidth\":" + std::to_string(pixelWidth) + ",\"pixelHeight\":" + std::to_string(pixelHeight)
-        + ",\"rendererFullscreenControls\":" + (rendererControls ? "true" : "false") + ",\"nativeVideoFocused\":false"
         + ",\"exportedFrames\":" + std::to_string(leases.latest()) + ",\"cpuFramesInFlight\":" + std::to_string(leases.inFlight()) + '}';
 }
 class Output {

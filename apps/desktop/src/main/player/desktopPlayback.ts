@@ -1,6 +1,4 @@
-import { createLinuxPlaybackFallback, type LinuxPlaybackMode } from './linuxPlaybackFallback'
-import { createWindowsPlaybackFallback } from './windowsPlaybackFallback'
-import { createGraphicsPlaybackFallback } from './graphicsPlaybackFallback'
+import { createPlaybackEngine } from './playbackEngine'
 import { app, dialog, shell, powerSaveBlocker, powerMonitor, type BrowserWindow } from 'electron'
 import path from 'node:path'
 import type { CatalogBackend } from '../application/catalogBackend'
@@ -10,13 +8,12 @@ import { createPlaybackSourceResolver, playbackCatalogKey } from './playbackSour
 import { builtinPlaybackAvailability, createLibmpvPlayback } from './libmpvPlayback'
 import { appCommandAdapter, appEventAdapter } from '../ipc/appContractAdapter'
 import { IPC } from '@shared/ipc-channels'
-import type { PlaybackTarget } from '@shared/desktop/playback'
+import type { PlaybackRenderMode, PlaybackTarget } from '@shared/desktop/playback'
 import type { PlayResult } from '@shared/libraryTypes'
 import type { DesktopSettingsStore } from '../application/desktopPorts'
 import { createPlaybackVolume } from './playbackVolume'
 import { createPlaybackResumeStore } from './playbackResumeStore'
 import { playbackFailure } from './playbackFailure'
-import { navigateWindowHistory } from '../desktop/windowNavigation'
 import fs from 'node:fs/promises'
 import { localAiDirectories } from '../services/localModels/modelStorage'
 import { createAiSubtitleController } from './aiSubtitles/aiSubtitleController'
@@ -33,15 +30,13 @@ export function disposeBuiltinPlayback(): Promise<void> {
 }
 
 export function registerBuiltinPlayback(backend: CatalogBackend, getWindow: () => BrowserWindow | null, settings: DesktopSettingsStore, recentStarted?: (videoId: number) => Promise<void>): (target: PlaybackTarget) => Promise<PlayResult> {
-  let linuxMode: LinuxPlaybackMode = process.argv.includes('--javdex-cpu') ? 'cpu' : 'auto'
-  const native = process.platform === 'linux' ? createLinuxPlaybackFallback(createLibmpvPlayback(getWindow), createLibmpvPlayback(getWindow, 'software'), () => linuxMode)
-    : process.platform === 'win32' ? createWindowsPlaybackFallback(createLibmpvPlayback(getWindow), createLibmpvPlayback(getWindow, 'software'), {
-      forceCpu: () => process.argv.slice(1, process.argv.indexOf('--') < 0 ? undefined : process.argv.indexOf('--')).includes('--javdex-cpu'),
-      gpuAvailable: () => app.isHardwareAccelerationEnabled()
-    }) : process.platform === 'darwin' ? createGraphicsPlaybackFallback(createLibmpvPlayback(getWindow), createLibmpvPlayback(getWindow, 'software'), {
-      forceCpu: () => process.argv.slice(1, process.argv.indexOf('--') < 0 ? undefined : process.argv.indexOf('--')).includes('--javdex-cpu'),
-      gpuAvailable: () => app.isHardwareAccelerationEnabled()
-    }, 'darwin') : createLibmpvPlayback(getWindow)
+  const forceCpu = process.argv.slice(1, process.argv.indexOf('--') < 0 ? undefined : process.argv.indexOf('--')).includes('--javdex-cpu')
+  let renderMode: PlaybackRenderMode = forceCpu ? 'cpu' : 'auto'
+  const native = createPlaybackEngine(createLibmpvPlayback(getWindow), createLibmpvPlayback(getWindow, 'software'), {
+    mode: () => renderMode,
+    gpuAvailable: () => app.isHardwareAccelerationEnabled() && builtinPlaybackAvailability().available,
+    gpuUnavailableReason: () => app.isHardwareAccelerationEnabled() ? 'GPU_INITIALIZATION_FAILED' : 'GPU_DISABLED'
+  }, process.platform === 'darwin' ? 'darwin' : process.platform === 'win32' ? 'win32' : 'linux')
   const resolver = createPlaybackSourceResolver(backend)
   const volume = createPlaybackVolume(settings)
   let recordingEnabled = false
@@ -106,14 +101,6 @@ export function registerBuiltinPlayback(backend: CatalogBackend, getWindow: () =
         if (process.platform === 'win32') window.focusOnWebView()
         else window.webContents.focus()
       }
-    },
-    navigate: direction => navigateWindowHistory(getWindow(), direction),
-    escape: () => {
-      const window = getWindow()
-      if (!window || window.isDestroyed()) return
-      // Preserve the renderer's layered Escape behavior, separate from system Back.
-      window.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Escape' })
-      window.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Escape' })
     },
     started: async source => {
       const current = (): boolean => source.identityKey === playbackCatalogKey(backend)
@@ -192,15 +179,15 @@ export function registerBuiltinPlayback(backend: CatalogBackend, getWindow: () =
     return aiSubtitles.close()
   }
   const availability = () => {
-    const gpu = builtinPlaybackAvailability(linuxMode === 'cpu' ? 'software' : undefined)
-    return process.platform === 'linux' && linuxMode === 'auto' && !gpu.available ? builtinPlaybackAvailability('software') : gpu
+    const gpu = builtinPlaybackAvailability(renderMode === 'cpu' ? 'software' : undefined)
+    return renderMode === 'auto' && !gpu.available ? builtinPlaybackAvailability('software') : gpu
   }
   appCommandAdapter.register(IPC.PLAYBACK_AVAILABILITY, availability)
   appCommandAdapter.register(IPC.PLAYBACK_SNAPSHOT, () => ({ revision: observationRevision, snapshot: session.snapshot() }))
   appCommandAdapter.register(IPC.PLAYBACK_AI_SUBTITLE_SNAPSHOT, aiSubtitles.snapshot)
   appCommandAdapter.register(IPC.PLAYBACK_AI_SUBTITLE_COMMAND, aiSubtitles.command)
   const open = async (target: PlaybackTarget): Promise<PlayResult> => {
-    linuxMode = process.platform !== 'linux' ? 'auto' : process.argv.includes('--javdex-cpu') ? 'cpu' : (await settings.read()).linuxPlaybackMode ?? 'auto'
+    renderMode = forceCpu ? 'cpu' : (await settings.read()).playbackRenderMode ?? 'auto'
     const available = availability()
     if (!available.available) return { ok: false, error: available.reason ?? '内置播放不可用' }
     try {

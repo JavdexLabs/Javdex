@@ -35,8 +35,9 @@ try {
   })
   await application.evaluate(installCanvasSubmissionObserver)
   const inspect = () => application.evaluate(({ app }, surfaceToken) => {
-    const require = process.getBuiltinModule('module').createRequire(app.getAppPath() + '/package.json')
-    const state = require(app.isPackaged ? process.resourcesPath + '/native-playback/playback.node' : app.getAppPath() + '/out/native-playback/playback.node').sharedTexture.inspect()
+    const request = { gpu: { alive: false, outstandingSurfaces: 0, pixelWidth: 0, pixelHeight: 0 } }
+    process.getBuiltinModule('diagnostics_channel').channel('javdex.playback.host.statistics').publish(request)
+    const state = request.gpu
     return { alive: state.alive, outstanding: state.outstandingSurfaces, peak: state.peakOutstandingSurfaces,
       frames: state.nativeFrames, width: state.pixelWidth, height: state.pixelHeight,
       adapter: [state.producerAdapterLuidLow, state.producerAdapterLuidHigh], submitted: globalThis.windowsCanvasReceipts.get(surfaceToken)?.count ?? 0 }
@@ -45,7 +46,7 @@ try {
     const opened = await page.evaluate(t => window.api.player.openResource(t.libraryId, t.resourceId, t.videoId), target)
     assert.equal(opened.ok, true, opened.error)
     const state = await waitForState(page, s => s?.phase === 'playing' && s.position > .5, 'Windows Canvas playback')
-    assert.ok(state.sharedTextureSurface); assert.equal(state.rendererFullscreenControls, true)
+    assert.ok(state.sharedTextureSurface)
     surfaceToken = state.sharedTextureSurface
     await waitForValue(inspect, s => s.frames > 2 && s.submitted > 1, 'native production and real Canvas submission')
     assert.equal((await nativeEvidence(application)).presentedFrames, undefined, 'Canvas receipt is not physical presentation')

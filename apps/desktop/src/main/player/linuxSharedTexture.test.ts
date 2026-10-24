@@ -1,3 +1,5 @@
+import { createFrameEndpoint, isFrameBinding } from './frameEndpoint'
+import { FrameHealthProbe } from './frameHealthProbe'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { EventEmitter } from 'node:events'
@@ -46,6 +48,9 @@ function fixture(diagnostics = false, software = false) {
     console: { info: (tag: string, data: string) => { if (tag === '[playback-texture-pixels]') diagnosticLogs.push(data) } }, Date: { now: () => now },
     setInterval: (callback: () => void) => { tick = callback; return { unref() {} } }, clearInterval: () => { tick = () => {} },
     require(id: string): unknown {
+      if (id === './frameEndpoint') return { createFrameEndpoint, isFrameBinding }
+
+      if (id === './frameHealthProbe') return { FrameHealthProbe }
       if (id === './frameBudget') return { FrameBudget }
       if (id === 'node:crypto') return { randomUUID: () => '11111111-1111-4111-8111-111111111111' }
       if (id === 'node:module') return { createRequire: () => () => transport }
@@ -374,7 +379,7 @@ test('frame timing and producer color contracts reject partial, invalid and misl
 })
 
 test('adaptive budget bounds cost spikes and adjustment rate, resets to 20ms', () => {
-  const f = fixture(), b = new f.exports.FrameBudget()
+  const f = fixture(), b = new FrameBudget()
   assert.equal(b.value, 20)
   for (let i = 0; i < 5000; i++) b.observe(90, i * 34)
   assert.equal(b.value, 40)

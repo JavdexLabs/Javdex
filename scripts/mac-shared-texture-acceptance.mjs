@@ -45,8 +45,9 @@ try {
     })
   })
   const inspect = () => application.evaluate(({ app }) => {
-    const require = process.getBuiltinModule('module').createRequire(app.getAppPath() + '/package.json')
-    const state = require(app.getAppPath() + '/out/native-playback/playback.node').inspect()
+    const request = { gpu: { alive: false, outstandingSurfaces: 0, pixelWidth: 0, pixelHeight: 0 } }
+    process.getBuiltinModule('diagnostics_channel').channel('javdex.playback.host.statistics').publish(request)
+    const state = request.gpu
     return { alive: state.alive, outstanding: state.outstandingSurfaces, peakOutstanding: state.peakOutstandingSurfaces, outstandingSequences: state.outstandingSurfaceSequences,
       width: state.pixelWidth, height: state.pixelHeight,
       observedAt: Number(process.hrtime.bigint()) / 1e6,
@@ -66,7 +67,6 @@ try {
     assert.equal(opened.ok, true, opened.error)
     const state = await waitForState(page, s => s?.phase === 'playing' && s.position > 1, 'real playback')
     assert.ok(state.sharedTextureSurface)
-    assert.equal(state.rendererFullscreenControls, true)
     assert.equal(state.info.hardwareDecoder, 'videotoolbox')
     await page.locator('canvas[data-playback-surface]').waitFor()
     const id = state.sessionId

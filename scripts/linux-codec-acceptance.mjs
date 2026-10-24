@@ -20,7 +20,7 @@ fs.mkdirSync(output) // Refuse to overwrite an earlier run.
 const files = ['h264-1080p30.mp4', 'hevc-main10-1080p30.mkv', 'av1-1080p30.mkv'].slice(0, codecLimit).map(f => path.join(media, f))
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-playback-acceptance-codecs-'))
 const targets = seedAcceptanceCatalog(profile, files)
-fs.writeFileSync(path.join(profile, 'this-computer.json'), JSON.stringify({mode:'local', closeToTray:false, linuxPlaybackMode:mode, resumePlayback:false, playbackVolume:25}))
+fs.writeFileSync(path.join(profile, 'this-computer.json'), JSON.stringify({mode:'local', closeToTray:false, playbackRenderMode:mode, resumePlayback:false, playbackVolume:25}))
 const hash = file => createHash('sha256').update(fs.readFileSync(file)).digest('hex')
 const report = { image, sha256:hash(image), display, mode, profile, media:files.map(file=>({file,sha256:hash(file)})), cases:[], pending:['human audio sync', 'other GPUs and desktops', 'HDR and 4K60'] }
 const save = () => fs.writeFileSync(path.join(output, 'report.json'), JSON.stringify(report,null,2))

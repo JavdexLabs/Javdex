@@ -9,7 +9,7 @@
 #include <atomic>
 #include <cmath>
 #include <cstdint>
-#include <deque>
+#include <cstring>
 #include <iomanip>
 #include <locale>
 #include <map>
@@ -19,11 +19,23 @@
 #include <utility>
 #include <vector>
 #include "generatedSubtitles.h"
+#include "renderConfig.h"
+#include "colorPipeline.h"
 
 namespace javdex {
 #ifndef JAVDEX_STANDALONE_PLAYBACK
 inline napi_value undefined(napi_env env) { napi_value value; napi_get_undefined(env, &value); return value; }
 inline napi_value fail(napi_env env, const std::string &message) { napi_throw_error(env, nullptr, message.c_str()); return nullptr; }
+inline bool nodeMainThread(napi_env env) {
+    napi_value global, process, builtin, name, threads, main; bool result = false;
+    return napi_get_global(env, &global) == napi_ok
+        && napi_get_named_property(env, global, "process", &process) == napi_ok
+        && napi_get_named_property(env, process, "getBuiltinModule", &builtin) == napi_ok
+        && napi_create_string_utf8(env, "node:worker_threads", NAPI_AUTO_LENGTH, &name) == napi_ok
+        && napi_call_function(env, process, builtin, 1, &name, &threads) == napi_ok
+        && napi_get_named_property(env, threads, "isMainThread", &main) == napi_ok
+        && napi_get_value_bool(env, main, &result) == napi_ok && result;
+}
 inline std::string stringArg(napi_env env, napi_value value) {
     size_t length = 0;
     if (napi_get_value_string_utf8(env, value, nullptr, 0, &length) != napi_ok) throw std::runtime_error("Expected a string");
@@ -87,7 +99,6 @@ inline std::string nodeJson(const mpv_node &node) {
     }
 }
 struct ObservedValue { mpv_format format = MPV_FORMAT_NONE; double number = 0; std::string text; };
-struct NativeAction { std::string kind; double value; };
 
 inline bool optionalSubtitleCommand(const std::vector<std::string> &values) {
     if (values.empty()) return false;
@@ -99,13 +110,47 @@ inline bool optionalSubtitleCommand(const std::vector<std::string> &values) {
 class MpvCore {
     mpv_handle *handle = nullptr;
     mpv_render_context *renderer = nullptr;
+    bool pauseRequested = true;
     std::atomic<bool> requested{false};
     std::atomic<void (*)(void *)> renderWakeup{nullptr};
     std::atomic<void *> renderWakeupContext{nullptr};
     std::map<std::string, ObservedValue> observed;
-    std::deque<NativeAction> actions;
     std::string lastError;
     int lastErrorCode = 0;
+    bool cpuRendering = false, colorReady = false, colorPending = false, colorConfigured = false, sourceColorKnown = false;
+    uint64_t colorFileEpoch = 0;
+    int colorSlot = 0;
+    color::Profile desiredColor, appliedColor, pendingColor;
+    color::LutFiles colorFiles;
+    void configureColor() {
+        if (!cpuRendering || colorPending || !sourceColorKnown) return;
+        if (colorConfigured && desiredColor == appliedColor) { colorReady = true; request(this); return; }
+        const auto filter = colorFiles.write(desiredColor, colorSlot = 1 - colorSlot);
+        const char *args[] = {"vf", "set", filter.c_str(), nullptr};
+        const int error = mpv_command_async(handle, 3, args);
+        if (error < 0) throw std::runtime_error("Cannot configure CPU display color");
+        pendingColor = desiredColor; colorPending = true; colorReady = false;
+    }
+    void observeColor(const mpv_node &node) {
+        if (node.format != MPV_FORMAT_NODE_MAP || !node.u.list) return;
+        color::Profile profile;
+        double peak = 0, width = 0, height = 0;
+        for (int i = 0; i < node.u.list->num; i++) {
+            const std::string key = node.u.list->keys[i]; const auto &value = node.u.list->values[i];
+            if (value.format == MPV_FORMAT_STRING && value.u.string) {
+                if (key == "gamma") profile.transfer = value.u.string;
+                if (key == "primaries") profile.primaries = value.u.string;
+                if (key == "light") profile.light = value.u.string;
+            }
+            if (key == "sig-peak" && value.format == MPV_FORMAT_DOUBLE) peak = value.u.double_ * 203;
+            const double number = value.format == MPV_FORMAT_INT64 ? static_cast<double>(value.u.int64) : value.format == MPV_FORMAT_DOUBLE ? value.u.double_ : 0;
+            if (key == "w") width = number; if (key == "h") height = number;
+        }
+        if (width < 1 || height < 1) return;
+        profile.peak = std::isfinite(peak) && peak > 0 ? std::clamp(peak, 1.0, 10000.0)
+            : profile.transfer == "pq" ? 10000 : profile.transfer == "hlg" ? 1000 : 203;
+        desiredColor = profile; sourceColorKnown = true; configureColor();
+    }
     uint64_t frames = 0, presentedFrames = 0, loadedFiles = 0, restarts = 0, commandErrors = 0, subtitleCommandErrors = 0, subtitleCommandsPending = 0, subtitleCommandReplies = 0;
     uint64_t generatedSubtitleCommandErrors = 0, generatedSubtitleCommandsPending = 0, generatedSubtitleCommandReplies = 0;
     GeneratedTimeline generatedTimeline;
@@ -130,7 +175,7 @@ class MpvCore {
                     const double center = (generatedWidth + (osdLeft - osdRight) * sx) / 2;
                     const double bottom = generatedHeight - osdBottom * sy - videoHeight * 0.05;
                     text = "{\\an2\\pos(" + std::to_string(center) + "," + std::to_string(bottom)
-                        + ")\\fnMicrosoft YaHei\\bord" + std::to_string(2 * scale) + "\\shad" + std::to_string(scale)
+                        + ")\\fnsans-serif\\bord" + std::to_string(2 * scale) + "\\shad" + std::to_string(scale)
                         + "\\1c&HFFFFFF&\\1a&H00&\\3c&H101010&\\3a&H00&\\4c&H000000&\\4a&H80&}"
                         + scaleGeneratedFonts(std::move(text), scale);
                 }
@@ -169,67 +214,50 @@ public:
     }
     bool alive() const { return handle && renderer; }
     uint64_t loads() const { return loadedFiles; }
+#if MPV_CLIENT_API_VERSION >= MPV_MAKE_VERSION(2, 2)
+    static int64_t frameDelayUs(int64_t targetNs, int64_t nowNs, bool paused, uint64_t flags) {
+        if (paused || targetNs <= 0 || !(flags & MPV_RENDER_FRAME_INFO_PRESENT)
+            || (flags & (MPV_RENDER_FRAME_INFO_REDRAW | MPV_RENDER_FRAME_INFO_REPEAT))) return 0;
+        return (targetNs - nowNs) / 1000;
+    }
+#endif
     double number(const char *name) const {
         const auto found = observed.find(name);
         return found == observed.end() || !std::isfinite(found->second.number) ? 0 : found->second.number;
     }
-    void initialize(void *(*getProc)(void *, const char *), void *context = nullptr, bool softwareRendering = false,
-        void (*wakeup)(void *) = nullptr, void *wakeupContext = nullptr, const char *hardwareDecode = "auto", bool cpuRendering = false,
-        const char *renderTimingOffset = "0", bool srgbOutput = false) {
+    void initialize(const RenderConfig &config) {
         if (handle || renderer) throw std::runtime_error("Native session is already initialized");
-        observed.clear(); actions.clear(); lastError.clear(); lastErrorCode = 0;
+        observed.clear(); lastError.clear(); lastErrorCode = 0;
+        pauseRequested = true;
+        cpuRendering = config.cpu; colorReady = colorPending = colorConfigured = false;
+        sourceColorKnown = false; colorFileEpoch = 0;
         frames = presentedFrames = loadedFiles = restarts = commandErrors = subtitleCommandErrors = subtitleCommandsPending = subtitleCommandReplies = 0; requested.store(false);
         generatedSubtitleCommandErrors = generatedSubtitleCommandsPending = generatedSubtitleCommandReplies = 0;
         generatedTimeline = {}; generatedVisible = generatedFailed = generatedRefreshRequired = false; generatedLastText.clear(); generatedRevision = 0;
         generatedWidth = generatedHeight = 0; osdWidth = osdHeight = osdLeft = osdRight = osdTop = osdBottom = 0;
-        renderWakeupContext.store(wakeupContext); renderWakeup.store(wakeup);
+        renderWakeupContext.store(config.wakeupContext); renderWakeup.store(config.wakeup);
         handle = mpv_create();
         if (!handle) throw std::runtime_error("mpv_create failed");
         const char *options[][2] = {
-            {"config", "no"}, {"load-scripts", "no"}, {"ytdl", "no"}, {"vo", "libmpv"}, {"hwdec", hardwareDecode},
+            {"config", "no"}, {"load-scripts", "no"}, {"ytdl", "no"}, {"vo", "libmpv"}, {"hwdec", config.hardwareDecode},
             {"idle", "yes"}, {"keep-open", "yes"}, {"pause", "yes"}, {"volume", "50"}, {"terminal", "no"},
             {"input-default-bindings", "no"}, {"input-vo-keyboard", "no"}, {"osc", "no"},
             {"audio-pitch-correction", "yes"}, {"sub-auto", "no"}, {"audio-file-auto", "no"},
-            {"access-references", "no"}, {"video-timing-offset", renderTimingOffset}
+            {"access-references", "no"}, {"video-timing-offset", config.renderLead}
         };
         for (const auto &option : options) {
             int error = mpv_set_option_string(handle, option[0], option[1]);
             if (error < 0) throw std::runtime_error(std::string(option[0]) + ": " + mpv_error_string(error));
         }
-        if (srgbOutput) {
-            // Shared-texture Canvas producers label these same SDR bytes on
-            // import. This is not a physical HDR display or HDR passthrough.
-            const char *display[][2] = {{"target-prim", "bt.709"}, {"target-trc", "srgb"}, {"video-output-levels", "full"}};
+        if (!config.cpu) {
+            const char *display[][2] = {{"target-prim", "bt.709"}, {"target-trc", "srgb"}, {"video-output-levels", "full"},
+                {"target-peak", "203"}, {"tone-mapping", "bt.2390"}, {"hdr-compute-peak", "no"}};
             for (const auto &option : display) {
                 const int error = mpv_set_option_string(handle, option[0], option[1]);
                 if (error < 0) throw std::runtime_error(std::string(option[0]) + ": " + mpv_error_string(error));
             }
-#ifdef _WIN32
-            // Automatic peak detection needs compute/SSBO support. With the
-            // same HDR frame, GL 3.2 and 4.3 can otherwise choose different
-            // curves (including history-dependent average-brightness scaling).
-            // Canvas is an SDR target: use the 203-nit reference white and
-            // metadata-based BT.2390 on every Windows GPU. Keep the CPU SW
-            // converter independent; it does not pass srgbOutput here.
-            const char *hdr[][2] = {{"target-peak", "203"}, {"tone-mapping", "bt.2390"}, {"hdr-compute-peak", "no"}};
-            for (const auto &option : hdr) {
-                const int error = mpv_set_option_string(handle, option[0], option[1]);
-                if (error < 0) throw std::runtime_error(std::string(option[0]) + ": " + mpv_error_string(error));
-            }
-#endif
         }
-        if (softwareRendering) {
-            // Mesa llvmpipe/softpipe can misrender libmpv's convolution scaling
-            // path (black/striped/partial frames). A conservative supported GL
-            // path keeps playback usable on software contexts; real GPUs keep
-            // normal quality. See mpv-player/mpv#14577 for the upstream symptom.
-            const char *fallback[][2] = {{"scale", "bilinear"}, {"cscale", "bilinear"}, {"dscale", "bilinear"}, {"correct-downscaling", "no"}, {"gpu-dumb-mode", "yes"}};
-            for (const auto &option : fallback) {
-                int result = mpv_set_option_string(handle, option[0], option[1]);
-                if (result < 0) throw std::runtime_error(mpv_error_string(result));
-            }
-        }
-        if (cpuRendering) {
+        if (config.cpu) {
             // libmpv SW defaults to single-threaded Lanczos conversion/scaling.
             // The compatibility path favors timely frames at desktop sizes.
             // A zero render lead makes the SW callback miss presentation
@@ -239,23 +267,15 @@ public:
             if (timing < 0) throw std::runtime_error(mpv_error_string(timing));
             const int result = mpv_set_option_string(handle, "sws-scaler", "bilinear");
             if (result < 0) throw std::runtime_error(mpv_error_string(result));
-            // The SW render API uses legacy sws_scale: RGB conversion alone
-            // leaves HDR transfer functions/gamut unchanged. FFmpeg 9's scale
-            // filter uses the frame API and its perceptual color mapper, so
-            // produce tagged BT.709 SDR before the final viewport conversion.
-            // SDR BT.709 remains a no-op; no GL or additional library is needed.
-            const int color = mpv_set_option_string(handle, "vf",
-                "lavfi=[scale=out_primaries=bt709:out_transfer=bt709:out_color_matrix=bt709:intent=perceptual]");
-            if (color < 0) throw std::runtime_error(std::string("CPU SDR conversion: ") + mpv_error_string(color));
         }
         int error = mpv_initialize(handle);
         if (error < 0) throw std::runtime_error(mpv_error_string(error));
-        mpv_opengl_init_params gl = {getProc, context};
+        mpv_opengl_init_params gl = {config.getProc, config.glContext};
         mpv_render_param params[] = {{MPV_RENDER_PARAM_API_TYPE, (void *)MPV_RENDER_API_TYPE_OPENGL},
             {MPV_RENDER_PARAM_OPENGL_INIT_PARAMS, &gl}, {MPV_RENDER_PARAM_INVALID, nullptr}};
         mpv_render_param software[] = {{MPV_RENDER_PARAM_API_TYPE, (void *)MPV_RENDER_API_TYPE_SW}, {MPV_RENDER_PARAM_INVALID, nullptr}};
-        error = mpv_render_context_create(&renderer, handle, cpuRendering ? software : params);
-        if (error < 0) throw std::runtime_error(std::string(cpuRendering ? "CPU render context: " : "OpenGL render context: ") + mpv_error_string(error));
+        error = mpv_render_context_create(&renderer, handle, config.cpu ? software : params);
+        if (error < 0) throw std::runtime_error(std::string(config.cpu ? "CPU render context: " : "OpenGL render context: ") + mpv_error_string(error));
         const char *numbers[] = {"time-pos", "duration", "volume", "speed", "width", "height", "audio-pts", "frame-drop-count", "sub-delay", "sub-font-size"};
         const char *strings[] = {"hwdec-current", "video-codec", "audio-codec", "audio-device", "current-ao", "sid", "aid"};
         const char *flags[] = {"pause", "mute", "eof-reached", "core-idle", "seekable", "seeking", "paused-for-cache"};
@@ -265,6 +285,7 @@ public:
         mpv_observe_property(handle, 0, "track-list", MPV_FORMAT_NODE);
         mpv_observe_property(handle, 0, "chapter-list", MPV_FORMAT_NODE);
         mpv_observe_property(handle, 0, "osd-dimensions", MPV_FORMAT_NODE);
+        if (config.cpu) mpv_observe_property(handle, 0, "video-dec-params", MPV_FORMAT_NODE);
         mpv_render_context_set_update_callback(renderer, request, this);
     }
     void shutdown() {
@@ -272,7 +293,8 @@ public:
         if (handle) mpv_set_wakeup_callback(handle, nullptr, nullptr);
         if (renderer) { mpv_render_context_set_update_callback(renderer, nullptr, nullptr); mpv_render_context_free(renderer); renderer = nullptr; }
         if (handle) { mpv_terminate_destroy(handle); handle = nullptr; }
-        actions.clear(); requested.store(false);
+        colorFiles.clear(); colorReady = colorPending = colorConfigured = false;
+        requested.store(false);
         generatedTimeline = {}; generatedVisible = false; generatedLastText.clear();
     }
     void generatedSubtitles(const std::string &operation, const std::string &document, bool visible, uint64_t revision) {
@@ -323,6 +345,7 @@ public:
         // Never synchronously wait on the mpv client from the platform GL thread.
         const int error = mpv_command_async(handle, optionalSubtitleCommand(values) ? (generatedSubtitle ? 2 : 1) : 0, args.data());
         if (error < 0) throw std::runtime_error(mpv_error_string(error));
+        if (values.size() == 3 && values[0] == "set" && values[1] == "pause") pauseRequested = values[2] == "yes";
         if (optionalSubtitleCommand(values)) subtitleCommandsPending++;
         if (generatedSubtitle && optionalSubtitleCommand(values)) generatedSubtitleCommandsPending++;
         if (values[0] == "loadfile") {
@@ -331,7 +354,6 @@ public:
             generatedFailed = false; refreshGeneratedSubtitles();
         }
     }
-    void queue(const char *kind, double value = 0) { if (actions.size() < 32) actions.push_back({kind, value}); }
     bool updateRequested() {
         // Drain into the existing action queue without consuming its ownership.
         // Subtitle timing follows native frame observations, not the 200ms UI poll.
@@ -345,12 +367,11 @@ public:
         if (!renderer) return 0;
         mpv_render_frame_info info{};
         mpv_render_param param{MPV_RENDER_PARAM_NEXT_FRAME_INFO, &info};
-        if (mpv_render_context_get_info(renderer, param) < 0 || !info.target_time
-            || (info.flags & (MPV_RENDER_FRAME_INFO_REDRAW | MPV_RENDER_FRAME_INFO_REPEAT))) return 0;
+        if (mpv_render_context_get_info(renderer, param) < 0) return 0;
         // Pinned mpv 0.41 vo_libmpv.c exports vo_frame::pts in nanoseconds,
         // although render.h still documents microseconds. Match the actual
         // bundled implementation; revalidate this contract on mpv upgrades.
-        return (info.target_time - mpv_get_time_ns(handle)) / 1000;
+        return frameDelayUs(info.target_time, mpv_get_time_ns(handle), pauseRequested || number("pause") != 0 || number("seeking") != 0, info.flags);
 #else
         // Older system libmpv is supported for development compilation only.
         // Its clock contract is not the pinned runtime contract tested here.
@@ -374,6 +395,11 @@ public:
         if (!renderer || width <= 0 || height <= 0) return false;
         generatedWidth = width; generatedHeight = height;
         drainEvents(); refreshGeneratedSubtitles(); mpv_render_context_update(renderer);
+        if (!colorReady) {
+            // Never publish unconverted HDR while the asynchronous video filter
+            // is being installed. Native state/errors continue to be drained.
+            std::memset(pixels, 0, stride * height); return skipRender();
+        }
         int dimensions[] = {width, height}, block = 0;
         mpv_render_param params[] = {{MPV_RENDER_PARAM_SW_SIZE, dimensions},
             {MPV_RENDER_PARAM_SW_FORMAT, (void *)"rgb0"}, {MPV_RENDER_PARAM_SW_STRIDE, &stride},
@@ -400,6 +426,22 @@ public:
     void swapped() { if (renderer) mpv_render_context_report_swap(renderer); }
     void presented(bool visible) { if (visible && loadedFiles > 0) presentedFrames++; }
     void consume(const mpv_event &event) {
+        if (cpuRendering && event.event_id == MPV_EVENT_GET_PROPERTY_REPLY && (event.reply_userdata & 255) == 4) {
+            if ((event.reply_userdata >> 8) == colorFileEpoch && event.error >= 0) {
+                const auto *property = static_cast<mpv_event_property *>(event.data);
+                if (property && property->format == MPV_FORMAT_NODE && property->data) observeColor(*static_cast<mpv_node *>(property->data));
+            }
+            return;
+        }
+        if (event.event_id == MPV_EVENT_COMMAND_REPLY && event.reply_userdata == 3) {
+            colorPending = false;
+            if (event.error < 0) {
+                colorReady = false; lastErrorCode = MPV_ERROR_VO_INIT_FAILED;
+                lastError = "CPU display color filter: " + std::string(mpv_error_string(event.error)); return;
+            }
+            appliedColor = pendingColor; colorConfigured = true;
+            configureColor(); return;
+        }
         if (event.event_id == MPV_EVENT_COMMAND_REPLY && (event.reply_userdata == 1 || event.reply_userdata == 2)) {
             if (subtitleCommandsPending) subtitleCommandsPending--;
             subtitleCommandReplies++;
@@ -410,6 +452,11 @@ public:
         }
         if (event.event_id == MPV_EVENT_PROPERTY_CHANGE) {
             const auto *property = static_cast<mpv_event_property *>(event.data);
+            if (cpuRendering && std::string(property->name) == "video-dec-params" && property->format == MPV_FORMAT_NODE && property->data) {
+                try { observeColor(*static_cast<mpv_node *>(property->data)); }
+                catch (const std::exception &error) { colorReady = false; lastErrorCode = MPV_ERROR_VO_INIT_FAILED; lastError = error.what(); }
+                return;
+            }
             if (std::string(property->name) == "osd-dimensions" && property->format == MPV_FORMAT_NODE && property->data) {
                 const auto &node = *static_cast<mpv_node *>(property->data);
                 if (node.format == MPV_FORMAT_NODE_MAP && node.u.list) for (int i = 0; i < node.u.list->num; i++) {
@@ -432,8 +479,15 @@ public:
             }
             observed[property->name] = std::move(value);
         }
-        if (event.event_id == MPV_EVENT_FILE_LOADED) loadedFiles++;
+        if (event.event_id == MPV_EVENT_FILE_LOADED) {
+            loadedFiles++;
+            // A repeated file can have identical decoded parameters. Explicitly
+            // request them as well as observing changes, without a synchronous
+            // property call on a render thread or reusing the old file's reply.
+            if (cpuRendering && handle) mpv_get_property_async(handle, (colorFileEpoch << 8) | 4, "video-dec-params", MPV_FORMAT_NODE);
+        }
         if (event.event_id == MPV_EVENT_START_FILE) {
+            if (cpuRendering) { colorReady = sourceColorKnown = false; colorFileEpoch++; }
             generatedTimeline = {}; generatedVisible = false;
             if (generatedFailed) generatedRefreshRequired = true;
             generatedFailed = false;
@@ -480,6 +534,12 @@ public:
             if (value.format == MPV_FORMAT_STRING || value.format == MPV_FORMAT_NODE) result += ',' + jsonString(key.c_str()) + ':' + jsonString(value.text.c_str());
         }
         number("nativeFrames", frames); number("presentedFrames", presentedFrames); number("loadedFiles", loadedFiles);
+        result += ",\"colorOutput\":\"bt709-srgb-rgb-full\"";
+        if (cpuRendering) {
+            result += ",\"colorInputTransfer\":" + jsonString(appliedColor.transfer.c_str());
+            result += ",\"colorInputPrimaries\":" + jsonString(appliedColor.primaries.c_str());
+            number("colorInputPeak", appliedColor.peak);
+        }
         number("playbackRestarts", restarts); number("commandErrors", commandErrors);
         number("subtitleCommandErrors", subtitleCommandErrors);
         number("generatedSubtitleCommandErrors", generatedSubtitleCommandErrors);
@@ -488,13 +548,8 @@ public:
         number("generatedSubtitleOverlayVersion", 1); number("generatedSubtitleRevision", generatedRevision);
         number("subtitleCommandsPending", subtitleCommandsPending);
         number("subtitleCommandReplies", subtitleCommandReplies);
-        result += ",\"errorKind\":" + jsonString(errorKind()) + ",\"error\":" + jsonString(lastError.c_str()) + ",\"actions\":[";
-        for (size_t i = 0; i < actions.size(); i++) {
-            if (i) result += ',';
-            result += "{\"kind\":" + jsonString(actions[i].kind.c_str()) + ",\"value\":" + std::to_string(actions[i].value) + '}';
-        }
-        actions.clear();
-        return result + "]}";
+        result += ",\"errorKind\":" + jsonString(errorKind()) + ",\"error\":" + jsonString(lastError.c_str());
+        return result + "}";
     }
 #ifndef JAVDEX_STANDALONE_PLAYBACK
     napi_value state(napi_env env, bool drain) {
@@ -507,12 +562,13 @@ public:
             if (value.format == MPV_FORMAT_FLAG) setFlag(env, result, key.c_str(), value.number != 0);
             if (value.format == MPV_FORMAT_STRING || value.format == MPV_FORMAT_NODE) setString(env, result, key.c_str(), value.text);
         }
-        if (drain) {
-            napi_value pending; napi_create_array(env, &pending); uint32_t index = 0;
-            for (const auto &action : actions) { napi_value item; napi_create_object(env, &item); setString(env, item, "kind", action.kind); setNumber(env, item, "value", action.value); napi_set_element(env, pending, index++, item); }
-            actions.clear(); napi_set_named_property(env, result, "actions", pending);
-        }
         setNumber(env, result, "nativeFrames", frames); setNumber(env, result, "presentedFrames", presentedFrames);
+        setString(env, result, "colorOutput", "bt709-srgb-rgb-full");
+        if (cpuRendering) {
+            setString(env, result, "colorInputTransfer", appliedColor.transfer);
+            setString(env, result, "colorInputPrimaries", appliedColor.primaries);
+            setNumber(env, result, "colorInputPeak", appliedColor.peak);
+        }
         setNumber(env, result, "loadedFiles", loadedFiles); setNumber(env, result, "playbackRestarts", restarts); setNumber(env, result, "commandErrors", commandErrors);
         setNumber(env, result, "subtitleCommandsPending", subtitleCommandsPending);
         setNumber(env, result, "subtitleCommandReplies", subtitleCommandReplies);

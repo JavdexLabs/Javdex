@@ -1,17 +1,20 @@
 import assert from 'node:assert/strict'
 import { it } from 'node:test'
-import { createLinuxPlaybackFallback } from './linuxPlaybackFallback'
+import { createPlaybackEngine } from './playbackEngine'
+import type { PlaybackRenderMode } from '@shared/desktop/playback'
+const createLinuxPlaybackFallback = (gpu: NativePlayback, cpu: NativePlayback, preference: () => PlaybackRenderMode) =>
+  createPlaybackEngine(gpu, cpu, { mode: preference, gpuAvailable: () => true }, 'linux')
 import type { NativePlayback, NativePlaybackState } from './nativePlayback'
 function fixture() {
   const calls: unknown[][] = []
   let state: NativePlaybackState = { alive: true, loadedFiles: 1, seekable: true, pause: false, 'time-pos': 12 }
   let broken = false
   const player: NativePlayback = {
-    create: () => { calls.push(['create']); if (broken) throw Error('native') },
+    create: () => { calls.push(['create']); if (broken) throw Object.assign(Error('native'), { playbackFailureKind: 'graphics' }) },
     load: (...args) => { calls.push(['load', ...args]) },
     command: (...args) => { calls.push(['command', ...args]) },
-    read: () => { if (broken) throw Error('native'); return state },
-    render: () => { if (broken) throw Error('native') },
+    read: () => { if (broken) throw Object.assign(Error('native'), { playbackFailureKind: 'graphics' }); return state },
+    render: () => { if (broken) throw Object.assign(Error('native'), { playbackFailureKind: 'graphics' }) },
     viewport: (...args) => { calls.push(['viewport', ...args]) },
     addSubtitle: (...args) => { calls.push(['subtitle', ...args]) },
     destroy: () => { calls.push(['destroy']) }
@@ -82,7 +85,8 @@ it('keeps a newer seek while CPU recovery is awaiting the previous position', as
   p.command({ kind: 'seek', seconds: 40 })
   cpu.state({ alive: true, loadedFiles: 1, seekable: true, pause: true, 'time-pos': 40 })
   assert.equal(p.read()['time-pos'], 40)
-  await new Promise(resolve => setTimeout(resolve, 50))
+  for (let attempt = 0; attempt < 50 && (cpu.calls.at(-1)?.[1] as { kind?: string } | undefined)?.kind !== 'pause'; attempt++)
+    await new Promise(resolve => setTimeout(resolve, 20))
   assert.deepEqual(cpu.calls.at(-1), ['command', { kind: 'pause', paused: false }])
   p.destroy()
 })

@@ -127,7 +127,7 @@ afterEach(async () => {
 for (const presentation of ['expanded', 'fullscreen'] as const) test(`system back docks ${presentation} playback with settings open and retains the detail route`, async () => {
   await mount(undefined, '/libraries/1/video/2')
   await act(async () => changed({ ...snapshot(), presentation: 'docked' }))
-  const current = { ...snapshot(), presentation, rendererFullscreenControls: true }
+  const current = { ...snapshot(), presentation }
   await act(async () => changed(current))
   await options()
   await act(async () => history.go())
@@ -289,7 +289,7 @@ test('remounting the playback panel releases the old history callback and docks 
 
 for (const presentation of ['expanded', 'fullscreen'] as const) test(`Escape retains layered dismissal in ${presentation} playback`, async () => {
   await mount()
-  const current = { ...snapshot(), presentation, rendererFullscreenControls: true }
+  const current = { ...snapshot(), presentation }
   await act(async () => changed(current))
   await options()
   const escape = () => window.dispatchEvent(Object.assign(new Event('keydown', { cancelable: true }), { key: 'Escape', isComposing: false }))
@@ -501,7 +501,7 @@ test('progress keyboard focus reveals fullscreen controls and cancels their auto
   })
   context.mock.method(window, 'clearTimeout', (id: number) => { hideTimers.delete(id) })
   await mount()
-  await act(async () => changed({ ...snapshot(), presentation: 'fullscreen', rendererFullscreenControls: true, nativeVideoFocused: false }))
+  await act(async () => changed({ ...snapshot(), presentation: 'fullscreen' }))
   const panel = () => renderer!.root.find(node => node.props['data-playback-session'] === 'first')
   const slider = renderer!.root.findAllByType('input').find(node => node.props['aria-label'] === '播放进度')!
   assert.equal(panel().props['data-controls-visible'], false)
@@ -674,7 +674,7 @@ test('source query failure keeps the current playback and can be retried by reop
   assert.equal(source().props.disabled, false)
 })
 
-test('viewport polling hides only intersecting visible toast surfaces and restores the same playback session', async context => {
+test('Canvas keeps playing behind HTML toasts without resending native geometry', async context => {
   let poll = (): void => {}
   context.mock.method(window, 'setInterval', (callback: () => void) => { poll = callback; return 1 })
   context.mock.method(window, 'clearInterval', () => {})
@@ -684,7 +684,7 @@ test('viewport polling hides only intersecting visible toast surfaces and restor
   const surface = { getBoundingClientRect: () => surfaceBounds, checkVisibility: () => surfaceVisible }
   let surfaces: typeof surface[] = []
   context.mock.method(document, 'querySelectorAll', (selector: string) => {
-    assert.equal(selector, '[data-native-playback-occluder]')
+    assert.equal(selector, '[data-playback-overlay-surface]')
     return surfaces
   })
   await mount({ createNodeMock: element => element.type === 'button' && String(element.props['aria-label']).startsWith('视频画面')
@@ -695,21 +695,21 @@ test('viewport polling hides only intersecting visible toast surfaces and restor
   assert.equal(viewports.length, 1, 'a disjoint toast does not hide video or resend unchanged geometry')
   surfaceBounds = { left: 109, top: 20, right: 200, bottom: 60 }
   await act(async () => { poll(); poll() })
-  assert.deepEqual(viewports.map(value => value.visible), [true, false])
+  assert.deepEqual(viewports.map(value => value.visible), [true])
   surfaceVisible = false
   await act(async () => poll())
-  assert.deepEqual(viewports.map(value => value.visible), [true, false, true])
+  assert.deepEqual(viewports.map(value => value.visible), [true])
   surfaceVisible = true
   await act(async () => poll())
   surfaces = []
   await act(async () => poll())
-  assert.deepEqual(viewports.map(value => value.visible), [true, false, true, false, true])
+  assert.deepEqual(viewports.map(value => value.visible), [true])
   assert.ok(viewports.every(value => value.sessionId === 'first' && value.presentation === 'expanded'))
   assert.deepEqual(controls, [], 'visual occlusion neither pauses nor stops the decoder')
   assert.deepEqual(opened, [], 'restoring video does not reopen the source')
 })
 
-test('owned dropdowns keep video visible unless their surface overlaps; nested modals still hide it', async context => {
+test('HTML dropdowns and nested modals preserve the Canvas surface', async context => {
   let poll = (): void => {}
   context.mock.method(window, 'setInterval', (callback: () => void) => { poll = callback; return 1 })
   context.mock.method(window, 'clearInterval', () => {})
@@ -735,7 +735,7 @@ test('owned dropdowns keep video visible unless their surface overlaps; nested m
   assert.deepEqual(viewports.map(value => value.visible), [true], 'a dropdown in the option rail does not black out video')
   menuBounds = { left: 109, top: 20, right: 200, bottom: 60 }
   await act(async () => poll())
-  assert.deepEqual(viewports.map(value => value.visible), [true, false])
+  assert.deepEqual(viewports.map(value => value.visible), [true])
   menuBounds = { left: 200, top: 20, right: 300, bottom: 60 }
   await act(async () => poll())
   const removeModal = register({ id: 'playback-confirmation', parentId: playerLayer.id, modal: true, root: () => null })
@@ -745,14 +745,14 @@ test('owned dropdowns keep video visible unless their surface overlaps; nested m
   removeSelect()
   surfaces = []
   await act(async () => poll())
-  assert.deepEqual(viewports.map(value => value.visible), [true, false, true, false, true])
+  assert.deepEqual(viewports.map(value => value.visible), [true])
   assert.deepEqual(controls, [], 'opening and closing menus does not pause or stop the decoder')
   assert.deepEqual(opened, [], 'the same playback source remains open')
 })
 
 test('Windows fullscreen uses the classic toolbar and the same three settings tabs', async () => {
   await mount()
-  await act(async () => changed({ ...snapshot(), presentation: 'fullscreen', rendererFullscreenControls: true, interactionSequence: 1 }))
+  await act(async () => changed({ ...snapshot(), presentation: 'fullscreen' }))
   assert.ok(button('退出全屏'))
   const quickSpeed = renderer!.root.findAllByType(Select).find(node => node.props['aria-label'] === '快捷倍速')!
   assert.ok(quickSpeed)
@@ -773,7 +773,7 @@ test('Windows fullscreen uses the classic toolbar and the same three settings ta
 
 test('fullscreen volume previews survive old snapshots and resume following confirmed volume', async () => {
   await mount()
-  const current = { ...snapshot(), presentation: 'fullscreen' as const, rendererFullscreenControls: true }
+  const current = { ...snapshot(), presentation: 'fullscreen' as const }
   await act(async () => changed(current))
   const slider = () => renderer!.root.findAllByType('input').find(node => node.props['aria-label'] === '音量')!
   await act(async () => slider().props.onChange({ target: { value: '75' } }))
@@ -813,32 +813,33 @@ test('fullscreen mouse hover reveals only its own edge, including while paused',
   context.mock.method(window, 'clearTimeout', () => {})
   Object.defineProperty(window, 'innerHeight', { configurable: true, value: 800 })
   await mount()
-  const current = { ...snapshot(), presentation: 'fullscreen' as const, rendererFullscreenControls: true, fullscreenPointerY: 400 }
+  const current = { ...snapshot(), presentation: 'fullscreen' as const }
   const panel = () => renderer!.root.find(node => node.props['data-playback-session'] === 'first')
   await act(async () => changed(current))
   assert.equal(panel().props['data-controls-visible'], false)
   assert.equal(panel().props['data-header-visible'], false)
-  await act(async () => changed({ ...current, fullscreenPointerY: 450, interactionSequence: 2 }))
-  assert.equal(panel().props['data-controls-visible'], false, 'native motion in the middle cannot summon chrome')
-  await act(async () => changed({ ...current, fullscreenPointerY: 8 }))
+  await act(async () => panel().props.onPointerMove({ clientY: 450 }))
+  assert.equal(panel().props['data-controls-visible'], false, 'motion in the middle cannot summon chrome')
+  await act(async () => panel().props.onPointerMove({ clientY: 8 }))
   assert.equal(panel().props['data-header-visible'], true)
   assert.equal(panel().props['data-controls-visible'], false)
-  await act(async () => changed({ ...current, fullscreenPointerY: 780 }))
+  await act(async () => panel().props.onPointerMove({ clientY: 780 }))
   assert.equal(panel().props['data-controls-visible'], true)
   assert.equal(panel().props['data-header-visible'], false)
   await act(async () => panel().props.onPointerMove({ clientY: 400 }))
   assert.equal(panel().props['data-controls-visible'], false, 'HTML motion obeys the same regions')
   await act(async () => changed({ ...current, paused: true, phase: 'paused' }))
   assert.equal(panel().props['data-controls-visible'], false, 'pause does not bypass hover activation')
-  await act(async () => changed({ ...current, paused: true, phase: 'paused', fullscreenPointerY: 780 }))
+  await act(async () => changed({ ...current, paused: true, phase: 'paused' }))
+  await act(async () => panel().props.onPointerMove({ clientY: 780 }))
   assert.equal(panel().props['data-controls-visible'], true)
   await act(async () => changed(current))
   await act(async () => { panel().props.onKeyDownCapture({ key: 'Tab' }); panel().props.onFocusCapture({ target: {} }) })
   await act(async () => hide!())
   assert.equal(panel().props['data-controls-visible'], true, 'keyboard focus keeps chrome reachable')
-  await act(async () => changed({ ...current, nativeVideoFocused: true }))
+  await act(async () => { window.dispatchEvent(new Event('blur')); panel().props.onPointerMove({ clientY: 400 }) })
   await act(async () => hide!())
-  assert.equal(panel().props['data-controls-visible'], false, 'native focus overrides stale HTML focus')
+  assert.equal(panel().props['data-controls-visible'], false, 'window blur clears stale control focus')
   await act(async () => changed(current))
   await act(async () => panel().props.onPointerDownCapture())
   await act(async () => panel().props.onFocusCapture({ target: { closest: () => ({}) } }))
@@ -853,7 +854,7 @@ test('fullscreen mouse hover reveals only its own edge, including while paused',
   assert.equal(panel().props['data-controls-visible'], false, 'closing settings restores toolbar hover activation')
 })
 
-test('Windows popup clipping keeps the remaining video visible and restores its complete region', async context => {
+test('HTML popups preserve Canvas playback without native cutout commands', async context => {
   let poll = (): void => {}
   context.mock.method(window, 'setInterval', (callback: () => void) => { poll = callback; return 1 })
   context.mock.method(window, 'clearInterval', () => {})
@@ -863,15 +864,13 @@ test('Windows popup clipping keeps the remaining video visible and restores its 
   context.mock.method(document, 'querySelectorAll', () => surfaces)
   await mount({ createNodeMock: element => element.type === 'button' && String(element.props['aria-label']).startsWith('视频画面')
     ? { getBoundingClientRect: () => video, closest: () => null } : null })
-  await act(async () => changed({ ...snapshot(), rendererFullscreenControls: true }))
+  await act(async () => changed({ ...snapshot() }))
   await act(async () => poll())
   surfaces = [popup]
   await act(async () => poll())
   assert.equal(viewports.at(-1)!.visible, true)
-  assert.deepEqual(viewports.at(-1)!.occlusions, [{ x: 80, y: 70, width: 30, height: 30 }])
   surfaces = []
   await act(async () => poll())
-  assert.deepEqual(viewports.at(-1)!.occlusions, [])
   assert.deepEqual(controls, [])
 })
 
@@ -887,7 +886,7 @@ test('the unconfigured toolbar switch opens a guide without enabling or starting
   assert.equal(aiSwitch().props.checked, false)
   assert.equal(commands, 0)
   assert.ok(button('前往配置'))
-  assert.equal(renderer!.root.findAll(node => node.props.role === 'dialog' && node.props['data-native-playback-occluder'] === true).length, 1)
+  assert.equal(renderer!.root.findAll(node => node.props.role === 'dialog' && node.props['data-playback-overlay-surface'] === true).length, 1)
   await act(async () => { window.dispatchEvent(Object.assign(new Event('keydown', { cancelable: true }), { key: 'Escape', isComposing: false })) })
   assert.equal(aiSwitch().props['aria-expanded'], false)
   assert.deepEqual(controls, [])
@@ -960,10 +959,10 @@ test('toolbar command failure stays off and exposes a recoverable guide', async 
 for (const presentation of ['expanded', 'fullscreen'] as const) test(`AI guide closes on session replacement in ${presentation}`, async () => {
   aiState = { ...aiSnapshot(), supported: true }
   await mount()
-  await act(async () => changed({ ...snapshot(), presentation, rendererFullscreenControls: true }))
+  await act(async () => changed({ ...snapshot(), presentation }))
   await act(async () => aiSwitch().props.onChange())
   assert.equal(aiSwitch().props['aria-expanded'], true)
-  await act(async () => changed({ ...snapshot('second'), presentation, rendererFullscreenControls: true }))
+  await act(async () => changed({ ...snapshot('second'), presentation }))
   assert.equal(aiSwitch().props['aria-expanded'], false)
   assert.equal(aiSwitch().props.checked, false)
 })
@@ -1005,7 +1004,7 @@ test('shared-texture canvas stays in the video control and binds only to the cur
   assert.equal(canvas.parent!.type, 'button', 'video controls retain their existing hit target')
   assert.deepEqual(boundSurfaces, ['first-surface'])
   await act(async () => changed({ ...current, position: 2 }))
-  await act(async () => changed({ ...current, presentation: 'fullscreen', rendererFullscreenControls: true }))
+  await act(async () => changed({ ...current, presentation: 'fullscreen' }))
   assert.deepEqual(boundSurfaces, ['first-surface'], 'clock and presentation changes preserve the mounted receiver')
   assert.equal(renderer!.root.findByType('canvas'), canvas, 'ordinary updates keep the same canvas backing')
   await act(async () => button('视频画面，单击播放或暂停，双击全屏').props.onClick())

@@ -13,6 +13,7 @@
 #include <GL/gl.h>
 #include <uv.h>
 #include "mpvCore.h"
+#include "frameTiming.h"
 #include "windowsTextureTickets.h"
 #include <memory>
 #include <mutex>
@@ -81,11 +82,12 @@ struct Export {
     Com<ID3D11Texture2D> texture;
     HANDLE handle = nullptr;
     int width = 0, height = 0;
-    uint64_t generation = 0;
+    uint64_t generation = 0, resourceId = 0;
     void reset() { if (handle) CloseHandle(handle); handle = nullptr; texture.reset(); width = height = 0; }
 };
 WindowsTextureTickets tickets;
 std::array<Export, 3> exports;
+uint64_t nextResourceId = 0;
 size_t peak = 0;
 struct Wakeup {
     napi_env env = nullptr; napi_ref callback = nullptr;
@@ -121,22 +123,18 @@ struct Session {
     Gl gl; HANDLE interop = nullptr, registered = nullptr;
     GLuint buffer = 0, frame = 0;
     int width = 1, height = 1, bridgeWidth = 0, bridgeHeight = 0;
-    bool visible = false, dirty = true, locked = false, uncertain = false;
-    uint64_t timeline = 0, pending = 0, pendingTimeline = 0;
+    bool visible = false, dirty = true, locked = false, uncertain = false, probePending = false, pendingProbe = false;
+    uint64_t pending = 0;
+    FrameTiming timing, pendingTiming;
     size_t pendingSlot = 0;
-    int64_t renderStart = 0, target = 0;
     uv_timer_t timer{};
     LUID adapter{};
 };
 Session *session = nullptr;
 void current(Session &s) { if (!wglMakeCurrent(s.dc, s.context)) throw std::runtime_error("Cannot make Windows shared render context current"); }
 void size(napi_env env, napi_value bounds, Session &s) {
-    const auto scale = namedNumber(env, bounds, "scale"), width = std::ceil(namedNumber(env, bounds, "width") * scale),
-        height = std::ceil(namedNumber(env, bounds, "height") * scale);
-    if (!std::isfinite(scale) || scale <= 0 || scale > 8 || !std::isfinite(width) || !std::isfinite(height)
-        || width < 1 || height < 1 || width > 8192 || height > 8192 || width * height * 4 > 256 * 1024 * 1024)
-        throw std::runtime_error("Invalid Windows texture bounds");
-    if (s.width != width || s.height != height) { s.width = static_cast<int>(width); s.height = static_cast<int>(height); s.dirty = true; }
+    const auto next = frameLayout(namedNumber(env, bounds, "width"), namedNumber(env, bounds, "height"), namedNumber(env, bounds, "scale"));
+    if (s.width != next.width || s.height != next.height) { s.width = next.width; s.height = next.height; s.dirty = true; }
 }
 D3D11_TEXTURE2D_DESC description(int width, int height) {
     D3D11_TEXTURE2D_DESC result{};
@@ -173,7 +171,7 @@ void prepare(Session &s, size_t index) {
     Com<IDXGIResource1> resource;
     checked(out.texture->QueryInterface(__uuidof(IDXGIResource1), reinterpret_cast<void **>(resource.put())), "Query IDXGIResource1");
     checked(resource->CreateSharedHandle(nullptr, DXGI_SHARED_RESOURCE_READ | DXGI_SHARED_RESOURCE_WRITE, nullptr, &out.handle), "Create NT shared handle");
-    out.width = s.width; out.height = s.height; out.generation = tickets.generation;
+    out.width = s.width; out.height = s.height; out.generation = tickets.generation; out.resourceId = ++nextResourceId;
 }
 bool copyDone(Session &s) {
     BOOL done = FALSE;
@@ -257,7 +255,8 @@ napi_value create(napi_env env, napi_callback_info info) {
         s.interop = s.gl.open(s.device.value);
         if (!s.interop) throw std::runtime_error("GL cannot access the selected D3D11 adapter");
         D3D11_QUERY_DESC query{D3D11_QUERY_EVENT, 0}; checked(s.device->CreateQuery(&query, s.query.put()), "Create GPU completion query");
-        s.playback.initialize(mpvProc, nullptr, false, notify, &wakeup, "auto", false, "0.02", true);
+        RenderConfig config; config.getProc = mpvProc; config.wakeup = notify; config.wakeupContext = &wakeup;
+        s.playback.initialize(config);
         s.playback.setEventWakeup(notify, &wakeup);
     } catch (const std::exception &error) {
         try { shutdown(); } catch (...) { if (session) session->uncertain = true; }
@@ -283,9 +282,14 @@ napi_value visibility(napi_env env, napi_callback_info info) {
 napi_value reset(napi_env env, napi_callback_info info) {
     try { requireOwner(); size_t count = 1; napi_value args[1]; double value = 0; napi_get_cb_info(env, info, &count, args, nullptr, nullptr);
         if (!session || count != 1 || napi_get_value_double(env, args[0], &value) != napi_ok || !std::isfinite(value)
-            || value <= session->timeline || value > 9007199254740991.0 || std::floor(value) != value) throw std::runtime_error("Invalid Windows timeline");
-        session->timeline = static_cast<uint64_t>(value); session->dirty = true; notify(nullptr);
+            || value <= session->timing.timeline || value > 9007199254740991.0 || std::floor(value) != value) throw std::runtime_error("Invalid Windows timeline");
+        session->timing.reset(static_cast<uint64_t>(value)); session->dirty = true; notify(nullptr);
     } catch (const std::exception &error) { return fail(env, error.what()); }
+    return undefined(env);
+}
+napi_value probe(napi_env env, napi_callback_info) {
+    try { requireOwner(); if (session) { session->probePending = true; session->dirty = true; notify(nullptr); } }
+    catch (const std::exception &error) { return fail(env, error.what()); }
     return undefined(env);
 }
 napi_value next(napi_env env, napi_callback_info) {
@@ -296,7 +300,7 @@ napi_value next(napi_env env, napi_callback_info) {
         const bool updated = s.playback.updateRequested(); s.dirty = s.dirty || updated;
         if (s.pending) {
             if (!copyDone(s)) {
-                if (clockUs() - s.renderStart > 5000000) throw std::runtime_error("Windows producer GPU completion timeout");
+                if (clockUs() - s.pendingTiming.renderStartUs > 5000000) throw std::runtime_error("Windows producer GPU completion timeout");
                 if (updated && !s.playback.skipRender()) throw std::runtime_error("Cannot skip pending Windows frame");
                 return undefined(env);
             }
@@ -306,11 +310,13 @@ napi_value next(napi_env env, napi_callback_info) {
             napi_value result, handle; napi_create_object(env, &result);
             napi_create_buffer_copy(env, sizeof(out.handle), &out.handle, nullptr, &handle);
             napi_set_named_property(env, result, "ntHandle", handle);
-            setNumber(env, result, "sequence", id); setNumber(env, result, "timeline", s.pendingTimeline);
+            setNumber(env, result, "resourceId", out.resourceId); setNumber(env, result, "slot", s.pendingSlot);
+            setNumber(env, result, "sequence", id); setNumber(env, result, "timeline", s.pendingTiming.timeline);
             setNumber(env, result, "width", out.width); setNumber(env, result, "height", out.height);
-            setNumber(env, result, "renderStartUs", s.renderStart); setNumber(env, result, "targetTimeUs", s.target);
+            setNumber(env, result, "renderStartUs", s.pendingTiming.renderStartUs); setNumber(env, result, "targetTimeUs", s.pendingTiming.targetTimeUs);
             setFlag(env, result, "producerComplete", true); setString(env, result, "pixelFormat", "bgra");
             setString(env, result, "colorContract", "bt709-srgb-rgb-full"); notify(nullptr);
+            if (s.pendingProbe) setString(env, result, "selfTest", "solid-v1");
             return result;
         }
         const auto free = std::find_if(tickets.slots.begin(), tickets.slots.end(), [](const auto &ticket) { return ticket.state == WindowsTextureTickets::State::free; });
@@ -319,8 +325,11 @@ napi_value next(napi_env env, napi_callback_info) {
             return undefined(env);
         }
         if (!s.dirty) return undefined(env);
+        const bool probe = s.probePending;
+        const int viewportWidth = s.width, viewportHeight = s.height;
+        if (probe) { s.width = 640; s.height = 360; }
         const auto index = static_cast<size_t>(free - tickets.slots.begin()); prepare(s, index);
-        const auto delay = s.playback.nextFrameDelayUs(); s.renderStart = clockUs(); s.target = delay ? s.renderStart + delay : 0;
+        const auto delay = s.playback.nextFrameDelayUs(); s.timing.sample(clockUs(), delay);
         if (!s.gl.lock(s.interop, 1, &s.registered)) throw std::runtime_error("Cannot acquire WGL bridge");
         s.locked = true;
         s.gl.bindRenderbuffer(renderbuffer, s.buffer); s.gl.bindFrame(framebuffer, s.frame);
@@ -329,15 +338,17 @@ napi_value next(napi_env env, napi_callback_info) {
         glViewport(0, 0, s.width, s.height); glDisable(GL_SCISSOR_TEST); glClearColor(0.f, 0.f, 0.f, 1.f); glClear(GL_COLOR_BUFFER_BIT);
         // flipY=false matches the top-left shared image contract; four-corner
         // color fixtures on Windows must establish real driver orientation.
-        if (!s.playback.render(s.width, s.height, s.frame, false)) throw std::runtime_error("Cannot render Windows shared texture");
+        if (probe) { glClearColor(64.f / 255, 191.f / 255, 128.f / 255, 1); glClear(GL_COLOR_BUFFER_BIT); }
+        else if (!s.playback.render(s.width, s.height, s.frame, false)) throw std::runtime_error("Cannot render Windows shared texture");
         glFinish();
         const auto glError = glGetError();
         if (glError != GL_NO_ERROR) throw std::runtime_error("Windows shared GL render failed (error " + std::to_string(glError) + ")");
         if (!s.gl.unlock(s.interop, 1, &s.registered)) throw std::runtime_error("Cannot release WGL bridge");
         s.locked = false;
-        s.pendingSlot = index; s.pendingTimeline = s.timeline; s.pending = tickets.begin(index);
+        s.pendingSlot = index; s.pendingTiming = s.timing; s.pending = tickets.begin(index);
         s.immediate->CopyResource(exports[index].texture.value, s.bridge.value);
-        s.immediate->End(s.query.value); s.immediate->Flush(); s.dirty = false;
+        s.immediate->End(s.query.value); s.immediate->Flush(); s.dirty = probe;
+        s.pendingProbe = probe; s.probePending = false; s.width = viewportWidth; s.height = viewportHeight;
         peak = std::max(peak, tickets.outstanding());
         // Asynchronous owner-thread polling while a copy is pending only.
         // No sleep loop or fixed frame-rate cap in normal playback.
@@ -416,16 +427,7 @@ void cleanup(void *) {
 napi_value initializeWindowsSharedTexture(napi_env env, napi_value exportsObject) {
     // Electron may own an embedded uv loop; uv_default_loop identity is not a
     // main-thread test. Ask the fixed Node runtime before touching global state.
-    napi_value global, processObject, builtin, moduleName, workerThreads, main;
-    bool isMain = false;
-    if (napi_get_global(env, &global) != napi_ok
-        || napi_get_named_property(env, global, "process", &processObject) != napi_ok
-        || napi_get_named_property(env, processObject, "getBuiltinModule", &builtin) != napi_ok
-        || napi_create_string_utf8(env, "node:worker_threads", NAPI_AUTO_LENGTH, &moduleName) != napi_ok
-        || napi_call_function(env, processObject, builtin, 1, &moduleName, &workerThreads) != napi_ok
-        || napi_get_named_property(env, workerThreads, "isMainThread", &main) != napi_ok
-        || napi_get_value_bool(env, main, &isMain) != napi_ok || !isMain)
-        return javdex::fail(env, "Windows shared producer cannot load in a worker thread");
+    if (!javdex::nodeMainThread(env)) return javdex::fail(env, "Windows shared producer requires the Node main thread, not a worker thread");
     owner = GetCurrentThreadId(); wakeup.env = env;
     napi_value name; napi_create_string_utf8(env, "javdex-windows-shared-wakeup", NAPI_AUTO_LENGTH, &name);
     if (napi_create_threadsafe_function(env, nullptr, nullptr, name, 1, 1, nullptr, nullptr, nullptr, dispatch, &wakeup.function) != napi_ok)
@@ -437,6 +439,7 @@ napi_value initializeWindowsSharedTexture(napi_env env, napi_value exportsObject
         {"setBounds", nullptr, bounds, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"setVisible", nullptr, visibility, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"resetTiming", nullptr, reset, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"requestSelfTest", nullptr, probe, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nextFrame", nullptr, next, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"setRenderBudget", nullptr, budget, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"setWakeup", nullptr, setWakeup, nullptr, nullptr, nullptr, napi_default, nullptr},

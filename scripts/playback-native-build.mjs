@@ -50,7 +50,14 @@ export function playbackNativeBuild({ platform, arch, root, prefix, include, nod
       { command: core, args: [] },
       { command: 'clang++', args: ['-std=c++17', ...architecture, '-fobjc-arc', '-shared', '-undefined', 'dynamic_lookup', '-Wno-deprecated-declarations',
         `-I${include}`, `-I${prefix}/include`, path.join(source, 'macSharedTexture.mm'), `-L${prefix}/lib`, '-lmpv',
-        '-framework', 'Foundation', '-framework', 'OpenGL', '-framework', 'IOSurface', '-o', path.join(output, 'playback.node')] }
+        '-framework', 'CoreFoundation', '-framework', 'OpenGL', '-framework', 'IOSurface', '-o', path.join(output, 'playback.node')] },
+      { command: 'clang++', args: ['-std=c++17', ...architecture, '-shared', '-undefined', 'dynamic_lookup', '-Wno-deprecated-declarations',
+        `-I${include}`, path.join(source, 'playbackInterop.cpp'), '-framework', 'CoreFoundation', '-framework', 'IOSurface',
+        '-o', path.join(output, 'playback-interop.node')] },
+      { command: 'clang++', args: ['-std=c++17', ...architecture, '-UNDEBUG', '-Wno-deprecated-declarations',
+        path.join(source, 'macSurfaceTransport.test.cpp'), '-framework', 'CoreFoundation', '-framework', 'IOSurface',
+        '-o', path.join(output, 'mac-surface-transport-test')] },
+      { command: path.join(output, 'mac-surface-transport-test'), args: [] }
     ]
   }
   if (platform === 'win32') {

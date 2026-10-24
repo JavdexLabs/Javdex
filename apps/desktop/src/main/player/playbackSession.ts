@@ -33,8 +33,6 @@ interface Dependencies {
   awake(playing: boolean): void
   windowSize(): { width: number; height: number }
   focusControls?(): void
-  navigate?(direction: 'back' | 'forward'): void
-  escape?(): void
   readVolume?(): Promise<number>
   volumeChanged?(value: number): void
   progress?: {
@@ -61,7 +59,6 @@ export function createPlaybackSession(deps: Dependencies) {
   let pendingSeek: { target: number; requestedAt: number } | null = null
   let subtitleRefresh: { id: number; target: number; requestedAt: number } | null = null
   let openedAt = 0
-  let focusSequence = 0
   const now = deps.now ?? Date.now
   const publish = (): void => { deps.changed(snapshot ? structuredClone(snapshot) : null) }
   function destroySource(): void {
@@ -257,12 +254,7 @@ export function createPlaybackSession(deps: Dependencies) {
       const { width, height } = deps.windowSize()
       const rect = viewport.rect
       const valid = rect.width >= 1 && rect.height >= 1 && rect.x + rect.width <= width + 1 && rect.y + rect.height <= height + 1
-      const occlusions = valid ? (viewport.occlusions ?? []).flatMap(area => {
-        const x = Math.max(rect.x, area.x), y = Math.max(rect.y, area.y)
-        const right = Math.min(rect.x + rect.width, area.x + area.width), bottom = Math.min(rect.y + rect.height, area.y + area.height)
-        return right > x && bottom > y ? [area.radii ? area : { x, y, width: right - x, height: bottom - y }] : []
-      }) : []
-      deps.native.viewport(valid ? rect : { x: 0, y: 0, width: 1, height: 1 }, viewport.visible && valid, snapshot, occlusions)
+      deps.native.viewport(valid ? rect : { x: 0, y: 0, width: 1, height: 1 }, viewport.visible && valid, snapshot)
     },
     addSubtitle(id: string, file: string): void { current(id); deps.native.addSubtitle(file) },
     aiSubtitleSource(id: string): PlaybackSource {
@@ -313,11 +305,7 @@ export function createPlaybackSession(deps: Dependencies) {
           fallbackReason: raw.playbackFallbackReason ?? null
         } } : {}),
         audioOutput: raw['current-ao'] ?? null, droppedFrames: finite(raw['frame-drop-count']) }
-      state.rendererFullscreenControls = raw.rendererFullscreenControls === true
       state.sharedTextureSurface = raw.sharedTextureSurface
-      state.nativeVideoFocused = raw.nativeVideoFocused === true
-      state.interactionSequence = finite(raw.interactionSequence) ?? undefined
-      state.fullscreenPointerY = finite(raw.fullscreenPointerY) ?? undefined
       deps.awake(state.phase === 'playing')
       // Rendering a paused first frame and jumping the clock cannot prove actual playback.
       const frames = raw.submittedFrames ?? raw.presentedFrames ?? 0
@@ -329,36 +317,6 @@ export function createPlaybackSession(deps: Dependencies) {
         sample = { frames, position: state.position }
       } else sample = null
       saveProgress(state.phase === 'ended' || state.phase === 'paused' && previousPhase !== 'paused')
-      let pauseIntent = state.paused
-      let muteIntent = state.muted
-      let volumeIntent = state.volume
-      for (const action of raw.actions ?? []) {
-        if (snapshot !== state) break
-        if (action.kind === 'history-back' || action.kind === 'history-forward') deps.navigate?.(action.kind === 'history-back' ? 'back' : 'forward')
-        else if (action.kind === 'escape') {
-          if (state.presentation === 'docked') deps.navigate?.('back')
-          else deps.escape?.()
-        }
-        else if (action.kind === 'toggle-pause') {
-          if (state.phase === 'ended' && !state.seeking) { control(state.sessionId, { kind: 'restart' }); pauseIntent = false }
-          else { pauseIntent = !pauseIntent; control(state.sessionId, { kind: 'pause', paused: pauseIntent }) }
-        }
-        else if (action.kind === 'toggle-mute') { muteIntent = !muteIntent; control(state.sessionId, { kind: 'mute', muted: muteIntent }) }
-        else if (action.kind === 'focus-forward' || action.kind === 'focus-backward') {
-          state.focusRequest = { sequence: ++focusSequence, backwards: action.kind === 'focus-backward' }
-          deps.focusControls?.()
-        }
-        else if (action.kind === 'stop') stop()
-        else if (action.kind === 'dock') control(state.sessionId, { kind: 'presentation', value: 'docked' })
-        else if (action.kind === 'expand') control(state.sessionId, { kind: 'presentation', value: state.presentation === 'fullscreen' ? 'docked' : 'expanded' })
-        else if (action.kind === 'fullscreen') control(state.sessionId, { kind: 'presentation', value: state.presentation === 'fullscreen' ? 'expanded' : 'fullscreen' })
-        else if (action.kind === 'seek' && action.value != null) control(state.sessionId, { kind: 'seek', seconds: action.value })
-        else if (action.kind === 'seek-relative' && state.seekable && action.value != null) control(state.sessionId, { kind: 'seek', relative: true, seconds: action.value })
-        else if ((action.kind === 'volume' || action.kind === 'volume-relative') && action.value != null && Number.isFinite(action.value)) {
-          volumeIntent = Math.max(0, Math.min(100, action.kind === 'volume-relative' ? volumeIntent + action.value : action.value))
-          control(state.sessionId, { kind: 'volume', value: volumeIntent })
-        }
-      }
       if (!validation && now() - lastValidation >= 5000) {
         lastValidation = now()
         const check = deps.validate(activeSource).catch(error => {

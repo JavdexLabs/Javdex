@@ -185,6 +185,21 @@ export async function aggregatePlaybackSources(directory, version) {
         if (fs.readFileSync(path.join(native, 'apps/desktop/src/main/player/native', producer), 'utf8').includes('#include "softwarePlayback.h"'))
           requiredNative.push('apps/desktop/src/main/player/native/softwarePlayback.h')
       }
+      if (runtime.playbackHostVersion === 1 && runtime.platform !== 'linux') requiredNative.push('apps/desktop/src/main/player/native/playbackInterop.cpp')
+      // Every quoted local include is part of the preferred source closure.
+      // This also validates older source snapshots using their actual includes.
+      const nativeDirectory = path.join(native, 'apps/desktop/src/main/player/native')
+      const visited = new Set()
+      function headers(file) {
+        if (visited.has(file)) return
+        visited.add(file)
+        for (const match of fs.readFileSync(file, 'utf8').matchAll(/^\s*#include "([^"/\\]+)"/gm)) {
+          const header = path.join(nativeDirectory, match[1])
+          assert.ok(fs.statSync(header).size > 0, 'Missing native header: ' + match[1])
+          headers(header)
+        }
+      }
+      for (const name of requiredNative.filter(name => /\.(?:h|cpp|mm)$/.test(name))) headers(path.join(native, name))
       for (const name of requiredNative) assert.ok(fs.statSync(path.join(native, name)).size > 0, 'Missing preferred native source/SDK: ' + name)
       assert.equal(JSON.parse(fs.readFileSync(path.join(native, 'package.json'))).version, version, 'Native snapshot version mismatch')
       const nativeLock = JSON.parse(fs.readFileSync(path.join(native, 'build/playback-sources.json')))

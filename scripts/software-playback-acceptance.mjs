@@ -1,8 +1,8 @@
 // Native macOS/Windows acceptance with isolated catalogs and synthetic fixtures.
 // --mode=disabled verifies automatic recovery with Chromium GPU acceleration
 // disabled; initialization injects only the GL create failure; gpu-fault kills
-// only this acceptance host's GPU child. producer-fault injects one native
-// nextFrame exception through the real shared-frame bridge. No driver is changed.
+// only this acceptance host's GPU child. producer-fault exits the isolated native
+// host; host-stall verifies its heartbeat timeout. No driver is changed.
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -16,6 +16,7 @@ import { closeAcceptanceAndSave } from './playback-acceptance-cleanup.mjs'
 import { checkSyntheticCanvasFrame } from './windows-canvas-checks.mjs'
 
 assert(['darwin', 'win32'].includes(process.platform))
+process.env.JAVDEX_PLAYBACK_DIAGNOSTICS = '1'
 const host = process.platform === 'darwin' ? 'macos' : 'windows'
 const mode = process.argv.find(v => v.startsWith('--mode='))?.slice(7) ?? 'disabled'
 const playingFault = process.argv.includes('--playing-fault')
@@ -24,8 +25,8 @@ const savedVolumeArg = process.argv.find(v => v.startsWith('--saved-volume='))
 const savedVolume = savedVolumeArg === undefined ? undefined : Number(savedVolumeArg.slice('--saved-volume='.length))
 if (savedVolume !== undefined) assert(Number.isFinite(savedVolume) && savedVolume >= 0 && savedVolume <= 100)
 const recoveryVolume = savedVolume ?? 31
-assert(['disabled', 'forced', 'initialization', 'gpu-fault', 'producer-fault'].includes(mode))
-const recoveringFault = mode === 'gpu-fault' || mode === 'producer-fault'
+assert(['disabled', 'forced', 'initialization', 'gpu-fault', 'producer-fault', 'host-stall'].includes(mode))
+const recoveringFault = mode === 'gpu-fault' || mode === 'producer-fault' || mode === 'host-stall'
 const media = process.argv.slice(2).filter(v => !v.startsWith('--')).map(v => path.resolve(v))
 assert(media.length > 0, 'Pass synthetic media files for the acceptance catalog')
 assert(mode !== 'producer-fault' || media.length === 1, 'Run each producer-fault fixture in a fresh host; CPU recovery stays active until restart')
@@ -35,7 +36,7 @@ fs.mkdirSync(output, { recursive: true })
 const directory = createAcceptanceDirectory(`${host}-cpu-`), targets = seedAcceptanceCatalog(directory, media)
 const report = { passed: false, mode, playingFault, agedSession, savedVolume, directory, checks: [], pending: ['physical GPU-less machine', 'additional GPU/driver/display combinations', 'long playback', 'signed package'] }
 const nativeFile = process.env.JAVDEX_PLAYBACK_ACCEPTANCE_EXECUTABLE
-  ? path.join(path.dirname(path.resolve(process.env.JAVDEX_PLAYBACK_ACCEPTANCE_EXECUTABLE)), 'resources/native-playback/playback.node')
+  ? path.resolve(path.dirname(process.env.JAVDEX_PLAYBACK_ACCEPTANCE_EXECUTABLE), process.platform === 'darwin' ? '../Resources/native-playback/playback.node' : 'resources/native-playback/playback.node')
   : path.resolve('out/native-playback/playback.node')
 report.nativeSha256 = createHash('sha256').update(fs.readFileSync(nativeFile)).digest('hex')
 const save = () => fs.writeFileSync(path.join(output, `${host}-cpu-${mode}.json`), JSON.stringify(report, null, 2) + '\n')
@@ -81,40 +82,21 @@ try {
       globalThis.cpuReceipts.set(value.surfaceToken, (globalThis.cpuReceipts.get(value.surfaceToken) ?? 0) + 1)
     })
   })
-  if (mode === 'initialization') await application.evaluate(({ app }) => {
-    const require = process.getBuiltinModule('module').createRequire(app.getAppPath() + '/package.json')
-    const file = require.resolve(app.isPackaged ? process.resourcesPath + '/native-playback/playback.node' : app.getAppPath() + '/out/native-playback/playback.node'), original = require(file)
-    const injected = Object.create(null)
-    for (const name of Object.getOwnPropertyNames(original)) injected[name] = original[name]
-    const gpu = process.platform === 'darwin' ? injected : Object.fromEntries(Object.getOwnPropertyNames(original.sharedTexture).map(key => [key, original.sharedTexture[key]]))
-    gpu.create = () => { throw new Error('OpenGL 3.2 core context is unavailable (acceptance injection)') }
-    if (process.platform === 'win32') injected.sharedTexture = gpu
-    require.cache[file].exports = injected
-  })
-  if (mode === 'producer-fault') await application.evaluate(({ app }) => {
-    const require = process.getBuiltinModule('module').createRequire(app.getAppPath() + '/package.json')
-    const file = require.resolve(app.isPackaged ? process.resourcesPath + '/native-playback/playback.node' : app.getAppPath() + '/out/native-playback/playback.node')
-    const original = require(file)
-    const producer = process.platform === 'darwin' ? original : original.sharedTexture
-    const shared = Object.fromEntries(Object.getOwnPropertyNames(producer).map(key => [key, producer[key]]))
-    shared.nextFrame = (...args) => {
-      if (globalThis.injectProducerFault) {
-        globalThis.injectProducerFault = false
-        throw new Error('Shared GL render failed (acceptance injection)')
-      }
-      return producer.nextFrame(...args)
+  if (mode === 'initialization') await application.evaluate(({ utilityProcess }) => {
+    const original = utilityProcess.fork.bind(utilityProcess)
+    utilityProcess.fork = (entry, args, options) => {
+      if (args[1] === 'gpu') throw Error('GPU host initialization unavailable (acceptance injection)')
+      return original(entry, args, options)
     }
-    require.cache[file].exports = process.platform === 'darwin' ? shared
-      : { ...Object.fromEntries(Object.getOwnPropertyNames(original).map(key => [key, original[key]])), sharedTexture: shared }
   })
-  const native = () => application.evaluate(({ app }) => {
-    const require = process.getBuiltinModule('module').createRequire(app.getAppPath() + '/package.json')
-    const addon = require(app.isPackaged ? process.resourcesPath + '/native-playback/playback.node' : app.getAppPath() + '/out/native-playback/playback.node'), s = addon.software.inspect()
-    return { alive: s.alive, backend: s.backend, width: s.pixelWidth, height: s.pixelHeight, frames: s.nativeFrames,
+  const native = () => application.evaluate(() => {
+    const request = {cpu: {alive: false}, gpu: {alive: false}}
+    process.getBuiltinModule('diagnostics_channel').channel('javdex.playback.host.statistics').publish(request)
+    const s = request.cpu
+    return { alive: s.alive, backend: s.backend, width: s.pixelWidth ?? 0, height: s.pixelHeight ?? 0, frames: s.nativeFrames,
       position: s['time-pos'], audioPosition: s['audio-pts'], decoder: s['hwdec-current'], audio: s['current-ao'],
       volume: s.volume, muted: s.mute, speed: s.speed, sid: s.sid, aid: s.aid,
-      droppedFrames: s['frame-drop-count'],
-      error: s.error, loaded: s.loadedFiles, canvasAlive: (process.platform === 'darwin' ? addon : addon.sharedTexture).inspect().alive }
+      droppedFrames: s['frame-drop-count'], error: s.error, loaded: s.loadedFiles, canvasAlive: request.gpu.alive }
   })
   const capture = async name => {
     const png = await page.locator('canvas[data-playback-surface]').screenshot()
@@ -138,14 +120,15 @@ try {
       await control({ kind: 'mute', muted: true }); await control({ kind: 'speed', value: 1.25 })
       const sub = state.tracks.find(t => t.type === 'sub')
       if (sub) await control({ kind: 'track', type: 'sub', id: sub.id })
+      await waitForState(page, s => s?.paused && !s.seeking && Math.abs(s.position - faultPosition) < .15, 'paused position before the fault')
       if (playingFault) await control({ kind: 'pause', paused: false })
-      check.before = await waitForState(page, s => s?.paused === !playingFault && !s.seeking && Math.abs(s.position - faultPosition) < .15 && s.volume === recoveryVolume && s.muted && s.speed === 1.25
+      check.before = await waitForState(page, s => s?.paused === !playingFault && !s.seeking && (playingFault ? s.position >= faultPosition - .15 && s.position < faultPosition + 2 : Math.abs(s.position - faultPosition) < .15) && s.volume === recoveryVolume && s.muted && s.speed === 1.25
         && (!sub || s.tracks.some(t => t.type === 'sub' && t.id === sub.id && t.selected)), 'state before GPU fault')
       const restoredPosition = value => playingFault ? value >= check.before.position - .5 : Math.abs(value - faultPosition) < .5
       if (agedSession) await page.waitForTimeout(31000)
-      if (mode === 'producer-fault') {
-        await application.evaluate(() => { globalThis.injectProducerFault = true })
-        check.injected = 'one native nextFrame exception; actual CPU decoder/rendering and bridge recovery'
+      if (mode === 'producer-fault' || mode === 'host-stall') {
+        await application.evaluate((_electron, operation) => { process.getBuiltinModule('diagnostics_channel').channel('javdex.playback.host.control').publish({mode: 'gpu', operation}) }, mode === 'host-stall' ? 'stall' : 'kill')
+        check.injected = mode === 'host-stall' ? 'isolated native host stopped responding' : 'isolated native host terminated'
       } else check.killedGpu = await application.evaluate(({ app }) => {
         const gpu = app.getAppMetrics().find(p => p.type === 'GPU')
         if (!gpu || gpu.pid === process.pid) throw new Error('No owned GPU child to terminate')

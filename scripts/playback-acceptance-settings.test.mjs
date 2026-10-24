@@ -120,21 +120,20 @@ test('Windows follow-up requires advancing animated pixels, not just production 
 })
 
 test('formal fullscreen geometry checks reveal renderer chrome through actual pointer interaction only', async () => {
-  for (const state of [{ presentation: 'expanded', rendererFullscreenControls: true },
-    { presentation: 'fullscreen', rendererFullscreenControls: false }, { presentation: 'fullscreen', rendererFullscreenControls: true }]) {
+  for (const state of [{ presentation: 'expanded' }, { presentation: 'fullscreen' }]) {
     const calls = []; let evaluations = 0
     const page = { evaluate: async () => ++evaluations === 1 ? state : { width: 700, height: 450 },
       mouse: { move: async (x, y) => calls.push(['move', x, y]) },
       getByRole: (role, options) => ({ waitFor: async value => calls.push([role, options.name, value.state]) }) }
     await revealFullscreenControls(page)
-    assert.deepEqual(calls, state.presentation === 'fullscreen' && state.rendererFullscreenControls
+    assert.deepEqual(calls, state.presentation === 'fullscreen'
       ? [['move', 350, 448], ['slider', '播放进度', 'visible']] : [])
   }
 })
 
 test('full-frame pixel inspection hides overlay chrome without changing playback or video geometry', async () => {
   const calls = []; let evaluations = 0
-  const page = { evaluate: async () => ++evaluations === 1 ? { presentation: 'fullscreen', rendererFullscreenControls: true } : { width: 700, height: 450 },
+  const page = { evaluate: async () => ++evaluations === 1 ? { presentation: 'fullscreen' } : { width: 700, height: 450 },
     mouse: { move: async (x, y) => calls.push(['move', x, y]) },
     getByRole: (role, options) => ({ focus: async () => calls.push([role, options.name, 'focus']) }),
     locator: selector => ({ waitFor: async () => calls.push(['wait', selector]) }) }
@@ -143,14 +142,25 @@ test('full-frame pixel inspection hides overlay chrome without changing playback
     ['wait', '[data-playback-session][data-controls-visible="false"][data-header-visible="false"]']])
 })
 
-for (const platform of ['darwin', 'win32']) test(`${platform} evidence names render/presentation counters without confusing Canvas production with screen presentation`, async () => {
-  const state = { alive: true, loadedFiles: 1, presentedFrames: platform === 'darwin' ? 0 : 70, nativeFrames: 100 }
-  const application = { evaluate: callback => vm.runInNewContext(`(${callback.toString()})({app})`, {
-    app: { getAppPath: () => '/app', commandLine: { hasSwitch: () => false } }, process: { platform, getBuiltinModule: () => ({ createRequire: () => () => ({ inspect: () => state, sharedTexture: { inspect: () => state }, software: { inspect: () => ({ alive: false }) } }) }) }
+function evidenceApplication(hosts) {
+  return { evaluate: callback => vm.runInNewContext(`(${callback.toString()})()`, {
+    process: { getBuiltinModule: name => {
+      assert.equal(name, 'diagnostics_channel', 'evidence must not load a native decoder in main')
+      return { channel: name => {
+        assert.equal(name, 'javdex.playback.host.statistics')
+        return { publish: request => Object.assign(request, hosts) }
+      } }
+    } }
   }) }
-  const result = await nativeEvidence(application)
+}
+for (const mode of ['gpu', 'cpu']) test(`${mode} evidence projects isolated-host production without implying screen presentation`, async () => {
+  const state = { alive: true, loadedFiles: 1, presentedFrames: 70, nativeFrames: 100,
+    'track-list': JSON.stringify([{type: 'audio', id: 1, title: 'Audio', 'external-filename': '/private/video'}]) }
+  const result = await nativeEvidence(evidenceApplication({[mode]: state}))
   assert.equal(result.renderedFrames, 100)
   assert.equal(result.presentedFrames, undefined)
+  assert.equal(result.loadedFiles, 1)
+  assert.equal(JSON.stringify(result).includes('/private/'), false)
 })
 
 for (const platform of ['darwin', 'win32'])
@@ -181,29 +191,10 @@ for (const { visible, fullscreen } of [{ visible: true, fullscreen: true }, { vi
   assert.equal(result.rendererFullscreen, fullscreen)
 })
 
-test('Windows Canvas evidence observes the selected producer without startup switches', async () => {
-  const application = { evaluate: callback => vm.runInNewContext(`(${callback.toString()})({app})`, {
-    app: { getAppPath: () => '/app' },
-    process: { platform: 'win32', getBuiltinModule: () => ({ createRequire: () => () => ({
-      software: { inspect: () => ({ alive: false }) },
-      sharedTexture: { inspect: () => ({ alive: true, nativeFrames: 23, presentedFrames: 0 }) }
-    }) }) }
-  }) }
-  const result = await nativeEvidence(application)
-  assert.equal(result.alive, true); assert.equal(result.renderedFrames, 23)
-  assert.equal(result.presentedFrames, undefined)
-})
-test('Windows CPU evidence observes actual software frames after automatic recovery', async () => {
-  const application = { evaluate: callback => vm.runInNewContext(`(${callback.toString()})({app})`, {
-    app: { getAppPath: () => '/app' },
-    process: { platform: 'win32', getBuiltinModule: () => ({ createRequire: () => () => ({
-      sharedTexture: { inspect: () => { throw Error('inactive GPU must not be observed') } },
-      software: { inspect: () => ({ alive: true, nativeFrames: 19 }) }
-    }) }) }
-  }) }
-  const result = await nativeEvidence(application)
+test('evidence observes CPU after GPU recovery and an empty state after stop', async () => {
+  const result = await nativeEvidence(evidenceApplication({gpu: {alive: false}, cpu: {alive: true, nativeFrames: 19}}))
   assert.equal(result.alive, true); assert.equal(result.renderedFrames, 19)
-  assert.equal(result.presentedFrames, undefined)
+  assert.equal((await nativeEvidence(evidenceApplication({}))).alive, false)
 })
 
 test('non-recording playback explicitly changes the real fresh default, not product policy', async () => {

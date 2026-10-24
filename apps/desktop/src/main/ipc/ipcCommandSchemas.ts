@@ -716,7 +716,7 @@ export const appIpcSchemas = {
         remoteBaseUrl: z.string().max(2048).nullable().optional(),
         playerPath: z.string().max(4096).nullable().optional(),
         playerPreference: z.enum(['external', 'builtin']).optional(),
-        linuxPlaybackMode: z.enum(['auto', 'gpu', 'cpu']).optional(),
+        playbackRenderMode: z.enum(['auto', 'gpu', 'cpu']).optional(),
         resumePlayback: z.boolean().optional()
       })
       .strict()

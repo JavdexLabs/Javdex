@@ -1,13 +1,15 @@
 import { setTimeout as delay } from 'node:timers/promises'
-import type { PlaybackControl } from '@shared/desktop/playback'
+import type { PlaybackRenderMode, PlaybackControl } from '@shared/desktop/playback'
 import type { NativePlayback, NativePlaybackState } from './nativePlayback'
+import { isGraphicsPlaybackFailure, graphicsPlaybackFailure, playbackFallbackReason } from './playbackGraphicsFailure'
 
 /** Retry the same authorized source once in the independent SW renderer. After
- * a graphics failure, stay on CPU until app restart; never reuse uncertain GL or
+ * a graphics failure, stay on CPU until explicit GPU retry; never reuse uncertain GL or
  * consumer-held shared textures. Media/auth/audio failures are not GPU failures. */
-export function createGraphicsPlaybackFallback(gpu: NativePlayback, cpu: NativePlayback,
-  options: { forceCpu(): boolean; gpuAvailable(): boolean }, platform: 'darwin' | 'win32'): NativePlayback {
+export function createPlaybackEngine(gpu: NativePlayback, cpu: NativePlayback,
+  options: { mode(): PlaybackRenderMode; gpuAvailable(): boolean; gpuUnavailableReason?(): string }, platform: 'darwin' | 'win32' | 'linux'): NativePlayback {
   let current = gpu, active = false, gpuFailed = false, reason: string | undefined
+  let mode: PlaybackRenderMode = 'auto', hadHardwareDecoder = false, decoderFallback = false
   let epoch = 0, restoring = false, restoreFailure: unknown
   let pauseIntent: boolean | undefined, seekIntent: number | undefined
   let source: { locator: string; paused: boolean } | null = null
@@ -16,32 +18,26 @@ export function createGraphicsPlaybackFallback(gpu: NativePlayback, cpu: NativeP
   let viewport: Parameters<NativePlayback['viewport']> | null = null
   const controls = new Map<string, PlaybackControl>(), subtitles: string[] = []
   let generated: Parameters<NonNullable<NativePlayback['updateGeneratedSubtitle']>> | null = null
-  const graphicsError = (error: unknown): boolean => {
-    if (!(error instanceof Error) || /页面已关闭|page.*closed|运行库.*缺少|运行库需更新|播放运行库缺少/i.test(error.message)) return false
-    const kind = (error as Error & { playbackFailureKind?: unknown }).playbackFailureKind
-    if (kind !== undefined) return kind === 'graphics'
-    return /OpenGL|\bWGL\b|\bCGL\b|\bGL\b|IOSurface|D3D|DXGI|GPU|共享.*[纹帧]|shared.texture|native.*(context|drawable|pixel format|frame rendering|swap)/i.test(error.message)
-  }
   const hideGpu = (): void => {
-    if (viewport) { try { gpu.viewport(viewport[0], false, viewport[2], viewport[3]) } catch { /* Lost contexts can reject viewport work. */ } }
+    if (viewport) { try { gpu.viewport(viewport[0], false, viewport[2]) } catch { /* Lost contexts can reject viewport work. */ } }
     // A failed graphics cleanup must not prevent independent CPU playback. The
     // native implementations retain uncertain resources; never force-free them.
     try { gpu.destroy() } catch { console.warn('[playback] failed graphics resources retained until exit') }
   }
   const fallback = (error: unknown, kind: 'initialization' | 'runtime'): void => {
-    if (!active || current !== gpu || gpuFailed) throw error
-    gpuFailed = true; reason = kind === 'initialization' ? 'GPU_INITIALIZATION_FAILED' : 'GPU_RUNTIME_FAILED'
+    if (!active || mode !== 'auto' || current !== gpu || gpuFailed) throw error
+    gpuFailed = true; reason = playbackFallbackReason(error, kind === 'initialization' ? 'GPU_INITIALIZATION_FAILED' : 'GPU_RUNTIME_FAILED')
     const saved = { position: seekIntent ?? last['time-pos'] ?? 0, paused: pauseIntent ?? last.pause ?? source?.paused ?? false, started: Date.now(), seekRevision: 0 }
     hideGpu(); current = cpu
-    console.info(`[playback] ${platform === 'darwin' ? 'macOS' : 'Windows'} CPU recovery reason=` + reason)
+    console.info(`[playback] ${platform} CPU recovery reason=` + reason)
     cpu.create()
     if (source) { recovery = saved; cpu.load(source.locator, { paused: true }) }
-    if (viewport) cpu.viewport(viewport[0], recovery ? false : viewport[1], viewport[2], viewport[3])
+    if (viewport) cpu.viewport(viewport[0], recovery ? false : viewport[1], viewport[2])
   }
   const attempt = <T>(operation: () => T): T => {
     try { return operation() }
     catch (error) {
-      if (!graphicsError(error)) throw error
+      if (!isGraphicsPlaybackFailure(error)) throw error
       fallback(error, source ? 'runtime' : 'initialization')
       return operation()
     }
@@ -49,7 +45,7 @@ export function createGraphicsPlaybackFallback(gpu: NativePlayback, cpu: NativeP
   const perform = (operation: () => void): void => {
     try { operation() }
     catch (error) {
-      if (!graphicsError(error)) throw error
+      if (!isGraphicsPlaybackFailure(error)) throw error
       fallback(error, source ? 'runtime' : 'initialization')
       // fallback already loaded the source paused and retained command intent.
       // Reissuing load/pause here would race restoration or load the file twice.
@@ -100,13 +96,19 @@ export function createGraphicsPlaybackFallback(gpu: NativePlayback, cpu: NativeP
       pauseIntent = undefined; seekIntent = undefined
       viewport = null; generated = null; restoring = false; restoreFailure = undefined
       controls.clear(); subtitles.length = 0
-      const forced = options.forceCpu()
-      if (!forced && !options.gpuAvailable()) { gpuFailed = true; reason = 'GPU_DISABLED' }
-      current = forced || gpuFailed ? cpu : gpu
+      mode = options.mode(); hadHardwareDecoder = decoderFallback = false
+      if (mode === 'gpu') { gpuFailed = false; reason = undefined }
+      if (mode !== 'cpu' && !options.gpuAvailable()) {
+        const unavailable = options.gpuUnavailableReason?.() ?? 'GPU_DISABLED'
+        if (mode === 'gpu') throw graphicsPlaybackFailure(unavailable)
+        gpuFailed = true; reason = playbackFallbackReason(graphicsPlaybackFailure(unavailable), 'GPU_INITIALIZATION_FAILED')
+      }
+      current = mode === 'cpu' || mode === 'auto' && gpuFailed ? cpu : gpu
       try { current.create() }
-      catch (error) { if (current !== gpu || !graphicsError(error)) throw error; fallback(error, 'initialization') }
+      catch (error) { if (current !== gpu || !isGraphicsPlaybackFailure(error)) throw error; fallback(error, 'initialization') }
     },
     load(locator, options): void {
+      hadHardwareDecoder = decoderFallback = false
       epoch++; recovery = null; restoring = false; restoreFailure = undefined; generated = null
       // The application applies its remembered volume before the first load.
       // Keep that global control while dropping the previous movie's choices.
@@ -135,17 +137,22 @@ export function createGraphicsPlaybackFallback(gpu: NativePlayback, cpu: NativeP
       if (recovery && Date.now() - recovery.started > 15000) throw new Error('CPU 回退恢复超时')
       let value = attempt(() => current.read())
       if (seekIntent !== undefined && !value.seeking && Math.abs((value['time-pos'] ?? -100) - seekIntent) < 1.5) seekIntent = undefined
-      if (active && current === gpu && value.error && ['native', 'video'].includes(value.errorKind ?? '')) {
+      if (active && current === gpu && (!value.alive || value.error && ['native', 'video'].includes(value.errorKind ?? ''))) {
         last = { ...last, ...value }; fallback(new Error(value.error), 'runtime'); value = cpu.read()
+      }
+      if (current === gpu) {
+        const decoder = value['hwdec-current']
+        if (decoder && decoder !== 'no') hadHardwareDecoder = true
+        if (decoder === 'no' && hadHardwareDecoder && !value.seeking && !value['eof-reached']) decoderFallback = true
       }
       restore(value)
       last = recovery ? { ...value, pause: recovery.paused, 'time-pos': recovery.position } : value
-      return { ...last, playbackMode: current === cpu ? 'cpu' : 'gpu', playbackFallback: current === cpu && gpuFailed,
+      return { ...last, decoderFallback, playbackMode: current === cpu ? 'cpu' : 'gpu', playbackFallback: current === cpu && gpuFailed,
         playbackFallbackReason: current === cpu && gpuFailed ? reason : undefined }
     },
     viewport(...args): void {
       viewport = args
-      if (recovery) cpu.viewport(args[0], false, args[2], args[3])
+      if (recovery) cpu.viewport(args[0], false, args[2])
       else perform(() => current.viewport(...args))
     },
     render(): void { if (active) attempt(() => current.render()) },

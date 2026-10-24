@@ -1,24 +1,16 @@
 import { existsSync } from 'node:fs'
 import path from 'node:path'
+import { channel } from 'node:diagnostics_channel'
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import type { NativePlaybackState } from './nativePlayback'
-import type { PlaybackOcclusion } from '@shared/desktop/playback'
 
 interface Bounds { x: number; y: number; width: number; height: number; scale?: number }
 const LIMIT = 1024 * 1024
 const GENERATED_LIMIT = 8 * 1024 * 1024 + 4096
-const actionKinds = new Set(['toggle-pause', 'toggle-mute', 'expand', 'dock', 'fullscreen', 'stop', 'seek', 'seek-relative', 'volume', 'volume-relative', 'focus-forward', 'focus-backward', 'history-back', 'history-forward', 'escape'])
-function validAction(value: unknown): boolean {
-  if (!value || typeof value !== 'object') return false
-  const action = value as { kind?: unknown; value?: unknown }
-  return typeof action.kind === 'string' && actionKinds.has(action.kind)
-    && (action.value === undefined || typeof action.value === 'number' && Number.isFinite(action.value))
-}
-
 /** Length-delimited UTF-8 fields keep paths, URLs and subtitle names out of shell
  * parsing. The helper has only inherited private pipes, never a listening port. */
 export function encodePlaybackMessage(fields: string[]): Buffer {
-  if (!fields.length || fields.length > (fields[0] === 'occlusions' ? 257 : 16) || fields.some(value => value.includes('\0'))) throw new Error('无效的播放控制参数')
+  if (!fields.length || fields.length > 16 || fields.some(value => value.includes('\0'))) throw new Error('无效的播放控制参数')
   const values = fields.map(value => Buffer.from(value, 'utf8'))
   const size = 4 + values.reduce((sum, value) => sum + 4 + value.length, 0)
   if (size > (fields[0] === 'generated-subtitles' ? GENERATED_LIMIT : LIMIT)) throw new Error('播放控制参数过长')
@@ -39,6 +31,8 @@ export interface LinuxPlaybackFrameChannel {
   isReady?(): boolean
   submittedFrames?(): number
   resetTiming?(): number | undefined
+  onReady?(callback: () => void): void
+  onProbe?(callback: () => void): void
   onBudget?(callback: (ms: number) => void): void
   timingStats?(): { renderBudgetMs: number; submissionLatenessMs: number }
   destroy(): void
@@ -66,19 +60,31 @@ export function linuxSharedTextureFailureCode(message: string): string {
 }
 
 export function createLinuxPlaybackBridge(executable: string,
-  createFrameChannel?: (onError: (error: Error) => void) => LinuxPlaybackFrameChannel, renderNode?: string, vulkanLoader?: string) {
+  createFrameChannel?: (onError: (error: Error) => void) => LinuxPlaybackFrameChannel, renderNode?: string, vulkanLoader?: string, backend: 'dmabuf' | 'software' = 'dmabuf') {
   let child: ChildProcessWithoutNullStreams | null = null
   let frameChannel: LinuxPlaybackFrameChannel | null = null
   let generation = 0
   let snapshot: NativePlaybackState = { alive: false }
-  let actions: NonNullable<NativePlaybackState['actions']> = []
   let failure: Error | null = null
   let input = ''
   let lastDiagnostic = 0
   let heartbeat: ReturnType<typeof setInterval> | undefined
   let requestedVisible = false
-  let lastBounds = '', lastVisible: boolean | undefined, lastPresentation = ''
-  let lastOcclusions = '', lastRendererControls: boolean | undefined
+  let lastBounds = '', lastVisible: boolean | undefined
+  const mode = backend === 'software' ? 'cpu' : 'gpu'
+  const statistics = channel('javdex.playback.host.statistics'), controls = channel('javdex.playback.host.control')
+  const report = (value: unknown): void => {
+    if (!value || typeof value !== 'object') return
+    try { Object.assign(value, { [mode]: { ...snapshot, pid: child?.pid,
+      outstandingSurfaces: (snapshot as NativePlaybackState & { dmaBufFramesInFlight?: number; cpuFramesInFlight?: number }).dmaBufFramesInFlight
+        ?? (snapshot as NativePlaybackState & { cpuFramesInFlight?: number }).cpuFramesInFlight ?? 0 } }) } catch { /* Read-only diagnostics. */ }
+  }
+  const control = (value: unknown): void => {
+    const request = value as { mode?: string; operation?: string } | null
+    if (request?.mode !== mode || !child) return
+    if (request.operation === 'kill') child.kill('SIGKILL')
+    if (request.operation === 'stall') send(['diagnostic-stall'])
+  }
   const send = (fields: string[]): void => {
     if (failure) throw failure
     if (!child || child.killed || !child.stdin.writable) throw new Error('Linux 播放进程未运行')
@@ -97,10 +103,11 @@ export function createLinuxPlaybackBridge(executable: string,
   }
   const destroy = (): void => {
     generation++
+    statistics.unsubscribe(report); controls.unsubscribe(control)
     clearInterval(heartbeat); heartbeat = undefined
     const previous = child; child = null
     frameChannel?.destroy(); frameChannel = null
-    snapshot = { alive: false }; actions = []; failure = null; input = ''
+    snapshot = { alive: false }; failure = null; input = ''
     if (!previous) return
     // Graceful cleanup first, then bound shutdown of an unresponsive decoder.
     if (previous.stdin.writable) previous.stdin.end(encodePlaybackMessage(['destroy']))
@@ -108,13 +115,13 @@ export function createLinuxPlaybackBridge(executable: string,
     timeout.unref(); previous.once('exit', () => clearTimeout(timeout))
   }
   return {
-    create(handle: Buffer, bounds: Bounds, host?: { backend: 'dmabuf' | 'software' }): void {
-      const shared = host?.backend === 'dmabuf' || host?.backend === 'software'
+    create(bounds: Bounds): void {
+      const shared = backend === 'dmabuf' || backend === 'software'
       const diagnostics = shared && globalThis.process.env.JAVDEX_PLAYBACK_DIAGNOSTICS === '1'
       if (shared && !createFrameChannel) throw new Error('未提供实验共享纹理传输通道')
-      if (!shared || handle.length !== 0) throw new Error('Linux 播放仅支持共享纹理或 CPU 内存帧')
-      const id = 0n
-      destroy(); requestedVisible = false; lastBounds = ''; lastVisible = undefined; lastPresentation = ''; lastOcclusions = ''; lastRendererControls = undefined
+      destroy(); requestedVisible = false; lastBounds = ''; lastVisible = undefined
+      statistics.subscribe(report)
+      if (globalThis.process.env.JAVDEX_PLAYBACK_DIAGNOSTICS === '1') controls.subscribe(control)
       const epoch = generation
       let lastState = Date.now()
       let process: ChildProcessWithoutNullStreams | null = null
@@ -135,7 +142,7 @@ export function createLinuxPlaybackBridge(executable: string,
         if (shared) frameChannel = createFrameChannel!(failed)
         const fontConfig = path.join(path.dirname(executable), 'fonts.conf')
         const environment = { ...globalThis.process.env,
-          JAVDEX_PLAYBACK_VULKAN_LOADER: host?.backend === 'dmabuf' ? vulkanLoader : undefined,
+          JAVDEX_PLAYBACK_VULKAN_LOADER: backend === 'dmabuf' ? vulkanLoader : undefined,
           ...(shared && renderNode ? { JAVDEX_DRM_RENDER_NODE: renderNode } : {}),
           ...(shared && existsSync(fontConfig) ? { FONTCONFIG_FILE: fontConfig } : {}) }
         process = spawn(executable, ['--stdio-v1'], { stdio: frameChannel
@@ -168,10 +175,7 @@ export function createLinuxPlaybackBridge(executable: string,
             if (!value || typeof value !== 'object' || typeof (value as NativePlaybackState).alive !== 'boolean') throw new Error('Invalid state')
             const next = value as NativePlaybackState
             if (!next.alive && next.error) { failed(new Error(next.error)); return }
-            if (next.actions && (!Array.isArray(next.actions) || next.actions.length > 32 || !next.actions.every(validAction))) throw new Error('Invalid actions')
-            actions.push(...(next.actions ?? []))
-            if (actions.length > 128) throw new Error('Action overflow')
-            snapshot = { ...next, actions: undefined }; lastState = Date.now()
+            snapshot = next; lastState = Date.now()
             if (diagnostics && Date.now() - lastDiagnostic >= 1000) {
               lastDiagnostic = Date.now()
               console.info('[playback-dmabuf]', JSON.stringify({ alive: next.alive, nativeFrames: next.nativeFrames,
@@ -184,11 +188,12 @@ export function createLinuxPlaybackBridge(executable: string,
         if (child === launched) {
           clearInterval(heartbeat); heartbeat = undefined
           frameChannel?.destroy(); frameChannel = null
-          snapshot = { alive: false }; failure ??= new Error(`Linux 播放进程已退出（${signal ?? code ?? 'unknown'}）`)
+          snapshot = { alive: false }; failure ??= Object.assign(new Error(`Linux 播放进程已退出（${signal ?? code ?? 'unknown'}）`), { playbackFailureCode: 'PLAYBACK_HOST_EXITED' })
         }
       })
-      send(['create', id.toString(), ...rectangle(bounds), host!.backend])
-      if (host?.backend === 'dmabuf' && launched.pid) send(['self-test'])
+      send(['create', ...rectangle(bounds), backend])
+      frameChannel?.onReady?.(syncNativeVisibility)
+      frameChannel?.onProbe?.(() => send(['self-test']))
     },
     setBounds(bounds: Bounds): void {
       const fields = rectangle(bounds), key = fields.join(',')
@@ -198,17 +203,6 @@ export function createLinuxPlaybackBridge(executable: string,
       requestedVisible = visible
       frameChannel?.setVisible(visible)
       syncNativeVisibility()
-    },
-    setPresentation(value: string): void { if (value !== lastPresentation) { send(['presentation', value]); lastPresentation = value } },
-    setRendererControls(enabled: boolean): void {
-      if (enabled !== lastRendererControls) { send(['renderer-controls', enabled ? '1' : '0']); lastRendererControls = enabled }
-    },
-    setOcclusions(rects: PlaybackOcclusion[]): void {
-      if (rects.length > 32) throw new Error('播放控件遮挡区域过多')
-      const values = rects.flatMap(rect => [rect.x, rect.y, rect.width, rect.height, ...(rect.radii ?? [0, 0, 0, 0])])
-      if (values.some(value => !Number.isFinite(value))) throw new Error('无效的播放控件遮挡区域')
-      const key = values.join(',')
-      if (key !== lastOcclusions) { send(['occlusions', ...values.map(String)]); lastOcclusions = key }
     },
     command(args: string[], generatedSubtitle = false): void {
       send([generatedSubtitle ? 'generated-subtitle-command' : 'command', ...args])
@@ -228,7 +222,7 @@ export function createLinuxPlaybackBridge(executable: string,
     state(): NativePlaybackState {
       if (failure) throw failure
       const value = { ...snapshot, ...(frameChannel ? { sharedTextureSurface: frameChannel.surfaceToken,
-        displayProbe: frameChannel.displayProbe?.(), presentedFrames: undefined, submittedFrames: frameChannel.submittedFrames?.() ?? 0, ...frameChannel.timingStats?.() } : {}), actions }; actions = []; return value
+        displayProbe: frameChannel.displayProbe?.(), presentedFrames: undefined, submittedFrames: frameChannel.submittedFrames?.() ?? 0, ...frameChannel.timingStats?.() } : {}) }; return value
     },
     inspect(): NativePlaybackState {
       if (failure) throw failure

@@ -17,7 +17,7 @@ const image=path.resolve(imageArg),media=path.resolve(mediaArg),output=path.reso
 fs.mkdirSync(output)
 const profile=fs.mkdtempSync(path.join(os.tmpdir(),'javdex-playback-acceptance-load-'))
 const target=seedAcceptanceCatalog(profile,[media])[0]
-fs.writeFileSync(path.join(profile,'this-computer.json'),JSON.stringify({mode:'local',closeToTray:false,linuxPlaybackMode:mode,resumePlayback:false,playbackVolume:15}))
+fs.writeFileSync(path.join(profile,'this-computer.json'),JSON.stringify({mode:'local',closeToTray:false,playbackRenderMode:mode,resumePlayback:false,playbackVolume:15}))
 async function hash(file){const digest=createHash('sha256');for await(const chunk of fs.createReadStream(file))digest.update(chunk);return digest.digest('hex')}
 const report={image,sha256:await hash(image),media,mediaSha256:await hash(media),display,mode,duration,isolation,samples:[]}
 const save=()=>fs.writeFileSync(path.join(output,'report.json'),JSON.stringify(report,null,2))

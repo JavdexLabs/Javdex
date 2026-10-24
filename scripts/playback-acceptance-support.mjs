@@ -38,9 +38,10 @@ export function seedAcceptanceCatalog(directory, media) {
 }
 
 export async function launchAcceptance(directory, logName = 'application.log', args = []) {
-  assert.ok(['darwin', 'win32'].includes(process.platform), 'this acceptance host covers macOS and Windows only')
+  assert.ok(['darwin', 'win32', 'linux'].includes(process.platform), 'unsupported desktop acceptance host')
   assert.match(logName, /^[a-z-]+\.log$/)
-  if (process.platform === 'win32') {
+  if (process.platform !== 'darwin' || process.env.JAVDEX_PLAYBACK_ACCEPTANCE_EXECUTABLE) {
+    if (process.platform === 'linux' && !args.some(v => /^--javdex-(?:x11|wayland)$/.test(v))) args = [...args, process.env.WAYLAND_DISPLAY && !process.env.DISPLAY ? '--javdex-wayland' : '--javdex-x11']
     const env = { ...process.env, JAVDEX_TEST_USER_DATA: directory }
     delete env.ELECTRON_RUN_AS_NODE
     const packaged = process.env.JAVDEX_PLAYBACK_ACCEPTANCE_EXECUTABLE
@@ -48,7 +49,7 @@ export async function launchAcceptance(directory, logName = 'application.log', a
     if (packaged) {
       assert.ok(path.isAbsolute(packaged) && fs.statSync(packaged).isFile(), 'packaged acceptance executable must exist')
       const pathKey = Object.keys(env).find(key => key.toLowerCase() === 'path') ?? 'Path'
-      env[pathKey] = path.join(process.env.SystemRoot, 'System32') + path.delimiter + process.env.SystemRoot
+      env[pathKey] = process.platform === 'win32' ? path.join(process.env.SystemRoot, 'System32') + path.delimiter + process.env.SystemRoot : '/usr/bin:/bin'
       delete env.JAVDEX_MPV_PREFIX
       cwd = path.join(directory, 'empty-cwd')
       fs.mkdirSync(cwd, { recursive: true })
@@ -95,17 +96,15 @@ export async function waitForValue(read, predicate, description, timeout = 20000
 export const waitForState = (page, predicate, description, timeout) =>
   waitForValue(() => page.evaluate(() => window.api.playback.snapshot()), predicate, description, timeout)
 
-// Only observation: inspect() cannot consume the main session's events or actions.
-// Keep diagnostics projected; raw tracks can contain local paths or signed locators.
-export const nativeEvidence = application => application.evaluate(({ app }) => {
-  const require = process.getBuiltinModule('module').createRequire(app.getAppPath() + '/package.json')
-  const addon = require(app.isPackaged ? process.resourcesPath + '/native-playback/playback.node' : app.getAppPath() + '/out/native-playback/playback.node')
-  const canvas = process.platform === 'darwin' || process.platform === 'win32'
-  const state = (addon.software?.inspect().alive ? addon.software : process.platform === 'win32' ? addon.sharedTexture : addon).inspect()
-  // This is a producer render counter, not proof of physical screen presentation.
+// Read the active isolated host; observing evidence must never load libmpv into
+// Electron main. Project fields because raw tracks can contain private locators.
+export const nativeEvidence = application => application.evaluate(() => {
+  const request = { cpu: { alive: false }, gpu: { alive: false } }
+  process.getBuiltinModule('diagnostics_channel').channel('javdex.playback.host.statistics').publish(request)
+  const state = request.cpu.alive ? request.cpu : request.gpu
+  // Native production does not prove physical screen presentation.
   return { alive: state.alive, loadedFiles: state.loadedFiles,
-    renderedFrames: canvas ? state.nativeFrames : state.presentedFrames,
-    presentedFrames: canvas ? undefined : state.presentedFrames,
+    renderedFrames: state.nativeFrames, presentedFrames: undefined,
     commandErrors: state.commandErrors, position: state['time-pos'], audioPosition: state['audio-pts'],
     audioTracks: JSON.parse(state['track-list'] ?? '[]').filter(track => track.type === 'audio').map(track => ({
       id: track.id, title: track.title, language: track.lang, codec: track.codec, channels: track['demux-channel-count']

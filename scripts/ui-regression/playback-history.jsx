@@ -22,7 +22,7 @@ const publish = value => {
 }
 function makeState(presentation = 'expanded') {
   return { sessionId: 'history-fixture', target: { libraryId: 1, videoId: 2, resourceId: 3 }, title: 'Synthetic playback',
-    source: 'local', presentation, presentationRevision: 1, rendererFullscreenControls: true, phase: 'playing', paused: false, seeking: false,
+    source: 'local', presentation, presentationRevision: 1,  phase: 'playing', paused: false, seeking: false,
     position: 1, duration: 120, seekable: true, volume: 50, muted: false, speed: 1, subtitleDelay: 0, subtitleSize: 55,
     tracks: [], chapters: [], error: null, resumePosition: null, recordingProgress: false, progressError: null,
     info: { videoCodec: 'fixture', audioCodec: null, width: 640, height: 360, hardwareDecoder: null, audioOutput: null, droppedFrames: null } }

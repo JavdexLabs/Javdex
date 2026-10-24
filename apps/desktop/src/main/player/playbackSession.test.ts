@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import type { PlaybackControl, PlaybackOcclusion, PlaybackSnapshot, PlaybackTarget } from '@shared/desktop/playback'
+import type { PlaybackControl, PlaybackSnapshot, PlaybackTarget } from '@shared/desktop/playback'
 import { createPlaybackSession } from './playbackSession'
 import type { NativePlayback, NativePlaybackState } from './nativePlayback'
 import type { PlaybackSource } from './playbackSource'
@@ -13,7 +13,6 @@ function fixture(volume?: { read(): Promise<number>; remember(value: number): vo
   const loadOptions: Array<{ paused: boolean } | undefined> = []
   const commands: PlaybackControl[] = []
   const viewports: Array<{ visible: boolean; width: number }> = []
-  const occlusionShapes: PlaybackOcclusion[][] = []
   const presentations: string[] = []
   const awake: boolean[] = []
   const navigations: string[] = []
@@ -23,12 +22,11 @@ function fixture(volume?: { read(): Promise<number>; remember(value: number): vo
   let resolves = 0
   let destroys = 0
   let focuses = 0
-  let escapes = 0
   let time = 1000000
   let raw: NativePlaybackState = { alive: true, loadedFiles: 1, pause: false, seekable: true, duration: 120, 'time-pos': 0, presentedFrames: 0 }
   const native: NativePlayback = {
     create() {}, load: (locator, options) => { loads.push(locator); loadOptions.push(options); raw.pause = options?.paused ?? false }, command: value => { commands.push(value) },
-    read: () => raw, viewport: (rect, visible, _state, occlusions = []) => { viewports.push({ visible, width: rect.width }); occlusionShapes.push(occlusions) },
+    read: () => raw, viewport: (rect, visible, _state) => { viewports.push({ visible, width: rect.width }) },
     render() {}, addSubtitle() {}, destroy: () => { destroys++ }
   }
   let resolve = async (input: PlaybackTarget): Promise<PlaybackSource> => ({ target: input, title: 'Synthetic', mode: 'remote',
@@ -40,11 +38,9 @@ function fixture(volume?: { read(): Promise<number>; remember(value: number): vo
     changed: state => events.push(state), presentation: value => { presentations.push(value) }, started: async () => { starts++ }, awake: value => { awake.push(value) },
     windowSize: () => ({ width: 1000, height: 700 }),
     focusControls: () => { focuses++ },
-    navigate: direction => { navigations.push(direction) },
-    escape: () => { escapes++ },
     readVolume: volume?.read, volumeChanged: volume?.remember, progress, now: () => time
   })
-  return { session, native, released, endings: () => endings, loads, loadOptions, commands, events, viewports, occlusionShapes, presentations, awake, navigations, advance: (ms: number) => { time += ms }, starts: () => starts, resolves: () => resolves, destroys: () => destroys, focuses: () => focuses, escapes: () => escapes,
+  return { session, native, released, endings: () => endings, loads, loadOptions, commands, events, viewports, presentations, awake, navigations, advance: (ms: number) => { time += ms }, starts: () => starts, resolves: () => resolves, destroys: () => destroys, focuses: () => focuses,
     raw: (patch: Partial<NativePlaybackState>) => { raw = { ...raw, ...patch } },
     resolve: (next: typeof resolve) => { resolve = next }, validate: (next: typeof validate) => { validate = next } }
 }
@@ -168,72 +164,6 @@ test('PGS refresh does not seek for playing, disabled/already-selected, unseekab
     assert.deepEqual(f.commands.slice(before), [command], scenario)
   }
 })
-test('native end-of-file play restarts the same session and consecutive toggles retain ordering', async () => {
-  const f = fixture()
-  await f.session.open(target)
-  const id = f.session.snapshot()!.sessionId
-  f.raw({ pause: true, 'eof-reached': true, 'time-pos': 120, actions: [{ kind: 'toggle-pause' }] })
-  f.session.tick()
-  assert.deepEqual(f.commands.slice(-2), [{ kind: 'seek', seconds: 0 }, { kind: 'pause', paused: false }])
-  assert.equal(f.session.snapshot()!.sessionId, id)
-  assert.equal(f.loads.length, 1)
-  f.raw({ pause: false, seeking: false, 'eof-reached': false, 'time-pos': 0,
-    actions: [{ kind: 'toggle-pause' }, { kind: 'toggle-pause' }, { kind: 'toggle-mute' }, { kind: 'toggle-mute' }] })
-  f.session.tick()
-  assert.deepEqual(f.commands.slice(-4), [{ kind: 'pause', paused: true }, { kind: 'pause', paused: false },
-    { kind: 'mute', muted: true }, { kind: 'mute', muted: false }])
-})
-
-test('native Tab hands focus to HTML without sending transport commands or rebuilding playback', async () => {
-  const f = fixture()
-  await f.session.open(target)
-  const id = f.session.snapshot()!.sessionId
-  f.raw({ actions: [{ kind: 'focus-forward' }] }); f.session.tick()
-  assert.deepEqual(f.session.snapshot()!.focusRequest, { sequence: 1, backwards: false })
-  f.raw({ actions: [{ kind: 'focus-backward' }] }); f.session.tick()
-  assert.deepEqual(f.session.snapshot()!.focusRequest, { sequence: 2, backwards: true })
-  assert.equal(f.focuses(), 2)
-  assert.equal(f.session.snapshot()!.sessionId, id)
-  assert.equal(f.loads.length, 1)
-  assert.equal(f.commands.length, 1, 'only initial volume command')
-  assert.equal(playbackControlSchema.safeParse({ kind: 'focus-forward' }).success, false, 'renderer cannot forge native focus actions')
-})
-test('native history input goes through the window coordinator without pretending to be a transport command', async () => {
-  const f = fixture()
-  await f.session.open(target)
-  const id = f.session.snapshot()!.sessionId
-  f.raw({ actions: [{ kind: 'history-back' }, { kind: 'history-forward' }] }); f.session.tick()
-  assert.deepEqual(f.navigations, ['back', 'forward'])
-  assert.equal(f.session.snapshot()!.sessionId, id)
-  assert.equal(f.commands.length, 1)
-  assert.equal(f.loads.length, 1)
-  assert.equal(playbackControlSchema.safeParse({ kind: 'history-back' }).success, false)
-})
-
-test('native Escape delegates layered dismissal while system history remains independent', async () => {
-  const f = fixture()
-  await f.session.open(target)
-  const id = f.session.snapshot()!.sessionId
-  const destroys = f.destroys()
-  for (const presentation of ['expanded', 'fullscreen'] as const) {
-    f.session.control(id, { kind: 'presentation', value: presentation })
-    f.raw({ actions: [{ kind: 'escape' }] }); f.session.tick()
-    assert.equal(f.session.snapshot()!.presentation, presentation, 'the renderer owns the Escape decision')
-    assert.equal(f.session.snapshot()!.sessionId, id)
-  }
-  assert.equal(f.escapes(), 2)
-  assert.deepEqual(f.navigations, [])
-  f.raw({ actions: [{ kind: 'history-back' }] }); f.session.tick()
-  assert.deepEqual(f.navigations, ['back'])
-  f.session.control(id, { kind: 'presentation', value: 'docked' })
-  f.raw({ actions: [{ kind: 'escape' }] }); f.session.tick()
-  assert.deepEqual(f.navigations, ['back', 'back'], 'preserve the native docked Escape behavior')
-  assert.equal(f.escapes(), 2)
-  assert.equal(f.loads.length, 1)
-  assert.equal(f.destroys(), destroys, 'neither Escape nor system history releases the decoder')
-  assert.equal(playbackControlSchema.safeParse({ kind: 'escape' }).success, false)
-})
-
 test('stop and failure restore HTML focus when releasing native playback', async () => {
   const f = fixture()
   await f.session.open(target)
@@ -250,7 +180,7 @@ test('stop and failure restore HTML focus when releasing native playback', async
   assert.equal(g.session.snapshot()!.phase, 'error')
   assert.equal(g.session.snapshot()!.presentation, 'expanded')
 })
-test('saved volume applies before playback; HTML and native controls remember only explicit volume changes', async () => {
+test('saved volume applies before playback; controls remember only explicit volume changes', async () => {
   const remembered: number[] = []
   const f = fixture({ read: async () => 23, remember: value => remembered.push(value) })
   await f.session.open(target)
@@ -259,47 +189,11 @@ test('saved volume applies before playback; HTML and native controls remember on
   f.raw({ volume: 23 }); f.session.tick()
   assert.deepEqual(remembered, [])
   f.session.control(f.session.snapshot()!.sessionId, { kind: 'volume', value: 0 })
-  f.raw({ actions: [{ kind: 'volume', value: 67 }] }); f.session.tick()
+  f.session.control(f.session.snapshot()!.sessionId, { kind: 'volume', value: 67 })
   assert.deepEqual(remembered, [0, 67])
   await f.session.open(target)
   assert.equal(f.commands.filter(command => command.kind === 'volume').length, 3, 'same source does not reapply saved volume')
 })
-
-test('native slider key repeats accumulate against session intent and retain volume bounds', async () => {
-  const remembered: number[] = []
-  const f = fixture({ read: async () => 31, remember: value => remembered.push(value) })
-  await f.session.open(target)
-  f.raw({ volume: 31, pause: true, 'time-pos': 40, actions: [
-    ...Array.from({ length: 10 }, () => ({ kind: 'volume-relative' as const, value: 1 })),
-    { kind: 'seek-relative', value: 30 }, { kind: 'seek-relative', value: 5 }
-  ] })
-  f.session.tick()
-  assert.deepEqual(remembered, Array.from({ length: 10 }, (_, index) => 32 + index))
-  assert.deepEqual(f.commands.slice(-2), [{ kind: 'seek', seconds: 70 }, { kind: 'seek', seconds: 75 }])
-  assert.equal(f.session.snapshot()!.paused, true)
-  f.raw({ volume: 41, actions: [{ kind: 'volume', value: 99 }, { kind: 'volume-relative', value: 5 },
-    { kind: 'volume', value: 0 }, { kind: 'volume-relative', value: -1 }] })
-  f.session.tick()
-  assert.deepEqual(remembered.slice(-4), [99, 100, 0, 0])
-  assert.equal(f.loads.length, 1)
-  assert.equal(playbackControlSchema.safeParse({ kind: 'volume-relative', value: 1 }).success, false)
-})
-
-function progressFixture(point: { position: number; duration: number | null } | null = null) {
-  const saves: Array<{ resourceId: number; point: typeof point }> = []
-  const clears: number[] = []
-  let preparations = 0
-  const f = fixture(undefined, {
-    prepare: async () => { preparations++; return { enabled: true, point } },
-    save: (source, value) => saves.push({ resourceId: source.target.resourceId, point: value }),
-    clear: source => { clears.push(source.target.resourceId) }
-  })
-  const start = (position = 40): void => {
-    f.raw({ pause: false, seeking: false, 'time-pos': position, presentedFrames: 5 }); f.session.tick()
-    f.raw({ pause: false, 'time-pos': position + 0.2, presentedFrames: 6 }); f.session.tick()
-  }
-  return { ...f, saves, clears, start, preparations: () => preparations }
-}
 
 test('a resume point loads paused and transport controls cannot bypass the explicit decision', async () => {
   const f = progressFixture({ position: 60, duration: 120 })
@@ -496,22 +390,6 @@ test('actual-start requires advancing rendered video and clock; paused/seek-only
   f.raw({ presentedFrames: 5, 'time-pos': 20.4 }); f.session.tick()
   assert.equal(f.starts(), 1)
 })
-test('viewport preserves rounded popup geometry while clipping square popups and discarding nonintersections', async () => {
-  const f = fixture()
-  await f.session.open(target)
-  const state = f.session.snapshot()!
-  const rounded: PlaybackOcclusion = { x: -10, y: 70, width: 170, height: 50, radii: [8, 12, 16, 4] }
-  const viewport = { sessionId: state.sessionId, presentation: state.presentation, presentationRevision: state.presentationRevision, sequence: 1,
-    rect: { x: 0, y: 0, width: 100, height: 100 }, visible: true,
-    occlusions: [rounded, { x: 80, y: 70, width: 80, height: 50 }, { x: 200, y: 200, width: 10, height: 10 }] }
-  assert.equal(playbackViewportSchema.safeParse(viewport).success, true)
-  f.session.viewport(viewport)
-  assert.deepEqual(f.occlusionShapes.at(-1), [rounded, { x: 80, y: 70, width: 20, height: 30 }])
-  for (const radii of [[8, 8], [-1, 0, 0, 0], [Infinity, 0, 0, 0]]) {
-    assert.equal(playbackViewportSchema.safeParse({ ...viewport, occlusions: [{ ...rounded, radii }] }).success, false)
-  }
-})
-
 test('boundary schemas reject arbitrary commands, host paths, unknown keys and invalid geometry', () => {
   assert.deepEqual(playbackControlSchema.parse({ kind: 'speed', value: 3 }), { kind: 'speed', value: 3 })
   for (const command of [{ kind: 'loadfile', url: '/private/a' }, { kind: 'volume', value: 101 }, { kind: 'speed', value: 99 }, { kind: 'pause', paused: true, locator: 'http://x' }]) {
@@ -539,27 +417,6 @@ test('subtitle state reflects native observations and seek preserves pause inten
   for (const command of [{ kind: 'subtitle-delay', seconds: 61 }, { kind: 'subtitle-size', value: 101 }]) {
     assert.equal(playbackControlSchema.safeParse(command).success, false)
   }
-})
-
-test('native keyboard actions use the same seek and mute controls without changing pause intent', async () => {
-  const f = fixture()
-  await f.session.open(target)
-  f.raw({ pause: true, mute: false, 'time-pos': 60, actions: [
-    { kind: 'seek-relative', value: -5 }, { kind: 'seek-relative', value: 30 }, { kind: 'toggle-mute' }
-  ] })
-  f.session.tick()
-  assert.deepEqual(f.commands, [
-    { kind: 'volume', value: 50 },
-    { kind: 'seek', seconds: 55 }, { kind: 'seek', seconds: 85 }, { kind: 'mute', muted: true }
-  ])
-  assert.equal(f.session.snapshot()!.paused, true)
-  f.raw({ mute: true, actions: [{ kind: 'toggle-mute' }] })
-  f.session.tick()
-  assert.deepEqual(f.commands.at(-1), { kind: 'mute', muted: false })
-  const commandCount = f.commands.length
-  f.raw({ seekable: false, actions: [{ kind: 'seek-relative', value: 5 }] })
-  f.session.tick()
-  assert.equal(f.commands.length, commandCount, 'unseekable playback ignores the native seek shortcut')
 })
 
 test('opening and seek timeouts release the core, retain actionable errors and exit fullscreen', async () => {
@@ -593,19 +450,6 @@ test('opening and seek timeouts release the core, retain actionable errors and e
   assert.equal(f.presentations.at(-1), 'expanded')
 })
 
-test('native errors use controlled causes, never raw locators; initialization failure is not a successful open', async () => {
-  const f = fixture()
-  f.native.create = () => { throw new Error('dlopen /private/movie?token=secret') }
-  await assert.rejects(f.session.open(target), /运行库无法初始化/)
-  assert.equal(f.session.snapshot()!.phase, 'error')
-  assert.ok(!JSON.stringify(f.events).includes('secret'))
-  f.native.create = () => {}
-  await f.session.open(target)
-  f.raw({ error: 'https://server.invalid?token=secret', errorKind: 'format' }); f.session.tick()
-  assert.match(f.session.snapshot()!.error!, /格式/)
-  assert.ok(!JSON.stringify(f.events).includes('secret'))
-})
-
 test('an old source validation does not stop a new session or block its validation', async () => {
   const f = fixture()
   let rejectOld!: (error: Error) => void
@@ -622,3 +466,19 @@ test('an old source validation does not stop a new session or block its validati
   assert.equal(f.session.snapshot()!.target.resourceId, 4)
   assert.notEqual(f.session.snapshot()!.phase, 'error')
 })
+
+function progressFixture(point: { position: number; duration: number | null } | null = null) {
+  const saves: Array<{ resourceId: number; point: typeof point }> = []
+  const clears: number[] = []
+  let preparations = 0
+  const f = fixture(undefined, {
+    prepare: async () => { preparations++; return { enabled: true, point } },
+    save: (source, value) => saves.push({ resourceId: source.target.resourceId, point: value }),
+    clear: source => { clears.push(source.target.resourceId) }
+  })
+  const start = (position = 40): void => {
+    f.raw({ pause: false, seeking: false, 'time-pos': position, presentedFrames: 5 }); f.session.tick()
+    f.raw({ pause: false, 'time-pos': position + 0.2, presentedFrames: 6 }); f.session.tick()
+  }
+  return { ...f, saves, clears, start, preparations: () => preparations }
+}

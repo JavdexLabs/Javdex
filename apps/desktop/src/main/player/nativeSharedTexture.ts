@@ -1,8 +1,11 @@
+import { createFrameEndpoint } from './frameEndpoint'
 import { app, ipcMain, sharedTexture, type BrowserWindow, type IpcMainEvent } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { channel } from 'node:diagnostics_channel'
 import type { NativePlaybackState } from './nativePlayback'
 import { FrameBudget } from './frameBudget'
+import { FrameHealthProbe } from './frameHealthProbe'
+import { playbackFallbackReason, graphicsPlaybackFailure } from './playbackGraphicsFailure'
 
 interface Bounds { width: number; height: number; scale?: number }
 interface Binding { surfaceToken: string; bindingToken: string }
@@ -14,6 +17,7 @@ export interface SharedTextureProducer {
   setRenderBudget(ms: number): void
   setWakeup(callback: (() => void) | null): void
   nextFrame(): unknown
+  requestSelfTest(): void
   releaseFrame(sequence: number): void
   command(args: string[], generated?: boolean): void
   generatedSubtitles(operation: 'update' | 'visible' | 'clear', document: string, visible: boolean, revision: number): void
@@ -25,6 +29,7 @@ interface Frame {
   sequence: number; timeline: number; width: number; height: number; ioSurface?: Buffer; ntHandle?: Buffer
   pixelFormat: 'bgra'; producerComplete: true; colorContract: 'bt709-srgb-rgb-full'
   renderStartUs: number; targetTimeUs: number
+  selfTest?: 'solid-v1'
 }
 interface Lease {
   since: number
@@ -51,6 +56,7 @@ export function createNativeSharedTextureBridge(native: SharedTextureProducer, w
   const pending = new Map<number, Lease>()
   const targets = new Map<number, { start: number; target: number }>()
   const budget = new FrameBudget()
+  const probe = new FrameHealthProbe()
   // Main-process pull-only diagnostics. Reuse the normal counters; no extra
   // per-frame IPC/listener, native handle or media locator enters this seam.
   const reportStatistics = (request: unknown): void => {
@@ -59,11 +65,7 @@ export function createNativeSharedTextureBridge(native: SharedTextureProducer, w
       frameTimeline: timeline, renderBudgetMs: budget.value, submissionLatenessMs: lateness }) }
     catch { /* Diagnostics cannot fail playback, including frozen requests. */ }
   }
-  const trusted = (event: IpcMainEvent): boolean => !contents.isDestroyed() && event.sender === contents && event.senderFrame === contents.mainFrame
-  const matches = (event: IpcMainEvent, value: unknown): value is Binding => {
-    const v = value as Binding | null
-    return trusted(event) && !!v && v.surfaceToken === surfaceToken && typeof v.bindingToken === 'string' && /^[\da-f-]{36}$/.test(v.bindingToken)
-  }
+  const { matches, clock } = createFrameEndpoint(contents, surfaceToken, () => !stopped, monotonicMs)
   const flush = (): void => {
     targets.clear()
     budget.reset(); native.setRenderBudget(budget.value)
@@ -74,10 +76,15 @@ export function createNativeSharedTextureBridge(native: SharedTextureProducer, w
     if (stopped) return
     const next = requested && binding !== null
     if (next === shown) return
+    if (next && probe.state === 'pending') { probe.reset(); native.requestSelfTest() }
     flush(); native.setVisible(next); shown = next
   }
   const ready = (event: IpcMainEvent, value: unknown): void => {
     if (stopped || !matches(event, value)) return
+    if (binding?.bindingToken !== value.bindingToken) {
+      probe.reset()
+      if (shown) native.requestSelfTest()
+    }
     binding = { surfaceToken, bindingToken: value.bindingToken }
     if (timeline) contents.send('playback:frame-flush', { ...binding, timeline })
     visibility()
@@ -85,12 +92,6 @@ export function createNativeSharedTextureBridge(native: SharedTextureProducer, w
   const removed = (event: IpcMainEvent, value: unknown): void => {
     if (!matches(event, value) || value.bindingToken !== binding?.bindingToken) return
     binding = null; visibility()
-  }
-  const clock = (event: IpcMainEvent, value: unknown): void => {
-    if (stopped || !matches(event, value)) return
-    const sentAt = (value as Binding & { sentAt?: unknown }).sentAt
-    if (typeof sentAt === 'number' && Number.isFinite(sentAt) && sentAt >= 0)
-      contents.send('playback:frame-clock', { ...value, sentAt, mainTime: monotonicMs() })
   }
   const drawn = (event: IpcMainEvent, value: unknown): void => {
     if (stopped || !shown || !matches(event, value) || value.bindingToken !== binding?.bindingToken) return
@@ -124,20 +125,27 @@ export function createNativeSharedTextureBridge(native: SharedTextureProducer, w
     // Do not release/recycle consumer-held textures here. Each callback below
     // retains its original ticket, including after destroy or another create.
   }
-  const fail = (message: string, kind: 'graphics' | 'page' = 'graphics'): void => {
+  const fail = (message: string, kind: 'graphics' | 'page' = 'graphics', reason = 'GPU_RUNTIME_FAILED'): void => {
     if (!stopped) {
+      console.warn('[playback-frame-failure]', platform, kind, reason)
       // Keep the failure domain in the main process: localized transport text
       // must not hide a graphics fault from the independent CPU recovery path.
-      failure = Object.assign(new Error(message), { code: 'PLAYBACK_RESTART_REQUIRED', playbackFailureKind: kind })
+      failure = Object.assign(new Error(message), { code: 'PLAYBACK_RESTART_REQUIRED', playbackFailureKind: kind,
+        ...(kind === 'graphics' ? { playbackFailureCode: playbackFallbackReason(graphicsPlaybackFailure(reason), 'GPU_RUNTIME_FAILED') } : {}) })
       destroy()
     }
   }
   const receiverFailed = (event: IpcMainEvent, value: unknown): void => {
     if (matches(event, value) && value.bindingToken === binding?.bindingToken) fail(`${label} 共享视频帧消费失败`)
   }
+  const selfTest = (event: IpcMainEvent, value: unknown): void => {
+    if (stopped || !matches(event, value) || binding?.bindingToken !== value.bindingToken) return
+    try { probe.receive(value as Binding & { sequence?: unknown; samples?: unknown }) }
+    catch { fail('共享视频合成色块自检失败', 'graphics', 'DISPLAY_SELF_TEST_FAILED') }
+  }
   const gone = (): void => fail('播放器页面已关闭，请重启应用后重试', 'page')
   const navigation = (_event: unknown, _url: string, inPlace: boolean, main: boolean): void => { if (main && !inPlace) gone() }
-  const childGone = (_event: unknown, details: { type: string }): void => { if (details.type === 'GPU') fail('GPU 进程已退出，请重启应用后重试') }
+  const childGone = (_event: unknown, details: { type: string }): void => { if (details.type === 'GPU') fail('GPU 进程已退出，请重启应用后重试', 'graphics', 'GPU_PROCESS_EXITED') }
   const consumerReleased = (event: IpcMainEvent, value: unknown): void => {
     if (!matches(event, value)) return
     const sequence = (value as Binding & { sequence: number }).sequence
@@ -150,7 +158,8 @@ export function createNativeSharedTextureBridge(native: SharedTextureProducer, w
   }
   const listeners: Array<[string, (event: IpcMainEvent, value: unknown) => void]> = [
     ['playback:shared-texture-ready', ready], ['playback:shared-texture-removed', removed],
-    ['playback:shared-texture-failed', receiverFailed], ['playback:frame-clock', clock], ['playback:shared-texture-submitted', drawn]
+    ['playback:shared-texture-failed', receiverFailed], ['playback:frame-clock', clock], ['playback:shared-texture-submitted', drawn],
+    ['playback:shared-texture-self-test', selfTest]
   ]
   const publish = (frame: Frame, target: Binding): void => {
     let imported: ReturnType<typeof sharedTexture.importSharedTexture> | undefined
@@ -173,21 +182,22 @@ export function createNativeSharedTextureBridge(native: SharedTextureProducer, w
       transferStarted = true
       contents.send(transferChannel, {
         ...target, sequence: frame.sequence, timeline: frame.timeline, targetTime: frame.targetTimeUs / 1000,
-        colorContract: frame.colorContract, transfer
+        colorContract: frame.colorContract, ...(frame.selfTest ? { selfTest: frame.selfTest } : {}), transfer
       })
     } catch {
       // Once a transferable exists, a delivery exception does not prove that
       // the consumer cannot acquire it. Quarantine rather than recycle it.
       if (imported && !transferStarted) imported.release()
       else if (!imported && !owner.released) { owner.released = true; pending.delete(frame.sequence); native.releaseFrame(frame.sequence) }
-      fail(`${label} 共享纹理导入或传输失败，请重启应用后重试`)
+      fail(`${label} 共享纹理导入或传输失败，请重启应用后重试`, 'graphics', 'TEXTURE_IMPORT_FAILED')
     }
   }
   const poll = (): void => {
     if (stopped) return
     try {
+      probe.tick(shown, Date.now())
       if (shown && pending.size >= 3 && [...pending.values()].every(p => Date.now() - p.since > 5000))
-        throw new Error('共享帧消费超时')
+        throw graphicsPlaybackFailure('FRAME_RELEASE_TIMEOUT')
       if (requested && lastSequence === 0 && Date.now() - startedAt > 10000) throw new Error(`等待 ${label} 共享帧超时`)
       // Pump mpv events even when hidden. The native producer drops updates but
       // never overwrites one of its three consumer-held surfaces.
@@ -198,6 +208,8 @@ export function createNativeSharedTextureBridge(native: SharedTextureProducer, w
       // release a duplicate consumer-held ticket based on untrusted metadata.
       const fresh = Number.isSafeInteger(f.sequence) && f.sequence > lastSequence
       const invalid = (): never => {
+        console.warn('[playback-frame-metadata]', { sequence: f.sequence, timeline: f.timeline, width: f.width, height: f.height,
+          leadMs: f.targetTimeUs / 1000 - monotonicMs(), pending: pending.size, selfTest: f.selfTest })
         if (fresh) native.releaseFrame(f.sequence)
         throw new Error('Invalid native shared texture frame metadata')
       }
@@ -207,22 +219,27 @@ export function createNativeSharedTextureBridge(native: SharedTextureProducer, w
         || f.width * f.height * 4 > 256 * 1024 * 1024 || !Buffer.isBuffer(f[handleKey]) || f[handleKey]!.length !== 8
         || f[platform === 'darwin' ? 'ntHandle' : 'ioSurface'] !== undefined
         || f.pixelFormat !== 'bgra' || f.producerComplete !== true || f.colorContract !== 'bt709-srgb-rgb-full'
+        || f.selfTest !== undefined && f.selfTest !== 'solid-v1'
         || !Number.isSafeInteger(f.targetTimeUs) || f.targetTimeUs < 0 || !Number.isSafeInteger(f.renderStartUs) || f.renderStartUs < 1
         || f.targetTimeUs > (monotonicMs() + 100) * 1000) invalid()
       lastSequence = f.sequence
-      if (!shown || !binding || f.timeline !== timeline) { native.releaseFrame(f.sequence); return }
+      if (!shown || !binding || !f.selfTest && f.timeline !== timeline) { native.releaseFrame(f.sequence); return }
+      if (f.selfTest && !probe.exported(f.sequence, binding.bindingToken, f.width, f.height)) { native.releaseFrame(f.sequence); return }
       if (f.targetTimeUs) {
         if (targets.size >= 120) targets.delete(targets.keys().next().value!)
         targets.set(f.sequence, { start: f.renderStartUs / 1000, target: f.targetTimeUs / 1000 })
       }
       publish(f, binding)
-    } catch { fail(`${label} 共享视频生产失败，请重启应用后重试`) }
+    } catch (error) {
+      console.warn('[playback-frame-error]', error)
+      fail(`${label} 共享视频生产失败，请重启应用后重试`, 'graphics', playbackFallbackReason(error, 'FRAME_RENDER_FAILED'))
+    }
   }
   const snapshot = (consume: boolean): NativePlaybackState => ({ ...(consume ? native.state() : native.inspect()),
-    rendererFullscreenControls: true, nativeVideoFocused: false, sharedTextureSurface: surfaceToken,
-    presentedFrames: undefined, submittedFrames: submitted, frameTimeline: timeline, renderBudgetMs: budget.value, submissionLatenessMs: lateness })
+    sharedTextureSurface: surfaceToken,
+    displayProbe: probe.state, presentedFrames: undefined, submittedFrames: submitted, frameTimeline: timeline, renderBudgetMs: budget.value, submissionLatenessMs: lateness })
   return {
-    create(_handle: Buffer, bounds: Bounds): void {
+    create(bounds: Bounds): void {
       if (typeof sharedTexture?.importSharedTexture !== 'function') throw new Error(`Electron 不支持 ${label} 共享纹理`)
       native.create({ ...bounds, scale: bounds.scale ?? 1 }); stopped = false; startedAt = Date.now()
       statistics.subscribe(reportStatistics)
@@ -237,11 +254,10 @@ export function createNativeSharedTextureBridge(native: SharedTextureProducer, w
       timer = setInterval(poll, 250); timer.unref()
     },
     setBounds(bounds: Bounds): void {
-      const next = `${Math.ceil(bounds.width * (bounds.scale ?? 1))}:${Math.ceil(bounds.height * (bounds.scale ?? 1))}`
+      const next = `${Math.round(bounds.width * (bounds.scale ?? 1))}:${Math.round(bounds.height * (bounds.scale ?? 1))}`
       if (next !== dimensions) { dimensions = next; native.setBounds({ ...bounds, scale: bounds.scale ?? 1 }); flush() }
     },
     setVisible(value: boolean): void { requested = value; visibility() },
-    setPresentation(_presentation: string): void { /* HTML owns all presentation and controls. */ },
     command(args: string[], generated = false): void {
       native.command(args, generated)
       if (!generated && (['loadfile', 'seek', 'stop'].includes(args[0]) || args[0] === 'set' && ['pause', 'speed'].includes(args[1]))) flush()

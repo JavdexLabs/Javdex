@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { setTimeout as delay } from 'node:timers/promises'
-import { createGraphicsPlaybackFallback } from './graphicsPlaybackFallback'
+import { createPlaybackEngine } from './playbackEngine'
 import { createPlaybackSession } from './playbackSession'
 import type { NativePlayback, NativePlaybackState } from './nativePlayback'
 
@@ -23,17 +23,17 @@ function fixture() {
     viewport(...args) { calls.push(['viewport', ...args]) },
     addSubtitle(...args) { calls.push(['subtitle', ...args]) },
     updateGeneratedSubtitle(...args) { calls.push(['generated', ...args]) },
-    destroy() { calls.push(['destroy']); if (cleanupFailure) throw new Error('OpenGL cleanup failed'); state.alive = false }
+    destroy() { calls.push(['destroy']); if (cleanupFailure) throw Object.assign(new Error('OpenGL cleanup failed'), { playbackFailureKind: 'graphics' }); state.alive = false }
   }
-  return { player, calls, break: (message = 'OpenGL context lost', kind?: 'graphics' | 'page') => {
+  return { player, calls, break: (message = 'OpenGL context lost', kind: 'graphics' | 'page' = 'graphics') => {
     failure = Object.assign(new Error(message), kind ? { playbackFailureKind: kind } : {})
   },
     cleanupFails: () => { cleanupFailure = true }, state: (next: Partial<NativePlaybackState>) => { state = { ...state, ...next } } }
 }
-for (const platform of ['darwin', 'win32'] as const) {
+for (const platform of ['darwin', 'win32', 'linux'] as const) {
   function pair(options = { forceCpu: () => false, gpuAvailable: () => true }) {
     const gpu = fixture(), cpu = fixture()
-    return { gpu, cpu, p: createGraphicsPlaybackFallback(gpu.player, cpu.player, options, platform) }
+    return { gpu, cpu, p: createPlaybackEngine(gpu.player, cpu.player, { mode: () => options.forceCpu() ? 'cpu' : 'auto', gpuAvailable: options.gpuAvailable }, platform) }
   }
 
   test(`${platform}: unsupported graphics initializes CPU once and stays there across subsequent sessions`, () => {
@@ -95,7 +95,7 @@ for (const platform of ['darwin', 'win32'] as const) {
       const { gpu, cpu, p } = pair(); p.create(); gpu.state({ error: 'bad media', errorKind })
       assert.equal(p.read().errorKind, errorKind); assert.equal(cpu.calls.length, 0); p.destroy()
     }
-    const { gpu, cpu, p } = pair(); p.create(); gpu.break('播放器页面已关闭，请重启应用后重试')
+    const { gpu, cpu, p } = pair(); p.create(); gpu.break('播放器页面已关闭，请重启应用后重试', 'page')
     assert.throws(() => p.read(), /页面已关闭/); assert.equal(cpu.calls.length, 0); p.destroy()
   })
   test(`${platform}: a CPU failure is surfaced without retry loops`, () => {

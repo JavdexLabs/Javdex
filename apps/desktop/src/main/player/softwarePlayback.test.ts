@@ -1,3 +1,5 @@
+import { FrameBudget } from './frameBudget'
+import { createFrameEndpoint, isFrameBinding } from './frameEndpoint'
 import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
 import { readFileSync } from 'node:fs'
@@ -28,13 +30,16 @@ function softwareFixture(platform: 'darwin' | 'win32') {
   runInNewContext(code, { exports, Buffer, process, Date: { now: () => now },
     setInterval: (callback: () => void) => { poll = callback; return { unref() {} } }, clearInterval() {},
     require(id: string) {
+      if (id === './frameBudget') return { FrameBudget }
+      if (id === './frameEndpoint') return { createFrameEndpoint, isFrameBinding }
+
       if (id === 'electron') return { ipcMain: ipc }
       if (id === 'node:crypto') return { randomUUID: () => '11111111-1111-4111-8111-111111111111' }
       throw new Error(id)
     }
   })
   const bridge = exports.createSoftwarePlaybackBridge(native, { webContents: contents } as unknown as BrowserWindow, platform)
-  bridge.create(Buffer.alloc(0), { width: 10, height: 10, scale: 1 })
+  bridge.create({ width: 10, height: 10, scale: 1 })
   const binding = { surfaceToken: bridge.state().sharedTextureSurface!, bindingToken }
   const emit = (name: string, data: unknown = binding, trusted = true): void => {
     ipc.emit(name, { sender: trusted ? contents : {}, senderFrame: contents.mainFrame }, data)

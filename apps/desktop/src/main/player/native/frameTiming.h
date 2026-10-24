@@ -8,9 +8,9 @@
 
 namespace javdex {
 // Metadata only: never calls report_swap and owns no frame or release fence.
-// libmpv supplies a delta from its clock; both Linux producers anchor it in
-// CLOCK_MONOTONIC. Zero means an immediate paused/redraw frame, not "now".
-struct LinuxFrameTiming {
+// libmpv supplies a delta; each producer anchors it in the platform
+// monotonic clock (uv_hrtime or CLOCK_MONOTONIC). Zero means an immediate paused/redraw frame, not "now".
+struct FrameTiming {
     uint64_t timeline = 0;
     int64_t renderStartUs = 0, targetTimeUs = 0;
     void reset(uint64_t next) {

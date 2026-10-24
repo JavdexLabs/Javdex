@@ -14,6 +14,7 @@
 #include <thread>
 #endif
 #include "mpvCore.h"
+#include <uv.h>
 #include <algorithm>
 #include <cstdlib>
 
@@ -33,9 +34,7 @@ bool visible = false, dirty = true;
 int width = 1, height = 1;
 size_t stride = 64, capacity = 0;
 unsigned char *pixels = nullptr;
-uint64_t sequence = 0;
-constexpr int maxDimension = 8192;
-constexpr size_t maxBufferBytes = 256ULL * 1024 * 1024;
+uint64_t sequence = 0, timeline = 0;
 void requireOwner() {
     if (ownerThread != currentOwner()) throw std::runtime_error("CPU playback requires its owner thread");
 }
@@ -51,22 +50,12 @@ void shutdown() {
     playback.shutdown();
     releasePixels();
     visible = false; dirty = true; width = height = 1; stride = 64;
+    timeline = 0;
 }
 void bounds(napi_env env, napi_value value) {
-    const double w = namedNumber(env, value, "width"), h = namedNumber(env, value, "height"), scale = namedNumber(env, value, "scale");
-    if (w <= 0 || h <= 0 || scale <= 0 || scale > 8)
-        throw std::runtime_error("Invalid CPU playback bounds");
-    // Match Linux CPU playback: render the physical viewport without a quality
-    // cap, retaining only the dimension and frame-memory safety boundaries.
-    const double pw = std::round(w * scale), ph = std::round(h * scale);
-    if (!std::isfinite(pw) || !std::isfinite(ph) || pw < 1 || ph < 1 || pw > maxDimension || ph > maxDimension)
-        throw std::runtime_error("CPU viewport exceeds supported dimensions");
-    const int nextWidth = static_cast<int>(pw), nextHeight = static_cast<int>(ph);
-    const size_t nextStride = (static_cast<size_t>(nextWidth) * 4 + 63) & ~size_t(63);
-    if (nextStride * nextHeight > maxBufferBytes) throw std::runtime_error("CPU frame exceeds memory limit");
-    if (width != nextWidth || height != nextHeight) {
-        width = nextWidth; height = nextHeight;
-        stride = nextStride; dirty = true;
+    const auto next = frameLayout(namedNumber(env, value, "width"), namedNumber(env, value, "height"), namedNumber(env, value, "scale"));
+    if (width != next.width || height != next.height) {
+        width = next.width; height = next.height; stride = next.stride; dirty = true;
     }
 }
 napi_value create(napi_env env, napi_callback_info info) {
@@ -76,7 +65,8 @@ napi_value create(napi_env env, napi_callback_info info) {
         size_t count = 1; napi_value args[1]; napi_get_cb_info(env, info, &count, args, nullptr, nullptr);
         if (count != 1) throw std::runtime_error("Expected CPU playback bounds");
         bounds(env, args[0]);
-        playback.initialize(nullptr, nullptr, false, nullptr, nullptr, "no", true);
+        RenderConfig config; config.cpu = true; config.hardwareDecode = "no";
+        playback.initialize(config);
         return undefined(env);
     } catch (const std::exception &error) {
         if (ownerThread == currentOwner()) shutdown();
@@ -97,6 +87,24 @@ napi_value setVisible(napi_env env, napi_callback_info info) {
         if (count != 1 || napi_get_value_bool(env, args[0], &next) != napi_ok) throw std::runtime_error("Invalid CPU visibility");
         if (visible != next) dirty = true;
         visible = next; return undefined(env);
+    } catch (const std::exception &error) { return fail(env, error.what()); }
+}
+napi_value resetTiming(napi_env env, napi_callback_info info) {
+    try {
+        requireOwner(); size_t count = 1; napi_value args[1]; double value = 0;
+        napi_get_cb_info(env, info, &count, args, nullptr, nullptr);
+        if (count != 1 || napi_get_value_double(env, args[0], &value) != napi_ok || !std::isfinite(value)
+            || value <= timeline || value > 9007199254740991.0 || std::floor(value) != value) throw std::runtime_error("Invalid CPU timeline");
+        timeline = static_cast<uint64_t>(value); dirty = true; return undefined(env);
+    } catch (const std::exception &error) { return fail(env, error.what()); }
+}
+napi_value setRenderBudget(napi_env env, napi_callback_info info) {
+    try {
+        requireOwner(); size_t count = 1; napi_value args[1]; double value = 0;
+        napi_get_cb_info(env, info, &count, args, nullptr, nullptr);
+        if (count != 1 || napi_get_value_double(env, args[0], &value) != napi_ok || !std::isfinite(value) || value < 8 || value > 40)
+            throw std::runtime_error("Invalid CPU render budget");
+        playback.command({"set", "video-timing-offset", std::to_string(value / 1000)}); return undefined(env);
     } catch (const std::exception &error) { return fail(env, error.what()); }
 }
 napi_value nextFrame(napi_env env, napi_callback_info info) {
@@ -124,6 +132,7 @@ napi_value nextFrame(napi_env env, napi_callback_info info) {
             capacity = size;
         }
         const auto delay = playback.nextFrameDelayUs();
+        const auto start = static_cast<int64_t>(uv_hrtime() / 1000);
         if (!playback.renderSoftware(width, height, stride, pixels)) throw std::runtime_error("Cannot render CPU frame");
         for (int y = 0; y < height; y++) {
             auto *row = pixels + static_cast<size_t>(y) * stride;
@@ -134,6 +143,8 @@ napi_value nextFrame(napi_env env, napi_callback_info info) {
         napi_value result, buffer; napi_create_object(env, &result);
         if (napi_create_buffer_copy(env, size, pixels, nullptr, &buffer) != napi_ok) throw std::runtime_error("Cannot copy CPU frame");
         napi_set_named_property(env, result, "pixels", buffer);
+        setNumber(env, result, "timeline", timeline);
+        setNumber(env, result, "renderStartUs", start); setNumber(env, result, "targetTimeUs", delay ? start + delay : 0);
         setNumber(env, result, "width", width); setNumber(env, result, "height", height);
         setNumber(env, result, "stride", static_cast<double>(stride)); setNumber(env, result, "size", static_cast<double>(size));
         setNumber(env, result, "sequence", static_cast<double>(++sequence));
@@ -179,6 +190,8 @@ napi_value initialize(napi_env env, napi_value exports, const char *name) {
         {"setBounds", nullptr, setBounds, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"setVisible", nullptr, setVisible, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nextFrame", nullptr, nextFrame, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"resetTiming", nullptr, resetTiming, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"setRenderBudget", nullptr, setRenderBudget, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"command", nullptr, command, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"generatedSubtitles", nullptr, generatedSubtitles, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"state", nullptr, state, nullptr, nullptr, nullptr, napi_default, nullptr},

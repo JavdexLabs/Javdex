@@ -10,7 +10,7 @@ import { pqCode } from './linux-color-reference.mjs'
 import { inspectColorFixture } from './linux-color-fixture-validation.mjs'
 
 const [binary, directory] = process.argv.slice(2)
-assert(binary && directory, 'Usage: node scripts/windows-hdr-fixtures.mjs FFMPEG NEW_DIRECTORY')
+assert(binary && directory, 'Usage: node scripts/playback-color-fixtures.mjs FFMPEG NEW_DIRECTORY')
 const generated = spawnSync(process.execPath, [fileURLToPath(new URL('./linux-color-fixtures.mjs', import.meta.url)), binary, directory], { stdio: 'inherit' })
 assert.equal(generated.status, 0, 'Shared color fixtures failed')
 const manifestFile = path.join(directory, 'manifest.json'), manifest = JSON.parse(fs.readFileSync(manifestFile))

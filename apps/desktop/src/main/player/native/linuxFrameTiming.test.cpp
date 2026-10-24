@@ -1,8 +1,8 @@
-#include "linuxFrameTiming.h"
+#include "frameTiming.h"
 #include <cassert>
 
 int main() {
-    javdex::LinuxFrameTiming timing;
+    javdex::FrameTiming timing;
     timing.sample(1000000, 41667); assert(timing.targetTimeUs == 1041667); // 24fps
     timing.sample(2000000, 33333); assert(timing.targetTimeUs == 2033333); // 30fps
     timing.sample(3000000, 16667); assert(timing.targetTimeUs == 3016667); // 60fps

@@ -250,7 +250,8 @@ for (const step of adapterPlan) {
 }
 const staged = path.join(buildRoot, 'runtime'); mkdirSync(staged)
 const entry = platform === 'linux' ? 'playback-helper' : 'playback.node'
-cpSync(path.join(addon, entry), path.join(staged, entry))
+const nativeEntries = platform === 'linux' ? [entry] : [entry, 'playback-interop.node']
+for (const name of nativeEntries) cpSync(path.join(addon, name), path.join(staged, name))
 const libraryDirectory = path.join(prefix, platform === 'win32' ? 'bin' : 'lib')
 const candidates = readdirSync(libraryDirectory).filter(name => platform === 'darwin' ? /^libmpv.*\.dylib$/.test(name)
   : platform === 'win32' ? /^(lib)?mpv.*\.dll$/.test(name) : /^libmpv\.so(?:\.\d+)*$/.test(name))
@@ -265,7 +266,7 @@ for (const name of libraries) {
   copyFileSync(file, path.join(staged, name))
 }
 if (platform === 'darwin') {
-  for (const name of [entry, ...libraries]) {
+  for (const name of [...nativeEntries, ...libraries]) {
     const file = path.join(staged, name), commands = run('otool', ['-l', file], root, true)
     const ids = new Set([...commands.matchAll(/cmd LC_ID_DYLIB\s+cmdsize \d+\s+name (.+?) \(offset \d+\)/g)].map(match => match[1]))
     if (ids.size) run('install_name_tool', ['-id', '@loader_path/' + name, file])
@@ -324,11 +325,11 @@ function inventory(directory, relative = '') {
   }
 }
 inventory(staged)
-writeFileSync(path.join(staged, 'runtime.json'), JSON.stringify({ schemaVersion: 1, hashStage: 'pre-sign', platform, arch, electronVersion,
+writeFileSync(path.join(staged, 'runtime.json'), JSON.stringify({ schemaVersion: 1, playbackHostVersion: 1, hashStage: 'pre-sign', platform, arch, electronVersion,
   mpvVersion: lock.sources.find(item => item.id === 'mpv').version, files, components: [
     { name: 'mpv', version: lock.sources.find(item => item.id === 'mpv').version, license: 'GPL-3.0-or-later', binaries: libraries,
       licenseFile: 'licenses/libmpv.txt', sourceArchive: 'sources/libmpv-sources.tar', buildRecipe: 'build.json' },
-    { name: 'javdex-native', version: require('../package.json').version, license: 'GPL-3.0-or-later', binaries: [entry],
+    { name: 'javdex-native', version: require('../package.json').version, license: 'GPL-3.0-or-later', binaries: nativeEntries,
       licenseFile: 'licenses/javdex.txt', sourceArchive: 'sources/javdex-native.tar.gz', buildRecipe: 'build.json' }
   ] }, null, 2) + '\n')
 validatePlaybackRuntime(staged, target)

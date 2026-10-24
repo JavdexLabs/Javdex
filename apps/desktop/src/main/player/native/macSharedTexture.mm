@@ -1,12 +1,13 @@
-// macOS playback producer, loaded only in Electron's main process.
-// IOSurfaceRef never crosses application IPC: Electron retains/imports it here
-// and Chromium owns the Mach-port transfer to GPU/renderer processes.
-#import <Foundation/Foundation.h>
+// Offscreen macOS producer in the isolated playback process. AppKit/main-UI
+// thread objects are unnecessary; IOSurfaces cross processes as Mach rights.
+#include <CoreFoundation/CoreFoundation.h>
 #import <IOSurface/IOSurface.h>
 #import <OpenGL/OpenGL.h>
 #import <OpenGL/gl3.h>
 #include "mpvCore.h"
+#include "frameTiming.h"
 #include "softwarePlayback.h"
+#include "macSurfaceTransport.h"
 #include <uv.h>
 #include <array>
 #include <unordered_map>
@@ -18,18 +19,20 @@ namespace {
 using namespace javdex;
 MpvCore playback;
 CGLContextObj context = nullptr;
-struct Slot { IOSurfaceRef surface = nullptr; GLuint texture = 0, framebuffer = 0; uint64_t sequence = 0; int width = 0, height = 0; };
+struct Slot { IOSurfaceRef surface = nullptr; GLuint texture = 0, framebuffer = 0; uint64_t sequence = 0, resourceId = 0; int width = 0, height = 0; };
 std::array<Slot, 3> slots;
+bool probePending = false;
 // Retain each exported surface independently of the active GL context. A late
 // consumer release after destroy cannot release/reuse a newer session's slot.
 std::unordered_map<uint64_t, IOSurfaceRef> leases;
-uint64_t sequence = 0, timeline = 0;
+uint64_t sequence = 0, nextResourceId = 0;
+FrameTiming frameTiming;
 size_t peakLeases = 0;
 int width = 1, height = 1;
 bool visible = false, dirty = true;
 // One bounded asynchronous dispatcher lives for the addon environment. mpv
 // callbacks never touch JS, GL or mpv. The owner is held until shutdown joins
-// mpv's threads; queued work reads only the current main-thread callback.
+// mpv's threads; queued work reads only the current owner-thread callback.
 struct Wakeup { napi_env env = nullptr; napi_threadsafe_function function = nullptr; napi_ref callback = nullptr; } wakeup;
 void notify(void *context) {
     auto &state = *static_cast<Wakeup *>(context);
@@ -69,21 +72,13 @@ void shutdown() {
     visible = false; dirty = true;
 }
 void size(napi_env env, napi_value bounds) {
-    const double scale = namedNumber(env, bounds, "scale");
-    const double w = std::ceil(namedNumber(env, bounds, "width") * scale);
-    const double h = std::ceil(namedNumber(env, bounds, "height") * scale);
-    if (!std::isfinite(scale) || scale <= 0 || scale > 8 || !std::isfinite(w) || !std::isfinite(h)
-        || w < 1 || h < 1 || w > 8192 || h > 8192 || w * h * 4 > 256 * 1024 * 1024)
-        throw std::runtime_error("Invalid IOSurface bounds");
-    if (width != w || height != h) { width = static_cast<int>(w); height = static_cast<int>(h); dirty = true; }
+    const auto next = frameLayout(namedNumber(env, bounds, "width"), namedNumber(env, bounds, "height"), namedNumber(env, bounds, "scale"));
+    if (width != next.width || height != next.height) { width = next.width; height = next.height; dirty = true; }
 }
 void prepare(Slot &slot) {
     if (slot.width == width && slot.height == height) return;
     dispose(slot);
-    NSDictionary *properties = @{(id)kIOSurfaceWidth: @(width), (id)kIOSurfaceHeight: @(height),
-        (id)kIOSurfaceBytesPerElement: @4, (id)kIOSurfacePixelFormat: @(0x42475241)}; // BGRA
-    slot.surface = IOSurfaceCreate((__bridge CFDictionaryRef)properties);
-    if (!slot.surface) throw std::runtime_error("Cannot allocate IOSurface");
+    slot.surface = javdex::mac::createSurface(width, height); slot.resourceId = ++nextResourceId;
     glGenTextures(1, &slot.texture); glBindTexture(GL_TEXTURE_RECTANGLE, slot.texture);
     const auto error = CGLTexImageIOSurface2D(context, GL_TEXTURE_RECTANGLE, GL_RGBA8, width, height,
         GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV, slot.surface, 0);
@@ -95,8 +90,8 @@ void prepare(Slot &slot) {
 }
 napi_value create(napi_env env, napi_callback_info info) {
     size_t count = 1; napi_value args[1]; napi_get_cb_info(env, info, &count, args, nullptr, nullptr);
-    if (count != 1 || ![NSThread isMainThread]) return fail(env, "IOSurface create requires main thread and bounds");
-    shutdown(); timeline = 0; peakLeases = leases.size();
+    if (count != 1) return fail(env, "IOSurface create requires main thread and bounds");
+    shutdown(); frameTiming = {}; peakLeases = leases.size(); probePending = false;
     try {
         size(env, args[0]);
         CGLPixelFormatAttribute attributes[] = {kCGLPFAOpenGLProfile, (CGLPixelFormatAttribute)kCGLOGLPVersion_3_2_Core,
@@ -109,7 +104,8 @@ napi_value create(napi_env env, napi_callback_info info) {
         CGLSetCurrentContext(context);
         // Preserve macOS's existing hwdec=auto. This is not Linux auto-copy,
         // and IOSurface/OpenGL is not a claim of Metal or end-to-end zero-copy.
-        playback.initialize(getProc, nullptr, false, notify, &wakeup, "auto", false, "0.02", true);
+        RenderConfig config; config.hardwareDecode = "auto"; config.getProc = getProc; config.wakeup = notify; config.wakeupContext = &wakeup;
+        playback.initialize(config);
         playback.setEventWakeup(notify, &wakeup);
     } catch (const std::exception &error) { shutdown(); return fail(env, error.what()); }
     return undefined(env);
@@ -127,9 +123,12 @@ napi_value visibility(napi_env env, napi_callback_info info) {
 }
 napi_value reset(napi_env env, napi_callback_info info) {
     size_t count = 1; napi_value args[1]; double value = 0; napi_get_cb_info(env, info, &count, args, nullptr, nullptr);
-    if (count != 1 || napi_get_value_double(env, args[0], &value) != napi_ok || value <= timeline
+    if (count != 1 || napi_get_value_double(env, args[0], &value) != napi_ok || value <= frameTiming.timeline
         || value > 9007199254740991.0 || std::floor(value) != value) return fail(env, "Invalid frame timeline");
-    timeline = static_cast<uint64_t>(value); dirty = true; notify(&wakeup); return undefined(env);
+    frameTiming.reset(static_cast<uint64_t>(value)); dirty = true; notify(&wakeup); return undefined(env);
+}
+napi_value probe(napi_env env, napi_callback_info) {
+    probePending = true; dirty = true; notify(&wakeup); return undefined(env);
 }
 napi_value next(napi_env env, napi_callback_info info) {
     try {
@@ -146,10 +145,14 @@ napi_value next(napi_env env, napi_callback_info info) {
         if (!dirty) return undefined(env);
         auto slot = std::find_if(slots.begin(), slots.end(), [](const Slot &s) { return !s.sequence || !leases.count(s.sequence); });
         if (slot == slots.end()) return undefined(env);
+        const bool selfTest = probePending;
+        const int viewportWidth = width, viewportHeight = height;
+        if (selfTest) { width = 640; height = 360; pattern = true; }
         prepare(*slot);
         const auto delay = pattern ? 0 : playback.nextFrameDelayUs(), start = clockUs();
+        frameTiming.sample(start, delay);
         glBindFramebuffer(GL_FRAMEBUFFER, slot->framebuffer); glViewport(0, 0, width, height);
-        glDisable(GL_SCISSOR_TEST); glClearColor(.25f, .75f, .5f, 1.f); glClear(GL_COLOR_BUFFER_BIT);
+        glDisable(GL_SCISSOR_TEST); glClearColor(64.f / 255, 191.f / 255, 128.f / 255, 1.f); glClear(GL_COLOR_BUFFER_BIT);
         if (!pattern && !playback.render(width, height, slot->framebuffer, false)) throw std::runtime_error("Cannot render IOSurface frame");
         // Completion is established before handing ownership to Chromium. Keep
         // this conservative synchronization until real-device fence validation.
@@ -161,11 +164,14 @@ napi_value next(napi_env env, napi_callback_info info) {
         napi_value result, handle; napi_create_object(env, &result);
         napi_create_buffer_copy(env, sizeof(slot->surface), &slot->surface, nullptr, &handle);
         napi_set_named_property(env, result, "ioSurface", handle);
-        setNumber(env, result, "sequence", sequence); setNumber(env, result, "timeline", timeline);
+        setNumber(env, result, "resourceId", slot->resourceId); setNumber(env, result, "slot", slot - slots.begin());
+        setNumber(env, result, "sequence", sequence); setNumber(env, result, "timeline", frameTiming.timeline);
         setNumber(env, result, "width", width); setNumber(env, result, "height", height);
-        setNumber(env, result, "renderStartUs", start); setNumber(env, result, "targetTimeUs", delay ? start + delay : 0);
+        setNumber(env, result, "renderStartUs", start); setNumber(env, result, "targetTimeUs", frameTiming.targetTimeUs);
         setFlag(env, result, "producerComplete", true); setString(env, result, "pixelFormat", "bgra");
         setString(env, result, "colorContract", "bt709-srgb-rgb-full");
+        if (selfTest) setString(env, result, "selfTest", "solid-v1");
+        probePending = false; dirty = selfTest; width = viewportWidth; height = viewportHeight;
         return result;
     } catch (const std::exception &error) { return fail(env, error.what()); }
 }
@@ -230,7 +236,7 @@ void cleanup(void *) {
     leases.clear();
 }
 napi_value initialize(napi_env env, napi_value exports) {
-    if (![NSThread isMainThread]) return fail(env, "IOSurface addon requires the main thread");
+    if (!nodeMainThread(env)) return fail(env, "IOSurface addon requires the Node main thread");
     wakeup.env = env;
     napi_value name; napi_create_string_utf8(env, "javdex-mac-shared-wakeup", NAPI_AUTO_LENGTH, &name);
     if (napi_create_threadsafe_function(env, nullptr, nullptr, name, 1, 1, nullptr, nullptr, &wakeup, dispatch, &wakeup.function) != napi_ok)
@@ -241,6 +247,7 @@ napi_value initialize(napi_env env, napi_value exports) {
         {"setBounds", nullptr, bounds, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"setVisible", nullptr, visibility, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"resetTiming", nullptr, reset, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"requestSelfTest", nullptr, probe, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"nextFrame", nullptr, next, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"setRenderBudget", nullptr, budget, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"setWakeup", nullptr, setWakeup, nullptr, nullptr, nullptr, napi_default, nullptr},

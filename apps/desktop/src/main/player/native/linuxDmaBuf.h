@@ -1,4 +1,5 @@
 #pragma once
+#include "renderConfig.h"
 
 // Shared invariants for the experimental producer. This header does not create
 // a GPU buffer; the socket tests exercise ownership and framing, not GPU import.
@@ -19,9 +20,9 @@
 namespace javdex::dmabuf {
 constexpr size_t slotCount = 3;
 constexpr uint64_t maxSequence = 9007199254740991ULL;
-constexpr uint64_t maxBufferBytes = 256ULL * 1024 * 1024;
+constexpr uint64_t maxBufferBytes = maximumFrameBytes;
 constexpr uint64_t stallTimeoutMs = 5000;
-constexpr int maxDimension = 8192;
+constexpr int maxDimension = maximumFrameDimension;
 constexpr size_t maxMessage = 8 * 1024 * 1024 + 4096;
 constexpr int transportFd = 3;
 // NVIDIA block-linear GBM/EGL and Vulkan imports can disagree when the
@@ -57,7 +58,7 @@ inline std::vector<std::string> decode(const std::string &bytes) {
         if (fields.back().find('\0') != std::string::npos) throw std::runtime_error("Invalid playback field");
     }
     if (offset != bytes.size()) throw std::runtime_error("Trailing playback command bytes");
-    if (fields.front() != "occlusions" && count > 16) throw std::runtime_error("Invalid playback command fields");
+    if (count > 16) throw std::runtime_error("Invalid playback command fields");
     return fields;
 }
 inline double finiteNumber(const std::string &text) {

@@ -28,7 +28,7 @@ export function linuxPackagingFiles(root) {
     'build/playback-sources.json', 'build/angle-runtime.json', 'build/angle-args.gn',
     'build/patches/angle-x11-vulkan-visual.patch',
     ...Object.keys(lock.electronPatches).map(name => 'build/angle-electron-patches/' + safePath(name)),
-    ...['mpvCore.h', 'generatedSubtitles.h', 'linuxDmaBuf.h', 'linuxDmaBuf.test.cpp', 'linuxFrameTiming.h', 'linuxFrameTiming.test.cpp', 'linuxVulkanModifiers.h', 'linuxFdTransport.h', 'linuxFdBridge.cpp',
+    ...['mpvCore.h', 'generatedSubtitles.h', 'linuxDmaBuf.h', 'linuxDmaBuf.test.cpp', 'frameTiming.h', 'renderConfig.h', 'colorPipeline.h', 'linuxFrameTiming.test.cpp', 'linuxVulkanModifiers.h', 'linuxFdTransport.h', 'linuxFdBridge.cpp',
       'linuxDmaBufPlayback.cpp', 'linuxSoftwarePlayback.cpp', 'runtimeDecode.test.cpp'].map(name => 'apps/desktop/src/main/player/native/' + name)
   ])]
 }

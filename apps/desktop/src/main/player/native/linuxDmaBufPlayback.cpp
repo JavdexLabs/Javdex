@@ -13,7 +13,7 @@
 #define JAVDEX_STANDALONE_PLAYBACK
 #include "mpvCore.h"
 #include "linuxDmaBuf.h"
-#include "linuxFrameTiming.h"
+#include "frameTiming.h"
 #include <algorithm>
 #include <chrono>
 #include <cstdlib>
@@ -84,10 +84,8 @@ void loadGlFunctions() {
 MpvCore playback;
 Leases leases;
 Bounds requested;
-bool rendererControls = true;
 bool selfTestRequested = false, selfTestSent = false;
 PublicationState publication;
-std::string presentation = "expanded";
 int wakeFd = -1, pixelWidth = 1, pixelHeight = 1;
 uint64_t now() { return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count(); }
 void *getProcAddress(void *, const char *name) { return reinterpret_cast<void *>(eglGetProcAddress(name)); }
@@ -324,14 +322,16 @@ void create(const Bounds &rect) {
     // headroom. With zero lead, mpv misses deadlines even with an immediate-ACK
     // consumer. Keep nonblocking render and all producer/consumer fences;
     // reserve 20ms for either DMA-BUF path, independent of modifier negotiation.
-    playback.initialize(getProcAddress, nullptr, false, wake, nullptr, "auto-copy", false, "0.02");
+    RenderConfig config; config.getProc = getProcAddress; config.wakeup = wake;
+    playback.initialize(config);
     publication.request();
 }
-LinuxFrameTiming frameTiming;
+FrameTiming frameTiming;
 bool dispatch(const std::vector<std::string> &fields) {
     const auto &op = fields.at(0);
-    if (op == "create" && fields.size() == 8 && fields[1] == "0" && fields[7] == "dmabuf") create(rectangle(fields, 2));
+    if (op == "create" && fields.size() == 7 && fields[6] == "dmabuf") create(rectangle(fields, 1));
     else if (op == "destroy" && fields.size() == 1) { destroyPlayer(); return false; }
+    else if (op == "diagnostic-stall" && fields.size() == 1 && std::getenv("JAVDEX_PLAYBACK_DIAGNOSTICS") && std::string(std::getenv("JAVDEX_PLAYBACK_DIAGNOSTICS")) == "1") { for (;;) pause(); }
     else if (op == "timing-reset" && fields.size() == 2) {
         const double value = finiteNumber(fields[1]);
         if (value < 1 || value > maxSequence || std::floor(value) != value) throw std::runtime_error("Invalid timing epoch");
@@ -339,15 +339,10 @@ bool dispatch(const std::vector<std::string> &fields) {
         preparedSlot = -1; preparedMetadata.clear(); publication.request();
     }
     else if (!playback.alive()) throw std::runtime_error("No shared-texture playback session");
-    else if (op == "self-test" && fields.size() == 1 && !selfTestSent) selfTestRequested = true;
+    else if (op == "self-test" && fields.size() == 1) { selfTestRequested = true; selfTestSent = false; }
     else if (op == "bounds" && fields.size() == 6) updateBounds(rectangle(fields, 1));
-    else if (op == "renderer-controls" && fields.size() == 2 && (fields[1] == "0" || fields[1] == "1")) rendererControls = fields[1] == "1";
-    else if (op == "occlusions" && fields.size() <= 257 && (fields.size() - 1) % 8 == 0) {
-        // Renderer composition handles occlusion; still validate the wire input.
-        for (size_t i = 1; i < fields.size(); i++) if (std::abs(finiteNumber(fields[i])) > 100000)
-            throw std::runtime_error("Invalid playback occlusion");
-    } else if (op == "visible" && fields.size() == 2 && (fields[1] == "0" || fields[1] == "1")) { publication.setVisible(fields[1] == "1"); }
-    else if (op == "presentation" && fields.size() == 2 && (fields[1] == "expanded" || fields[1] == "docked" || fields[1] == "fullscreen")) presentation = fields[1];
+    else if (op == "visible" && fields.size() == 2 && (fields[1] == "0" || fields[1] == "1")) { publication.setVisible(fields[1] == "1"); }
+
     else if ((op == "command" || op == "generated-subtitle-command") && fields.size() >= 2 && fields.size() <= 9)
         playback.command({fields.begin() + 1, fields.end()}, op == "generated-subtitle-command");
     else if (op == "generated-subtitles" && fields.size() == 5 && (fields[3] == "0" || fields[3] == "1")) {
@@ -362,7 +357,7 @@ std::string metadata(const Buffer &buffer, int slot, uint64_t sequence, bool sel
         + ",\"width\":" + std::to_string(buffer.width) + ",\"height\":" + std::to_string(buffer.height)
         + frameTiming.metadata()
         + (selfTest ? ",\"selfTest\":\"solid-v1\"" : "")
-        + ",\"pixelFormat\":\"bgra\",\"colorContract\":\"mpv-gpu-rgb-untagged\",\"stride\":" + std::to_string(buffer.stride) + ",\"offset\":" + std::to_string(buffer.offset)
+        + ",\"pixelFormat\":\"bgra\",\"colorContract\":\"bt709-srgb-rgb-full\",\"stride\":" + std::to_string(buffer.stride) + ",\"offset\":" + std::to_string(buffer.offset)
         + ",\"size\":" + std::to_string(buffer.size) + ",\"modifier\":\"" + std::to_string(buffer.modifier) + "\",\"producerComplete\":true}";
 }
 void render() {
@@ -433,7 +428,6 @@ void render() {
 std::string state() {
     auto result = playback.stateJson(); result.pop_back();
     return result + ",\"backend\":\"linux-dmabuf\",\"pixelWidth\":" + std::to_string(pixelWidth) + ",\"pixelHeight\":" + std::to_string(pixelHeight)
-        + ",\"rendererFullscreenControls\":" + (rendererControls ? "true" : "false") + ",\"nativeVideoFocused\":false"
         + ",\"exportedFrames\":" + std::to_string(leases.latest()) + ",\"dmaBufInFlight\":" + std::to_string(leases.inFlight()) + '}';
 }
 class Output {

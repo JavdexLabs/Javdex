@@ -1,3 +1,6 @@
+import { playbackFallbackReason, graphicsPlaybackFailure } from './playbackGraphicsFailure'
+import { createFrameEndpoint, isFrameBinding } from './frameEndpoint'
+import { FrameHealthProbe } from './frameHealthProbe'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { EventEmitter } from 'node:events'
@@ -29,11 +32,15 @@ function fixture(platform: 'darwin' | 'win32' = 'darwin') {
     inspect: () => ({ alive: created }), state: () => ({ alive: created }),
     nextFrame() { if (held.size >= 3) return; held.add(++sequence); return { sequence, timeline, width: 640, height: 360, [platform === 'darwin' ? 'ioSurface' : 'ntHandle']: Buffer.alloc(8),
       producerComplete: true, pixelFormat: 'bgra', colorContract: 'bt709-srgb-rgb-full', renderStartUs: 1, targetTimeUs: 0 } },
-    releaseFrame(value: number) { releases.push(value); held.delete(value) } }
+    requestSelfTest() {}, releaseFrame(value: number) { releases.push(value); held.delete(value) } }
   const exports = {} as typeof import('./nativeSharedTexture')
   runInNewContext(code, { exports, Buffer, process: { hrtime: { bigint: () => 1000000000n }, env: {} }, Date,
     setInterval: (callback: () => void) => { tick = callback; return { unref() {} } }, clearInterval() {},
     require(name: string) {
+      if (name === './playbackGraphicsFailure') return { playbackFallbackReason, graphicsPlaybackFailure }
+      if (name === './frameEndpoint') return { createFrameEndpoint, isFrameBinding }
+
+      if (name === './frameHealthProbe') return { FrameHealthProbe }
       if (name === 'node:diagnostics_channel') return { channel }
       if (name === './frameBudget') return { FrameBudget }
       if (name === 'node:crypto') return { randomUUID: () => '11111111-1111-4111-8111-111111111111' }
@@ -44,7 +51,7 @@ function fixture(platform: 'darwin' | 'win32' = 'darwin') {
       throw Error(name)
     } })
   const bridge = exports.createNativeSharedTextureBridge(native, { webContents: contents } as unknown as BrowserWindow, platform)
-  bridge.create(Buffer.alloc(0), { width: 640, height: 360, scale: 1 })
+  bridge.create({ width: 640, height: 360, scale: 1 })
   const binding = { surfaceToken: bridge.inspect().sharedTextureSurface!, bindingToken: '33333333-3333-4333-8333-333333333333' }
   ipc.emit('playback:shared-texture-ready', event, binding); bridge.setVisible(true)
   return { bridge, native, ipc, app, event, binding, messages, imported, releases, failFlush: () => { flushFailure = true }, failTransfer: () => { sendFailure = true }, mainReleases: () => mainReleases,

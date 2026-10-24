@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- 桌面三平台统一自动／GPU／CPU 播放设置、故障恢复、SDR/HDR 显示目标和 Canvas 控件；Windows/macOS 的原生播放移入隔离宿主，增加已知色块自检，并修复时间轴切换时误判待发送帧为 GPU 故障。默认字幕采用系统字体。
+
+- Linux x64 文本引擎的 CUDA／Vulkan 及 CUDA 依赖改由 Javdex Runtime 固定发行按需下载，保留原包摘要、已有安装和续传缓存。
+
 - macOS 内置播放新增 CPU 软件显示和图形故障自动回退，保留 GPU 默认路径；恢复播放位置、暂停意图及音轨字幕设置，并支持 `--javdex-cpu` 强制使用兼容模式。
 
 - 修复 Windows Canvas 的 HDR 转 SDR 亮度随 OpenGL 能力变化：固定 SDR 目标及基于元数据的 BT.2390 映射，关闭自动峰值/平均亮度检测；保留 Canvas 显示与图形故障后的 CPU 回退。

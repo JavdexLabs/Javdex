@@ -2,7 +2,7 @@
 
 桌面播放器在主窗口中使用 libmpv，支持本机和远程资料库的文件资源；服务器不解码或转码。日常操作见[播放指南](../website/src/content/docs/guides/playback.md)，构建与分发见[开发指南](DEVELOPMENT.md#内置播放运行库)。
 
-三平台能力与行为统一的目标、实施顺序和跨设备接续条件见 [ADR-0033](adr/0033-unify-desktop-playback-capabilities.md)。当前等待 Mac CPU 播放代码完成并推送，本机整合最新实现后再执行；下文仍记录现行实现，不代表统一方案已经落地。
+三平台能力与行为统一的目标、实施顺序和跨设备接续条件见 [ADR-0033](adr/0033-unify-desktop-playback-capabilities.md)。2026-10-24 已整合 Mac CPU 代码并实施共用层；新原生构建后的各平台实测范围分别记录，旧证据不追溯覆盖新宿主。
 
 ## 默认行为与来源
 
@@ -29,15 +29,22 @@
 
 共用核心拥有 mpv 生命周期、异步命令、状态、事件和字幕叠加层；macOS 使用 IOSurface 共享纹理到 Canvas，Windows 默认使用 D3D11 共享纹理到主窗口 Canvas，并提供 CPU 内存帧到 Canvas 的兜底；旧 HWND 显示和原生工具栏已移除；Linux 的 X11／XWayland 和原生 Wayland 共用共享纹理／CPU 内存帧到 Canvas 的显示方式。正常关闭由实际接受的窗口关闭与退出生命周期释放内核，不在可能被否决的 `close` 回调提前拆除活跃视图。
 
-Windows 与 macOS 在图形初始化失败、可检测的原生视频渲染／共享纹理故障，或 Electron 已禁用硬件加速时，自动改用同一运行库中的独立 CPU 后端；`--javdex-cpu` 可在启动时强制使用它（`--` 后不生效）。该后端使用 `hwdec=no`、libmpv SW Render API 和复制的 RGBA 帧，preload 在新建的软件 Canvas 上通过 `putImageData` 绘制，防止继承失效的加速画布；不创建播放端 GL context、D3D 设备或共享 GPU 纹理。最多两帧在途，与 Linux 一样按 `round(逻辑尺寸 × 缩放)` 渲染实际显示帧，不额外降至 1080p；保留单边 8192、单帧 256 MiB 的安全边界，超出时拒绝。高分辨率输入仍由 CPU 解码，流畅度取决于处理器和编码复杂度，不提供 HDR 直通保证；系统窗口合成不属于播放端 CPU 渲染保证。
+三平台采用同一“自动 / GPU / CPU 兼容”设置，在重新打开影片时应用。自动模式优先 GPU，图形初始化、自检或可检测运行故障最多触发一次 CPU 恢复；GPU 模式失败直接报告错误；CPU 模式使用软件解码和绘制。显式选择 GPU 后重开可重新探测。`--javdex-cpu` 可强制使用 CPU（`--` 后不生效）。未发布设置直接使用 `playbackRenderMode`，不读取或迁移旧平台专属字段。
 
-回退复用当前已授权来源，重新打开后恢复可定位资源的位置、暂停／播放意图、音量、静音、倍速、音轨、外挂字幕和 AI 字幕时间轴；停止或新来源取消旧恢复。一次图形故障后，本次应用运行继续使用 CPU，重启才重新尝试 GPU。旧 GPU 的未知租约保持隔离，不强行复用；页面已关闭、媒体／授权／音频错误及 CPU 自身故障不进入反复回退。线程被驱动完全挂死等不可检测故障不保证进程内恢复。实测与边界见 [Windows CPU 记录](reviews/windows-cpu-fallback-2026-10-24.md)。
+CPU 使用 `hwdec=no`、libmpv SW Render API 和 opaque RGBA，preload 通过新建的软件 Canvas 的 `putImageData` 绘制，不创建播放端 GL context 或 D3D 设备。三平台共用实际物理尺寸 `round(逻辑尺寸 × 缩放)`，不额外降至 1080p；保留缩放不超过 8、单边 8192、单帧 256MiB 的安全边界。复制帧最多两帧在途；Windows/macOS 的复制信用额度跨宿主和接收方共同约束。
 
-Windows GPU Canvas 的色彩目标固定为 8-bit BGRA、BT.709 primaries／sRGB transfer／RGB full range，SDR 参考白为 203nit；HDR 使用基于片源元数据的 BT.2390 映射，显式关闭自动峰值/平均亮度检测，避免 compute/SSBO 能力不同导致亮度变化。该目标不读取物理 HDR 显示器峰值，也不提供 HDR 直通。CPU 继续使用独立的 FFmpeg 感知映射到 BT.709 SDR，保留软件回退能力；两条映射曲线不保证相同亮度或逐像素一致。定位与实测见 [Windows HDR 映射修复](reviews/windows-hdr-mapping-2026-10-24.md)。
+`PlaybackEngine` 复用当前已授权来源，恢复位置、暂停意图、音量、静音、倍速、音轨、外挂字幕和 AI 时间轴；恢复中的新控制意图优先，停止或换片取消旧恢复。媒体、授权、音频和页面错误不触发图形回退；软件解码与 CPU 画面输出分别报告。未知 GPU 租约不强行回收，迟到回调继续归属原宿主与资源代。
 
-macOS 正常构建和启动默认使用共享纹理 Canvas2D，无需试验参数；旧 NSOpenGLView 显示后端及其原生全屏控件已移除。GPU 路径的 `playback.node` 在主进程以 CGL/OpenGL 把 libmpv 输出写入三槽 IOSurface，`hwdec=auto` 保持原策略；独立 `software` 导出提供 CPU 回退，不使用 Linux DMA-BUF 或原生子窗口。Electron 在主进程导入当前进程的 IOSurfaceRef，随后用公开的 `SharedTextureImportedSubtle` 转移对象交给隔离 preload；原始指针不进入应用 JSON、页面或共用播放合同。Canvas、全屏、键盘、滑杆与焦点使用现有 HTML 面板。
+Windows/macOS 的 libmpv、GL 和软件生产者运行在独立 utility process；主进程只加载不链接 libmpv/GL/D3D 的资源互操作模块。Windows 复制子进程 NT 共享句柄，macOS 用 Mach right 传递 IOSurface；以每次分配的资源 ID 区分同一槽的后续分配，接收方保持稳定导入，直到实际引用释放后才退休。宿主退出或 5 秒无心跳按统一规则处理，关闭超时由主进程终止，不让原生调用阻塞界面。Linux 继续使用独立 helper、私有管道和 FD 通道；绑定变化直接通知可见性，不再依赖会话的 16ms 轮询。
 
-该 addon 只允许主线程初始化。mpv 的帧通知与非视频事件经长度为一的非阻塞队列合并唤醒主线程，几何、可见性、时间线变化及租约归还也能唤醒；mpv 回调不执行 JS 或 GL。250ms 兜底继续处理故障、背压及事件，正常 200ms 状态观察保留，但不再为这个自驱动后端另设 16ms 渲染检查。兜底不是视频帧率上限，字幕、暂停 seek 和隐藏时的 skip 仍由正常内核处理。
+GPU/CPU 均以 BT.709 primaries、sRGB transfer、RGB full-range 的 8-bit SDR 为显示目标，参考白为 203nit，HDR 采用固定元数据和 BT.2390，不启用动态峰值统计。CPU 通过解码后、字幕合成前的 RGB16/四面体 LUT 转换，避免改变字幕颜色；不依赖 GL 或额外色彩运行库。缺失 PQ 亮度元数据按共同默认值处理。共同色彩验收入口为 `scripts/playback-color-fixtures.mjs` 与 `scripts/playback-color-acceptance.mjs`，GPU/CPU 输出允许最多 4 个字节值差异；截图不证明物理 HDR 输出或显示器校准。
+
+帧绑定与时钟交换由 `frameEndpoint.ts` 统一认证主 frame；预算和已知色块自检由共用模块处理。自检通过真实纹理/Canvas 通道采样固定 640×360 色块，不检查任意影片的黑色内容。异步复制中的帧保留独立时间信息，切换时间轴不能清零待发送帧的时间戳。应用生成字幕采用系统默认字体（`sans-serif`）；外挂 ASS 和内嵌字体保留片源样式。
+
+
+macOS 正常构建和启动默认使用共享纹理 Canvas2D，无需试验参数；旧 NSOpenGLView 显示后端及其原生全屏控件已移除。GPU 路径的 `playback.node` 在隔离宿主以 CGL/OpenGL 把 libmpv 输出写入三槽 IOSurface，`hwdec=auto` 保持原策略；独立 `software` 导出提供 CPU 回退，不使用 Linux DMA-BUF 或原生子窗口。资源互操作模块先接收 Mach right 并获取本进程 IOSurfaceRef，Electron 再在主进程导入，随后用公开的 `SharedTextureImportedSubtle` 转移对象交给隔离 preload；原始指针不进入应用 JSON、页面或共用播放合同。Canvas、全屏、键盘、滑杆与焦点使用现有 HTML 面板。
+
+该 addon 只允许宿主的 Node 主线程初始化。mpv 的帧通知与非视频事件经长度为一的非阻塞队列合并唤醒该线程，几何、可见性、时间线变化及租约归还也能唤醒；mpv 回调不执行 JS 或 GL。250ms 兜底继续处理故障、背压及事件，正常 200ms 状态观察保留，但不再为这个自驱动后端另设 16ms 渲染检查。兜底不是视频帧率上限，字幕、暂停 seek 和隐藏时的 skip 仍由正常内核处理。
 
 GPU 生产端以 `glFinish` 建立完成边界。Canvas2D 使用 `copy` 覆盖，解绑清理 backing store。消费端关闭 VideoFrame 后，从 `subtle.release` 的 GPU 完成回调确认释放；main 再释放源引用，最后在 `allReferencesReleased` 中归还原生租约。提交回执、`drawImage`、转移消息已发送都不能提前复用槽位。窗口正常停止仍接收迟到释放；交付结果不明时隔离最多三张未确认表面，最终由应用退出清理。可检测图形故障可在保留原 GPU 租约的同时切换独立 CPU 输出；renderer 页面关闭不触发回退，不能靠软件模式恢复已经消失的页面。
 

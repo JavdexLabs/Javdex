@@ -3,10 +3,10 @@ import { randomBytes } from 'node:crypto'
 import net from 'node:net'
 import os from 'node:os'
 import { setTimeout as delay } from 'node:timers/promises'
-import { gpuDiagnosticFailure, gpuLoaderFailure, gpuMemoryFailure, localModelProcessEnvironment, stopLocalModelProcess } from './processRunner'
+import { appendLocalModelDiagnostic, gpuDiagnosticFailure, gpuLoaderFailure, gpuMemoryFailure, localModelProcessEnvironment, stopLocalModelProcess } from './processRunner'
 import type { AiRuntimePaths } from './runtimeInstaller'
 import { localTextTranslationPrompt, localTranslationSettings } from './localTranslation'
-import { cpuExecution, LocalGpuFailure, reportLocalExecution, selectLocalExecution, type LocalExecution } from './runtimeAcceleration'
+import { cpuExecution, executionUsesGpu, LocalGpuFailure, reportLocalExecution, selectLocalExecution, type LocalExecution } from './runtimeAcceleration'
 
 export interface LocalTextInferenceOptions {
   spawn?: typeof spawn
@@ -99,7 +99,7 @@ function createTextServer(paths: TextPaths, options: LocalTextInferenceOptions, 
           '--offline', '--no-agent', '--no-webui', '--no-slots', '-c', '8192', '-np', '1', '-t', threads, '--prio', '-1', ...settings.serverArguments, ...(execution?.args ?? [])], {
           windowsHide: true, shell: false, stdio: execution ? ['ignore', 'ignore', 'pipe'] : 'ignore', env: { ...localModelProcessEnvironment(), ...execution?.env, LLAMA_API_KEY: token }
         })
-        child.stderr?.on('data', (chunk: Buffer) => { diagnostic = (diagnostic + chunk.toString()).slice(-65536) })
+        child.stderr?.on('data', (chunk: Buffer) => { diagnostic = appendLocalModelDiagnostic(diagnostic, chunk.toString()) })
         server = child
         let failed = false
         child.once('error', (error: NodeJS.ErrnoException) => { failed = true; nativeGpuFailure = error.code === 'ENOENT' })
@@ -109,7 +109,7 @@ function createTextServer(paths: TextPaths, options: LocalTextInferenceOptions, 
         generation.signal.addEventListener('abort', abort, { once: true })
         child.once('close', () => generation.signal.removeEventListener('abort', abort))
         const address = `http://127.0.0.1:${port}`
-        const startupFailure = (): Error => execution?.device && (nativeGpuFailure || gpuDiagnosticFailure(diagnostic))
+        const startupFailure = (): Error => executionUsesGpu(execution) && (nativeGpuFailure || gpuDiagnosticFailure(diagnostic))
           ? new LocalGpuFailure(gpuMemoryFailure(diagnostic) ? 'GPU 显存分配失败' : 'GPU 运行库启动失败') : new Error('离线中文翻译运行库启动失败')
         let initialized = false
         try {
@@ -133,7 +133,7 @@ function createTextServer(paths: TextPaths, options: LocalTextInferenceOptions, 
             }
             await delay(500, undefined, { signal: generation.signal })
           }
-          if (execution?.device) throw new LocalGpuFailure('GPU 初始化超时')
+          if (executionUsesGpu(execution)) throw new LocalGpuFailure('GPU 初始化超时')
           throw new Error('离线中文翻译模型加载超时')
         } finally {
           if (!initialized && server === child) {
@@ -161,13 +161,13 @@ function createTextServer(paths: TextPaths, options: LocalTextInferenceOptions, 
       signal: AbortSignal.any([signal, lifetime.signal, AbortSignal.timeout(90000)]),
       body: JSON.stringify({ messages: [{ role: 'user', content: prompt }], max_tokens: maxTokens,
         ...settings.request, stream: false }) }).catch(cause => {
-      if (execution?.device && !signal.aborted && (nativeGpuFailure || gpuDiagnosticFailure(diagnostic))) throw new LocalGpuFailure(gpuMemoryFailure(diagnostic) ? 'GPU 显存分配失败' : 'GPU 推理失败')
+      if (executionUsesGpu(execution) && !signal.aborted && (nativeGpuFailure || gpuDiagnosticFailure(diagnostic))) throw new LocalGpuFailure(gpuMemoryFailure(diagnostic) ? 'GPU 显存分配失败' : 'GPU 推理失败')
       throw cause
     })
     const raw = await response.text()
     options.log?.('翻译原始响应', { model, status: response.status, response: raw })
     if (!response.ok) {
-      if (execution?.device && gpuDiagnosticFailure(diagnostic)) throw new LocalGpuFailure(gpuMemoryFailure(diagnostic) ? 'GPU 显存分配失败' : 'GPU 推理失败')
+      if (executionUsesGpu(execution) && gpuDiagnosticFailure(diagnostic)) throw new LocalGpuFailure(gpuMemoryFailure(diagnostic) ? 'GPU 显存分配失败' : 'GPU 推理失败')
       throw new Error('离线中文翻译失败')
     }
     const value = JSON.parse(raw) as { choices?: Array<{ message?: { content?: unknown }; finish_reason?: string }> }

@@ -105,11 +105,15 @@ export async function selectLocalExecution(executable: string, model: string, en
     release: () => { if (!released) { released = true; reservations.set(memoryKey, Math.max(0, (reservations.get(memoryKey) ?? 0) - claim)) } }
   }
 }
+export function executionUsesGpu(execution?: LocalExecution): boolean {
+  return !!execution && ['metal', 'cuda', 'vulkan'].includes(execution.backend)
+}
 export function reportLocalExecution(acceleration: LocalRuntimeAcceleration | undefined, engine: LocalEngine, execution: LocalExecution, diagnostic: string): boolean {
   const active = engine === 'translation' ? /offloaded [1-9]\d*\/\d+ layers/.test(diagnostic)
-    : /whisper_backend_init_gpu: using (?:CUDA|Vulkan|Metal)\d* backend/.test(diagnostic)
+    : /whisper_backend_init_gpu: using (?:CUDA|Vulkan|Metal|MTL)\d* backend/.test(diagnostic)
+      && !/whisper_backend_init_gpu: failed to initialize .* backend/.test(diagnostic)
   const backend = execution.backend === 'metal' ? (active ? 'metal' : 'cpu') : execution.device && !active ? 'cpu' : execution.backend
   acceleration?.status?.(engine, { backend, device: active ? execution.device?.name : undefined,
-    reason: execution.device && !active ? '引擎未启用 GPU，已使用 CPU' : execution.reason })
-  return !execution.device || active
+    reason: executionUsesGpu(execution) && !active ? '引擎未启用 GPU，已使用 CPU' : execution.reason })
+  return !executionUsesGpu(execution) || active
 }

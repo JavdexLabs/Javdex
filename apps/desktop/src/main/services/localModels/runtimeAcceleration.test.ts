@@ -94,7 +94,7 @@ test('GPU startup retries once on CPU, but model errors and cancellation never d
       const child = Object.assign(new EventEmitter(), { stderr: new PassThrough(), exitCode: null as number | null, signalCode: null,
         kill() { alive = false; child.exitCode = 0; child.emit('exit', 0); child.emit('close', 0); return true } })
       queueMicrotask(() => {
-        if (args.includes('none')) return
+        if (args[args.indexOf('--device') + 1] === 'none') return
         if (failure === 'success') { child.stderr.write('load_tensors: offloaded 29/29 layers to GPU\n' + 'progress\n'.repeat(10000)); return }
         if (failure === 'zero-layers') return
         if (failure === 'cancel') { controller.abort(); return }

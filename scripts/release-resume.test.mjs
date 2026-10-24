@@ -5,7 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { resumePlan, verifiedAmd64Run } from './release-resume.mjs'
+import { resumePlan, verifiedAmd64Run, verifiedPublicationRun } from './release-resume.mjs'
 import { playbackInstallers } from './playback-source-materials.mjs'
 
 function fixture() {
@@ -56,6 +56,25 @@ test('an uploaded amd64 image may be reused only after all real gates passed', (
   assert.throws(() => verifiedAmd64Run(f.repository, f.run, f.jobs, f.changedPaths))
 })
 
+test('publication-only recovery requires a successful fixed image and signed closure checks', () => {
+  const f = fixture()
+  f.jobs = [{ name: 'resume-server / resume', conclusion: 'success' }, { name: 'resume-server / manifest', conclusion: 'success' },
+    { name: 'resume-server / publish', conclusion: 'failure', steps: [
+      ...['Download only the original verified artifact IDs', 'Bind reused desktop packages to original source manifests and hash release files',
+        'Package signed updates, verify image closures and reject existing Release'].map(name => ({ name, conclusion: 'success' })),
+      { name: 'Publish original candidate', conclusion: 'failure' }
+    ] }]
+  assert.equal(verifiedPublicationRun(f.repository, f.run, f.jobs, f.changedPaths).run, f.run.id)
+  for (let i = 0; i < 3; i++) {
+    const damaged = structuredClone(f)
+    damaged.jobs[2].steps[i].conclusion = 'skipped'
+    assert.throws(() => verifiedPublicationRun(damaged.repository, damaged.run, damaged.jobs, damaged.changedPaths))
+  }
+  assert.throws(() => verifiedPublicationRun(f.repository, f.run, f.jobs, ['package-lock.json']))
+  f.jobs[1].conclusion = 'failure'
+  assert.throws(() => verifiedPublicationRun(f.repository, f.run, f.jobs, f.changedPaths))
+})
+
 for (const [name, mutate] of [
   ['product edits', f => f.changedPaths.push('apps/server/src/runtime.ts')],
   ['missing source verification', f => f.jobs.find(j => j.name.startsWith('Aggregate')).conclusion = 'failure'],
@@ -81,7 +100,9 @@ test('recovery preserves publication guards, candidate identity, checks and all 
   const workflow = fs.readFileSync(new URL('../.github/workflows/release-resume-server.yml', import.meta.url), 'utf8')
   assert.match(workflow, /ref: \$\{\{ steps\.inspect\.outputs\.source \}\}/)
   assert.match(workflow, /GITHUB_SHA="\$CANDIDATE_SOURCE" npm run server:build/)
-  assert.match(workflow, /target_commitish: \$\{\{ needs\.resume\.outputs\.source \}\}/)
+  assert.match(workflow, /git rev-parse "refs\/tags\/\$RELEASE_TAG\^\{commit\}"/)
+  assert.ok(!workflow.includes('target_commitish:'))
+  assert.match(workflow, /needs\.resume\.outputs\.publishOnly == 'true' && needs\.manifest\.result == 'skipped'/)
   assert.ok(workflow.indexOf('npm run server:build') < workflow.indexOf('git show "$REPAIR_SOURCE:apps/server/src/dualBackendScan.e2e.test.ts"'))
   assert.ok(workflow.indexOf('git restore -- apps/server/src/dualBackendScan.e2e.test.ts') < workflow.indexOf('npm run server:smoke'))
   assert.ok(workflow.indexOf('git -c core.fileMode=false diff --exit-code') < workflow.indexOf('git restore -- apps/server/src/index.ts'))

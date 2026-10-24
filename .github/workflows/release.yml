@@ -33,6 +33,10 @@ on:
         description: "Optional prior recovery run whose amd64 tests/smokes passed before digest pinning failed."
         type: string
         required: false
+      resume_publish_run_id:
+        description: "Optional recovery run whose fixed image and signed closure checks passed before Release creation failed."
+        type: string
+        required: false
   push:
     branches:
       - "release-*"
@@ -65,6 +69,7 @@ jobs:
     with:
       run_id: ${{ inputs.resume_server_run_id }}
       amd64_run_id: ${{ inputs.resume_amd64_run_id }}
+      publish_run_id: ${{ inputs.resume_publish_run_id }}
       release_tag: ${{ inputs.release_tag }}
       prerelease: ${{ inputs.prerelease }}
     secrets: inherit

@@ -124,6 +124,10 @@ Linux 的包内与最终安装器门禁验证两个独立 ELF 闭包、ANGLE、�
 
 若接续作业的 AMD64 构建、服务端／升级／权限／容器检查全部成功，已上传镜像但摘要固定步骤失败，可另填 `resume_amd64_run_id=<该接续 run ID>`。入口逐项要求这些步骤成功且仅摘要固定失败，再从 registry 取得不可变摘要、读取镜像内原源码与版本；镜像不存在、身份不符或任一门禁缺失均拒绝继续，不重新构建已经通过的产品。
 
+若固定镜像已合成、完整签名封装及源码闭包校验已通过，仅创建 Release 失败，可填 `resume_publish_run_id=<该接续 run ID>`，跳过所有产品构建和镜像写入，只接续封装与上传。入口要求原接续的镜像合成成功且唯一失败步骤为 Release 创建，仍拒绝已存在的公开 Release。
+
+接续发布须先由维护者建立指向原源码的标签；入口和上传前均核对剥离后的提交。GitHub 的 [Release 权限规则](https://docs.github.com/en/rest/releases/releases#create-a-release)会检查显式 `target_commitish` 相对默认分支的工作流变化，普通工作流令牌即使有 `contents: write` 也可能返回 403。因此接续上传使用已核验的标签，不再传入这个对既有标签无效的参数，也不扩大令牌权限。Release API 可能将默认分支记为 `target_commitish`；实际源码身份以已核对的 Git 标签为准。
+
 ## 6. Release 内容要求
 
 正式 Release 必须：

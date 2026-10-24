@@ -9,6 +9,9 @@ on:
       amd64_run_id:
         type: string
         required: false
+      publish_run_id:
+        type: string
+        required: false
       release_tag:
         type: string
         required: false
@@ -42,6 +45,7 @@ jobs:
       image: ${{ steps.inspect.outputs.image }}
       prerelease: ${{ steps.inspect.outputs.prerelease }}
       artifactIds: ${{ steps.inspect.outputs.artifactIds }}
+      publishOnly: ${{ steps.inspect.outputs.publishOnly }}
       arm: ${{ steps.images.outputs.arm }}
       amd: ${{ steps.images.outputs.amd }}
     steps:
@@ -62,6 +66,7 @@ jobs:
         env:
           RESUME_RUN_ID: ${{ inputs.run_id }}
           RESUME_AMD64_RUN_ID: ${{ inputs.amd64_run_id }}
+          RESUME_PUBLISH_RUN_ID: ${{ inputs.publish_run_id }}
           GITHUB_TOKEN: ${{ github.token }}
       - name: Retain recovery provenance
         uses: actions/upload-artifact@v4
@@ -70,19 +75,22 @@ jobs:
           path: out/release-resume-receipt.json
           if-no-files-found: error
       - name: Checkout original candidate, never relabel its artifacts
+        if: steps.inspect.outputs.publishOnly != 'true'
         uses: actions/checkout@v4
         with:
           ref: ${{ steps.inspect.outputs.source }}
           path: candidate
           fetch-depth: 0
       - run: npm ci
+        if: steps.inspect.outputs.publishOnly != 'true'
       - name: Validate signing before publishing images
+        if: steps.inspect.outputs.publishOnly != 'true'
         run: node scripts/server-update-release.mjs validate
         env:
           JAVDEX_SERVER_UPDATE_SIGNING_KEY: ${{ secrets.JAVDEX_SERVER_UPDATE_SIGNING_KEY }}
           JAVDEX_SERVER_UPDATE_KEY_ID: ${{ vars.JAVDEX_SERVER_UPDATE_KEY_ID }}
       - name: Build only the missing amd64 product from original source
-        if: steps.inspect.outputs.amdImage == ''
+        if: steps.inspect.outputs.amdImage == '' && steps.inspect.outputs.publishOnly != 'true'
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$CANDIDATE_SOURCE"
@@ -92,7 +100,7 @@ jobs:
           JAVDEX_SERVER_UPDATE_SIGNING_KEY: ${{ secrets.JAVDEX_SERVER_UPDATE_SIGNING_KEY }}
           JAVDEX_SERVER_UPDATE_KEY_ID: ${{ vars.JAVDEX_SERVER_UPDATE_KEY_ID }}
       - name: Verify server with the repaired namespace test harness
-        if: steps.inspect.outputs.amdImage == ''
+        if: steps.inspect.outputs.amdImage == '' && steps.inspect.outputs.publishOnly != 'true'
         run: |
           set -euo pipefail
           git show "$REPAIR_SOURCE:apps/server/src/dualBackendScan.e2e.test.ts" > apps/server/src/dualBackendScan.e2e.test.ts
@@ -106,24 +114,27 @@ jobs:
         env:
           REPAIR_SOURCE: ${{ github.sha }}
       - run: npm run server:updater:test
-        if: steps.inspect.outputs.amdImage == ''
+        if: steps.inspect.outputs.amdImage == '' && steps.inspect.outputs.publishOnly != 'true'
       - name: Verify supplementary business groups under Linux root
-        if: steps.inspect.outputs.amdImage == ''
+        if: steps.inspect.outputs.amdImage == '' && steps.inspect.outputs.publishOnly != 'true'
         run: |
           set -euo pipefail
           setpriv --version
           sudo "$(command -v node)" --require ./scripts/register-test-paths.cjs --import tsx --test apps/server/src/updater/businessProcess.test.ts
       - run: npm run server:updater:smoke
-        if: steps.inspect.outputs.amdImage == ''
+        if: steps.inspect.outputs.amdImage == '' && steps.inspect.outputs.publishOnly != 'true'
       - run: npm run server:smoke
-        if: steps.inspect.outputs.amdImage == ''
+        if: steps.inspect.outputs.amdImage == '' && steps.inspect.outputs.publishOnly != 'true'
       - uses: docker/login-action@v3
+        if: steps.inspect.outputs.publishOnly != 'true'
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - uses: docker/setup-buildx-action@v3
+        if: steps.inspect.outputs.publishOnly != 'true'
       - name: Verify reused arm64 identity and pin both architecture digests
+        if: steps.inspect.outputs.publishOnly != 'true'
         id: images
         run: |
           set -euo pipefail
@@ -161,6 +172,7 @@ jobs:
 
   manifest:
     needs: resume
+    if: needs.resume.outputs.publishOnly != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -192,6 +204,7 @@ jobs:
 
   publish:
     needs: [resume, manifest]
+    if: ${{ always() && needs.resume.result == 'success' && (needs.manifest.result == 'success' || (needs.resume.outputs.publishOnly == 'true' && needs.manifest.result == 'skipped')) }}
     runs-on: ubuntu-latest
     env:
       RELEASE_TAG: ${{ needs.resume.outputs.tag }}
@@ -280,6 +293,10 @@ jobs:
           set -euo pipefail
           node scripts/server-update-release.mjs publish --directory release-artifacts
           GITHUB_SHA="$CANDIDATE_SOURCE" node scripts/release-publication.mjs release
+          # The existing tag is authoritative. Omitting target_commitish avoids
+          # asking the release API to authorize workflow edits at an older SHA.
+          git fetch origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
+          test "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")" = "$CANDIDATE_SOURCE"
         env:
           CANDIDATE_SOURCE: ${{ needs.resume.outputs.source }}
           GITHUB_TOKEN: ${{ github.token }}
@@ -289,7 +306,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.resume.outputs.tag }}
-          target_commitish: ${{ needs.resume.outputs.source }}
           name: Javdex ${{ needs.resume.outputs.tag }}
           body_path: release-body.md
           prerelease: ${{ needs.resume.outputs.prerelease == 'true' }}

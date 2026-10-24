@@ -36,6 +36,31 @@ export function verifiedAmd64Run(repository, run, jobs, changedPaths) {
   return { run: run.id, attempt: run.run_attempt, repairSource: run.head_sha }
 }
 
+export function verifiedPublicationRun(repository, run, jobs, changedPaths) {
+  assert.equal(run.repository?.full_name, repository)
+  assert.equal(run.head_repository?.full_name, repository)
+  assert.equal(run.path, '.github/workflows/release.yml')
+  assert.equal(run.status, 'completed')
+  assert.equal(run.conclusion, 'failure')
+  assert.ok(Number.isSafeInteger(run.id) && run.id > 0 && Number.isSafeInteger(run.run_attempt) && run.run_attempt > 0)
+  assert.ok(changedPaths.every(name => repairPaths.has(name)), 'Published image product source changed')
+  for (const name of ['resume-server / resume', 'resume-server / manifest']) {
+    assert.equal(jobs.filter(j => j.name === name).length, 1)
+    assert.equal(jobs.find(j => j.name === name).conclusion, 'success', `Unverified publication prerequisite: ${name}`)
+  }
+  const found = jobs.filter(j => j.name === 'resume-server / publish')
+  assert.equal(found.length, 1)
+  const job = found[0]
+  assert.equal(job.conclusion, 'failure')
+  assert.deepEqual(job.steps.filter(s => s.conclusion === 'failure').map(s => s.name), ['Publish original candidate'])
+  for (const name of ['Download only the original verified artifact IDs', 'Bind reused desktop packages to original source manifests and hash release files',
+    'Package signed updates, verify image closures and reject existing Release']) {
+    assert.equal(job.steps.find(s => s.name === name)?.conclusion, 'success', `Unverified release prerequisite: ${name}`)
+  }
+  assert.ok(jobs.filter(j => j.conclusion === 'failure').every(j => j.name === job.name))
+  return { run: run.id, attempt: run.run_attempt, repairSource: run.head_sha }
+}
+
 export function resumePlan({ repository, run, jobs, artifacts, changedPaths }) {
   assert.equal(run.repository?.full_name, repository, 'Foreign candidate repository')
   assert.equal(run.head_repository?.full_name, repository, 'Fork candidates cannot be resumed')
@@ -95,6 +120,8 @@ async function inspect() {
   assert.match(version, /^\d+\.\d+\.\d+(?:-[\w.-]+)?$/)
   const tag = process.env.RELEASE_TAG || `v${version}`
   assert.equal(tag, `v${version}`)
+  assert.equal(execFileSync('git', ['rev-parse', `refs/tags/${tag}^{commit}`], { encoding: 'utf8' }).trim(), plan.source,
+    'Recovery requires an existing maintainer-created tag at the original source')
   const image = `ghcr.io/${repository.split('/')[0].toLowerCase()}/javdex-server`
   let amd64
   if (process.env.RESUME_AMD64_RUN_ID) {
@@ -106,12 +133,22 @@ async function inspect() {
     const amdChanges = execFileSync('git', ['diff', '--name-only', plan.source, amdRun.head_sha], { encoding: 'utf8' }).trim().split('\n').filter(Boolean)
     amd64 = verifiedAmd64Run(repository, amdRun, amdJobs.jobs, amdChanges)
   }
-  await assertReleaseAvailable({ tag, version, image, env: { ...process.env, GITHUB_SHA: plan.source } })
+  let publication
+  if (process.env.RESUME_PUBLISH_RUN_ID) {
+    const publishId = process.env.RESUME_PUBLISH_RUN_ID
+    assert.match(publishId, /^[1-9][0-9]{0,15}$/)
+    const [publishRun, publishJobs] = await Promise.all([api(`actions/runs/${publishId}`), api(`actions/runs/${publishId}/jobs?filter=latest&per_page=100`)])
+    assert.ok(publishJobs.total_count <= 100)
+    execFileSync('git', ['merge-base', '--is-ancestor', publishRun.head_sha, 'HEAD'])
+    const publishChanges = execFileSync('git', ['diff', '--name-only', plan.source, publishRun.head_sha], { encoding: 'utf8' }).trim().split('\n').filter(Boolean)
+    publication = verifiedPublicationRun(repository, publishRun, publishJobs.jobs, publishChanges)
+  }
+  await assertReleaseAvailable({ tag, version, image, phase: publication ? 'release' : 'prepare', env: { ...process.env, GITHUB_SHA: plan.source } })
   const outputs = { source: plan.source, version, tag, image, prerelease: version.includes('-') || process.env.RELEASE_PRERELEASE === 'true',
     artifactIds: plan.artifacts.map(a => a.id).join(','), armImage: `${image}:build-${plan.baseRun}-${plan.baseAttempt}-arm64`,
-    amdImage: amd64 ? `${image}:build-${amd64.run}-${amd64.attempt}-amd64` : '' }
+    amdImage: amd64 ? `${image}:build-${amd64.run}-${amd64.attempt}-amd64` : '', publishOnly: Boolean(publication) }
   fs.mkdirSync('out', { recursive: true })
-  fs.writeFileSync('out/release-resume-receipt.json', JSON.stringify({ ...plan, amd64, repairSource: process.env.GITHUB_SHA, changedPaths }, null, 2) + '\n')
+  fs.writeFileSync('out/release-resume-receipt.json', JSON.stringify({ ...plan, amd64, publication, repairSource: process.env.GITHUB_SHA, changedPaths }, null, 2) + '\n')
   fs.appendFileSync(process.env.GITHUB_OUTPUT, Object.entries(outputs).map(([k, v]) => `${k}=${v}\n`).join(''))
   console.log(`Resume ${tag} from original source ${plan.source}; reuse ${plan.artifacts.length} verified artifacts and arm64.`)
 }

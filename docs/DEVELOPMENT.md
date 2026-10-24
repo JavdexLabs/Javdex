@@ -134,6 +134,8 @@ Whisper b5130 的 macOS arm64／x64 工具保留静态运行库、Metal／Accele
 
 所有平台的 AI 工具按需下载固定 Javdex Runtime 发布资产；安装校验压缩包 SHA，保留 POSIX `bin/lib` 布局，把安全的库别名转为普通文件。解压在独立暂存目录，完成后替换工具目录，失败保留旧安装。模型目录迁移不需要放宽原有禁止符号链接的规则。开发构建源码、合成音频、下载权重与验收产物均从安装包排除。
 
+Linux x64 的 llama.cpp b11435 CUDA 12.8、Vulkan 和 CUDA/cuBLAS 依赖固定消费 `llama-b11435-linux-gpu-r1`，不再直连上游 Release。原包大小、SHA-256、解压前缀和缓存文件名保持一致，已有有效安装和续传数据继续复用；源码和 NVIDIA CUDA 12.8.1 条款由运行库发行一并留存。消费方测试不再允许 Linux GPU 上游地址例外。
+
 无 GUI 的实际推理检查：生成／提供一段公开或合成日语音频后，运行 `node --import tsx scripts/local-ai-platform-acceptance.ts --audio <音频>`。默认仅使用忽略目录 `out/ai-runtime-acceptance/`，不访问应用用户目录；首次联网下载权重，后续可用 `--offline`。Linux 验证镜像由 `scripts/local-ai-linux-acceptance.Dockerfile` 构建，只挂载此专用目录，在 `--network none` 下运行编译后的检查脚本；不是服务端或 GUI 验收。详细命令与边界见 [AI 字幕历史验证](archive/local-ai/implementation-and-validation-2026-10.md#macoslinux-运行库适配2026-10-07)。
 
 <!-- 保留历史设计记录指向本节的链接。 -->

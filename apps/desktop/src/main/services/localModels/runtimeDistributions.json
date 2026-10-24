@@ -92,6 +92,11 @@
           "playback (macos-15-intel, darwin-x64)"
         ]
       }
+    },
+    {
+      "version": "llama-b11435-linux-gpu-r1",
+      "commit": "04d036632b5fb7a49f4e3ba1f6dd138fec482650",
+      "runId": 40072175763
     }
   ],
   "assets": [
@@ -336,37 +341,37 @@
       "archivePrefix": null
     },
     {
-      "release": "b11435",
+      "release": "llama-b11435-linux-gpu-r1",
       "id": "translator",
       "target": "linux-x64",
       "backend": "vulkan",
       "name": "llama-b11435-bin-ubuntu-vulkan-x64.tar.gz",
-      "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11435/llama-b11435-bin-ubuntu-vulkan-x64.tar.gz",
-      "source": "https://github.com/ggml-org/llama.cpp/tree/b11435",
+      "url": "https://github.com/JavdexLabs/javdex-runtime/releases/download/llama-b11435-linux-gpu-r1/llama-b11435-bin-ubuntu-vulkan-x64.tar.gz",
+      "source": "https://github.com/ggml-org/llama.cpp/releases/download/b11435/llama-b11435-bin-ubuntu-vulkan-x64.tar.gz",
       "bytes": 31636156,
       "sha256": "e8a9c44c8212c5e7ff1186864080ae49283131c60e7c07753a296faccd3a0324",
       "archivePrefix": "llama-b11435"
     },
     {
-      "release": "b11435",
+      "release": "llama-b11435-linux-gpu-r1",
       "id": "translator",
       "target": "linux-x64",
       "backend": "cuda",
       "name": "llama-b11435-bin-ubuntu-cuda-12.8-x64.tar.gz",
-      "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11435/llama-b11435-bin-ubuntu-cuda-12.8-x64.tar.gz",
-      "source": "https://github.com/ggml-org/llama.cpp/tree/b11435",
+      "url": "https://github.com/JavdexLabs/javdex-runtime/releases/download/llama-b11435-linux-gpu-r1/llama-b11435-bin-ubuntu-cuda-12.8-x64.tar.gz",
+      "source": "https://github.com/ggml-org/llama.cpp/releases/download/b11435/llama-b11435-bin-ubuntu-cuda-12.8-x64.tar.gz",
       "bytes": 171652084,
       "sha256": "251ad225b60da6eab0591567b639dda5e405662589bdaee7bd54a159b8d87fa9",
       "archivePrefix": "llama-b11435"
     },
     {
-      "release": "b11435",
+      "release": "llama-b11435-linux-gpu-r1",
       "id": "cuda",
       "target": "linux-x64",
       "backend": "cuda",
       "name": "cudart-llama-b11435-bin-ubuntu-cuda-12.8-x64.tar.gz",
-      "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11435/cudart-llama-b11435-bin-ubuntu-cuda-12.8-x64.tar.gz",
-      "source": "https://github.com/ggml-org/llama.cpp/tree/b11435",
+      "url": "https://github.com/JavdexLabs/javdex-runtime/releases/download/llama-b11435-linux-gpu-r1/cudart-llama-b11435-bin-ubuntu-cuda-12.8-x64.tar.gz",
+      "source": "https://github.com/ggml-org/llama.cpp/releases/download/b11435/cudart-llama-b11435-bin-ubuntu-cuda-12.8-x64.tar.gz",
       "bytes": 594377810,
       "sha256": "c14f9b18c0e19623d2fb763e47ca6cd0e409206d462176af8ac0665331b64f74",
       "archivePrefix": "cudart-llama-b11435-bin-ubuntu-cuda-12.8-x64"

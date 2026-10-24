@@ -2,46 +2,27 @@
 
 ## Unreleased
 
-- 桌面三平台统一自动／GPU／CPU 播放设置、故障恢复、SDR/HDR 显示目标和 Canvas 控件；Windows/macOS 的原生播放移入隔离宿主，增加已知色块自检，并修复时间轴切换时误判待发送帧为 GPU 故障。默认字幕采用系统字体。
+## 0.9.1-beta.1 — 发布准备
 
-- Linux x64 文本引擎的 CUDA／Vulkan 及 CUDA 依赖改由 Javdex Runtime 固定发行按需下载，保留原包摘要、已有安装和续传缓存。
+### 内置播放
 
-- macOS 内置播放新增 CPU 软件显示和图形故障自动回退，保留 GPU 默认路径；恢复播放位置、暂停意图及音轨字幕设置，并支持 `--javdex-cpu` 强制使用兼容模式。
+- 三平台统一自动／GPU／CPU 设置、控制与恢复；底栏、展开、全屏共用 Canvas 和 HTML 控件，移除旧原生子窗口、工具栏及试验开关。
+- Windows／macOS 解码与原生图形处理移入隔离宿主，增加已知色块自检、退出／无响应恢复和资源代际管理；保留独立 CPU 兜底与完整控制状态。
+- 统一 GPU／CPU 的 SDR／HDR 显示目标，使用固定元数据的 BT.2390 映射，修复 Windows HDR 亮度随 OpenGL 能力变化的问题；不提供物理 HDR 直通。
+- 修复 Windows Intel 核显 ASS／PGS 字幕绘制，以及时间轴重置时待复制帧被误判为 GPU 故障的问题。
+- Linux X11／XWayland 和 Wayland 统一使用 Canvas，修复小纹理黑块、OpenGL fence 泄漏及共享帧调度问题，通路失败时自动恢复到 CPU。
+- CPU 按实际显示尺寸绘制，不额外降至 1080p；默认字幕使用系统字体，外挂 ASS 遵循片源样式。修复自动回退后手动 CPU 仍显示旧回退标记的问题。
 
-- 修复 Windows Canvas 的 HDR 转 SDR 亮度随 OpenGL 能力变化：固定 SDR 目标及基于元数据的 BT.2390 映射，关闭自动峰值/平均亮度检测；保留 Canvas 显示与图形故障后的 CPU 回退。
+### 本地 AI 与分发
 
-- Windows 内置播放器正式使用共享纹理 Canvas，移除旧 HWND 视频子窗口、原生工具栏和试验启动开关；保留核显字幕修复与 GPU 故障后的纯 CPU 自动回退。
+- 本地 AI 工具、VAD 及 Linux CUDA／Vulkan 依赖改由 Javdex Runtime 固定发行按需下载，保留原包摘要、有效安装、模型和续传缓存。
+- macOS Whisper／FFmpeg 改为按需下载；Windows／macOS 不再携带 Linux 专用 Sharp WASM 后端。Linux 继续使用 Sharp WASM，避免 Electron 与 libvips 的 GLib 冲突。
+- 改善 Intel Mac 的 CPU／Metal 能力说明、实际 GPU 使用状态及故障回退诊断。
 
-- 修复 Windows 候选 Canvas 播放在 Intel 核显上绘制 ASS／PGS 字幕失败：使用 OpenGL 3.2 core context，并保留共享帧故障分类，避免本地化错误信息阻止自动 CPU 回退和播放状态恢复。
+### 升级与边界
 
-- Windows／macOS 安装包移除仅供 Linux Electron 使用的 Sharp WASM 后端，保留各平台原生图像处理；Linux 的 WASM 兼容方案保持不变。
-
-- Windows 内置播放新增纯 CPU 兼容路径：图形初始化或可检测的运行故障后自动回退并恢复播放位置与控制状态；软件解码、渲染和字幕合成不依赖 OpenGL／D3D 互操作，与 Linux 一样按实际显示尺寸渲染。
-
-- macOS 内置播放器默认改用 IOSurface 共享纹理到 Canvas2D，与 HTML 控件共同合成，无需试验参数；移除旧原生显示及全屏控件，保留三槽完成/释放同步与故障隔离。此迁移不代表播放态性能提升，硬件解码策略保持不变。
-
-- Linux GPU 专用 libmpv 回移植上游 OpenGL fence 泄漏修复，避免长时间播放时同步对象逐帧累积；保留 DMA-BUF 完成/释放同步和 CPU 回退。
-
-- Linux X11 GPU 按实际图像高度选择兼容的 NVIDIA 分块布局，修复小尺寸 DMA-BUF 成功导入后出现部分黑块的问题，保留正常尺寸 GPU 播放和 CPU 回退。
-
-- Linux CPU 兼容播放为 HDR10／HLG 增加显式 SDR 色彩转换，避免直接把 HDR 编码值当作 SDR 显示；保留独立的软件运行库和 GPU 播放路径。
-
-- 修复 Linux 桌面读取图片和生成缩略图时因 Electron 与 libvips 的 GLib 符号冲突而崩溃；该平台使用随包提供的 Sharp WASM 后端，其他平台和独立服务器保留原生后端。
-
-- Linux GPU 播放增加独立合成色块自检；自动模式在检测失败或超时后回退 CPU 并恢复播放状态，播放信息新增画面检查和回退原因。自检避开本机 XWayland 对微小纹理的导入兼容问题，不以影片黑色画面判定故障。
-
-- Linux GPU 共享帧按目标时间提交，区分 Canvas 提交与纹理释放回执，并以 20ms 为初始值进行有界渲染预算调整。
-- Linux Wayland 与 X11 GPU 播放预留渲染与传输提前量，减少零提前量导致的持续丢帧；保留直接导入修复、同步保护和 CPU 回退。
-
-- Linux X11 GPU 直接导入修正 ANGLE 的窗口 visual 选择，并按消费端 Vulkan 能力协商 DMA-BUF 布局；保留 Wayland 路径和 CPU 故障回退。
-
-- Linux X11／XWayland 在缺少直接 DMA-BUF 导入能力时，自动模式改走 CPU 兼容路径，避免 Chromium Pixmap 导入静默失败后持续黑屏。
-
-- 本地 AI 工具与 VAD 改由 Javdex Runtime 固定发行供应，避免上游构建过期导致下载 404；macOS Whisper／FFmpeg 改为按需下载，不再随主应用打包。有效旧 macOS Whisper 继续复用，模型权重和设备设置保持不变。
-
-- Linux 移除 X11 原生子窗口嵌入；X11／XWayland 与 Wayland 统一使用共享纹理或 CPU 内存帧在主窗口 Canvas 显示。
-
-- Linux x86_64 内置播放新增自动／GPU／CPU 兼容模式；自动模式在可检测的 GPU 播放故障后回退一次并恢复播放状态。双运行库随应用打包，保留手动处理无报错黑屏的入口。
+- 这是预发布，稳定版更新入口仍为 0.9.0；桌面和服务端需使用相同版本。相比正式 0.9.0 无新增数据库或模型管理文档迁移。
+- Windows 已完成本机及包内检查；Mac／Linux 新原生预检通过，实机 Canvas、硬解、音画同步与长播仍待补。CPU 高分辨率播放可能明显丢帧，不承诺 4K 流畅。
 
 ## 0.9.0 — 2026-10-18
 

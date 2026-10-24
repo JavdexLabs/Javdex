@@ -8,6 +8,7 @@ import { createAiRuntimeInstaller, type RuntimeInstallEvent } from './runtimeIns
 import { LOCAL_MODEL_ASSETS, aiRuntimeAssets, type AiRuntimeAsset } from './runtimeManifest'
 import { modelAssetDirectory, modelDownloadFile, runtimeAssetDirectory } from './modelStorage'
 import { runtimeTar } from './runtimeArchiveFixtures'
+import { gpuRuntimeAssets } from './gpuManifest'
 
 const contents = Buffer.from('model fixture data')
 function asset(filename: string): AiRuntimeAsset {
@@ -244,6 +245,34 @@ test('macOS downloads and verifies its own native archive without an application
   await changed.removeAsset('whisper')
   await assert.rejects(changed.install(new AbortController().signal, () => {}, ['whisper']), /完整性校验/)
   assert.equal(await changed.assetsInstalled(['whisper']), false)
+})
+
+test('installed Linux llama GPU tools survive the mirror move without downloading or rewriting', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'javdex-linux-llama-mirror-'))
+  t.after(() => fs.rm(root, { recursive: true, force: true }))
+  const target = { platform: 'linux', arch: 'x64' }
+  for (const backend of ['cuda', 'vulkan'] as const) {
+    for (const entry of gpuRuntimeAssets(target, backend).filter(asset => asset.id === 'translator' || asset.id === 'cuda')) {
+      const directory = runtimeAssetDirectory(root, entry.id, target, backend)
+      await fs.mkdir(directory, { recursive: true })
+      const names = entry.id === 'cuda' ? ['libcudart.so.12', 'libcublas.so.12', 'libcublasLt.so.12'] : ['llama-server']
+      if (backend === 'cuda') names.push('NOTICE-CUDA.txt')
+      const files = []
+      for (const name of names) {
+        const value = Buffer.from(`installed fixture ${name}`)
+        await fs.writeFile(path.join(directory, name), value, { mode: 0o755 })
+        files.push({ name, bytes: value.length, sha256: createHash('sha256').update(value).digest('hex') })
+      }
+      const marker = JSON.stringify({ sha256: entry.sha256, target: 'linux-x64', files })
+      await fs.writeFile(path.join(directory, 'asset.json'), marker)
+      let requests = 0
+      const runtime = createAiRuntimeInstaller(root, async () => { requests++; throw Error('unexpected download') }, [entry], { target })
+      assert.equal(await runtime.assetsInstalled([entry.id]), true)
+      await runtime.install(new AbortController().signal, () => {}, [entry.id])
+      assert.equal(requests, 0)
+      assert.equal(await fs.readFile(path.join(directory, 'asset.json'), 'utf8'), marker)
+    }
+  }
 })
 
 test('a valid previously installed Windows Vulkan tool survives the distribution move without downloading or rewriting', async t => {

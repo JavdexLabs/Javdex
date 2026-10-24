@@ -14,6 +14,8 @@
 
 ## 运行库独立发行
 
+[Linux llama GPU 下载来源统一](runtime-linux-llama-migration-2026-10-24.md)记录剩余三个 Linux x64 原包镜像的独立发行、消费锁定和缓存复用验证。
+
 [本地 AI 依赖留存与 macOS 按需下载](runtime-dependency-retention-2026-10-21.md)记录五个固定发行、原生与发布阶段的独立证据、公开附件检查及消费方验证；不代表 Javdex 0.9.0 安装包已更新。
 
 ## Linux 本地验证

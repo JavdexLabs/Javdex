@@ -52,6 +52,11 @@ async function fixture(t, windowsEntry = 'windowsPlaybackAddon.cpp', omitCpuHead
     write(native, 'package.json', JSON.stringify({ version }))
     write(native, 'package-lock.json', JSON.stringify({ version }))
     write(native, 'build/playback-sources.json', JSON.stringify({ sdk, sources: sourcePins }))
+    // The SDK has its own include root. Its conditionally generated V8 header
+    // is not shipped or needed by this N-API adapter's normal build.
+    write(native, 'electron-sdk/include/node/node.h', '#include "v8.h"\n')
+    write(native, 'electron-sdk/include/node/v8.h', '#include "v8config.h"\n')
+    write(native, 'electron-sdk/include/node/v8config.h', '#ifdef V8_GN_HEADER\n#include "v8-gn.h"\n#endif\n')
     write(native, 'electron-sdk/include/node/node_version.h', '#define NODE_MAJOR_VERSION 1\n#define NODE_MINOR_VERSION 2\n#define NODE_PATCH_VERSION 3\n')
     const nativeTar = path.join(root, 'native-' + i + '.tar.gz')
     await createTar({ cwd: native, file: nativeTar, gzip: true }, ['.'])

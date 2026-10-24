@@ -15,14 +15,16 @@ const report = { status: 'running', platform: `${process.platform}/${process.arc
 const reportFile = path.join(output, 'close-report.json')
 let application
 try {
-  application = await launchAcceptance(directory, 'close-application.log')
+  application = await launchAcceptance(directory, 'close-application.log', process.argv.includes('--javdex-cpu') ? ['--javdex-cpu'] : [])
   const page = await application.firstWindow()
   await page.waitForFunction(() => window.api?.playback && document.querySelector('nav'))
   assert.equal((await page.evaluate(() => window.api.thisComputer.get())).closeToTray, false)
   await page.evaluate(() => window.api.thisComputer.update({ playerPreference: 'builtin' }))
   const result = await page.evaluate(target => window.api.player.openResource(target.libraryId, target.resourceId, target.videoId), target)
   assert.equal(result.ok, true, result.error)
-  await waitForState(page, state => state?.phase === 'playing' && state.position > 0.5, 'play before normal close')
+  const playing = await waitForState(page, state => state?.phase === 'playing' && state.position > 0.5, 'play before normal close')
+  report.playbackMode = playing.info.playbackMode
+  if (process.argv.includes('--javdex-cpu')) assert.equal(report.playbackMode, 'cpu')
   report.before = await nativeEvidence(application)
   assert.equal(report.before.alive, true)
   assert.ok(report.before.renderedFrames > 0)
@@ -57,7 +59,8 @@ try {
   } else {
   report.atClose = await application.evaluate(({ app, BrowserWindow }) => {
     const require = process.getBuiltinModule('module').createRequire(app.getAppPath() + '/package.json')
-    const bridge = require(app.isPackaged ? process.resourcesPath + '/native-playback/playback.node' : app.getAppPath() + '/out/native-playback/playback.node')
+    const addon = require(app.isPackaged ? process.resourcesPath + '/native-playback/playback.node' : app.getAppPath() + '/out/native-playback/playback.node')
+    const bridge = addon.software?.inspect().alive ? addon.software : addon
     const window = BrowserWindow.getAllWindows()[0]
     let observed
     globalThis.playbackCloseTrace = { originalId: window.id, events: [] }

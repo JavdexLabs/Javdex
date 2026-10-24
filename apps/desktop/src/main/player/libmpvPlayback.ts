@@ -13,6 +13,7 @@ import { linuxGpuImportLoader } from './linuxGpuImport'
 import { createMacSharedTextureBridge } from './macSharedTexture'
 import { createNativeSharedTextureBridge } from './nativeSharedTexture'
 import { createWindowsSoftwarePlaybackBridge } from './windowsSoftwarePlayback'
+import { createSoftwarePlaybackBridge } from './softwarePlayback'
 
 interface Bridge {
   create(handle: Buffer, bounds: { x: number; y: number; width: number; height: number; scale?: number }, host?: { backend: 'dmabuf' | 'software' }): void
@@ -127,7 +128,9 @@ export function createLibmpvPlayback(getWindow: () => BrowserWindow | null, back
       if (!availability.available) throw new Error(availability.reason ?? '内置播放不可用')
       const window = getWindow()
       if (!window || window.isDestroyed()) throw new Error('主窗口不可用')
-      if (process.platform === 'darwin') bridge = createMacSharedTextureBridge(
+      if (process.platform === 'darwin' && backend === 'software') bridge = createSoftwarePlaybackBridge(
+        createRequire(path.join(app.getAppPath(), 'package.json'))(runtimePath(undefined, backend)).software, window, 'darwin')
+      else if (process.platform === 'darwin') bridge = createMacSharedTextureBridge(
         createRequire(path.join(app.getAppPath(), 'package.json'))(runtimePath(undefined, backend)), window)
       else if (windowsSoftware) bridge = createWindowsSoftwarePlaybackBridge(
         createRequire(path.join(app.getAppPath(), 'package.json'))(runtimePath(undefined, backend)).software, window)

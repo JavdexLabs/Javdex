@@ -178,6 +178,13 @@ export async function aggregatePlaybackSources(directory, version) {
           'apps/desktop/src/main/player/native/windowsSoftwarePlayback.cpp',
           'apps/desktop/src/main/player/native/windowsTextureTickets.h',
           'apps/desktop/src/main/player/native/windowsTextureTickets.test.cpp'] : [])]
+      // Old archives predate the shared CPU implementation. New producers must
+      // carry its header; never accept a snapshot that cannot rebuild itself.
+      if (['darwin', 'win32'].includes(runtime.platform)) {
+        const producer = runtime.platform === 'darwin' ? 'macSharedTexture.mm' : 'windowsSoftwarePlayback.cpp'
+        if (fs.readFileSync(path.join(native, 'apps/desktop/src/main/player/native', producer), 'utf8').includes('#include "softwarePlayback.h"'))
+          requiredNative.push('apps/desktop/src/main/player/native/softwarePlayback.h')
+      }
       for (const name of requiredNative) assert.ok(fs.statSync(path.join(native, name)).size > 0, 'Missing preferred native source/SDK: ' + name)
       assert.equal(JSON.parse(fs.readFileSync(path.join(native, 'package.json'))).version, version, 'Native snapshot version mismatch')
       const nativeLock = JSON.parse(fs.readFileSync(path.join(native, 'build/playback-sources.json')))

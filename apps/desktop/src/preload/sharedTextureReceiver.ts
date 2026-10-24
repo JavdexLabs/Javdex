@@ -305,7 +305,7 @@ export function installSharedTextureReceiver(): (surfaceToken: string) => () => 
       context = canvas?.getContext('2d', { alpha: false, colorSpace: 'srgb',
         ...(surfaceToken.startsWith('cpu:') ? { willReadFrequently: true } : {}) })
     } catch { /* Treat context creation failure like an unavailable receiver. */ }
-    if ((!supported && !(surfaceToken.startsWith('cpu:') && ['linux', 'win32'].includes(process.platform) && process.isMainFrame)) || !canvas || !context) {
+    if ((!supported && !(surfaceToken.startsWith('cpu:') && ['linux', 'win32', 'darwin'].includes(process.platform) && process.isMainFrame)) || !canvas || !context) {
       ipcRenderer.send('playback:shared-texture-failed', binding)
       return () => {}
     }

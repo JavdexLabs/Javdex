@@ -6,6 +6,7 @@
 #import <OpenGL/OpenGL.h>
 #import <OpenGL/gl3.h>
 #include "mpvCore.h"
+#include "softwarePlayback.h"
 #include <uv.h>
 #include <array>
 #include <unordered_map>
@@ -251,7 +252,8 @@ napi_value initialize(napi_env env, napi_value exports) {
         {"destroy", nullptr, destroy, nullptr, nullptr, nullptr, napi_default, nullptr}
     };
     napi_define_properties(env, exports, sizeof(methods) / sizeof(methods[0]), methods);
-    napi_add_env_cleanup_hook(env, cleanup, nullptr); return exports;
+    napi_add_env_cleanup_hook(env, cleanup, nullptr);
+    return javdex_software::initialize(env, exports, "macos-software");
 }
 }
 NAPI_MODULE(NODE_GYP_MODULE_NAME, initialize)

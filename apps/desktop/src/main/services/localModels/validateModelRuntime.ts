@@ -4,7 +4,7 @@ import path from 'node:path'
 import type { LocalExecutionStatus, LocalModelId } from '@shared/desktop/localModels'
 import type { AiRuntimePaths } from './runtimeInstaller'
 import { createLocalTextInference } from './textInference'
-import { cpuExecution, reportLocalExecution, selectLocalExecution } from './runtimeAcceleration'
+import { cpuExecution, executionUsesGpu, reportLocalExecution, selectLocalExecution } from './runtimeAcceleration'
 import { LocalModelProcessFailure, runLocalModelProcess } from './processRunner'
 
 /** A synthetic, local-only probe exercises the configured model without a user task. */
@@ -39,7 +39,7 @@ export async function validateModelRuntime(paths: AiRuntimePaths, model: LocalMo
         runtimeEnv: execution.env, diagnostic: value => { diagnostic = value } })
       retry = !reportLocalExecution(probe.acceleration, 'recognition', execution, diagnostic)
     } catch (cause) {
-      if (bounded.aborted || !execution.device || !(cause instanceof LocalModelProcessFailure) || !cause.gpuFailure) throw cause
+      if (bounded.aborted || !executionUsesGpu(execution) || !(cause instanceof LocalModelProcessFailure) || !cause.gpuFailure) throw cause
       retry = true
     } finally { execution.release() }
     if (retry) {

@@ -843,3 +843,16 @@ test('Intel Mac environments distinguish CPU-only text from system Metal speech 
   assert.ok(text.includes('macOS 内置 Metal 加速支持，无需额外安装。实际启用状态见模型验证结果。'))
   assert.equal(renderer!.root.findAllByType('button').some(node => String(node.props['aria-label']).includes('安装 GPU 加速支持')), false)
 })
+
+test('Metal CPU fallback remains visible without a CUDA or Vulkan device inventory', async () => {
+  sharedEnvironment()
+  state.acceleration!.devices = []
+  state.acceleration!.supported = false
+  for (const environment of state.environments!) environment.gpu = { state: 'platform', backend: 'metal' }
+  const variant = state.models[0].variants[0]
+  variant.validation = { state: 'passed', execution: { backend: 'cpu', reason: 'GPU 显存分配失败，已自动回退 CPU' } }
+  await mount()
+  assert.match(renderedText(row(variant.id)), /CPU 可用 · 显卡未启用/)
+  assert.match(renderedText(row(variant.id)), /显存不足，已验证 CPU/)
+  assert.equal(renderer!.root.findAllByType('button').some(node => renderedText(node) === '修复并验证'), false)
+})

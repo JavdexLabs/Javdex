@@ -1,6 +1,6 @@
 {
   "name": "Javdex",
-  "version": "0.9.1-beta.1",
+  "version": "0.9.1",
   "description": "Javdex — local JAV library manager",
   "main": "./out/main/index.js",
   "author": "Javdex",
@@ -8,7 +8,7 @@
   "private": false,
   "overrides": {
     "@earendil-works/pi-coding-agent": {
-      "undici": "8.10.2",
+      "undici": "8.12.2",
       "minimatch": {
         "brace-expansion": "5.0.12"
       }
@@ -79,7 +79,7 @@
     "web:dev": "vite build --config vite.web.config.ts --watch",
     "desktop:build": "electron-vite build && node scripts/check-mediapipe-assets.mjs && node scripts/check-built-pi-runtime.mjs && npm run measure:renderer",
     "setup:desktop": "electron-rebuild -f -w better-sqlite3",
-    "check:workspaces": "node scripts/check-workspaces.mjs && node --test scripts/check-workspaces.test.mjs",
+    "check:workspaces": "node scripts/check-workspaces.mjs && node --test scripts/check-workspaces.test.mjs scripts/check-installed-overrides.test.mjs && node scripts/check-installed-overrides.mjs",
     "check:server-boundaries": "node scripts/check-server-boundaries.mjs",
     "check:server-production-closure": "node scripts/check-server-production-closure.mjs",
     "server:build": "npm run web:build && node scripts/server-build.mjs && node scripts/check-server-production-closure.mjs",
@@ -134,7 +134,7 @@
     "@types/react-window": "^1.8.8",
     "@types/semver": "7.8.0",
     "@vitejs/plugin-react": "^5.2.0",
-    "electron": "43.8.0",
+    "electron": "43.8.1",
     "electron-builder": "^26.15.3",
     "electron-vite": "^5.0.0",
     "esbuild": "0.25.12",

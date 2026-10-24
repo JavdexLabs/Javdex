@@ -116,9 +116,10 @@ description: Javdex 各平台真实存储路径、userData 与 /program 文件�
 | `JAVDEX_STATIC_ROOT` | `<serverDir>/web` | 服务端 | 局域网 Web 前端静态资源目录（必须包含 `index.html`）。 |
 | `JAVDEX_WEB_USERNAME` | `config.web.username` | 服务端 | 覆盖局域网 Web 登录用户名。 |
 | `JAVDEX_WEB_PASSWORD` | 无 | 服务端 | 局域网 Web 登录明文密码（`12..128` 字符，启动时在内存生成 `scrypt` 哈希）。 |
-| `JAVDEX_BUSINESS_UID` | `stat(dataDir).uid` 或 `1000` | 容器管理器 | 管理器通过 `setpriv --reuid` 降权启动业务子进程的 UID。 |
-| `JAVDEX_BUSINESS_GID` | `stat(dataDir).gid` 或 `1000` | 容器管理器 | 管理器通过 `setpriv --regid` 降权启动业务子进程的 GID。 |
-| `JAVDEX_BUSINESS_GROUPS` | `/etc/group` 中附加组 | 容器管理器 | 逗号分隔的附加 GID 列表，传给 `setpriv --groups`。 |
+| `JAVDEX_PUBLIC_URL` | 无，必填 | 容器管理器 | 桌面可访问的 HTTPS 根地址，主机须在 `accessHosts` 中，端口与统一监听端口一致。 |
+| `JAVDEX_SERVER_UID` | `1000` | 容器管理器 | 管理器通过 `setpriv --reuid` 降权启动业务子进程的 UID。 |
+| `JAVDEX_SERVER_GID` | `1000` | 容器管理器 | 管理器通过 `setpriv --regid` 降权启动业务子进程的 GID。 |
+| `JAVDEX_SERVER_GROUPS` | 空 | 容器管理器 | 逗号分隔的附加 GID 列表，传给 `setpriv --groups`；未配置时清空，不继承管理器的组。 |
 | `JAVDEX_INTERNAL_PORT` | `8098` | 容器管理器 | 管理器网关与内部业务子进程通信的本地回环端口（`1024..65535`）。 |
 | `JAVDEX_UPDATE_STOP_TIMEOUT` | `120`（秒，范围 `5..600`） | 容器管理器 | 更新停服阶段等待业务子进程退出的超时秒数。 |
 | `JAVDEX_RELEASE_KEYS_FILE` | `'/opt/javdex-manager/release-keys.json'` | 容器管理器 | 验证 `.javdex-update` 升级包 Ed25519 签名的公钥文件路径。 |
@@ -130,7 +131,7 @@ description: Javdex 各平台真实存储路径、userData 与 /program 文件�
 
 | 环境变量名 | 默认值 | 作用域 | 具体行为与约束说明 |
 | :--- | :--- | :--- | :--- |
-| `DISPLAY` | 系统 X11 变量 | Linux 桌面端 | Linux 内置 `libmpv` 播放必需的 X11 / XWayland 显示服务地址（配合 `--javdex-x11`）。 |
+| `DISPLAY` | 系统 X11 变量 | Linux 桌面端 | X11／XWayland 后端使用的显示地址；原生 Wayland 使用对应会话，不要求 `DISPLAY`。 |
 | `XDG_CONFIG_HOME` | `~/.config` | Linux 桌面端 | 决定 Linux 下默认应用数据目录 `${XDG_CONFIG_HOME}/Javdex`。 |
 | `JAVDEX_USER_DATA` / `JAVDEX_TEST_USER_DATA` | 系统默认 `userData` | 桌面端 / CLI | 覆盖默认 `<userData>` 数据目录路径，用于便携隔离运行或测试。 |
 | `JAVDEX_BUNDLED_PLUGINS_ROOT` | 内置 `bundled-plugins` | 桌面端 | 当 `JAVDEX_TEST_USER_DATA` 启用时，可覆盖内置刮削插件加载根目录。 |

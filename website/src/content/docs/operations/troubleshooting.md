@@ -70,7 +70,7 @@ GPU 运行库未安装、驱动不兼容、设备不可用或显存预算不足�
 - **原因**：容器内业务进程默认以 `UID 1000` / `GID 1000` 运行，且每个媒体库根目录必须可写以创建 `.javdex-root` 身份标记文件。
 - **解决方式**：
   1. 检查 `docker-compose.yml` 中媒体目录是否以 `:rw`（读写）而非 `:ro` 挂载。
-  2. 将 `JAVDEX_BUSINESS_UID` 与 `JAVDEX_BUSINESS_GID` 环境变量设置为宿主机上拥有该媒体目录读写权限的实际 UID/GID。
+  2. 将 `JAVDEX_SERVER_UID` 与 `JAVDEX_SERVER_GID` 环境变量设置为宿主机上拥有该媒体目录读写权限的实际 UID/GID。
 
 ### 3. 桌面端连接远程服务端报错 `JAVDEX_CERTIFICATE_MISMATCH`（证书指纹不匹配）
 - **原因**：桌面端首次连接服务端时会通过 TOFU（Trust On First Use）机制将 `/program/state/tls/` 中的自签名证书 SHA-256 指纹固定在本地 `server-certificates.bin` 中。如果服务端删除或重建了 `/program` 卷，新生成的证书指纹与本地记录不一致，客户端会自动阻断请求以防御中间人攻击。

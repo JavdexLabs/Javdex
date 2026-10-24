@@ -203,7 +203,9 @@ Windows/macOS 经审核的运行库通过 `JAVDEX_PLAYBACK_RUNTIME_DIR` 显式�
 
 `npm run playback:runtime:build` 从 [固定源码清单](../build/playback-sources.json) 构建正式打包输入。Windows/macOS 输出到 `out/playback-runtime/<platform>-<arch>`；Linux x64 默认构建 dmabuf GPU profile 到 `out/linux-portable-runtime/linux-x64`，另以 `--linux-software` 构建 `out/linux-software-runtime/linux-x64`，并由 `scripts/build-linux-angle.py` 生成 `out/linux-angle-runtime/linux-x64`。下载前后的大小与 SHA-256 必须匹配；清单包含 libmpv、FFmpeg、字幕/字体、AV1、TLS 依赖及 libplacebo 的固定子模块，也锁定 Electron headers 的 Node 版本和许可来源。Meson 禁止自动下载或探测未声明的可选依赖，不复制 Homebrew／系统 FFmpeg。源码和配方变化后使用新空前缀；pkgconf 保留私有 `-I/-L`，避免从系统静态库解析 FFmpeg。工具安装在任务自己的 Python venv，不改本机系统 Python。
 
-当前清单固定 mpv 0.41.0、FFmpeg 9.0.2、Electron 43.8.0 和 Node SDK headers 24.22.0；其余来源、版本、字节数、摘要与工具版本以清单及 [构建配方](../scripts/playback-source-build.mjs) 为准。这套播放 FFmpeg 与本地 AI 使用的 FFmpeg 8.1.3 是独立构建，不能混用版本或许可说明。
+当前清单固定 mpv 0.41.0、FFmpeg 9.0.2、Electron 43.8.1 和 Node SDK headers 24.22.0；其余来源、版本、字节数、摘要与工具版本以清单及 [构建配方](../scripts/playback-source-build.mjs) 为准。这套播放 FFmpeg 与本地 AI 使用的 FFmpeg 8.1.3 是独立构建，不能混用版本或许可说明。
+
+Pi 的嵌套 Undici 与 brace-expansion 使用根 manifest 的安全覆盖版本。npm 10 在 `hasShrinkwrap` 存在时会重新采用上游锁定，忽略根锁文件中的覆盖；因此本项目锁文件明确不保留 Pi 的该字段。更新依赖后须以 `npm ci` 和 `npm run check:workspaces` 核对实际安装，不能仅依赖 `npm audit` 读取的锁文件结果。
 
 当前配置将解码和字幕依赖静态链接进一个共享 libmpv，另构建 Javdex 原生 addon／Linux helper；所有内置 FFmpeg 解码器保留，支持本地及内置网络协议，HTTPS 分别使用 macOS SecureTransport、Windows Schannel、Linux 自建 OpenSSL。视频编码／采集不进入播放配置，保留 PNG/MJPEG 图像编码。libass 保留系统字体提供者、HarfBuzz、FriBidi 和 libunibreak。Lua 5.2.4 是 mpv 0.41 支持的版本，保留它是为了使现有核心能够显式关闭脚本、ytdl、OSC，而不是忽略缺失的必需初始化选项。构建仅保留软件用到的基础播放能力，不加入额外的蓝光/DVD 导航、SFTP/SRT 等可选依赖；不能宣称与任意开发库的可选功能全集一致。
 

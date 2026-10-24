@@ -14,7 +14,10 @@ export function runtimeDistributionAssets(target: AiRuntimeTarget, backend?: 'cu
   return pins.assets.filter(entry => entry.target === `${target.platform}-${target.arch}`
     && (backend ? entry.backend === backend : !['cuda', 'vulkan'].includes(entry.backend)))
     .sort((left, right) => order.indexOf(left.id) - order.indexOf(right.id)).map(entry => ({
-    id: entry.id as AiRuntimeAsset['id'], label: labels[entry.id], filename: windows ? filenames[entry.id] : entry.name,
+    id: entry.id as AiRuntimeAsset['id'], label: labels[entry.id],
+    // Mirror URLs do not rename existing CPU download caches. New POSIX FFmpeg
+    // and GPU distributions retain their separately reviewed archive names.
+    filename: windows || !backend && entry.id !== 'ffmpeg' ? filenames[entry.id] : entry.name,
     archive: true, bytes: entry.bytes, sha256: entry.sha256, url: entry.url,
     archivePrefix: entry.archivePrefix ?? undefined,
     ...(backend ? { backend } : {}),

@@ -5,8 +5,16 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
-import { EXPERIMENTAL_VERSION, verifyExperimentalRuntime } from './wayland-experimental-package.mjs'
+import { EXPERIMENTAL_VERSION, EXPERIMENTAL_ELECTRON_VERSION, verifyExperimentalRuntime } from './wayland-experimental-package.mjs'
 import experimentalConfig from '../electron-builder.wayland-experimental.config.mjs'
+import { integratedLinuxPlayback } from './linux-integrated-playback.mjs'
+
+test('experimental hooks select the reviewed baseline instead of staging integrated helpers twice', () => {
+  const config = experimentalConfig()
+  const context = { electronPlatformName: 'linux', arch: 1, packager: { config } }
+  assert.equal(integratedLinuxPlayback(context), false)
+  assert.equal(integratedLinuxPlayback({ ...context, packager: { config: { extraMetadata: {} } } }), true)
+})
 
 const digest = value => createHash('sha256').update(value).digest('hex')
 function fixture(t) {
@@ -17,7 +25,7 @@ function fixture(t) {
   for (const name of names) { fs.writeFileSync(path.join(directory, name), name); files[name] = digest(name) }
   const inspected = { dependencies: ['libc.so.6'], glibc: 'GLIBC_2.34', glibcxx: null }
   const manifest = { schemaVersion: 1, experimental: true, platform: 'linux', arch: 'x64', version: EXPERIMENTAL_VERSION,
-    electronVersion: '43.8.0', mpvVersion: '0.41.0', reviewedLibmpvSha256: files['libmpv.so.2'], files,
+    electronVersion: EXPERIMENTAL_ELECTRON_VERSION, mpvVersion: '0.41.0', reviewedLibmpvSha256: files['libmpv.so.2'], files,
     sourceBundle: { fileName: 'sources.tar.gz', sha256: digest('source') },
     elf: Object.fromEntries(names.slice(0, 3).map(name => [name, inspected])) }
   const write = () => fs.writeFileSync(path.join(directory, 'experimental-runtime.json'), JSON.stringify(manifest))

@@ -517,7 +517,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.metadata.outputs.tag }}
-          target_commitish: ${{ github.sha }}
           name: Javdex ${{ needs.metadata.outputs.tag }}
           body_path: release-body.md
           prerelease: ${{ needs.metadata.outputs.prerelease == 'true' }}

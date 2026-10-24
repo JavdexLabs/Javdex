@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url'
 import { validatePlaybackRuntime } from './playback-runtime.mjs'
 
 export const EXPERIMENTAL_VERSION = '0.9.1-linux-texture.1'
+export const EXPERIMENTAL_ELECTRON_VERSION = JSON.parse(fs.readFileSync(new URL('../build/playback-sources.json', import.meta.url))).sdk.electronVersion
 export const EXPERIMENTAL_DIRECTORY = 'linux-texture-experimental'
 export const experimentalRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const binaries = ['playback-fd.node', 'playback-dmabuf-helper', 'libmpv.so.2']
@@ -78,7 +79,7 @@ export function verifyExperimentalRuntime(directory, { sourceDirectory, inspect 
   assert.equal(manifest.experimental, true)
   assert.equal(manifest.platform, 'linux')
   assert.equal(manifest.arch, 'x64')
-  assert.equal(manifest.electronVersion, '43.8.0')
+  assert.equal(manifest.electronVersion, EXPERIMENTAL_ELECTRON_VERSION)
   assert.equal(manifest.version, EXPERIMENTAL_VERSION)
   assert.equal(manifest.mpvVersion, '0.41.0')
   assert.deepEqual(Object.keys(manifest.files).sort(), [...binaries, ...notices].sort())
@@ -102,11 +103,11 @@ export function verifyExperimentalRuntime(directory, { sourceDirectory, inspect 
 }
 export function prepareExperimentalRuntime(context) {
   assert.equal(context.electronPlatformName, 'linux')
-  assert.equal(context.packager.info.framework.version, '43.8.0')
+  assert.equal(context.packager.info.framework.version, EXPERIMENTAL_ELECTRON_VERSION)
   assert.equal(context.packager.appInfo.version, EXPERIMENTAL_VERSION)
   const matrix = process.env.JAVDEX_PLAYBACK_RUNTIME_DIR
   assert.ok(matrix, 'Experimental packaging requires the complete reviewed playback source/runtime input')
-  const reviewed = validatePlaybackRuntime(path.join(matrix, 'linux-x64'), { platformName: 'linux', archName: 'x64', electronVersion: '43.8.0' })
+  const reviewed = validatePlaybackRuntime(path.join(matrix, 'linux-x64'), { platformName: 'linux', archName: 'x64', electronVersion: EXPERIMENTAL_ELECTRON_VERSION })
   const output = path.resolve(context.packager.info.outDir ?? path.dirname(context.appOutDir))
   fs.mkdirSync(output, { recursive: true })
   const work = fs.mkdtempSync(path.join(output, '.linux-texture-'))
@@ -147,7 +148,7 @@ export function prepareExperimentalRuntime(context) {
     fs.copyFileSync(path.join(reviewed.directory, 'licenses/libmpv.txt'), path.join(runtime, 'libmpv-LICENSE.txt'))
     fs.writeFileSync(path.join(runtime, 'SOURCE-ACCESS.txt'), `Experimental testing build, not a production release.\nCorresponding complete source, build recipes and third-party materials accompany this AppImage as ${sourceName}.\nSHA-256: ${sha256(archive)}\nThe reviewed X11 runtime has its own separate source archive and unchanged audit gate.\n`)
     const manifest = { schemaVersion: 1, experimental: true, platform: 'linux', arch: 'x64', version: EXPERIMENTAL_VERSION,
-      electronVersion: '43.8.0', mpvVersion: reviewed.manifest.mpvVersion,
+      electronVersion: EXPERIMENTAL_ELECTRON_VERSION, mpvVersion: reviewed.manifest.mpvVersion,
       reviewedLibmpvSha256: reviewed.manifest.files['libmpv.so.2'],
       sourceBundle: { fileName: sourceName, sha256: sha256(archive) },
       files: Object.fromEntries([...binaries, ...notices].map(name => [name, sha256(path.join(runtime, name))])),

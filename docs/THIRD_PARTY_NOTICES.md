@@ -14,7 +14,7 @@ Linux x86_64 AppImage 使用 [uruntime v0.8.1](https://github.com/VHSgunzo/urunt
 
 内置播放使用固定源码构建的 mpv 0.41.0 与 FFmpeg 9.0.2；[源码清单](../build/playback-sources.json) 将二者记录为 GPL-3.0-or-later，[构建配方](../scripts/playback-source-build.mjs) 显式启用 mpv GPL 及 FFmpeg GPL/version3 选项，不是本地 AI 工具所用的 LGPL FFmpeg 构建。实际输入、包内材料与验证合同见 [开发指南](DEVELOPMENT.md#固定源码构建与分发验证)。上游许可说明见 [mpv Copyright](https://github.com/mpv-player/mpv/blob/v0.41.0/Copyright) 与 [FFmpeg 官方说明](https://ffmpeg.org/legal.html)。
 
-固定源码清单单独保留 FreeType、HarfBuzz、FriBidi、libass、libunibreak、libplacebo/fast_float/Vulkan headers、dav1d、zlib、Lua 及平台 TLS/字符转换依赖的版本、原始来源、摘要和许可文件。依赖静态嵌入 libmpv 时，原许可全文合并展示但不改写各项目许可；Node headers、Windows node-gyp 钩子及适用的 GCC runtime exception 声明一并保留。当前 SDK 固定为 Electron 43.8.0／Node headers 24.22.0，以源码清单为准；`build.json` 记录实际来源、构建选项、工具链与配方，`runtime.json` 绑定 `mpv` 和 `javdex-native` 两个二进制所有者。
+固定源码清单单独保留 FreeType、HarfBuzz、FriBidi、libass、libunibreak、libplacebo/fast_float/Vulkan headers、dav1d、zlib、Lua 及平台 TLS/字符转换依赖的版本、原始来源、摘要和许可文件。依赖静态嵌入 libmpv 时，原许可全文合并展示但不改写各项目许可；Node headers、Windows node-gyp 钩子及适用的 GCC runtime exception 声明一并保留。当前 SDK 固定为 Electron 43.8.1／Node headers 24.22.0，以源码清单为准；`build.json` 记录实际来源、构建选项、工具链与配方，`runtime.json` 绑定 `mpv` 和 `javdex-native` 两个二进制所有者。
 
 应用 Resources 的 `native-playback/` 包含二进制、`licenses/libmpv.txt`、`licenses/javdex.txt`、`SOURCE-ACCESS.txt` 与分发清单。完整对应源码和配方独立交付为一个 `Javdex-Playback-Sources-<version>.tar.gz`，纳入 Release 的 `SHA256SUMS.txt`，不装入应用。总包按内容摘要去重四目标材料，保留原始上游归档、Javdex 原生源码、SDK headers、许可、构建和打包工具，以及六个最终安装产物的来源绑定；附 `restore.mjs`，可分别恢复 Windows x64、macOS x64／arm64、Linux x64 的原始材料。四份单平台源码包及 `.runtime.json`／`.installers.json` 回执保留为 CI 产物，不作为额外 Release 附件。具体恢复方法见 [开发指南](DEVELOPMENT.md#固定源码构建与分发验证)。
 

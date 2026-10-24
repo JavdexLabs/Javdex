@@ -8,6 +8,15 @@ import { modelDownloadFile, runtimeAssetDirectory } from './modelStorage'
 import { gpuRuntimeAssets } from './gpuManifest'
 import pins from './runtimeDistributions.json'
 
+test('mirrored POSIX CPU archives retain the existing partial-download path', () => {
+  for (const platform of ['darwin', 'linux']) for (const arch of ['arm64', 'x64']) {
+    for (const id of ['whisper', 'translator']) {
+      const asset = aiRuntimeAssets({ platform, arch }).find(entry => entry.id === id)!
+      assert.equal(modelDownloadFile('models', asset), modelDownloadFile('models', { ...asset, filename: `${id}.tar.gz` }))
+    }
+  }
+})
+
 test('all supported targets share portable weights but never reuse another target executable', () => {
   const weights = LOCAL_MODEL_ASSETS.filter(asset => !asset.archive)
   const runtimeHashes = new Set<string>()

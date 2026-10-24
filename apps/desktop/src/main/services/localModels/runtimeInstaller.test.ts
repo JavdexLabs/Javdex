@@ -225,6 +225,35 @@ test('native archive installs validate inventories, repair missing libraries, an
   } finally { await fs.rm(root, { recursive: true, force: true }) }
 })
 
+test('mirrored POSIX CPU tools install offline or resume the pre-upgrade archive cache', async t => {
+  const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'javdex-posix-cache-'))
+  t.after(() => fs.rm(temporary, { recursive: true, force: true }))
+  for (const platform of ['darwin', 'linux']) for (const arch of ['arm64', 'x64']) for (const id of ['whisper', 'translator'] as const) {
+    const target = { platform, arch }
+    const asset = aiRuntimeAssets(target).find(entry => entry.id === id)!
+    const name = id === 'whisper' ? 'whisper-cli' : 'llama-server'
+    const packed = runtimeTar([{ path: `${asset.archivePrefix ? `${asset.archivePrefix}/` : ''}${name}`, contents: 'cached native tool' }])
+    const fixture = { ...asset, bytes: packed.length, sha256: createHash('sha256').update(packed).digest('hex') }
+    for (const offset of [packed.length, Math.floor(packed.length / 2)]) {
+      const root = path.join(temporary, `${platform}-${arch}-${id}-${offset}`)
+      const oldPartial = modelDownloadFile(root, { ...fixture, filename: `${id}.tar.gz` })
+      await fs.mkdir(path.dirname(oldPartial), { recursive: true })
+      await fs.writeFile(oldPartial, packed.subarray(0, offset))
+      let requests = 0
+      const installer = createAiRuntimeInstaller(root, async (_input, init) => {
+        requests++
+        assert.notEqual(offset, packed.length, 'complete cached archives must work offline')
+        assert.equal(new Headers(init?.headers).get('range'), `bytes=${offset}-`)
+        return new Response(packed.subarray(offset), { status: 206,
+          headers: { 'content-range': `bytes ${offset}-${packed.length - 1}/${packed.length}` } })
+      }, [fixture], { target })
+      await installer.install(new AbortController().signal, () => {}, [id])
+      assert.equal(await installer.assetsInstalled([id]), true)
+      assert.equal(requests, offset === packed.length ? 0 : 1)
+    }
+  }
+})
+
 test('macOS downloads and verifies its own native archive without an application bundle', async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'javdex-mac-download-'))
   t.after(() => fs.rm(root, { recursive: true, force: true }))

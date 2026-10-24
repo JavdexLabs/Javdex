@@ -6,7 +6,7 @@ import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { extractFile } from '@electron/asar'
-import { EXPERIMENTAL_VERSION, experimentalRoot, verifyExperimentalRuntime } from './wayland-experimental-package.mjs'
+import { EXPERIMENTAL_VERSION, EXPERIMENTAL_ELECTRON_VERSION, experimentalRoot, verifyExperimentalRuntime } from './wayland-experimental-package.mjs'
 import { verifyPackagedPlaybackResources } from './check-packaged-playback-runtime.mjs'
 
 const output = path.resolve(process.argv[2] ?? path.join(experimentalRoot, 'dist/wayland-experimental'))
@@ -27,7 +27,7 @@ try {
   assert.equal(metadata.javdexExperimentalLinux, true)
   assert.equal(metadata.version, EXPERIMENTAL_VERSION)
   assert.equal(metadata.name, 'javdex-linux-texture-experimental')
-  const reviewed = verifyPackagedPlaybackResources(resources, output, { platformName: 'linux', archName: 'x64', electronVersion: '43.8.0' })
+  const reviewed = verifyPackagedPlaybackResources(resources, output, { platformName: 'linux', archName: 'x64', electronVersion: EXPERIMENTAL_ELECTRON_VERSION })
   const experimental = verifyExperimentalRuntime(path.join(resources, 'linux-texture-experimental'), { sourceDirectory: output })
   assert.equal(experimental.reviewedLibmpvSha256, reviewed.manifest.files['libmpv.so.2'])
   for (const name of Object.keys(experimental.files)) {

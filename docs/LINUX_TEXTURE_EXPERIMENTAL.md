@@ -10,7 +10,7 @@ Start with `--javdex-wayland` in a native Wayland desktop, or use `--javdex-x11 
 
 ## Build
 
-Use the repository's ordinary `npm ci` and `npm run setup:desktop`. Prerequisites are CMake 3.20+, a C++17 compiler, make or Ninja, pkg-config, Electron 43.8.0 headers, exact libmpv 0.41.0 headers/library, and X11/GL/EGL/GBM/DRM development packages. Host GPU/driver libraries remain host dependencies and are not copied into the package. The experimental AppImage supplies a minimal launcher and empty desktop-entry arguments so electron-builder cannot silently disable the Electron sandbox when user namespaces are unavailable; it must fail visibly on an unsupported sandbox environment.
+Use the repository's ordinary `npm ci` and `npm run setup:desktop`. Prerequisites are CMake 3.20+, a C++17 compiler, make or Ninja, pkg-config, Electron headers matching `build/playback-sources.json`, exact libmpv 0.41.0 headers/library, and X11/GL/EGL/GBM/DRM development packages. Host GPU/driver libraries remain host dependencies and are not copied into the package. The experimental AppImage supplies a minimal launcher and empty desktop-entry arguments so electron-builder cannot silently disable the Electron sandbox when user namespaces are unavailable; it must fail visibly on an unsupported sandbox environment.
 
 Configure the native source with the ordinary inputs and the additional opt-in flag:
 

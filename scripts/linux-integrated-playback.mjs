@@ -6,7 +6,10 @@ import path from 'node:path'
 import { validatePortableRuntime } from './linux-portable-runtime.mjs'
 import { playbackFileSha256 } from './playback-runtime.mjs'
 import { createLinuxSourceBundle } from './linux-release-materials.mjs'
-export function integratedLinuxPlayback(context) { return context.electronPlatformName === 'linux' && context.arch === 1 }
+export function integratedLinuxPlayback(context) {
+  return context.electronPlatformName === 'linux' && context.arch === 1
+    && context.packager?.config?.extraMetadata?.javdexExperimentalLinux !== true
+}
 const runtimes = [['out/linux-portable-runtime/linux-x64', 'linux-texture-experimental'], ['out/linux-software-runtime/linux-x64', 'linux-software-playback']]
 export function verifyIntegratedLinuxPlayback() {
   verifyLinuxAngleRuntime()

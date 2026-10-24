@@ -32,6 +32,8 @@
 
 ## 其他历史证据
 
+[Windows HDR 转 SDR 映射修复](windows-hdr-mapping-2026-10-24.md)记录 OpenGL 3.2/4.3 能力差异的复现、静态 BT.2390 策略、独立亮度参考与真实 Canvas/CPU 接管验证；不代表物理 HDR 输出或新安装包验收。
+
 [Windows Canvas 默认播放与最终包验收](windows-canvas-default-2026-10-24.md)记录旧 HWND 显示/控件移除、正常 Canvas 与 CPU 接管、完整本机测试、新 EXE/ZIP 和对应源码身份；打包阶段的未提交快照与后续源码提交身份分别记录，不代表公开发布。
 
 [Arc B390 Canvas 字幕修复（2026-10-24）](windows-arc-b390-canvas-fix-2026-10-24.md)记录纯 Intel 渲染设备上的 ASS／PGS GL 故障、OpenGL core context 修复、生产异常与真实 GPU 子进程退出的 CPU 恢复，以及修复版解压应用的播放矩阵和短时 4K60 复验；不扩大其他设备或正式安装包的验收范围。

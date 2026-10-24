@@ -197,13 +197,26 @@ public:
             if (error < 0) throw std::runtime_error(std::string(option[0]) + ": " + mpv_error_string(error));
         }
         if (srgbOutput) {
-            // Only the opt-in macOS Canvas producer uses this display contract.
-            // Other native/platform renderers keep their existing color policy.
+            // Shared-texture Canvas producers label these same SDR bytes on
+            // import. This is not a physical HDR display or HDR passthrough.
             const char *display[][2] = {{"target-prim", "bt.709"}, {"target-trc", "srgb"}, {"video-output-levels", "full"}};
             for (const auto &option : display) {
                 const int error = mpv_set_option_string(handle, option[0], option[1]);
                 if (error < 0) throw std::runtime_error(std::string(option[0]) + ": " + mpv_error_string(error));
             }
+#ifdef _WIN32
+            // Automatic peak detection needs compute/SSBO support. With the
+            // same HDR frame, GL 3.2 and 4.3 can otherwise choose different
+            // curves (including history-dependent average-brightness scaling).
+            // Canvas is an SDR target: use the 203-nit reference white and
+            // metadata-based BT.2390 on every Windows GPU. Keep the CPU SW
+            // converter independent; it does not pass srgbOutput here.
+            const char *hdr[][2] = {{"target-peak", "203"}, {"tone-mapping", "bt.2390"}, {"hdr-compute-peak", "no"}};
+            for (const auto &option : hdr) {
+                const int error = mpv_set_option_string(handle, option[0], option[1]);
+                if (error < 0) throw std::runtime_error(std::string(option[0]) + ": " + mpv_error_string(error));
+            }
+#endif
         }
         if (softwareRendering) {
             // Mesa llvmpipe/softpipe can misrender libmpv's convolution scaling

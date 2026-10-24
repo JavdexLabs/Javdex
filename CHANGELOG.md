@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- 修复 Windows Canvas 的 HDR 转 SDR 亮度随 OpenGL 能力变化：固定 SDR 目标及基于元数据的 BT.2390 映射，关闭自动峰值/平均亮度检测；保留 Canvas 显示与图形故障后的 CPU 回退。
+
 - Windows 内置播放器正式使用共享纹理 Canvas，移除旧 HWND 视频子窗口、原生工具栏和试验启动开关；保留核显字幕修复与 GPU 故障后的纯 CPU 自动回退。
 
 - 修复 Windows 候选 Canvas 播放在 Intel 核显上绘制 ASS／PGS 字幕失败：使用 OpenGL 3.2 core context，并保留共享帧故障分类，避免本地化错误信息阻止自动 CPU 回退和播放状态恢复。

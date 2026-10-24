@@ -31,6 +31,8 @@ Windows 在图形初始化失败、可检测的原生视频渲染／共享纹理
 
 回退复用当前已授权来源，重新打开后恢复可定位资源的位置、暂停／播放意图、音量、静音、倍速、音轨、外挂字幕和 AI 字幕时间轴；停止或新来源取消旧恢复。一次图形故障后，本次应用运行继续使用 CPU，重启才重新尝试 GPU。旧 GPU 的未知租约保持隔离，不强行复用；页面已关闭、媒体／授权／音频错误及 CPU 自身故障不进入反复回退。线程被驱动完全挂死等不可检测故障不保证进程内恢复。实测与边界见 [Windows CPU 记录](reviews/windows-cpu-fallback-2026-10-24.md)。
 
+Windows GPU Canvas 的色彩目标固定为 8-bit BGRA、BT.709 primaries／sRGB transfer／RGB full range，SDR 参考白为 203nit；HDR 使用基于片源元数据的 BT.2390 映射，显式关闭自动峰值/平均亮度检测，避免 compute/SSBO 能力不同导致亮度变化。该目标不读取物理 HDR 显示器峰值，也不提供 HDR 直通。CPU 继续使用独立的 FFmpeg 感知映射到 BT.709 SDR，保留软件回退能力；两条映射曲线不保证相同亮度或逐像素一致。定位与实测见 [Windows HDR 映射修复](reviews/windows-hdr-mapping-2026-10-24.md)。
+
 macOS 正常构建和启动使用唯一的共享纹理 Canvas2D 路径，无需试验参数；旧 NSOpenGLView 显示后端及其原生全屏控件已移除。`playback.node` 在主进程以 CGL/OpenGL 把 libmpv 输出写入三槽 IOSurface；`hwdec=auto` 保持原策略，不使用 Linux DMA-BUF、CPU 回退或原生子窗口。Electron 在主进程导入当前进程的 IOSurfaceRef，随后用公开的 `SharedTextureImportedSubtle` 转移对象交给隔离 preload；原始指针不进入应用 JSON、页面或共用播放合同。Canvas、全屏、键盘、滑杆与焦点使用现有 HTML 面板。
 
 该 addon 只允许主线程初始化。mpv 的帧通知与非视频事件经长度为一的非阻塞队列合并唤醒主线程，几何、可见性、时间线变化及租约归还也能唤醒；mpv 回调不执行 JS 或 GL。250ms 兜底继续处理故障、背压及事件，正常 200ms 状态观察保留，但不再为这个自驱动后端另设 16ms 渲染检查。兜底不是视频帧率上限，字幕、暂停 seek 和隐藏时的 skip 仍由正常内核处理。

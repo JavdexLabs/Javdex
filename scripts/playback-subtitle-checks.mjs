@@ -4,6 +4,7 @@ import path from 'node:path'
 import sharp from 'sharp'
 import { captureAcceptanceFrame, nativeEvidence, waitForState, waitForValue, waitForNativeFrame } from './playback-acceptance-support.mjs'
 import { bitmapFixture } from './playback-pgs-fixture.mjs'
+import { bitmapBoundsMatch } from './playback-pixel-math.mjs'
 import { openPlaybackSettings, closePlaybackSettings, selectPlaybackSetting, revealFullscreenControls, hideFullscreenControls } from './playback-settings-ui.mjs'
 
 // Integrate alpha coverage against the subtitle-off image. Counting only bright
@@ -81,7 +82,7 @@ export async function checkBitmapSubtitlePixels(application, page, directory, pr
     const offset = { x: (frame.width - canvas.width * scale) / 2, y: (frame.height - canvas.height * scale) / 2 }
     const expected = { x: offset.x + (cue.x + object.border) * scale, y: offset.y + (cue.y + object.border) * scale,
       width: (object.width - 2 * object.border) * scale, height: (object.height - 2 * object.border) * scale }
-    return { scale, offset, expected, tolerance: Math.max(3, Math.ceil(scale)) }
+    return { scale, offset, expected }
   }
   const ready = async (name, cue) => {
     const start = Date.now()
@@ -94,10 +95,10 @@ export async function checkBitmapSubtitlePixels(application, page, directory, pr
     }, frame => {
       if (!frame.clock.paused || frame.clock.seeking || Math.abs(frame.clock.position - intendedPosition) >= 0.15) return false
       if (!cue) return frame.whitePixels === 0
-      const { expected, tolerance } = geometry(frame, cue)
+      const { expected, scale } = geometry(frame, cue)
       // White pixels from a stale, different cue are not completion evidence.
       return frame.whitePixels > 100 && frame.whiteBounds
-        && ['x', 'y', 'width', 'height'].every(key => Math.abs(frame.whiteBounds[key] - expected[key]) <= tolerance)
+        && bitmapBoundsMatch(frame.whiteBounds, expected, scale)
     },
       `PGS native pixels did not ${cue ? 'reconstruct' : 'clear'} at ${name}`, 5000)
     return { ...frame, readyAfterMs: Date.now() - start, reads }
@@ -115,12 +116,10 @@ export async function checkBitmapSubtitlePixels(application, page, directory, pr
       assert.equal(frame.whitePixels, 0)
       return frame
     }
-    const { scale, expected, tolerance } = geometry(frame, cue)
+    const { scale, expected } = geometry(frame, cue)
     assert.ok(frame.whiteBounds, 'PGS must render a white bitmap, not just enumerate a selected track')
-    // Bounding bright pixels is not the full rescaled rectangle: integer corner
-    // rounding and filtered edge pixels allow at most one source pixel (min 3px).
-    for (const key of ['x', 'y', 'width', 'height']) assert.ok(Math.abs(frame.whiteBounds[key] - expected[key]) <= tolerance,
-      `PGS ${key} must follow positioned video-space coordinates: ${frame.whiteBounds[key]} vs ${expected[key]}`)
+    assert.ok(bitmapBoundsMatch(frame.whiteBounds, expected, scale),
+      `PGS bounds must follow positioned video-space coordinates: ${JSON.stringify(frame.whiteBounds)} vs ${JSON.stringify(expected)}`)
     const current = await sharp(path.join(directory, `${prefix}-${name}.png`)).ensureAlpha().raw().toBuffer()
     const baseline = await sharp(path.join(directory, `${prefix}-${name.replace(/-on$/, '-off')}.png`)).ensureAlpha().raw().toBuffer()
     const coverage = whiteBitmapCoverage(current, baseline)
@@ -137,7 +136,7 @@ export async function checkBitmapSubtitlePixels(application, page, directory, pr
     const off = await capture(`${name}-off`, { baseline: true })
     assert.equal(off.whitePixels, 0)
     await control({ kind: 'track', type: 'sub', id: sid })
-    await waitForState(page, state => state.tracks.some(track => track.type === 'sub' && track.id === sid && track.selected), 'PGS on')
+    await waitForState(page, state => !state.seeking && state.tracks.some(track => track.type === 'sub' && track.id === sid && track.selected), 'PGS on after paused refresh')
     await waitForNativeFrame(application, page, sid)
     const reconstructed = await ready(`${name}-ready`, cue)
     const on = await capture(`${name}-on`, { compare: true })

@@ -39,6 +39,7 @@ int main() {
     const auto sdrFilter = colorFilters.write({}, 0);
     assert(sdrFilter.find("lutrgb=") != std::string::npos);
     assert(sdrFilter.find("lut3d=") == std::string::npos);
+    assert(sdrFilter.find("format=gbrp16le,") != std::string::npos);
     assert(colorFilters.write(pq, 1).find("lut3d=") != std::string::npos);
     using javdex::nodeJson;
     assert(javdex::jsonString(nullptr) == "\"\"");

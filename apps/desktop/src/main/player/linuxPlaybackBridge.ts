@@ -36,6 +36,7 @@ export interface LinuxPlaybackFrameChannel {
   onProbe?(callback: () => void): void
   onBudget?(callback: (ms: number) => void): void
   timingStats?(): { renderBudgetMs: number; submissionLatenessMs: number }
+  observeState?(state: NativePlaybackState): void
   destroy(): void
 }
 
@@ -77,8 +78,8 @@ export function createLinuxPlaybackBridge(executable: string,
   const statistics = channel('javdex.playback.host.statistics'), controls = channel('javdex.playback.host.control')
   const report = (value: unknown): void => {
     if (!value || typeof value !== 'object') return
-    try { Object.assign(value, { [mode]: { ...snapshot, pid: child?.pid,
-      outstandingSurfaces: (snapshot as NativePlaybackState & { dmaBufFramesInFlight?: number; cpuFramesInFlight?: number }).dmaBufFramesInFlight
+    try { Object.assign(value, { [mode]: { ...snapshot, ...frameChannel?.timingStats?.(), pid: child?.pid,
+      outstandingSurfaces: (snapshot as NativePlaybackState & { dmaBufInFlight?: number; cpuFramesInFlight?: number }).dmaBufInFlight
         ?? (snapshot as NativePlaybackState & { cpuFramesInFlight?: number }).cpuFramesInFlight ?? 0 } }) } catch { /* Read-only diagnostics. */ }
   }
   const control = (value: unknown): void => {
@@ -194,6 +195,7 @@ export function createLinuxPlaybackBridge(executable: string,
             const next = value as NativePlaybackState
             if (!next.alive && next.error) { failed(new Error(next.error)); return }
             snapshot = next; lastState = Date.now()
+            frameChannel?.observeState?.(next)
             if (diagnostics && Date.now() - lastDiagnostic >= 1000) {
               lastDiagnostic = Date.now()
               console.info('[playback-dmabuf]', JSON.stringify({ alive: next.alive, nativeFrames: next.nativeFrames,

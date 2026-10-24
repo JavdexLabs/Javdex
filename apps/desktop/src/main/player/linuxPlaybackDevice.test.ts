@@ -12,11 +12,11 @@ function fixture() {
   const env: Record<string, string> = {}
   let override = '', display = 'wayland', extensions: string | undefined = 'EGL_EXT_image_dma_buf_import', queryFails = false
   let fixedRuntime = false, angle = '', compositing = 'enabled'
-  let stalled = false, expire = () => {}
+  let stalled = false, expire = () => {}, now = 0, accelerated = true
   const devices = [{ active: false, vendorId: 0x8086, deviceId: 0x4680 }, { active: true, vendorId: 0x10de, deviceId: 0x2704 }]
-  runInNewContext(code, { exports, process: { platform: 'linux', env }, setTimeout: (callback: () => void) => { expire = callback; return 1 }, clearTimeout: () => {}, require(id: string) {
+  runInNewContext(code, { exports, process: { platform: 'linux', env }, Date: { now: () => now }, setTimeout: (callback: () => void, ms: number) => { expire = () => { now += ms; callback() }; return 1 }, clearTimeout: () => {}, require(id: string) {
     if (id === 'electron') return { app: { commandLine: { getSwitchValue: (key: string) => key === 'ozone-platform' ? display : key === 'use-angle' ? angle : override },
-      getGPUFeatureStatus: () => ({ gpu_compositing: compositing }),
+      getGPUFeatureStatus: () => ({ gpu_compositing: compositing }), isHardwareAccelerationEnabled: () => accelerated,
       getGPUInfo: async () => { if (stalled) return new Promise(() => {}); if (queryFails) throw new Error('GPU unavailable'); return { gpuDevice: devices, auxAttributes: { glWsExtensions: extensions } } } } }
     if (id === './playbackDisplay') return { linuxPlaybackBackend: () => 'dmabuf' }
     if (id === './linuxGpuImport') return { hasX11GpuRuntime: () => fixedRuntime }
@@ -28,8 +28,31 @@ function fixture() {
       } }
     throw new Error(`Unexpected dependency ${id}`)
   } })
-  return { exports, devices, env, stall: () => { stalled = true }, expire: () => expire(), runtime: (fixed: boolean, backend: string, status = 'enabled') => { fixedRuntime = fixed; angle = backend; compositing = status }, override: (value: string) => { override = value }, fail: () => { queryFails = true }, display: (value: string) => { display = value }, extensions: (value: string | undefined) => { extensions = value } }
+  return { exports, devices, env, stall: () => { stalled = true }, expire: () => expire(), elapsed: () => now, acceleration: (value: boolean) => { accelerated = value }, runtime: (fixed: boolean, backend: string, status = 'enabled') => { fixedRuntime = fixed; angle = backend; compositing = status }, override: (value: string) => { override = value }, fail: () => { queryFails = true }, display: (value: string) => { display = value }, extensions: (value: string | undefined) => { extensions = value } }
 }
+
+test('cold X11 compositing can become ready without permanently selecting CPU', async () => {
+  const f = fixture(); f.display('x11'); f.extensions(undefined); f.runtime(true, 'vulkan', 'disabled_software')
+  await f.exports.prepareLinuxPlaybackDevice()
+  let ready = false
+  const preparing = f.exports.waitForLinuxPlaybackCompositing().then(() => { ready = true })
+  await Promise.resolve(); assert.equal(ready, false)
+  f.runtime(true, 'vulkan', 'enabled'); f.expire(); await preparing
+  assert.equal(f.exports.linuxPlaybackRenderNode(), '/dev/dri/renderD129')
+})
+
+test('unavailable X11 compositing remains bounded and the strict import guard still rejects it', async () => {
+  const f = fixture(); f.display('x11'); f.extensions(undefined); f.runtime(true, 'vulkan', 'disabled_software')
+  await f.exports.prepareLinuxPlaybackDevice()
+  const preparing = f.exports.waitForLinuxPlaybackCompositing()
+  for (let i = 0; i < 40; i++) { f.expire(); await Promise.resolve() }
+  await preparing
+  assert.equal(f.elapsed(), 2000)
+  assert.throws(f.exports.linuxPlaybackRenderNode, /X11/)
+  f.acceleration(false)
+  await f.exports.waitForLinuxPlaybackCompositing()
+  assert.equal(f.elapsed(), 2000, 'software startup must not wait for an unavailable GPU')
+})
 test('matches the active Chromium adapter instead of the first render node', async () => {
   const f = fixture()
   await f.exports.prepareLinuxPlaybackDevice()

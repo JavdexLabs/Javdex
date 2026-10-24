@@ -23,6 +23,7 @@ function tracks(raw: NativePlaybackState): PlaybackTrack[] {
 }
 interface Dependencies {
   native: NativePlayback
+  prepareNative?(): Promise<void>
   resolve(target: PlaybackTarget): Promise<PlaybackSource>
   validate(source: PlaybackSource): Promise<void>
   release?(source: PlaybackSource): void
@@ -197,6 +198,10 @@ export function createPlaybackSession(deps: Dependencies) {
         await deps.validate(source)
         if (request !== generation || !snapshot) return false
         control(snapshot.sessionId, { kind: 'presentation', value: 'expanded' }); return true
+      }
+      if (deps.prepareNative) {
+        await deps.prepareNative()
+        if (request !== generation) return false
       }
       const resolved = await deps.resolve(target)
       let adopted = false

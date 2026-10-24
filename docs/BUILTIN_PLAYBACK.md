@@ -43,9 +43,9 @@ CPU 使用 `hwdec=no`、libmpv SW Render API 和 opaque RGBA，preload 通过新
 
 Windows/macOS 的 libmpv、GL 和软件生产者运行在独立 utility process；主进程只加载不链接 libmpv/GL/D3D 的资源互操作模块。Windows 复制子进程 NT 共享句柄，macOS 用 Mach right 传递 IOSurface；以每次分配的资源 ID 区分同一槽的后续分配，接收方保持稳定导入，直到实际引用释放后才退休。宿主退出或 5 秒无心跳按统一规则处理，关闭超时由主进程终止，不让原生调用阻塞界面。Linux 继续使用独立 helper、私有管道和 FD 通道；绑定变化直接通知可见性，不再依赖会话的 16ms 轮询。
 
-GPU/CPU 均以 BT.709 primaries、sRGB transfer、RGB full-range 的 8-bit SDR 为显示目标，参考白为 203nit，HDR 采用固定元数据和 BT.2390，不启用动态峰值统计。CPU 通过解码后、字幕合成前的 RGB16/四面体 LUT 转换，避免改变字幕颜色；不依赖 GL 或额外色彩运行库。缺失 PQ 亮度元数据按共同默认值处理。共同色彩验收入口为 `scripts/playback-color-fixtures.mjs` 与 `scripts/playback-color-acceptance.mjs`，GPU/CPU 输出允许最多 4 个字节值差异；截图不证明物理 HDR 输出或显示器校准。
+GPU/CPU 均以 BT.709 primaries、sRGB transfer、RGB full-range 的 8-bit SDR 为显示目标，参考白为 203nit，HDR 采用固定元数据和 BT.2390，不启用动态峰值统计。CPU 在解码后、字幕合成前进行色彩转换，避免改变字幕颜色；不依赖 GL 或额外色彩运行库。缺失 PQ 亮度元数据按共同默认值处理。共同色彩验收入口为 `scripts/playback-color-fixtures.mjs` 与 `scripts/playback-color-acceptance.mjs`，GPU/CPU 输出允许最多 4 个字节值差异；截图不证明物理 HDR 输出或显示器校准。
 
-普通 BT.709 SDR 不需要色域或色调映射时，CPU 采用等价的 16-bit 每通道查表；HDR 和其他色域继续使用三维转换。软件画面按同一 bilinear 策略配置 swscale 与可用的 zimg，保留实际物理视口及帧内存上界。色彩数值验收读取显示器色彩转换前的 sRGB Canvas，窗口截图另行留存；两种取像来源不能混作同一比较基准。
+普通 BT.709 SDR 不需要色域或色调映射时，CPU 采用 16-bit 平面 RGB 每通道查表，避免在最终软件缩放及输出前重复量化；查表线程不超过可用逻辑核的一半且最多四个，给解码、缩放和界面留出资源。HDR 和其他色域继续使用 RGB16/四面体三维转换。软件画面按同一 bilinear 策略配置 swscale 与可用的 zimg，保留实际物理视口及帧内存上界。色彩数值验收读取显示器色彩转换前的 sRGB Canvas，窗口截图另行留存；两种取像来源不能混作同一比较基准。最终输出为 8-bit，低于一个字节值的参考灰阶允许量化为同一值；仍检查灰阶顺序、可分辨层次及原像素误差门槛。
 
 帧绑定与时钟交换由 `frameEndpoint.ts` 统一认证主 frame；预算和已知色块自检由共用模块处理。自检通过真实纹理/Canvas 通道采样固定 640×360 色块，不检查任意影片的黑色内容。异步复制中的帧保留独立时间信息，切换时间轴不能清零待发送帧的时间戳。应用生成字幕采用系统默认字体（`sans-serif`）；外挂 ASS 和内嵌字体保留片源样式。
 
@@ -59,6 +59,8 @@ GPU 生产端以 `glFinish` 建立完成边界。Canvas2D 使用 `copy` 覆盖�
 macOS 输出固定为 8-bit BGRA、opaque、BT.709 primaries／sRGB transfer／RGB full range，并将相同标记交给 Electron，Canvas 为 `alpha:false, colorSpace:srgb`。HDR 由 libmpv 映射到该 SDR 目标，不提供 HDR 直通或广色域保证。原生生产者仍是 OpenGL；Chromium 的 ANGLE Metal 消费后端不代表 IOSurface 本身是 Metal，也不证明全链路零拷贝或物理扫描输出。既有短时对照的播放态 CPU 高于旧原生视图；采用此路径是统一合成与交互的取舍，不是性能优化结论。范围与证据见 [正式化记录](reviews/macos-canvas-default-2026-10-23.md)，构建与验证入口见[开发指南](DEVELOPMENT.md#内置播放运行库)。
 
 Linux GPU 模式在 X11 和 Wayland 下均使用隔离 helper 导出 DMA-BUF，由 Electron 导入并绘制到主窗口 Canvas。主进程按 Chromium 活动 GPU 的 PCI vendor/device 匹配 DRM render node，无法唯一匹配时停止创建播放内核；不按 renderD128 的编号推断消费设备。显式 `JAVDEX_DRM_RENDER_NODE` 或 Chromium `--render-node-override` 仍用于本机对照，不能据此推定跨 GPU 导入可用。helper 优先分配线性缓冲；设备不支持时，在具备显式 modifier 导入能力的前提下分配原生布局，核对单平面 BGRA、实际大小并传递真实 modifier。生产端 `glFinish`、三槽租约及消费端引用释放后的 ACK 仍共同约束复用。`--javdex-x11` 仅选择窗口系统，不再启用 X11 原生子窗口；CPU 回退仍使用同一 Canvas。
+
+X11 的固定 Vulkan 消费路径在冷启动时可能短暂报告软件合成。首次打开影片前最多等待两秒，随后仍由原来的严格设备检查决定是否可用；软件启动和手动 CPU 不等待。等待期间停止或换片不能创建旧会话或申请旧媒体授权。Linux GPU 预算结合处理成本与持续上游丢帧学习会话下限，保留原有上下界，且同一 helper 跳转时保留下限。详细计时、重置和安全边界见 [Linux 兼容播放](LINUX_COMPATIBLE_PLAYBACK.md)；这些统计不等于物理呈现反馈。
 
 实验黑屏诊断须区分 producer、导入的 VideoFrame、Canvas 与最终屏幕。Linux 的 `submittedFrames` 只计 Canvas 提交回执，不是画面验收证据；不再填充 `presentedFrames`。`JAVDEX_TEXTURE_PIXEL_DIAGNOSTICS=1` 默认关闭，只对输出纹理为 640×360 的前三个指定间隔帧读取有界像素摘要；媒体自身的宽高不能证明 viewport 纹理符合采样条件。触发按符合尺寸的帧数计算，避免初始化 viewport 提前耗尽绝对帧号。读回可能改变同步或 Canvas 后端，修复验收应关闭该开关，并检查真实窗口画面、持续播放、暂停恢复、跳转、字幕、缩放及重开。
 

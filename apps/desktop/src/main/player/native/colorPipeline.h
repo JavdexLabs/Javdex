@@ -13,6 +13,7 @@
 #include <random>
 #include <stdexcept>
 #include <string>
+#include <thread>
 
 namespace javdex::color {
 using RGB = std::array<double, 3>;
@@ -170,12 +171,17 @@ public:
             && (profile.transfer == "bt.1886" || profile.transfer == "auto")
             && (profile.light == "auto" || profile.light == "display") && profile.peak <= 203) {
             // With identical primaries and no tone mapping, the transform is
-            // separable: sRGB(pow(encoded, 2.4)). libavfilter builds 16-bit
-            // channel tables once, instead of a tetrahedral lookup per pixel.
+            // separable: sRGB(pow(encoded, 2.4)). Keep the 16-bit intermediate
+            // to avoid quantizing before the final software scaler/output.
             // The upper sRGB branch cancels the 2.4 powers algebraically.
             const std::string curve = "maxval*if(lte(pow(val/maxval,2.4),0.0031308),12.92*pow(val/maxval,2.4),1.055*val/maxval-0.055)";
             const auto graph = "format=gbrp16le,lutrgb=r='" + curve + "':g='" + curve + "':b='" + curve + "'" + output;
-            return "lavfi=graph=%" + std::to_string(graph.size()) + "%" + graph;
+            // Leave CPU time for software decoding, scaling and Canvas. The
+            // filter graph otherwise creates its own machine-wide thread pool.
+            const auto available = std::thread::hardware_concurrency();
+            const auto options = "threads=" + std::to_string(std::clamp(available ? available / 2 : 1u, 1u, 4u));
+            return "lavfi=graph=%" + std::to_string(graph.size()) + "%" + graph
+                + ":o=%" + std::to_string(options.size()) + "%" + options;
         }
         if (directory.empty()) {
             std::random_device random;

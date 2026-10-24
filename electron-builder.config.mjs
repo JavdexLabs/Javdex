@@ -1,6 +1,7 @@
 import { prepareSharp } from './scripts/patch-sharp-electron.mjs'
 import { integratedLinuxPlayback, verifyIntegratedLinuxPlayback, stageIntegratedLinuxPlayback } from './scripts/linux-integrated-playback.mjs'
 import { prepareAutomaticAppImageRuntime } from './scripts/linux-appimage-runtime.mjs'
+import { verifyAsarUnpackedFiles } from './scripts/packaged-asar.mjs'
 import { signAsync } from '@electron/osx-sign'
 import { resolve } from 'node:path'
 import {
@@ -78,6 +79,9 @@ const base = {
     '!node_modules/**/*.d.cts',
     '!node_modules/**/*.d.ts.map',
     '!node_modules/**/*.map',
+    // Exclude SQLite development inputs before the ASAR index is generated.
+    '!node_modules/better-sqlite3/binding.gyp',
+    '!node_modules/better-sqlite3/{build,deps,src}/**/*',
     '!node_modules/playwright-core/lib/vite/**/*',
     // Photon is bundled into out/main/chunks with its adjacent WASM asset.
     '!node_modules/@silvia-odwyer/photon-node/photon_rs_bg.wasm',
@@ -94,6 +98,7 @@ const base = {
   win: {
     icon: 'build/icon.ico',
     files: [
+      '!node_modules/better-sqlite3/prebuilds/!(win32-${arch}).node',
       // Linux Electron needs the WASM backend to avoid GLib symbol collisions.
       // Windows uses the native backend and must not ship that Linux fallback.
       '!node_modules/@img/sharp-wasm32/**/*',
@@ -123,7 +128,8 @@ const base = {
   },
   mac: {
     icon: 'build/icon.icns',
-    files: ['!node_modules/@img/sharp-wasm32/**/*'],
+    // Retain both Darwin slices for universal builds as well as single-arch apps.
+    files: ['!node_modules/@img/sharp-wasm32/**/*', '!node_modules/better-sqlite3/prebuilds/!(darwin-*).node'],
     identity: '-',
     electronLanguages: MAC_ELECTRON_LANGUAGES,
     category: 'public.app-category.entertainment',
@@ -141,6 +147,7 @@ const base = {
     // Electron Linux packages target glibc. Filter binaries before ASAR creation;
     // keep loaders, metadata and licenses, including notices for optional packages.
     files: [
+      '!node_modules/better-sqlite3/prebuilds/!(linux-${arch}).node',
       '!node_modules/@img/sharp-!(linux-${arch})/**/*.node',
       '!node_modules/@img/sharp-libvips-!(linux-${arch})/**/*.so*',
       '!node_modules/@mariozechner/clipboard-!(linux-${arch}-gnu)/**/*.node',
@@ -194,6 +201,7 @@ export default function buildConfig() {
   }
   config.afterPack = async context => {
     prunePackagedRuntime(context)
+    verifyAsarUnpackedFiles(resolve(context.packager.getResourcesDir(context.appOutDir), 'app.asar'))
     verifyNoPackagedAiRuntime(context)
     if (integratedLinuxPlayback(context)) stageIntegratedLinuxPlayback(context)
     else { stagePackagedPlaybackRuntime(context); stageLocalPlaybackRuntime(context) }

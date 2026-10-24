@@ -1,6 +1,23 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { meanByteDifference, sampleColorPatches } from './playback-pixel-math.mjs'
+import { bitmapBoundsMatch, grayRampResolved, meanByteDifference, sampleColorPatches } from './playback-pixel-math.mjs'
+
+test('byte gray ramps may quantize sub-byte steps but cannot collapse resolvable steps or reverse order', () => {
+  const expected = [0, .246, 7.68, 45.16, 120.44, 187.52, 238.64, 255]
+  assert.equal(grayRampResolved([0, 0, 8, 45, 120, 188, 239, 255], expected), true)
+  assert.equal(grayRampResolved([0, 0, 0, 45, 120, 188, 239, 255], expected), false)
+  assert.equal(grayRampResolved([0, 1, 8, 7, 120, 188, 239, 255], expected), false)
+  assert.equal(grayRampResolved([0, NaN], [0, .246]), false)
+})
+
+test('fractional-DPI PGS extents account for both filtered edges without accepting stale cue geometry', () => {
+  const scale = 1060 / 360, expected = { x: 856.9, y: 877.4, width: 120 * scale, height: 32 * scale }
+  const actual = { x: 858, y: 879, width: 351, height: 91 }
+  assert.equal(bitmapBoundsMatch(actual, expected, scale), true)
+  assert.equal(bitmapBoundsMatch({ ...actual, y: actual.y + 8 }, expected, scale), false)
+  assert.equal(bitmapBoundsMatch({ ...actual, height: 46 }, expected, scale), false)
+  assert.equal(bitmapBoundsMatch(null, expected, scale), false)
+})
 
 test('a three-byte mean difference stays on the inclusive boundary', () => {
   assert.equal(meanByteDifference(161.35999999999999, 164.36), 3)

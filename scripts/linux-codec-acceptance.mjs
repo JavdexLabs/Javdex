@@ -28,6 +28,7 @@ const sleep = ms => new Promise(resolve=>setTimeout(resolve,ms))
 const port = Number(process.env.JAVDEX_ACCEPTANCE_PORT || 9563)
 const probeFault = process.env.JAVDEX_ACCEPTANCE_PROBE_FAULT
 assert(!probeFault || ['black', 'timeout'].includes(probeFault))
+assert(!probeFault || mode === 'auto', 'self-test recovery requires automatic mode')
 const checkControls = process.env.JAVDEX_CODEC_CONTROLS === '1'
 const runtimeFault = process.env.JAVDEX_ACCEPTANCE_RUNTIME_FAILURE === '1'
 assert(!runtimeFault || checkControls && mode === 'auto')
@@ -96,25 +97,30 @@ try {
   }
 
   for(let index=0;index<targets.length;index++) {
+    const caseMode = runtimeFault && index > 0 ? 'cpu' : expectedMode
+    const caseDecoder = caseMode === 'cpu' ? 'no' : expectedDecoder
+    const caseFallback = Boolean(probeFault || runtimeFault && index > 0)
     const test = {file:files[index],status:'running',samples:[]}; report.cases.push(test); save()
     try {
       const opened = await page.evaluate(t=>window.api.player.play(t.libraryId,t.videoId),targets[index])
       assert.equal(opened.ok,true,JSON.stringify(opened))
-      await waitState(s=>s?.target.videoId===targets[index].videoId&&s.phase==='playing'&&s.position>0.5&&s.info.playbackMode===expectedMode)
+      await waitState(s=>s?.target.videoId===targets[index].videoId&&s.phase==='playing'&&s.position>0.5&&s.info.playbackMode===caseMode)
       const duration = index===0 ? firstDuration : 8
+      const started = performance.now()
       for(let second=0;second<duration;second++) {
-        await sleep(1000)
+        await sleep(Math.max(0, started + (second + 1) * 1000 - performance.now()))
         const state=await page.evaluate(()=>window.api.playback.snapshot())
-        assert.equal(state?.phase,'playing',JSON.stringify(state)); assert.equal(state.info.playbackMode,expectedMode)
-        assert.equal(state.info.playbackFallback,Boolean(probeFault))
+        assert.equal(state?.phase,'playing',JSON.stringify(state)); assert.equal(state.info.playbackMode,caseMode)
+        assert.equal(state.info.playbackFallback,caseFallback)
         if (probeFault) assert.equal(state.info.playbackDiagnostics.fallbackReason,probeFault === 'black' ? 'DISPLAY_SELF_TEST_FAILED' : 'DISPLAY_SELF_TEST_TIMEOUT')
-        if (expectedMode === 'gpu') assert.equal(state.info.playbackDiagnostics.displayProbe, 'passed')
-        if(expectedDecoder) assert.equal(state.info.hardwareDecoder,expectedDecoder)
+        if (caseMode === 'gpu') assert.equal(state.info.playbackDiagnostics.displayProbe, 'passed')
+        if(caseDecoder) assert.equal(state.info.hardwareDecoder,caseDecoder)
         assert.match(state.info.videoCodec, [/H\.264/, /HEVC|H\.265/, /AV1/][index])
         assert.equal(state.info.width,1920); assert.equal(state.info.height,1080)
         test.samples.push(state)
-        if(second===2 || second===duration-1) await page.screenshot({path:path.join(output,`codec-${index}-${second}.png`)})
       }
+      // Keep capture/readback outside the timed interval.
+      await page.screenshot({path:path.join(output,`codec-${index}-end.png`)})
       assert(test.samples.at(-1).position>test.samples[0].position+duration-2,'Playback clock did not advance')
       // Readback is deliberately after the timing run; screenshots are reviewed separately.
       test.pixels=await page.evaluate(()=>{const c=document.querySelector('canvas[data-playback-surface]');if(!c)return null;const a=c.getContext('2d').getImageData(0,0,c.width,c.height).data;let colored=0;for(let i=0;i<a.length;i+=4)if(Math.max(a[i],a[i+1],a[i+2])-Math.min(a[i],a[i+1],a[i+2])>50)colored++;return {width:c.width,height:c.height,colored}})
@@ -128,7 +134,8 @@ try {
           const deadline=Date.now()+10000
           for (;;) {
             const s=await snapshot()
-            assert.equal(s.phase,'paused'); assert.equal(s.paused,true); assert.equal(s.info.hardwareDecoder,expectedDecoder)
+            assert.equal(s.phase,'paused'); assert.equal(s.paused,true); assert.equal(s.info.playbackMode,caseMode)
+            if (caseDecoder) assert.equal(s.info.hardwareDecoder,caseDecoder)
             if(!s.seeking && Math.abs(s.position-seconds)<0.5) return s
             assert(Date.now()<deadline, 'Seek did not settle: '+JSON.stringify(s)); await sleep(100)
           }
@@ -146,7 +153,7 @@ try {
         await page.evaluate(id=>window.api.playback.subtitle(id),session); await sleep(400)
         assert((await snapshot()).tracks.some(t=>t.type==='sub'&&t.selected))
         await page.screenshot({path:path.join(output,`codec-${index}-paused-subtitle.png`)})
-        if (runtimeFault) {
+        if (runtimeFault && index === 0) {
           await mainEvaluate(`(()=>{process.getBuiltinModule('module').createRequire(process.execPath)('electron').app.emit('child-process-gone',{}, {type:'GPU'});return true})()`)
           await waitState(s=>s?.info.playbackMode==='cpu'&&s.paused&&Math.abs(s.position-1)<0.5&&s.tracks.some(t=>t.type==='sub'&&t.selected),15000)
           await sleep(500);const recovered=await snapshot()
@@ -164,9 +171,13 @@ try {
         await control({kind:'stop'})
         await waitState(s=>s===null)
         assert.equal((await page.evaluate(t=>window.api.player.play(t.libraryId,t.videoId),targets[index])).ok,true)
-        await waitState(s=>s&&s.sessionId!==session&&s.phase==='playing'&&s.position>0.5&&s.info.hardwareDecoder===expectedDecoder)
+        const reopenedMode = runtimeFault ? 'cpu' : expectedMode
+        const reopenedDecoder = reopenedMode === 'cpu' ? 'no' : expectedDecoder
+        await waitState(s=>s&&s.sessionId!==session&&s.phase==='playing'&&s.position>0.5&&s.info.playbackMode===reopenedMode
+          && (!reopenedDecoder || s.info.hardwareDecoder===reopenedDecoder))
         await sleep(700);const reopened=await snapshot()
-        assert.equal(reopened.info.hardwareDecoder,expectedDecoder,JSON.stringify(reopened));assert.equal(reopened.info.playbackFallback,false)
+        if (reopenedDecoder) assert.equal(reopened.info.hardwareDecoder,reopenedDecoder,JSON.stringify(reopened))
+        assert.equal(reopened.info.playbackFallback,Boolean(probeFault || runtimeFault))
         test.controls.reopen=reopened
         await page.screenshot({path:path.join(output,`codec-${index}-reopen.png`)})
       }

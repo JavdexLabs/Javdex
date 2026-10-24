@@ -5,7 +5,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
 import { bt2390Srgb, bt1886Srgb, pqLuminance, hlgLuminance } from './playback-hdr-reference.mjs'
-import { meanByteDifference, sampleColorPatches } from './playback-pixel-math.mjs'
+import { grayRampResolved, meanByteDifference, sampleColorPatches } from './playback-pixel-math.mjs'
 import { createAcceptanceDirectory, seedAcceptanceCatalog, launchAcceptance, waitForState,
   waitForValue, closeAcceptance, output } from './playback-acceptance-support.mjs'
 import { prepareNonRecordingPlayback } from './playback-acceptance-settings.mjs'
@@ -50,6 +50,7 @@ try {
   const page = await application.firstWindow()
   await page.waitForFunction(() => window.api?.playback && document.querySelector('nav'))
   await prepareNonRecordingPlayback(page)
+  await page.evaluate(mode => window.api.thisComputer.update({ playbackRenderMode: mode === 'recovery' ? 'auto' : mode }), mode)
   report.environment = await application.evaluate(async ({ app, screen }) => ({
     versions: process.versions, gpu: await app.getGPUInfo('complete'), displays: screen.getAllDisplays()
   }))
@@ -84,6 +85,7 @@ try {
   for (const [index, fixture] of fixtures.entries()) {
     assert.equal((await page.evaluate(t => window.api.player.openResource(t.libraryId, t.resourceId, t.videoId), targets[index])).ok, true)
     let state = await waitForState(page, s => s?.phase === 'playing' && s.position > 1, 'HDR playback')
+    report.lastState = state; save()
     assert.equal(state.info.playbackMode, mode === 'cpu' ? 'cpu' : 'gpu')
     const control = value => page.evaluate(({ id, value }) => window.api.playback.control(id, value), { id: state.sessionId, value })
     const check = { fixture: fixture.name, samples: [] }; report.checks.push(check)
@@ -106,7 +108,6 @@ try {
       if (fixture.shape !== 'uniform') {
         assert(sample.gray[0].every(v => v <= 3), 'black level lifted')
         assert(sample.gray.at(-1).every(v => v >= 230), 'SDR peak is too dim')
-        for (let n = 1; n < 8; n++) assert(sample.gray[n][0] > sample.gray[n - 1][0], 'gray steps collapsed')
       } else assert(sample.gray[0].every(v => v > 80 && v < 220), 'metadata-free PQ frame is blank or clipped')
       if (fixture.levels) {
         // Both paths explicitly convert BT.1886 video to the same sRGB target.
@@ -119,6 +120,7 @@ try {
         check.expected = fixture.codes.map(c => bt2390Srgb(luminance((c - 64) / 876), fixture.sourcePeak ?? 1000))
       }
       if (check.expected) {
+        if (fixture.shape !== 'uniform') assert(grayRampResolved(sample.gray.map(rgb => rgb[0]), check.expected), 'resolvable gray steps collapsed or reversed')
         const error = Math.max(...sample.gray.flatMap((rgb, i) => rgb.map(v => Math.abs(v - check.expected[i]))))
         check.maxReferenceError = Math.max(check.maxReferenceError ?? 0, error)
         assert(error <= 4, `SDR mapping differs from the luminance reference: ${error}`)

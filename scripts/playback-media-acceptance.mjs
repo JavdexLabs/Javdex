@@ -7,7 +7,7 @@ import { checkBitmapSubtitlePixels, checkComplexSubtitlePixels, fullscreenSubtit
 import { openPlaybackSettings, closePlaybackSettings, selectPlaybackSetting, playbackSettingLabels, hideFullscreenControls } from './playback-settings-ui.mjs'
 import { prepareNonRecordingPlayback } from './playback-acceptance-settings.mjs'
 
-assert.ok(['darwin', 'win32'].includes(process.platform), 'this runner accepts macOS and Windows only')
+assert.ok(['darwin', 'win32', 'linux'].includes(process.platform), 'unsupported desktop acceptance host')
 const fixtures = prepareMediaFixtures()
 const directory = createAcceptanceDirectory('media-')
 const targets = seedAcceptanceCatalog(directory, fixtures.media)
@@ -68,7 +68,7 @@ try {
   for (const track of audio) {
     await select('音轨', new RegExp(`^${track.title}`))
     await waitForState(page, state => state?.tracks.some(item => item.type === 'audio' && item.id === track.id && item.selected)
-      && state.info.audioOutput === (process.platform === 'win32' ? 'wasapi' : 'coreaudio') && decodedCodec[track.codec].test(state.info.audioCodec ?? ''), `switch ${track.codec}`)
+      && state.info.audioOutput === ({ win32: 'wasapi', darwin: 'coreaudio', linux: 'pulse' }[process.platform]) && decodedCodec[track.codec].test(state.info.audioCodec ?? ''), `switch ${track.codec}`)
     const before = await waitForValue(() => nativeEvidence(application), value => Number.isFinite(value.audioPosition), `${track.codec} audio clock missing`)
     const after = await waitForValue(() => nativeEvidence(application), value => value.audioPosition > before.audioPosition + 0.4
       && value.renderedFrames > before.renderedFrames, `${track.codec} clock/frames did not advance`)

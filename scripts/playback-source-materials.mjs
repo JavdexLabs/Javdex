@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import path from 'node:path'
 
 export const playbackPackagingFiles = ['scripts/playback-runtime.mjs', 'scripts/playback-source-materials.mjs',
-  'scripts/packaging-runtime.mjs', 'scripts/dist.mjs', 'electron-builder.config.mjs',
+  'scripts/packaging-runtime.mjs', 'scripts/packaged-asar.mjs', 'scripts/dist.mjs', 'electron-builder.config.mjs',
   'build/packaging.targets.json', 'package.json', 'package-lock.json', 'LICENSE', 'NOTICE']
 export function playbackPackagingDigest(directory, names = playbackPackagingFiles) {
   const hash = createHash('sha256')

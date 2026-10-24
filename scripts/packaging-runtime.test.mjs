@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 import { FileMatcher, getMainFileMatchers } from 'app-builder-lib/out/fileMatcher.js'
 import { doMergeConfigs } from 'app-builder-lib/out/util/config/config.js'
 import buildConfig from '../electron-builder.config.mjs'
+import { createPackageWithOptions, extractAll } from '@electron/asar'
+import { verifyAsarUnpackedFiles } from './packaged-asar.mjs'
 import {
   MAC_ELECTRON_LANGUAGES,
   expectedBetterSqlitePrebuilds,
@@ -19,6 +21,35 @@ import {
 function tempDirectory(name) {
   return mkdtempSync(path.join(tmpdir(), `javdex-${name}-`))
 }
+
+test('SQLite packaging excludes removed files before generating the archive index', () => {
+  const root = process.cwd(), config = buildConfig()
+  for (const [platform, arch, kept] of [['linux', 'x64', ['linux-x64']], ['win', 'arm64', ['win32-arm64']],
+    ['mac', 'universal', ['darwin-arm64', 'darwin-x64']]]) {
+    const filter = new FileMatcher(root, '/unused-package-output', value => value.replaceAll('${arch}', arch),
+      ['node_modules/**/*', ...config.files, ...config[platform].files]).createFilter()
+    const selected = name => filter(path.join(root, 'node_modules/better-sqlite3', name), { isDirectory: () => false })
+    for (const name of ['lib/index.js', 'package.json', 'LICENSE']) assert.equal(selected(name), true)
+    for (const name of ['binding.gyp', 'build/Makefile', 'deps/common.gypi', 'src/better_sqlite3.cpp']) assert.equal(selected(name), false)
+    for (const target of ['linux-x64', 'linux-arm64', 'linuxmusl-x64', 'darwin-arm64', 'darwin-x64', 'win32-x64', 'win32-arm64']) {
+      assert.equal(selected(`prebuilds/${target}.node`), kept.includes(target), `${platform}/${arch}: ${target}`)
+    }
+  }
+})
+
+test('archive verification accepts internal aliases but rejects missing unpacked files', async t => {
+  const root = tempDirectory('asar-index')
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const input = path.join(root, 'input'), archive = path.join(root, 'app.asar')
+  mkdirSync(input); writeFileSync(path.join(input, 'binding.node'), 'fixture')
+  // Windows symlink creation needs privileges unrelated to this archive check.
+  if (process.platform !== 'win32') symlinkSync('binding.node', path.join(input, 'alias.js'))
+  await createPackageWithOptions(input, archive, { unpack: '*.node' })
+  verifyAsarUnpackedFiles(archive)
+  extractAll(archive, path.join(root, 'extracted'))
+  rmSync(path.join(archive + '.unpacked', 'binding.node'))
+  assert.throws(() => verifyAsarUnpackedFiles(archive), /Missing ASAR unpacked file: binding.node/)
+})
 
 test('pruneBetterSqlitePrebuilds retains only the current platform and arch', (t) => {
   const root = tempDirectory('sqlite')

@@ -78,3 +78,16 @@ export function linuxPlaybackRenderNode(): string {
   if (!node || !/^\/dev\/dri\/renderD\d+$/.test(node)) throw new Error('无法确定共享纹理消费设备，请指定 JAVDEX_DRM_RENDER_NODE 后重新启动')
   return node
 }
+
+/** Chromium may report software compositing briefly after the first window
+ * loads, even with a working Vulkan device. Wait before the synchronous factory
+ * classifies that transient state as a permanent GPU initialization failure. */
+export async function waitForLinuxPlaybackCompositing(): Promise<void> {
+  if (process.platform !== 'linux' || !requireGpuCompositing || !app.isHardwareAccelerationEnabled()) return
+  const deadline = Date.now() + 2000
+  while (app.getGPUFeatureStatus().gpu_compositing !== 'enabled' && Date.now() < deadline) {
+    await new Promise<void>(resolve => setTimeout(resolve, 50))
+  }
+  // Keep the existing strict factory check after timeout; Auto may recover in
+  // CPU, while explicit GPU still fails instead of using an unsafe import path.
+}

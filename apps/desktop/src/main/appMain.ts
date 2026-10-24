@@ -6,6 +6,7 @@ import { pathToFileURL } from 'node:url'
 import { APP_DISPLAY_NAME } from '@shared/appIdentity'
 import { applyAppIcons, resolveWindowIcon } from './appIcon'
 import { startupGraphics } from './bootstrap/startupGraphics'
+import { bindMainWindowPresentation } from './bootstrap/mainWindowPresentation'
 import { getDb } from '@library/db/database'
 import { configureDesktopLibraryRuntime } from './libraryRuntime'
 import { catalogReadService } from './services/catalogReadService'
@@ -113,11 +114,7 @@ function createWindow(rendererEntryUrl = resolveRendererEntryUrl()): void {
     }
   })
 
-  mainWindow.once('ready-to-show', () => {
-    if (!startupGraphics.canContinue()) return
-    mainWindow?.show()
-    startupGraphics.windowReady()
-  })
+  bindMainWindowPresentation(mainWindow, startupGraphics, !app.isHardwareAccelerationEnabled())
   mainWindow.webContents.once('render-process-gone', () => {
     // A renderer failure alone is not evidence of a GPU startup failure.
     if (startupGraphics.isStarting()) startupGraphics.startupFailed(new Error('Main renderer exited before first display'))

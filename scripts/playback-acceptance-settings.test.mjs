@@ -115,10 +115,11 @@ test('subtitle pixel inspection recognizes antialiased hues without counting neu
     'node:fs': { writeFileSync() {} }, 'node:path': path, 'node:crypto': crypto
   })[id] }) } })
   const application = { evaluate: async (callback, args) => {
-    if (!args) return { width: 6, height: 2, data: Buffer.from(Array.from({ length: 12 }, (_, i) =>
+    assert.ok(args.inspect, 'pixel analysis must remain beside the captured bitmap')
+    const frame = { width: 6, height: 2, data: Buffer.from(Array.from({ length: 12 }, (_, i) =>
       [...(colored ? i < 6 ? hues[i] : [128, 128, 128] : [32, 32, 32]), 255]).flat()) }
-    context.args = args
-    return vm.runInContext(`(${callback.toString()})(dependencies,args)`, context)
+    context.args = { ...args.options, frame }
+    return vm.runInContext(`(${args.inspect})(dependencies,args)`, context)
   } }
   await captureAcceptanceFrame(application, path.join(output, 'pixel-check'), 'off', { baseline: true })
   colored = true
@@ -235,6 +236,25 @@ test('a fullscreen layout change during capture retries before using crop geomet
   assert.equal(captures, 2, 'do not combine the previous screenshot with the new fullscreen bounds')
   assert.equal(crops.length, 1)
   assert.equal(frame.height, 722)
+})
+
+test('capture projections return statistics without serializing raw frame bytes to the controller', async () => {
+  const data = Buffer.alloc(16 * 9 * 4, 127)
+  const dependencies = { BrowserWindow: { getAllWindows: () => [{ webContents: {
+    executeJavaScript: async () => ({ x: 0, y: 0, width: 16, height: 9, windowWidth: 16, rendererFullscreen: false }),
+    capturePage: async () => ({ getSize: () => ({ width: 16, height: 9 }), crop: () => ({
+      getSize: () => ({ width: 16, height: 9 }), toBitmap: () => data
+    }) })
+  } }] } }
+  const application = { evaluate: (callback, projection) => {
+    assert.equal(Object.hasOwn(projection.options, 'frame'), false)
+    return vm.runInNewContext(`(${callback.toString()})(dependencies,projection)`, { dependencies, projection })
+  } }
+  const result = await captureAcceptanceImage(application, {
+    inspect: '(_dependencies, { frame }) => ({ width: frame.width, byteCount: frame.data.length })', options: {}
+  })
+  assert.deepEqual(JSON.parse(JSON.stringify(result)), { width: 16, byteCount: data.length })
+  assert.equal(result.data, undefined)
 })
 
 test('non-recording playback explicitly changes the real fresh default, not product policy', async () => {

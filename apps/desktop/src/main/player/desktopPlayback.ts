@@ -19,6 +19,7 @@ import { localAiDirectories } from '../services/localModels/modelStorage'
 import { createAiSubtitleController } from './aiSubtitles/aiSubtitleController'
 import { getLocalModels } from '../services/localModels/desktopLocalModels'
 import { softwareStartupRequested } from '../bootstrap/startupGraphicsRecovery'
+import { waitForLinuxPlaybackCompositing } from './linuxPlaybackDevice'
 
 let active: ReturnType<typeof createPlaybackSession> | null = null
 let dispose: (() => Promise<void>) | null = null
@@ -73,6 +74,9 @@ export function registerBuiltinPlayback(backend: CatalogBackend, getWindow: () =
   let observationRevision = 0
   const session = createPlaybackSession({
     native, ...resolver,
+    ...(process.platform === 'linux' ? { prepareNative: async () => {
+      if (renderMode !== 'cpu') await waitForLinuxPlaybackCompositing()
+    } } : {}),
     ending: () => { void stopSubtitles().catch(() => { console.warn('[playback] unable to finish subtitle cleanup') }) },
     readVolume: volume.read,
     volumeChanged: volume.remember,

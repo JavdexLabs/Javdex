@@ -28,6 +28,8 @@
 
 ## Linux 本地验证
 
+[2026-10-25 播放复检与修复](linux-playback-recheck-2026-10-25.md)记录远程修复后的 Linux 包、冷启动误判、软件窗口显示、调度预算、ASAR 索引和真实画面回归；本地验收构建与完整发行配方分开记录。
+
 [最终 AppImage 自动验收（2026-10-23）](linux-final-appimage-20261023.md)记录合并 Linux AI 运行库与 ANGLE 源码校验修复后的实际包身份、播放矩阵、故障回退及 4K60 性能边界。
 
 [Linux AI GPU 验收](linux-local-ai-gpu-20261023.md)记录 CUDA/Vulkan 按需运行库、真实推理及平台边界。

@@ -54,6 +54,7 @@ function fixture(t: TestContext, pause: 'recent' | 'playlist', renderPolling = t
   const cpu = { ...native, create() { cpuCreates++ } }
   let session!: ReturnType<typeof createPlaybackSession>
   const mocks: Record<string, unknown> = {
+    './linuxPlaybackDevice': { waitForLinuxPlaybackCompositing: async () => {} },
     electron: { app: { getPath: () => root, isHardwareAccelerationEnabled: () => startup.gpuAvailable ?? true }, dialog: {}, shell: {}, powerSaveBlocker: { start: () => 1, stop() {} }, powerMonitor: { on() {}, off() {} } },
     './libmpvPlayback': { builtinPlaybackAvailability: () => ({ available: true }), createLibmpvPlayback: (_window: unknown, selected?: string) => selected === 'software' ? cpu : native },
     './playbackSource': { playbackCatalogKey, createPlaybackSourceResolver: () => ({

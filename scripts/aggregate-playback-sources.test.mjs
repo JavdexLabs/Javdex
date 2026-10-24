@@ -12,7 +12,7 @@ import { linuxReleaseFixture } from './test-support/linux-release-fixture.mjs'
 const version = '0.9.0'
 const targetNames = ['win32-x64', 'darwin-x64', 'darwin-arm64', 'linux-x64']
 const names = ['windows-x64', 'macos-x64', 'macos-arm64', 'linux-x64']
-const packagingFiles = ['scripts/playback-runtime.mjs', 'scripts/playback-source-materials.mjs', 'scripts/packaging-runtime.mjs', 'scripts/dist.mjs',
+const packagingFiles = ['scripts/playback-runtime.mjs', 'scripts/playback-source-materials.mjs', 'scripts/packaging-runtime.mjs', 'scripts/packaged-asar.mjs', 'scripts/dist.mjs',
   'electron-builder.config.mjs', 'build/packaging.targets.json', 'package.json', 'package-lock.json', 'LICENSE', 'NOTICE']
 function write(root, name, bytes) {
   fs.mkdirSync(path.dirname(path.join(root, name)), { recursive: true })

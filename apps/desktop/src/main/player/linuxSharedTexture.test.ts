@@ -411,6 +411,21 @@ test('adaptive budget bounds cost spikes and adjustment rate, resets to 20ms', (
   assert.equal(b.value, 22)
   f.manager.destroy()
 })
+for (const software of [false, true]) test(`upstream drop feedback reaches only the visible GPU budget (CPU: ${software})`, async t => {
+  const f = fixture(false, software); t.after(f.manager.destroy)
+  const changes: number[] = []
+  f.ready(); f.manager.setVisible(true); f.manager.onBudget(value => changes.push(value))
+  f.manager.observeState({ alive: true, pause: false, 'frame-drop-count': 0 })
+  await f.tick(2000)
+  f.manager.observeState({ alive: true, pause: false, 'frame-drop-count': 12 })
+  assert.deepEqual(changes, software ? [] : [24])
+  f.manager.observeState({ alive: true, pause: true, 'frame-drop-count': 20 })
+  await f.tick(2000)
+  f.manager.observeState({ alive: true, pause: false, 'frame-drop-count': 40 })
+  assert.deepEqual(changes, software ? [] : [24], 'pause cannot look like sustained playback pressure')
+  f.manager.resetTiming()
+  assert.equal(changes.at(-1), software ? 20 : 24, 'GPU seeks retain the floor learned by this helper')
+})
 test('clock calibration rejects untrusted renderers and reset drops stale frames without reusing held textures', async t => {
   const f = fixture(); t.after(f.manager.destroy)
   f.ready(); f.manager.setVisible(true)

@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, rmSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import path from 'node:path'
+import assert from 'node:assert/strict'
 
 export const MAC_ELECTRON_LANGUAGES = Object.freeze(['en', 'en_GB', 'zh_CN', 'zh_TW'])
 export const PORTABLE_ELECTRON_LANGUAGES = Object.freeze(['en-US', 'en-GB', 'zh-CN', 'zh-TW'])
@@ -144,8 +145,16 @@ export function prunePackagedRuntime(context) {
     'better-sqlite3',
     'prebuilds'
   )
-  const sqlite = pruneBetterSqlitePrebuilds(sqlitePrebuilds, platformName, archName)
-  const sqliteBuildFiles = pruneBetterSqliteBuildFiles(path.dirname(sqlitePrebuilds))
+  // Deleting unpacked files here leaves dangling entries in app.asar (and can
+  // invalidate its integrity). File matchers must do all SQLite pruning first.
+  const expected = expectedBetterSqlitePrebuilds(platformName, archName)
+  const allowed = platformName === 'darwin' ? expectedBetterSqlitePrebuilds('darwin', 'universal') : expected
+  const binaries = readdirSync(sqlitePrebuilds).filter(name => name.endsWith('.node'))
+  assert.ok([...expected].every(name => binaries.includes(name)), 'Missing target SQLite prebuild')
+  assert.ok(binaries.every(name => allowed.has(name)), 'Foreign SQLite prebuild must be excluded before ASAR creation')
+  for (const name of ['binding.gyp', 'build', 'deps', 'src']) {
+    assert.ok(!existsSync(path.join(path.dirname(sqlitePrebuilds), name)), `SQLite ${name} must be excluded before ASAR creation`)
+  }
 
   let removedLocales = []
   if (platformName === 'darwin') {
@@ -164,7 +173,7 @@ export function prunePackagedRuntime(context) {
 
   console.log(
     `Pruned packaged runtime (${platformName}/${archName}): ` +
-    `${sqlite.removed.length} SQLite prebuilds, ${sqliteBuildFiles.length} SQLite build files, ` +
+    `${binaries.length} verified SQLite prebuilds, ` +
     `${removedLocales.length} Electron locales`
   )
 }

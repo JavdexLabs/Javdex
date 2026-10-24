@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
-import { createAcceptanceDirectory, seedAcceptanceCatalog, launchAcceptance, waitForState, closeAcceptance, output } from './playback-acceptance-support.mjs'
+import { createAcceptanceDirectory, seedAcceptanceCatalog, launchAcceptance, waitForState, waitForValue, closeAcceptance, output } from './playback-acceptance-support.mjs'
 import { prepareNonRecordingPlayback } from './playback-acceptance-settings.mjs'
 
 const media = path.resolve(process.argv[2] ?? 'out/playback-acceptance/synthetic-h264.mp4')
@@ -15,9 +15,10 @@ for (const mode of ['normal', 'software']) {
   try {
     application = await launchAcceptance(directory, `startup-${mode}.log`, mode === 'software' ? ['--javdex-software'] : [])
     const page = await application.firstWindow()
-    // Keep acceptance out of the user's way; no fullscreen or file selectors.
-    await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].hide())
     await page.waitForFunction(() => window.api?.playback && document.querySelector('nav'))
+    await waitForValue(() => application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isVisible()),
+      Boolean, 'main window must actually become visible')
+    await page.screenshot({ path: path.join(output, `startup-${mode}.png`), timeout: 5000 })
     await prepareNonRecordingPlayback(page)
     const acceleration = await application.evaluate(({ app }) => app.isHardwareAccelerationEnabled())
     assert.equal(acceleration, mode !== 'software')

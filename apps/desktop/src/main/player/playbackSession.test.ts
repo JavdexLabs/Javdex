@@ -7,7 +7,7 @@ import type { PlaybackSource } from './playbackSource'
 import { playbackControlSchema, playbackViewportSchema } from './playbackSchemas'
 
 const target: PlaybackTarget = { libraryId: 1, videoId: 2, resourceId: 3 }
-function fixture(volume?: { read(): Promise<number>; remember(value: number): void }, progress?: Parameters<typeof createPlaybackSession>[0]['progress']) {
+function fixture(volume?: { read(): Promise<number>; remember(value: number): void }, progress?: Parameters<typeof createPlaybackSession>[0]['progress'], prepareNative?: () => Promise<void>) {
   const events: Array<PlaybackSnapshot | null> = []
   const loads: string[] = []
   const loadOptions: Array<{ paused: boolean } | undefined> = []
@@ -32,7 +32,7 @@ function fixture(volume?: { read(): Promise<number>; remember(value: number): vo
   let resolve = async (input: PlaybackTarget): Promise<PlaybackSource> => ({ target: input, title: 'Synthetic', mode: 'remote',
     locator: 'https://server.invalid/play?token=private', identityKey: 'catalog', revision: 'revision', resumeKey: 'resume-key' })
   let validate = async (_source: PlaybackSource): Promise<void> => {}
-  const session = createPlaybackSession({ native,
+  const session = createPlaybackSession({ native, prepareNative,
     resolve: input => { resolves++; return resolve(input) }, validate: source => validate(source),
     release: source => { released.push(source) }, ending: () => { endings++ },
     changed: state => events.push(state), presentation: value => { presentations.push(value) }, started: async () => { starts++ }, awake: value => { awake.push(value) },
@@ -44,6 +44,27 @@ function fixture(volume?: { read(): Promise<number>; remember(value: number): vo
     raw: (patch: Partial<NativePlaybackState>) => { raw = { ...raw, ...patch } },
     resolve: (next: typeof resolve) => { resolve = next }, validate: (next: typeof validate) => { validate = next } }
 }
+test('cancelling graphics readiness cannot resolve a media grant or create a late session', async () => {
+  let ready!: () => void
+  const pending = new Promise<void>(resolve => { ready = resolve })
+  const f = fixture(undefined, undefined, () => pending)
+  const opening = f.session.open(target)
+  assert.equal(f.resolves(), 0)
+  f.session.stop(); ready()
+  assert.equal(await opening, false)
+  assert.equal(f.resolves(), 0); assert.equal(f.loads.length, 0); assert.equal(f.session.snapshot(), null)
+})
+
+test('the latest open wins while graphics readiness is pending', async () => {
+  let ready!: () => void
+  const pending = new Promise<void>(resolve => { ready = resolve })
+  const f = fixture(undefined, undefined, () => pending), newer = { ...target, videoId: 4, resourceId: 5 }
+  const first = f.session.open(target), second = f.session.open(newer)
+  ready()
+  assert.equal(await first, false); assert.equal(await second, true)
+  assert.equal(f.resolves(), 1); assert.equal(f.loads.length, 1)
+  assert.deepEqual(f.session.snapshot()!.target, newer)
+})
 test('track projection retains bounded container channel hints and never external filenames', async () => {
   const f = fixture()
   await f.session.open(target)

@@ -3,6 +3,7 @@ import { app, ipcMain, sharedTexture, type BrowserWindow, type IpcMainEvent, typ
 import { randomUUID } from 'node:crypto'
 import { FrameHealthProbe } from './frameHealthProbe'
 import { createRequire } from 'node:module'
+import type { NativePlaybackState } from './nativePlayback'
 
 const READY = 'playback:shared-texture-ready'
 const REMOVED = 'playback:shared-texture-removed'
@@ -374,7 +375,7 @@ export function createLinuxSharedTexture(window: BrowserWindow, addonPath: strin
   return { surfaceToken, childFd: channel.childFd, spawned, destroy, submittedFrames: (): number => drawnFrames,
     resetTiming(): number | undefined {
       if (stopped) return
-      timeline++; timings.clear(); budget.reset(); setBudget?.(20)
+      timeline++; timings.clear(); budget.reset(!software); setBudget?.(budget.value)
       if (binding) contents.send('playback:frame-flush', { ...binding, timeline })
       return timeline
     },
@@ -382,6 +383,12 @@ export function createLinuxSharedTexture(window: BrowserWindow, addonPath: strin
     onReady(callback: () => void): void { readyChanged = callback },
     onProbe(callback: () => void): void { requestProbe = callback },
     timingStats: () => ({ renderBudgetMs: budget.value, submissionLatenessMs: lastLatenessMs }),
+    observeState: (state: NativePlaybackState): void => {
+      if (software) return
+      const next = budget.observeDrops(state['frame-drop-count'], visible && !state.pause && !state.seeking
+        && !state['paused-for-cache'] && !state['eof-reached'], monoMs())
+      if (next !== undefined) setBudget?.(next)
+    },
     onBudget(callback: (ms: number) => void): void { setBudget = callback },
     isReady: (): boolean => !stopped && binding !== null,
     setVisible(value: boolean): void {

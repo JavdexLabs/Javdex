@@ -2,7 +2,7 @@
 
 日期：2026-10-24。
 
-状态：实施与验收进行中。2026-10-24 已整合 Mac CPU 开发，正在 Windows 工作区执行统一方案。
+状态：统一实现已落地，Windows 本机及包内验证通过；Mac/Linux 原生 CI 通过，跨平台实机验收待补。
 
 ## 接续与实施基线
 
@@ -100,7 +100,10 @@ Windows/macOS 的隔离宿主先验证跨进程帧资源交接和释放，再推
 - [x] 整合 GPU/CPU 的静态 BT.2390、203nit、BT.709/sRGB/full 输出；CPU 在字幕合成前转换。
 - [x] 共用帧绑定、时钟交换、自检和预算；Windows/macOS 增加隔离宿主与资源代际管理，Linux 保留隔离 helper。
 - [x] 移除旧窗口句柄、原生焦点/全屏和空遮挡协议，三个平台直接使用 HTML 控件。
-- [ ] 完成本轮包内验证与性能结果整理。
-- [ ] 在 macOS 执行新的 Mach 资源预检及真实 Canvas 验收，在 Linux 实机完成相同矩阵。WSL 结果仅覆盖编译、软件生产与 FD/进程合同，不代替 Linux 桌面验收。
+- [x] 完成 Windows 本轮包内验证与 4K 性能结果整理，记录 CPU 丢帧边界。
+- [x] macOS arm64／Intel 和 Linux 原生 CI 通过；Mac 的跨进程 Mach 资源预检通过。
+- [ ] 在 macOS 和 Linux 实机完成相同 Canvas／CPU／包内矩阵。WSL 与原生 CI 不代替桌面实机验收。
 
 Mac 原生构建加入跨进程 IOSurface/Mach 预检：验证生产进程退出后接收方仍可读取并释放资源；预检失败即停止构建。此预检不代表 CGL、Chromium 或显示设备验收已经完成。
+
+本轮实现、回归、安装包摘要和性能边界见[统一验证记录](../reviews/playback-unification-2026-10-24.md)。

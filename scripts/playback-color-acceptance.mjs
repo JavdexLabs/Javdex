@@ -138,7 +138,7 @@ try {
       await application.evaluate(() => { process.getBuiltinModule('diagnostics_channel').channel('javdex.playback.host.control').publish({mode: 'gpu', operation: 'kill'}) })
       await control({ kind: 'seek', seconds: 4.1 })
       state = await waitForState(page, s => s?.phase === 'paused' && s.info.playbackMode === 'cpu'
-        && s.paused && !s.seeking && Math.abs(s.position - 4.1) < .3, 'HDR CPU recovery')
+        && s.paused && !s.seeking && Math.abs(s.position - 4.1) < .3 && s.volume === 31 && s.speed === 1.25, 'HDR CPU recovery')
       assert.equal(state.info.playbackFallback, true); assert.equal(state.volume, 31); assert.equal(state.speed, 1.25)
       await waitForValue(native, s => s.cpu.nativeFrames > 0 && !s.gpu.alive, 'CPU HDR frame produced')
       await page.waitForTimeout(250)

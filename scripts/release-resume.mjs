@@ -12,6 +12,30 @@ const repairPaths = new Set(['apps/server/src/dualBackendScan.e2e.test.ts', '.gi
   '.github/workflows/release-resume-server.yml', 'scripts/release-resume.mjs', 'scripts/release-resume.test.mjs',
   'docs/VERSIONING_AND_RELEASE.md'])
 
+export function verifiedAmd64Run(repository, run, jobs, changedPaths) {
+  assert.equal(run.repository?.full_name, repository)
+  assert.equal(run.head_repository?.full_name, repository)
+  assert.equal(run.path, '.github/workflows/release.yml')
+  assert.equal(run.status, 'completed')
+  assert.equal(run.conclusion, 'failure')
+  assert.ok(Number.isSafeInteger(run.id) && run.id > 0 && Number.isSafeInteger(run.run_attempt) && run.run_attempt > 0)
+  assert.ok(changedPaths.every(name => repairPaths.has(name)), 'Reused amd64 product source changed')
+  const found = jobs.filter(j => j.name === 'resume-server / resume')
+  assert.equal(found.length, 1)
+  const job = found[0]
+  assert.equal(job.conclusion, 'failure')
+  assert.deepEqual(job.steps.filter(s => s.conclusion === 'failure').map(s => s.name), ['Verify reused arm64 identity and pin both architecture digests'])
+  for (const name of ['Inspect original run and immutable artifacts', 'Validate signing before publishing images',
+    'Build only the missing amd64 product from original source', 'Verify server with the repaired namespace test harness',
+    'Run npm run server:updater:test', 'Verify supplementary business groups under Linux root',
+    'Run npm run server:updater:smoke', 'Run npm run server:smoke']) {
+    assert.equal(job.steps.find(step => step.name === name)?.conclusion, 'success', `Unverified amd64 prerequisite: ${name}`)
+  }
+  assert.ok(jobs.filter(j => j.conclusion === 'failure').every(j => j.name === job.name))
+  assert.ok(jobs.filter(j => /^resume-server \/ (manifest|publish)$/.test(j.name)).every(j => j.conclusion === 'skipped'))
+  return { run: run.id, attempt: run.run_attempt, repairSource: run.head_sha }
+}
+
 export function resumePlan({ repository, run, jobs, artifacts, changedPaths }) {
   assert.equal(run.repository?.full_name, repository, 'Foreign candidate repository')
   assert.equal(run.head_repository?.full_name, repository, 'Fork candidates cannot be resumed')
@@ -72,11 +96,22 @@ async function inspect() {
   const tag = process.env.RELEASE_TAG || `v${version}`
   assert.equal(tag, `v${version}`)
   const image = `ghcr.io/${repository.split('/')[0].toLowerCase()}/javdex-server`
+  let amd64
+  if (process.env.RESUME_AMD64_RUN_ID) {
+    const amdId = process.env.RESUME_AMD64_RUN_ID
+    assert.match(amdId, /^[1-9][0-9]{0,15}$/)
+    const [amdRun, amdJobs] = await Promise.all([api(`actions/runs/${amdId}`), api(`actions/runs/${amdId}/jobs?filter=latest&per_page=100`)])
+    assert.ok(amdJobs.total_count <= 100)
+    execFileSync('git', ['merge-base', '--is-ancestor', amdRun.head_sha, 'HEAD'])
+    const amdChanges = execFileSync('git', ['diff', '--name-only', plan.source, amdRun.head_sha], { encoding: 'utf8' }).trim().split('\n').filter(Boolean)
+    amd64 = verifiedAmd64Run(repository, amdRun, amdJobs.jobs, amdChanges)
+  }
   await assertReleaseAvailable({ tag, version, image, env: { ...process.env, GITHUB_SHA: plan.source } })
   const outputs = { source: plan.source, version, tag, image, prerelease: version.includes('-') || process.env.RELEASE_PRERELEASE === 'true',
-    artifactIds: plan.artifacts.map(a => a.id).join(','), armImage: `${image}:build-${plan.baseRun}-${plan.baseAttempt}-arm64` }
+    artifactIds: plan.artifacts.map(a => a.id).join(','), armImage: `${image}:build-${plan.baseRun}-${plan.baseAttempt}-arm64`,
+    amdImage: amd64 ? `${image}:build-${amd64.run}-${amd64.attempt}-amd64` : '' }
   fs.mkdirSync('out', { recursive: true })
-  fs.writeFileSync('out/release-resume-receipt.json', JSON.stringify({ ...plan, repairSource: process.env.GITHUB_SHA, changedPaths }, null, 2) + '\n')
+  fs.writeFileSync('out/release-resume-receipt.json', JSON.stringify({ ...plan, amd64, repairSource: process.env.GITHUB_SHA, changedPaths }, null, 2) + '\n')
   fs.appendFileSync(process.env.GITHUB_OUTPUT, Object.entries(outputs).map(([k, v]) => `${k}=${v}\n`).join(''))
   console.log(`Resume ${tag} from original source ${plan.source}; reuse ${plan.artifacts.length} verified artifacts and arm64.`)
 }

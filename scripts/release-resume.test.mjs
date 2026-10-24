@@ -5,7 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { resumePlan } from './release-resume.mjs'
+import { resumePlan, verifiedAmd64Run } from './release-resume.mjs'
 import { playbackInstallers } from './playback-source-materials.mjs'
 
 function fixture() {
@@ -27,6 +27,33 @@ test('resume retains the original candidate and exact immutable artifact IDs', (
   assert.equal(plan.source, 'a'.repeat(40))
   assert.equal(plan.baseRun, 123)
   assert.deepEqual(plan.artifacts.map(a => a.id), [1, 2, 3, 4, 5])
+})
+
+function amdFixture() {
+  const f = fixture()
+  f.run.id = 456
+  const names = ['Inspect original run and immutable artifacts', 'Validate signing before publishing images',
+    'Build only the missing amd64 product from original source', 'Verify server with the repaired namespace test harness',
+    'Run npm run server:updater:test', 'Verify supplementary business groups under Linux root',
+    'Run npm run server:updater:smoke', 'Run npm run server:smoke']
+  f.jobs = [{ name: 'resume-server / resume', conclusion: 'failure', steps: [
+    ...names.map(name => ({ name, conclusion: 'success' })),
+    { name: 'Verify reused arm64 identity and pin both architecture digests', conclusion: 'failure' }
+  ] }]
+  return f
+}
+
+test('an uploaded amd64 image may be reused only after all real gates passed', () => {
+  const f = amdFixture()
+  assert.deepEqual(verifiedAmd64Run(f.repository, f.run, f.jobs, f.changedPaths), { run: 456, attempt: 1, repairSource: f.run.head_sha })
+  for (let i = 0; i < 8; i++) {
+    const incomplete = amdFixture()
+    incomplete.jobs[0].steps[i].conclusion = 'skipped'
+    assert.throws(() => verifiedAmd64Run(incomplete.repository, incomplete.run, incomplete.jobs, incomplete.changedPaths))
+  }
+  assert.throws(() => verifiedAmd64Run(f.repository, f.run, f.jobs, ['apps/server/src/index.ts']))
+  f.jobs.push({ name: 'resume-server / manifest', conclusion: 'success' })
+  assert.throws(() => verifiedAmd64Run(f.repository, f.run, f.jobs, f.changedPaths))
 })
 
 for (const [name, mutate] of [
@@ -65,6 +92,8 @@ test('recovery preserves publication guards, candidate identity, checks and all 
   assert.match(workflow, /artifact-ids: \$\{\{ needs\.resume\.outputs\.artifactIds \}\}/)
   assert.match(workflow, /run-id: \$\{\{ inputs\.run_id \}\}/)
   assert.match(workflow, /assert\.equal\(info\.build, process\.env\.CANDIDATE_SOURCE\)/)
+  assert.match(workflow, /imagetools inspect.*\{\{\.Manifest\.Digest\}\}/)
+  assert.ok(!workflow.includes('.RepoDigests'))
   assert.match(workflow, /Javdex-Playback-Sources-\$\{\{ needs\.resume\.outputs\.version \}\}\.tar\.gz/)
   assert.ok(!workflow.includes('force=true'))
 })

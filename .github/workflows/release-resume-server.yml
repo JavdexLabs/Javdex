@@ -6,6 +6,9 @@ on:
       run_id:
         type: string
         required: true
+      amd64_run_id:
+        type: string
+        required: false
       release_tag:
         type: string
         required: false
@@ -58,6 +61,7 @@ jobs:
         run: node scripts/release-resume.mjs
         env:
           RESUME_RUN_ID: ${{ inputs.run_id }}
+          RESUME_AMD64_RUN_ID: ${{ inputs.amd64_run_id }}
           GITHUB_TOKEN: ${{ github.token }}
       - name: Retain recovery provenance
         uses: actions/upload-artifact@v4
@@ -78,6 +82,7 @@ jobs:
           JAVDEX_SERVER_UPDATE_SIGNING_KEY: ${{ secrets.JAVDEX_SERVER_UPDATE_SIGNING_KEY }}
           JAVDEX_SERVER_UPDATE_KEY_ID: ${{ vars.JAVDEX_SERVER_UPDATE_KEY_ID }}
       - name: Build only the missing amd64 product from original source
+        if: steps.inspect.outputs.amdImage == ''
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$CANDIDATE_SOURCE"
@@ -87,6 +92,7 @@ jobs:
           JAVDEX_SERVER_UPDATE_SIGNING_KEY: ${{ secrets.JAVDEX_SERVER_UPDATE_SIGNING_KEY }}
           JAVDEX_SERVER_UPDATE_KEY_ID: ${{ vars.JAVDEX_SERVER_UPDATE_KEY_ID }}
       - name: Verify server with the repaired namespace test harness
+        if: steps.inspect.outputs.amdImage == ''
         run: |
           set -euo pipefail
           git show "$REPAIR_SOURCE:apps/server/src/dualBackendScan.e2e.test.ts" > apps/server/src/dualBackendScan.e2e.test.ts
@@ -100,13 +106,17 @@ jobs:
         env:
           REPAIR_SOURCE: ${{ github.sha }}
       - run: npm run server:updater:test
+        if: steps.inspect.outputs.amdImage == ''
       - name: Verify supplementary business groups under Linux root
+        if: steps.inspect.outputs.amdImage == ''
         run: |
           set -euo pipefail
           setpriv --version
           sudo "$(command -v node)" --require ./scripts/register-test-paths.cjs --import tsx --test apps/server/src/updater/businessProcess.test.ts
       - run: npm run server:updater:smoke
+        if: steps.inspect.outputs.amdImage == ''
       - run: npm run server:smoke
+        if: steps.inspect.outputs.amdImage == ''
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -117,24 +127,34 @@ jobs:
         id: images
         run: |
           set -euo pipefail
-          docker pull --platform linux/arm64 "$ARM_IMAGE"
-          arm_digest=$(docker image inspect "$ARM_IMAGE" --format '{{index .RepoDigests 0}}')
-          test "$(docker image inspect "$ARM_IMAGE" --format '{{.Architecture}}')" = arm64
+          arm_digest="$IMAGE@$(docker buildx imagetools inspect "$ARM_IMAGE" --format '{{.Manifest.Digest}}')"
+          docker pull --platform linux/arm64 "$arm_digest"
+          test "$(docker image inspect "$arm_digest" --format '{{.Architecture}}')" = arm64
           docker create --platform linux/arm64 --name verify-reused-arm "$arm_digest"
           docker cp verify-reused-arm:/app/build-info.json "$RUNNER_TEMP/arm-build-info.json"
           docker cp verify-reused-arm:/app/package.json "$RUNNER_TEMP/arm-package.json"
           docker rm verify-reused-arm
           node --input-type=module -e 'import fs from "node:fs"; import assert from "node:assert/strict"; const info = JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP + "/arm-build-info.json")); assert.equal(info.build, process.env.CANDIDATE_SOURCE); assert.equal(JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP + "/arm-package.json")).version, process.env.VERSION)'
-          amd_image="$IMAGE:build-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-amd64"
-          docker tag javdex-server:smoke "$amd_image"
-          docker push "$amd_image"
-          docker pull --platform linux/amd64 "$amd_image"
-          amd_digest=$(docker image inspect "$amd_image" --format '{{index .RepoDigests 0}}')
+          amd_image="$AMD_IMAGE"
+          if [[ -z "$amd_image" ]]; then
+            amd_image="$IMAGE:build-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-amd64"
+            docker tag javdex-server:smoke "$amd_image"
+            docker push "$amd_image"
+          fi
+          amd_digest="$IMAGE@$(docker buildx imagetools inspect "$amd_image" --format '{{.Manifest.Digest}}')"
+          docker pull --platform linux/amd64 "$amd_digest"
+          test "$(docker image inspect "$amd_digest" --format '{{.Architecture}}')" = amd64
+          docker create --platform linux/amd64 --name verify-reused-amd "$amd_digest"
+          docker cp verify-reused-amd:/app/build-info.json "$RUNNER_TEMP/amd-build-info.json"
+          docker cp verify-reused-amd:/app/package.json "$RUNNER_TEMP/amd-package.json"
+          docker rm verify-reused-amd
+          node --input-type=module -e 'import fs from "node:fs"; import assert from "node:assert/strict"; const info = JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP + "/amd-build-info.json")); assert.equal(info.build, process.env.CANDIDATE_SOURCE); assert.equal(JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP + "/amd-package.json")).version, process.env.VERSION)'
           [[ "$arm_digest" =~ ^ghcr.io/[a-z0-9/-]+@sha256:[a-f0-9]{64}$ ]]
           [[ "$amd_digest" =~ ^ghcr.io/[a-z0-9/-]+@sha256:[a-f0-9]{64}$ ]]
           printf 'arm=%s\namd=%s\n' "$arm_digest" "$amd_digest" >> "$GITHUB_OUTPUT"
         env:
           ARM_IMAGE: ${{ steps.inspect.outputs.armImage }}
+          AMD_IMAGE: ${{ steps.inspect.outputs.amdImage }}
           IMAGE: ${{ steps.inspect.outputs.image }}
           VERSION: ${{ steps.inspect.outputs.version }}
           CANDIDATE_SOURCE: ${{ steps.inspect.outputs.source }}

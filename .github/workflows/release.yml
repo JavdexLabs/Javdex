@@ -29,6 +29,10 @@ on:
         description: "Resume an unpublished candidate with successful desktop/source/arm64 jobs and only an amd64 server-test failure."
         type: string
         required: false
+      resume_amd64_run_id:
+        description: "Optional prior recovery run whose amd64 tests/smokes passed before digest pinning failed."
+        type: string
+        required: false
   push:
     branches:
       - "release-*"
@@ -60,6 +64,7 @@ jobs:
       packages: write
     with:
       run_id: ${{ inputs.resume_server_run_id }}
+      amd64_run_id: ${{ inputs.resume_amd64_run_id }}
       release_tag: ${{ inputs.release_tag }}
       prerelease: ${{ inputs.prerelease }}
     secrets: inherit

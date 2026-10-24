@@ -4,16 +4,17 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { prepareMediaFixtures } from './playback-media-fixtures.mjs'
 import { prepareNonRecordingPlayback } from './playback-acceptance-settings.mjs'
-import { captureAcceptanceImage, createAcceptanceDirectory, seedAcceptanceCatalog, launchAcceptance,
+import { captureAcceptanceImage, captureAcceptanceFrame, createAcceptanceDirectory, seedAcceptanceCatalog, launchAcceptance,
   nativeEvidence, output, waitForState, waitForValue, closeAcceptance } from './playback-acceptance-support.mjs'
 import { closeAcceptanceAndSave } from './playback-acceptance-cleanup.mjs'
 import { installCanvasSubmissionObserver, checkSyntheticCanvasFrame } from './windows-canvas-checks.mjs'
 
 assert.equal(process.platform, 'win32', 'Windows Canvas acceptance requires a native Windows desktop')
 const fixture = prepareMediaFixtures(), directory = createAcceptanceDirectory('windows-canvas-')
-const [target] = seedAcceptanceCatalog(directory, [fixture.media[0]])
+const [target, assTarget, pgsTarget] = seedAcceptanceCatalog(directory,
+  [fixture.media[0], fixture.media[fixture.complexIndex], fixture.media[fixture.bitmapIndex]])
 const report = { passed: false, backend: 'windows-d3d11-nt-canvas2d', checks: [], pending: [
-  'four-corner orientation, SDR reference colors, HDR mapping and complex/bitmap subtitles',
+  'four-corner orientation, SDR reference colors and HDR mapping',
   'device removal, renderer/GPU crash quarantine, multi-GPU/display/remote-desktop compatibility',
   'physical display/audio sync, long-run handles/memory/power and installed/signed packages'
 ] }
@@ -70,6 +71,45 @@ try {
     await control({ kind: 'stop' }); await waitForState(page, s => s === null, 'stop')
     const stopped = await waitForValue(inspect, s => !s.alive && s.outstanding === 0, 'late references release before reopen', 10000)
     report.checks.push({ iteration, surfaceToken, firstPixels, laterPixels, beforeStop, stopped }); save()
+  }
+  // The basic video fixture cannot detect compatibility-profile GL failures
+  // when mpv first draws ASS glyphs or a PGS bitmap. Verify actual subtitle
+  // pixels while remaining on the GPU path, in both presentation modes.
+  for (const [name, subtitleTarget] of [['ass', assTarget], ['pgs', pgsTarget]]) {
+    assert.equal((await page.evaluate(t => window.api.playback.open(t), subtitleTarget)).ok, true)
+    const state = await waitForState(page, s => s?.phase === 'playing' && s.position > .5, `${name} starts on Canvas`)
+    surfaceToken = state.sharedTextureSurface
+    const sub = state.tracks.find(t => t.type === 'sub'); assert.ok(sub)
+    const control = value => page.evaluate(({ id, value }) => window.api.playback.control(id, value), { id: state.sessionId, value })
+    await control({ kind: 'pause', paused: true })
+    const frames = []
+    for (const presentation of ['expanded', 'fullscreen']) {
+      await control({ kind: 'presentation', value: presentation })
+      await waitForState(page, s => s?.presentation === presentation && s.paused, `${name} ${presentation}`)
+      await page.waitForTimeout(250)
+      await control({ kind: 'track', type: 'sub', id: null })
+      await waitForState(page, s => !s.tracks.some(t => t.type === 'sub' && t.selected), 'subtitle disabled')
+      await control({ kind: 'seek', seconds: 2 })
+      await waitForState(page, s => !s.seeking && Math.abs(s.position - 2) < .15, 'subtitle-off seek')
+      await page.waitForTimeout(250)
+      await captureAcceptanceFrame(application, output, `${name}-${presentation}-off`, { baseline: true })
+      await control({ kind: 'track', type: 'sub', id: sub.id })
+      await waitForState(page, s => s.tracks.some(t => t.type === 'sub' && t.id === sub.id && t.selected), 'subtitle enabled')
+      await control({ kind: 'seek', seconds: 2 })
+      await waitForState(page, s => !s.seeking && Math.abs(s.position - 2) < .15, 'subtitle-on seek')
+      const frame = await waitForValue(() => captureAcceptanceFrame(application, output, `${name}-${presentation}-on`, { compare: true, whiteBounds: true }),
+        value => value.differentPixels > 100 && (name !== 'pgs' || value.whitePixels > 100), `${name} actual subtitle pixels`)
+      const current = await page.evaluate(() => window.api.playback.snapshot())
+      assert.equal(current.info.playbackMode, 'gpu'); assert.equal(current.info.playbackFallback, false)
+      assert.equal(current.sessionId, state.sessionId)
+      const native = await nativeEvidence(application)
+      assert.equal(native.loadedFiles, 1); assert.equal(native.commandErrors, 0)
+      frames.push({ presentation, frame, native })
+    }
+    await control({ kind: 'presentation', value: 'expanded' }); await control({ kind: 'stop' })
+    await waitForState(page, s => s === null, 'subtitle stop')
+    const stopped = await waitForValue(inspect, s => !s.alive && s.outstanding === 0, 'subtitle references released')
+    report.checks.push({ subtitle: name, frames, stopped }); save()
   }
   report.passed = true
 } catch (error) { report.error = error.stack ?? String(error); throw error }

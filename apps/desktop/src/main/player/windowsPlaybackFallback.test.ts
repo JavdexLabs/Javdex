@@ -23,7 +23,9 @@ function fixture() {
     updateGeneratedSubtitle(...args) { calls.push(['generated', ...args]) },
     destroy() { calls.push(['destroy']); if (cleanupFailure) throw new Error('OpenGL cleanup failed'); state.alive = false }
   }
-  return { player, calls, break: (message = 'OpenGL context lost') => { failure = new Error(message) },
+  return { player, calls, break: (message = 'OpenGL context lost', kind?: 'graphics' | 'page') => {
+    failure = Object.assign(new Error(message), kind ? { playbackFailureKind: kind } : {})
+  },
     cleanupFails: () => { cleanupFailure = true }, state: (next: Partial<NativePlaybackState>) => { state = { ...state, ...next } } }
 }
 function pair(options = { forceCpu: () => false, gpuAvailable: () => true }) {
@@ -46,6 +48,25 @@ test('disabled acceleration automatically chooses CPU; an explicit CPU request i
     assert.equal(value.playbackFallback, !forced)
     assert.equal(value.playbackFallbackReason, forced ? undefined : 'GPU_DISABLED')
   }
+})
+
+test('localized shared-frame production failures recover through their structured graphics domain', async t => {
+  const { gpu, cpu, p } = pair(); t.after(() => p.destroy())
+  p.create(); p.load('/subtitle-fixture.mkv'); p.read()
+  p.command({ kind: 'pause', paused: true }); p.command({ kind: 'track', type: 'sub', id: 1 })
+  gpu.break('Windows 共享视频生产失败，请重启应用后重试', 'graphics')
+  assert.equal(p.read().playbackMode, 'cpu')
+  assert.equal(p.read().playbackFallbackReason, 'GPU_RUNTIME_FAILED')
+  await delay(50)
+  assert.equal(cpu.calls.filter(c => c[0] === 'create').length, 1)
+  assert(cpu.calls.some(c => c[0] === 'command' && (c[1] as { kind: string; id?: number }).kind === 'track' && (c[1] as { id?: number }).id === 1))
+  assert.deepEqual(cpu.calls.at(-1), ['command', { kind: 'pause', paused: true }])
+})
+
+test('a page failure cannot become a graphics recovery because its text contains GPU', () => {
+  const { gpu, cpu, p } = pair(); p.create(); gpu.break('GPU canvas navigation ended', 'page')
+  assert.throws(() => p.read(), /navigation ended/)
+  assert.equal(cpu.calls.length, 0); p.destroy()
 })
 test('restores source, position, pause intent, audio and subtitle settings after graphics failure', async t => {
   const { gpu, cpu, p } = pair(); t.after(() => p.destroy())

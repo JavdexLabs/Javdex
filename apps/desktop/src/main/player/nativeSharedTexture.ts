@@ -124,13 +124,18 @@ export function createNativeSharedTextureBridge(native: SharedTextureProducer, w
     // Do not release/recycle consumer-held textures here. Each callback below
     // retains its original ticket, including after destroy or another create.
   }
-  const fail = (message: string): void => {
-    if (!stopped) { failure = Object.assign(new Error(message), { code: 'PLAYBACK_RESTART_REQUIRED' }); destroy() }
+  const fail = (message: string, kind: 'graphics' | 'page' = 'graphics'): void => {
+    if (!stopped) {
+      // Keep the failure domain in the main process: localized transport text
+      // must not hide a graphics fault from the independent CPU recovery path.
+      failure = Object.assign(new Error(message), { code: 'PLAYBACK_RESTART_REQUIRED', playbackFailureKind: kind })
+      destroy()
+    }
   }
   const receiverFailed = (event: IpcMainEvent, value: unknown): void => {
     if (matches(event, value) && value.bindingToken === binding?.bindingToken) fail(`${label} 共享视频帧消费失败`)
   }
-  const gone = (): void => fail('播放器页面已关闭，请重启应用后重试')
+  const gone = (): void => fail('播放器页面已关闭，请重启应用后重试', 'page')
   const navigation = (_event: unknown, _url: string, inPlace: boolean, main: boolean): void => { if (main && !inPlace) gone() }
   const childGone = (_event: unknown, details: { type: string }): void => { if (details.type === 'GPU') fail('GPU 进程已退出，请重启应用后重试') }
   const consumerReleased = (event: IpcMainEvent, value: unknown): void => {

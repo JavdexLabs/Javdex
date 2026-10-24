@@ -82,9 +82,19 @@ test('Windows rejects IOSurface substitution and incomplete producer metadata be
     const next = f.native.nextFrame.bind(f.native)
     f.native.nextFrame = () => ({ ...next(), ...mutation }) as never
     await f.tick()
-    assert.throws(() => f.bridge.render(), /Windows.*生产失败/)
+    assert.throws(() => f.bridge.render(), { code: 'PLAYBACK_RESTART_REQUIRED', playbackFailureKind: 'graphics' })
     assert.equal(f.imported.length, 0); assert.deepEqual(f.releases, [1])
   }
+})
+
+test('native producer failures retain the graphics domain while page destruction remains distinct', async t => {
+  const f = fixture('win32'); t.after(f.bridge.destroy)
+  f.native.nextFrame = () => { throw new Error('Windows shared GL render failed') }
+  await f.tick()
+  assert.throws(() => f.bridge.render(), { message: 'Windows 共享视频生产失败，请重启应用后重试', playbackFailureKind: 'graphics' })
+  const page = fixture('win32'); t.after(page.bridge.destroy)
+  page.event.sender.emit('destroyed')
+  assert.throws(() => page.bridge.render(), { playbackFailureKind: 'page' })
 })
 test('Windows uncertain delivery keeps its lease and rejects a new binding release', async t => {
   const f = fixture('win32'); t.after(f.bridge.destroy)

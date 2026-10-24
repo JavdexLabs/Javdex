@@ -32,6 +32,8 @@
 
 ## 其他历史证据
 
+[Arc B390 Canvas 字幕修复（2026-10-24）](windows-arc-b390-canvas-fix-2026-10-24.md)记录纯 Intel 渲染设备上的 ASS／PGS GL 故障、OpenGL core context 修复、生产异常与真实 GPU 子进程退出的 CPU 恢复，以及修复版解压应用的播放矩阵和短时 4K60 复验；不扩大其他设备或正式安装包的验收范围。
+
 [Windows Canvas 本地接入](windows-canvas-implementation-2026-10-23.md)记录 D3D11 NT 生产端、共用帧传输及后续 Windows 11／RTX 4080 本机检查；默认仍为旧 HWND。[Windows CPU 兜底](windows-cpu-fallback-2026-10-24.md)记录软件渲染、故障恢复及取消 1080p 上限；[UHD 770 混合配置](windows-uhd770-hybrid-2026-10-24.md)区分 Intel 的 D3D／解码、NVIDIA 的 WGL 和真实跨设备失败后的 CPU 回退。完整 HDR、纯 Intel 显示、长播及正式安装包仍按各记录保留边界。[Windows 同步 API 调查](windows-canvas-api-2026-10-23.md)保留 Microsoft／Khronos 的句柄、互操作与完成条件。
 
 [macOS 共享视频帧实验验证](macos-shared-texture-2026-10-23.md)保留正式化之前的真实窗口、控制、色彩和新旧短时对照；当时的启用／回滚入口已移出活动代码，性能证据不追溯改写。

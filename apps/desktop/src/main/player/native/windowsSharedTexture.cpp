@@ -238,6 +238,15 @@ napi_value create(napi_env env, napi_callback_info info) {
         pixel.iPixelType = PFD_TYPE_RGBA; pixel.cColorBits = 32; pixel.cAlphaBits = 8;
         const auto format = ChoosePixelFormat(s.dc, &pixel);
         if (!format || !SetPixelFormat(s.dc, format, &pixel) || !(s.context = wglCreateContext(s.dc))) throw std::runtime_error("Cannot create Windows GL context");
+        current(s);
+        // Match the HWND renderer's core profile. A legacy compatibility
+        // context can accept video but fail mpv's ASS/PGS draws on Intel GL.
+        using CreateContext = HGLRC (WINAPI *)(HDC, HGLRC, const int *);
+        auto createContext = load<CreateContext>("wglCreateContextAttribsARB");
+        const int attributes[] = {0x2091, 3, 0x2092, 2, 0x9126, 1, 0};
+        const auto core = createContext(s.dc, nullptr, attributes);
+        if (!core) throw std::runtime_error("Cannot create Windows shared OpenGL 3.2 core context");
+        wglMakeCurrent(nullptr, nullptr); wglDeleteContext(s.context); s.context = core;
         current(s); s.gl.initialize(s.dc);
         checked(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, D3D11_CREATE_DEVICE_BGRA_SUPPORT,
             nullptr, 0, D3D11_SDK_VERSION, s.device.put(), nullptr, s.immediate.put()), "Create hardware D3D11 device");
@@ -322,7 +331,8 @@ napi_value next(napi_env env, napi_callback_info) {
         // color fixtures on Windows must establish real driver orientation.
         if (!s.playback.render(s.width, s.height, s.frame, false)) throw std::runtime_error("Cannot render Windows shared texture");
         glFinish();
-        if (glGetError() != GL_NO_ERROR) throw std::runtime_error("Windows shared GL render failed");
+        const auto glError = glGetError();
+        if (glError != GL_NO_ERROR) throw std::runtime_error("Windows shared GL render failed (error " + std::to_string(glError) + ")");
         if (!s.gl.unlock(s.interop, 1, &s.registered)) throw std::runtime_error("Cannot release WGL bridge");
         s.locked = false;
         s.pendingSlot = index; s.pendingTimeline = s.timeline; s.pending = tickets.begin(index);

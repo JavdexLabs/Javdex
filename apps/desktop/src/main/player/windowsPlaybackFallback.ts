@@ -16,9 +16,12 @@ export function createWindowsPlaybackFallback(gpu: NativePlayback, cpu: NativePl
   let viewport: Parameters<NativePlayback['viewport']> | null = null
   const controls = new Map<string, PlaybackControl>(), subtitles: string[] = []
   let generated: Parameters<NonNullable<NativePlayback['updateGeneratedSubtitle']>> | null = null
-  const graphicsError = (error: unknown): boolean => error instanceof Error
-    && !/页面已关闭|page.*closed|运行库.*缺少|运行库需更新|播放运行库缺少/i.test(error.message)
-    && /OpenGL|\bWGL\b|\bGL\b|D3D|DXGI|GPU|共享.*[纹帧]|shared.texture|native.*(context|drawable|pixel format|frame rendering|swap)/i.test(error.message)
+  const graphicsError = (error: unknown): boolean => {
+    if (!(error instanceof Error) || /页面已关闭|page.*closed|运行库.*缺少|运行库需更新|播放运行库缺少/i.test(error.message)) return false
+    const kind = (error as Error & { playbackFailureKind?: unknown }).playbackFailureKind
+    if (kind !== undefined) return kind === 'graphics'
+    return /OpenGL|\bWGL\b|\bGL\b|D3D|DXGI|GPU|共享.*[纹帧]|shared.texture|native.*(context|drawable|pixel format|frame rendering|swap)/i.test(error.message)
+  }
   const hideGpu = (): void => {
     if (viewport) { try { gpu.viewport(viewport[0], false, viewport[2], viewport[3]) } catch { /* Lost contexts can reject viewport work. */ } }
     // A failed graphics cleanup must not prevent independent CPU playback. The

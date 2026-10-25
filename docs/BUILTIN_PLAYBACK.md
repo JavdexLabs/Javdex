@@ -54,11 +54,23 @@ GPU/CPU 均以 BT.709 primaries、sRGB transfer、RGB full-range 的 8-bit SDR �
 帧绑定与时钟交换由 `frameEndpoint.ts` 统一认证主 frame；预算和已知色块自检由共用模块处理。自检通过真实纹理/Canvas 通道采样固定 640×360 色块，不检查任意影片的黑色内容。异步复制中的帧保留独立时间信息，切换时间轴不能清零待发送帧的时间戳。应用生成字幕采用系统默认字体（`sans-serif`）；外挂 ASS 和内嵌字体保留片源样式。
 
 
+Windows GPU 生产者统一使用 Electron 配套 ANGLE 的 GLES3／D3D11 上下文。libmpv 从该上下文取得同一 D3D11 设备，按 `d3d11va,auto-copy` 尝试直接硬解；正常支持的 NV12／P010 画面不回读系统内存。编解码不支持时，解码器自己的回退与 GPU 画面路径分别报告。WGL 和私有全尺寸 bridge／复制输出已移除；ANGLE 初始化、共享目标、自检或可检测运行故障直接进入统一图形故障处理，自动模式最多恢复一次独立 CPU，手动 GPU 模式报告错误。
+
+ANGLE 直接渲染到空闲的非 keyed NT 共享输出槽，不经过全尺寸私有 bridge 或 `CopyResource`。每个槽缓存自己的 EGL pbuffer；仅空闲槽允许写入或更换尺寸，资源 ID 与三槽租约仍约束跨代回收。独立 1×1 私有 pbuffer 承担内核更新、skip 和关闭，不能把仍由消费端持有的输出槽用于这些操作。渲染后调用 `glFinish` 确认写入完成，检查错误并解绑输出，随后才能交付；消费端最终释放前仍不能复用槽位。已移除异步 fence、完成轮询和多帧生产队列试验。GPU 保持 mpv 默认缩放算法，不因设备、视口或吞吐不足更改缩放、色彩或输出分辨率；低性能设备可能卡顿，性能不足本身不触发 CPU 回退。
+
+ANGLE 从 Electron 可执行文件目录按绝对路径加载配套 `libEGL.dll`／`libGLESv2.dll`；不独立下载另一套 ANGLE，也不使用 Chromium GPU 子进程的原生指针。头文件、许可和固定摘要随对应源码材料交付。
+
+Windows GPU 创建前最多等待两秒取得 Chromium 活动设备的 PCI 身份与 GPU preference；CPU 不查询或等待显卡。与 Chromium 当前的 DXGI preference 定义一致，低功耗／高性能分别解析 `EnumAdapterByGpuPreference(0)` 的 LUID，再核对 PCI 身份；没有 preference 时要求 PCI 匹配唯一。重复同型号但不同 LUID 的物理／虚拟设备不能按枚举顺序猜测。明确目标找不到、变更或存在歧义时按模式报告图形失败／恢复 CPU；GPUInfo 未知或超时时保留系统默认设备与真实画面自检，诊断保持未知。停止、换片或迟到 GPUInfo 结果不能初始化旧宿主；不改写系统显卡偏好。
+
+Windows 私有诊断包括生产端 DXGI 名称／vendor／device／LUID、选择来源、GL renderer、实际解码器及 copy-back 帧所属设备的 DXGI LUID，以及 Chromium 活动设备／driver／preference 信息。`producerBackend=angle-d3d11`、`producerOutput=direct-shared`、`producerSynchronization=gl-finish` 标明唯一 GPU 实现，`directOutputFrames` 记录实际渲染次数。`producerTimings` 分别记录渲染调用、`glFinishWait`、`outputAcquire`、`outputRelease` 和 `producerReadyWall`。最后一项包含渲染、完成等待及 owner-thread 交付调度，非物理显示延迟；渲染调用可能包含上传，跨阶段均值不能直接相加当作端到端延迟。`JAVDEX_PLAYBACK_DIAGNOSTICS=1` 时从固定 mpv 源码收集每 30 帧批量上报的实际回读调用墙钟时间，用于区分解码器回退。
+
+诊断命令为 `node scripts/windows-gpu-profile.mjs 合成视频 gpu|cpu [秒数]`，使用产品默认算法，输出设备、原始样本、区间均值、进程 CPU／工作集及计时后的截图。`JAVDEX_WINDOWS_VIDEO_ADAPTER=VVVV:DDDD` 仅在诊断模式选择唯一硬件适配器，不能覆盖已知且不同的 Chromium 消费设备。原 GPU backend／output／sync 与 pipeline 试验开关已移除。最终实现及验收见 [ANGLE 同步直接输出收敛记录](reviews/windows-angle-finish-consolidation-2026-10-25.md)，早期候选路径与性能对照仅作为历史证据。
+
 macOS 正常构建和启动默认使用共享纹理 Canvas2D，无需试验参数；旧 NSOpenGLView 显示后端及其原生全屏控件已移除。GPU 路径的 `playback.node` 在隔离宿主以 CGL/OpenGL 把 libmpv 输出写入三槽 IOSurface，`hwdec=auto` 保持原策略；独立 `software` 导出提供 CPU 回退，不使用 Linux DMA-BUF 或原生子窗口。资源互操作模块先接收 Mach right 并获取本进程 IOSurfaceRef，Electron 再在主进程导入，随后用公开的 `SharedTextureImportedSubtle` 转移对象交给隔离 preload；原始指针不进入应用 JSON、页面或共用播放合同。Canvas、全屏、键盘、滑杆与焦点使用现有 HTML 面板。
 
 该 addon 只允许宿主的 Node 主线程初始化。mpv 的帧通知与非视频事件经长度为一的非阻塞队列合并唤醒该线程，几何、可见性、时间线变化及租约归还也能唤醒；mpv 回调不执行 JS 或 GL。250ms 兜底继续处理故障、背压及事件，正常 200ms 状态观察保留，但不再为这个自驱动后端另设 16ms 渲染检查。兜底不是视频帧率上限，字幕、暂停 seek 和隐藏时的 skip 仍由正常内核处理。
 
-GPU 生产端以 `glFinish` 建立完成边界。Canvas2D 使用 `copy` 覆盖，解绑清理 backing store。消费端关闭 VideoFrame 后，从 `subtle.release` 的 GPU 完成回调确认释放；main 再释放源引用，最后在 `allReferencesReleased` 中归还原生租约。提交回执、`drawImage`、转移消息已发送都不能提前复用槽位。窗口正常停止仍接收迟到释放；交付结果不明时隔离最多三张未确认表面，最终由应用退出清理。可检测图形故障可在保留原 GPU 租约的同时切换独立 CPU 输出；renderer 页面关闭不触发回退，不能靠软件模式恢复已经消失的页面。
+GPU 生产端必须确认实际完成后交付：Windows／macOS／Linux 均使用 `glFinish` 确认渲染完成。Canvas2D 使用 `copy` 覆盖，解绑清理 backing store。消费端关闭 VideoFrame 后，从 `subtle.release` 的 GPU 完成回调确认释放；main 再释放源引用，最后在 `allReferencesReleased` 中归还原生租约。提交回执、`drawImage`、转移消息已发送都不能提前复用槽位。窗口正常停止仍接收迟到释放；交付结果不明时隔离最多三张未确认表面，最终由应用退出清理。可检测图形故障可在保留原 GPU 租约的同时切换独立 CPU 输出；renderer 页面关闭不触发回退，不能靠软件模式恢复已经消失的页面。
 
 macOS 输出固定为 8-bit BGRA、opaque、BT.709 primaries／sRGB transfer／RGB full range，并将相同标记交给 Electron，Canvas 为 `alpha:false, colorSpace:srgb`。HDR 由 libmpv 映射到该 SDR 目标，不提供 HDR 直通或广色域保证。原生生产者仍是 OpenGL；Chromium 的 ANGLE Metal 消费后端不代表 IOSurface 本身是 Metal，也不证明全链路零拷贝或物理扫描输出。既有短时对照的播放态 CPU 高于旧原生视图；采用此路径是统一合成与交互的取舍，不是性能优化结论。范围与证据见 [正式化记录](reviews/macos-canvas-default-2026-10-23.md)，构建与验证入口见[开发指南](DEVELOPMENT.md#内置播放运行库)。
 

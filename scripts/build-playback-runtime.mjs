@@ -10,7 +10,7 @@ import { createRequire } from 'node:module'
 import { availableParallelism } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { playbackBuildFingerprint, playbackMpvRenderFenceFix, playbackLinuxAssDependency, playbackLinuxVaapiRenderDependency, playbackPkgConfigEnvironment, playbackSourceNativePlan, playbackSourcePlan, playbackWindowsExportNames, playbackWindowsSourceEnvironment, stageWindowsStaticZlib, staticPlaybackDependencies, verifyPlaybackSource } from './playback-source-build.mjs'
+import { playbackBuildFingerprint, playbackMpvRenderFenceFix, playbackMpvHwdownloadTiming, playbackMpvAngleDeviceQueryFix, playbackLinuxAssDependency, playbackLinuxVaapiRenderDependency, playbackPkgConfigEnvironment, playbackSourceNativePlan, playbackSourcePlan, playbackWindowsExportNames, playbackWindowsSourceEnvironment, stageWindowsStaticZlib, staticPlaybackDependencies, verifyPlaybackSource } from './playback-source-build.mjs'
 import { playbackFileSha256, validatePlaybackRuntime } from './playback-runtime.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'), require = createRequire(import.meta.url)
@@ -72,6 +72,14 @@ const recipeFiles = ['build/playback-sources.json', 'scripts/build-playback-runt
   'scripts/playback-runtime.mjs', ...(portable ? ['scripts/linux-portable-runtime.mjs'] : []), 'scripts/playback-source-materials.mjs', 'scripts/packaging-runtime.mjs', 'scripts/playback-native-build.mjs', 'scripts/check-playback-load.mjs', 'scripts/playback-linux-helper-smoke.mjs',
   'package.json', 'package-lock.json', 'LICENSE', 'NOTICE', 'LICENSES/Javdex-MIT.txt', 'LICENSES/node-gyp-MIT.txt',
   ...readdirSync(native).filter(name => /\.(cpp|mm|h)$|^CMakeLists.txt$/.test(name)).map(name => 'apps/desktop/src/main/player/native/' + name)]
+if (platform === 'win32') {
+  recipeFiles.push('build/angle-runtime.json')
+  const headers = path.join(native, 'vendor/angle')
+  for (const file of readdirSync(headers, { recursive: true, withFileTypes: true }).filter(entry => entry.isFile())) {
+    const parent = file.parentPath ?? file.path
+    recipeFiles.push(path.relative(root, path.join(parent, file.name)).replaceAll('\\', '/'))
+  }
+}
 for (const parent of ['apps', 'packages']) {
   for (const directory of readdirSync(path.join(root, parent), { withFileTypes: true }).filter(entry => entry.isDirectory())) {
     const file = `${parent}/${directory.name}/package.json`
@@ -134,6 +142,21 @@ if (platform === 'linux') cpSync(path.join(sourceRoot, 'vulkan_headers/include')
 cpSync(path.join(sourceRoot, 'fast_float'), path.join(sourceRoot, 'libplacebo/3rdparty/fast_float'), { recursive: true })
 cpSync(path.join(sourceRoot, 'vulkan_headers'), path.join(sourceRoot, 'libplacebo/3rdparty/Vulkan-Headers'), { recursive: true })
 const patches = []
+if (platform === 'win32') {
+  const headers = path.join(root, 'apps/desktop/src/main/player/native/vendor/angle')
+  const pin = JSON.parse(readFileSync(path.join(headers, 'provenance.json')))
+  assert.equal(pin.revision, JSON.parse(readFileSync(path.join(root, 'build/angle-runtime.json'))).angleRevision)
+  for (const [name, sha256] of Object.entries(pin.sha256)) assert.equal(playbackFileSha256(path.join(headers, name)), sha256, 'ANGLE header provenance mismatch')
+  cpSync(path.join(headers, 'include'), path.join(prefix, 'include'), { recursive: true })
+  // Meson probes must see the same pinned EGL declarations as the adapter.
+  environment.CFLAGS += ` -I${posix(path.join(prefix, 'include'))}`
+  const file = path.join(sourceRoot, 'mpv/video/decode/vd_lavc.c')
+  writeFileSync(file, playbackMpvHwdownloadTiming(readFileSync(file, 'utf8')))
+  const interopFile = path.join(sourceRoot, 'mpv/video/out/opengl/hwdec_d3d11egl.c')
+  writeFileSync(interopFile, playbackMpvAngleDeviceQueryFix(readFileSync(interopFile, 'utf8')))
+  patches.push({ id: 'mpv', operation: 'Accept EXT_device_query in ANGLE client extensions; validate functions and actual device as upstream' })
+  patches.push({ id: 'mpv', operation: 'Opt-in batched hardware copy-back wall timing; EGL ANGLE direct D3D11 interop' })
+}
 // Keep upstream's native swapchain fences; libmpv render API owns no swapchain.
 if (!software) {
   const file = path.join(sourceRoot, 'mpv/video/out/opengl/context.c')
@@ -310,7 +333,10 @@ if (platform === 'win32') {
 run('tar', ['-czf', path.join(staged, 'sources/javdex-native.tar.gz'), '-C', adapterSource, '.'])
 writeFileSync(path.join(staged, 'licenses/javdex.txt'), readFileSync(path.join(root, 'LICENSE'), 'utf8') +
   '\n\n' + sdkNotices.join('\n') +
-  (platform === 'win32' ? '\n\nElectron delay-load hook (node-gyp):\n' + readFileSync(path.join(nodeGypRoot, 'LICENSE'), 'utf8') : ''))
+  (platform === 'win32' ? '\n\nElectron delay-load hook (node-gyp):\n' + readFileSync(path.join(nodeGypRoot, 'LICENSE'), 'utf8')
+    + '\n\nANGLE EGL ABI headers (BSD / Apache-2.0; per-file notices retained):\n'
+    + readFileSync(path.join(native, 'vendor/angle/LICENSE'), 'utf8')
+    + '\n' + readFileSync(path.join(native, 'vendor/angle/LICENSE-Apache-2.0.txt'), 'utf8') : ''))
 const receipt = { schemaVersion: 1, fingerprint, platform, arch, electronVersion, sdk: lock.sdk, toolchain, tools: lock.tools,
   sources: sources.map(({ licenseFiles, ...item }) => item), staticDependencies: patches, commands: [...plan, ...adapterPlan],
   rebuild: 'Extract javdex-native.tar.gz into a checkout, npm ci, restore source archives under out/playback-runtime-build/sources, then npm run playback:runtime:build on the recorded native host.' }

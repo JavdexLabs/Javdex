@@ -6,7 +6,7 @@
 
 namespace javdex {
 // Process-wide export quota, including old generations and quarantined copies.
-// This module contains no driver assumptions; completion is supplied by GetData,
+// This module contains no driver assumptions; completion is supplied by the producer,
 // release only by the importing bridge's allReferencesReleased callback.
 class WindowsTextureTickets {
 public:

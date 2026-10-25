@@ -6,11 +6,12 @@ import type { NativePlaybackState } from './nativePlayback'
 import { FrameBudget } from './frameBudget'
 import { FrameHealthProbe } from './frameHealthProbe'
 import { playbackFallbackReason, graphicsPlaybackFailure } from './playbackGraphicsFailure'
+import type { WindowsPlaybackAdapter } from './playbackHostProtocol'
 
 interface Bounds { width: number; height: number; scale?: number }
 interface Binding { surfaceToken: string; bindingToken: string }
 export interface SharedTextureProducer {
-  create(bounds: Bounds): void
+  create(bounds: Bounds, windowsAdapter?: WindowsPlaybackAdapter): void
   setBounds(bounds: Bounds): void
   setVisible(visible: boolean): void
   resetTiming(timeline: number): void

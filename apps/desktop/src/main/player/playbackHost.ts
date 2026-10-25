@@ -49,7 +49,9 @@ port.on('message', ({ data }: { data: HostRequest }) => {
   try {
     if (data.type === 'create') {
       if (created) throw new Error('Playback host already initialized')
-      native.create(data.bounds); created = true
+      if (gpu && process.platform === 'win32') native.create(data.bounds, data.windowsAdapter)
+      else native.create(data.bounds)
+      created = true
       if (gpu) native.setWakeup(poll)
     } else if (data.type === 'stall' && process.env.JAVDEX_PLAYBACK_DIAGNOSTICS === '1') {
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0)

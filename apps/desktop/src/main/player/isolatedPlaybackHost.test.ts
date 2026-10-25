@@ -7,12 +7,13 @@ import { runInNewContext } from 'node:vm'
 import { test } from 'node:test'
 import { ModuleKind, ScriptTarget, transpileModule } from 'typescript'
 import { graphicsPlaybackFailure } from './playbackGraphicsFailure'
+import { selectWindowsPlaybackAdapter } from './windowsPlaybackAdapter'
 import type { HostRequest, HostResponse } from './playbackHostProtocol'
 
 const code = transpileModule(readFileSync(new URL('./isolatedPlaybackHost.ts', import.meta.url), 'utf8'), {
   compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022, esModuleInterop: true }
 }).outputText
-function fixture(mode: 'gpu' | 'cpu' = 'gpu') {
+function fixture(mode: 'gpu' | 'cpu' = 'gpu', gpuInfo?: () => Promise<unknown>) {
   const messages: HostRequest[] = [], acquired: Buffer[] = [], released: Buffer[] = []
   const intervals: Array<() => void> = [], timeouts: Array<() => void> = []
   let time = 0, killed = false, postFailure = false, releaseFailure = false
@@ -23,11 +24,12 @@ function fixture(mode: 'gpu' | 'cpu' = 'gpu') {
     setInterval: (callback: () => void) => { intervals.push(callback); return { unref() {} } }, clearInterval() {},
     setTimeout: (callback: () => void) => { timeouts.push(callback); return { unref() {} } }, console,
     clearTimeout() {}, require(name: string) {
-      if (name === 'electron') return { app: { getAppPath: () => '/fixture' }, utilityProcess: { fork: () => child } }
+      if (name === 'electron') return { app: { getAppPath: () => '/fixture', getGPUInfo: gpuInfo }, utilityProcess: { fork: () => child } }
       if (name === 'node:path') return path
       if (name === 'node:crypto') return { randomUUID: () => '11111111-1111-4111-8111-111111111111' }
       if (name === 'node:diagnostics_channel') return { channel }
       if (name === './playbackGraphicsFailure') return { graphicsPlaybackFailure }
+      if (name === './windowsPlaybackAdapter') return { selectWindowsPlaybackAdapter }
       if (name === 'node:module') return { createRequire: () => () => ({ acquire() { const resource = Buffer.alloc(8, acquired.length + 1); acquired.push(resource); return resource },
         release(resource: Buffer) { if (releaseFailure) throw new Error('interop cleanup failed'); released.push(resource) } }) }
       throw Error(name)
@@ -39,6 +41,42 @@ function fixture(mode: 'gpu' | 'cpu' = 'gpu') {
   return { host, emit, frame, messages, acquired, released, intervals, timeouts, failPost: () => { postFailure = true }, failRelease: () => { releaseFailure = true },
     advance: (ms: number) => { time += ms; for (const callback of intervals) callback() }, killed: () => killed }
 }
+
+test('Windows GPU initialization preserves create/command order while choosing the consumer adapter', async t => {
+  let resolve!: (value: unknown) => void
+  const f = fixture('gpu', () => new Promise(done => { resolve = done })); t.after(f.host.destroy)
+  f.emit({ type: 'ready' }); f.host.command(['loadfile', '/authorized media.mkv', 'replace'])
+  await new Promise(setImmediate)
+  assert.equal(f.messages.length, 0)
+  resolve({ gpuDevice: [{ active: true, vendorId: 0x8086, deviceId: 0x4680 }] })
+  await new Promise(setImmediate)
+  assert.deepEqual(f.messages.map(message => message.type), ['create', 'command'])
+  const create = f.messages[0]; assert.equal(create.type, 'create')
+  assert.equal(create.windowsAdapter?.vendorId, 0x8086); assert.equal(create.windowsAdapter?.deviceId, 0x4680)
+})
+test('Windows GPU identity timeout is bounded, and late results cannot change the initialized device', async t => {
+  let resolve!: (value: unknown) => void
+  const f = fixture('gpu', () => new Promise(done => { resolve = done })); t.after(f.host.destroy)
+  f.emit({ type: 'ready' }); await new Promise(setImmediate)
+  f.timeouts[0](); await new Promise(setImmediate)
+  assert.equal(f.messages.length, 1)
+  const create = f.messages[0]; assert.equal(create.type, 'create'); assert.equal(create.windowsAdapter, undefined)
+  resolve({ gpuDevice: [{ active: true, vendorId: 0x8086, deviceId: 0x4680 }] }); await new Promise(setImmediate)
+  assert.equal(f.messages.length, 1); assert.equal(create.windowsAdapter, undefined)
+})
+test('stopping during Windows adapter discovery cannot initialize the old child', async () => {
+  let resolve!: (value: unknown) => void
+  const f = fixture('gpu', () => new Promise(done => { resolve = done }))
+  f.emit({ type: 'ready' }); await new Promise(setImmediate); f.host.destroy()
+  const before = f.messages.length
+  resolve({ gpuDevice: [{ active: true, vendorId: 0x8086, deviceId: 0x4680 }] }); await new Promise(setImmediate)
+  assert.equal(f.messages.length, before)
+  assert.equal(f.messages.some(message => message.type === 'create'), false)
+})
+test('CPU initialization never queries or waits for Windows graphics identity', t => {
+  const f = fixture('cpu', () => { throw Error('CPU must not query graphics') }); t.after(f.host.destroy)
+  f.emit({ type: 'ready' }); assert.equal(f.messages[0].type, 'create')
+})
 
 test('host exit notification still terminates its child when resource disposal throws', t => {
   const f = fixture(); t.after(f.host.destroy)

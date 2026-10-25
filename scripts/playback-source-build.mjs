@@ -125,10 +125,12 @@ export function playbackSourcePlan({ platform, arch, source, build, prefix, tool
       linux: ['--enable-openssl', linuxProfile === 'software' ? '--disable-vaapi' : '--enable-vaapi', ...(linuxProfile === 'dmabuf' ? ['--enable-ffnvcodec', '--enable-nvdec', '--enable-cuda', '--disable-nvenc'] : ['--disable-ffnvcodec', '--disable-nvdec', '--disable-cuda']), ...(linuxProfile === 'software' ? ['--disable-hwaccels'] : [])] }[platform])])
   step('make', ['-C', path.join(dir('lua'), 'src'), `-j${jobs}`, 'liblua.a',
     `MYCFLAGS=-O2 -fPIC ${platform === 'win32' ? '-DLUA_DL_DLL' : '-DLUA_USE_POSIX -DLUA_USE_DLOPEN'}`])
+  // mpv 0.41 requires gl-win32 to enable egl-angle; the application uses only
+  // its external ANGLE render context, never the former WGL producer.
   meson('mpv', ['-Dlibmpv=true', '-Dcplayer=false', '-Dgpl=true', '-Dbuild-date=false', `-Dgl=${linuxProfile === 'software' ? 'disabled' : 'enabled'}`, `-Dplain-gl=${linuxProfile === 'software' ? 'disabled' : 'enabled'}`,
     '-Diconv=enabled', '-Dzlib=enabled', '-Dlua=lua5.2',
     ...({ darwin: ['-Dcocoa=enabled', '-Dswift-build=enabled', `-Dswift-flags=-target ${arch === 'x64' ? 'x86_64' : 'arm64'}-apple-macos12.0`, '-Dgl-cocoa=enabled', '-Dcoreaudio=enabled', '-Dvideotoolbox-gl=enabled'],
-      win32: ['-Dwin32-threads=enabled', '-Dgl-win32=enabled', '-Dwasapi=enabled', '-Dd3d-hwaccel=enabled', '-Dd3d9-hwaccel=enabled'],
+      win32: ['-Dwin32-threads=enabled', '-Dgl-win32=enabled', '-Dwasapi=enabled', '-Dd3d-hwaccel=enabled', '-Dd3d9-hwaccel=enabled', '-Degl-angle=enabled', '-Degl-angle-lib=disabled', '-Degl-angle-win32=disabled'],
       linux: linuxProfile === 'software'
         ? ['-Dcuda-hwaccel=disabled', '-Dcuda-interop=disabled', '-Dpulse=enabled', '-Dalsa=disabled', '-Dx11=disabled', '-Dgl-x11=disabled', '-Dvaapi=disabled', '-Dvaapi-x11=disabled', '-Dvaapi-drm=disabled']
         : ['-Dcuda-hwaccel=enabled', '-Dcuda-interop=enabled', '-Dpulse=enabled', '-Dalsa=disabled', '-Dx11=disabled', '-Dgl-x11=disabled', '-Dvaapi=enabled', '-Dvaapi-x11=disabled', '-Dvaapi-drm=enabled'] }[platform])], 'shared')
@@ -178,4 +180,53 @@ export function playbackMpvRenderFenceFix(source) {
   const after = before.replace('if (gl->FenceSync)', 'if (gl->FenceSync && p->params.swap_buffers)')
   assert.equal(source.split(before).length, 2, 'Pinned mpv render fence source drift')
   return source.replace(before, after)
+}
+
+/** Opt-in copy-back wall time, batched at source; never label this GPU-only time. */
+export function playbackMpvHwdownloadTiming(text) {
+  const field = '    int hwdec_fail_count;'
+  const download = '        struct mp_image *sw = mp_image_hw_download(res, ctx->hwdec_swpool);'
+  assert.ok(!text.includes('javdex_download_count'), 'Pinned mpv decoder timing patch already applied')
+  assert.equal(text.split(field).length, 2, 'Pinned mpv decoder fields drifted')
+  assert.equal(text.split(download).length, 2, 'Pinned mpv copy-back call drifted')
+  return text.replace('#include <float.h>', '#include <float.h>\n#include "osdep/timer.h"\n#include <libavutil/hwcontext_d3d11va.h>\n#include <dxgi.h>')
+    .replace(field, field + '\n    uint64_t javdex_download_count;\n    int64_t javdex_download_total, javdex_download_max;')
+    .replace(download, `        const char *diagnostics = getenv("JAVDEX_PLAYBACK_DIAGNOSTICS");
+        const bool measure = diagnostics && strcmp(diagnostics, "1") == 0;
+        if (measure && !ctx->javdex_download_count) {
+            const AVHWFramesContext *frames = (const AVHWFramesContext *)res->hwctx->data;
+            if (frames && frames->device_ctx && frames->device_ctx->type == AV_HWDEVICE_TYPE_D3D11VA) {
+                const AVD3D11VADeviceContext *hardware = (const AVD3D11VADeviceContext *)frames->device_ctx->hwctx;
+                IDXGIDevice *dxgi = NULL; IDXGIAdapter *adapter = NULL; DXGI_ADAPTER_DESC description;
+                if (hardware && hardware->device
+                    && SUCCEEDED(ID3D11Device_QueryInterface(hardware->device, &IID_IDXGIDevice, (void **)&dxgi))
+                    && SUCCEEDED(IDXGIDevice_GetAdapter(dxgi, &adapter)) && SUCCEEDED(IDXGIAdapter_GetDesc(adapter, &description)))
+                    MP_INFO(vd, "javdex-decoder-device %lu %lu %lu %ld\\n", (unsigned long)description.VendorId,
+                        (unsigned long)description.DeviceId, (unsigned long)description.AdapterLuid.LowPart, (long)description.AdapterLuid.HighPart);
+                if (adapter) IDXGIAdapter_Release(adapter);
+                if (dxgi) IDXGIDevice_Release(dxgi);
+            }
+        }
+        const int64_t started = measure ? mp_time_ns() : 0;
+${download}
+        if (measure && sw) {
+            const int64_t elapsed = mp_time_ns() - started;
+            ctx->javdex_download_total += elapsed;
+            ctx->javdex_download_max = MPMAX(ctx->javdex_download_max, elapsed);
+            if (++ctx->javdex_download_count == 1 || ctx->javdex_download_count % 30 == 0)
+                MP_INFO(vd, "javdex-hwdownload %llu %lld %lld\\n",
+                    (unsigned long long)ctx->javdex_download_count,
+                    (long long)(ctx->javdex_download_total / 1000),
+                    (long long)(ctx->javdex_download_max / 1000));
+        }`)
+}
+
+/** Recent ANGLE advertises EXT_device_query on the client, not the display. */
+export function playbackMpvAngleDeviceQueryFix(text) {
+  const query = '    const char *exts = eglQueryString(egl_display, EGL_EXTENSIONS);'
+  const guard = '        !gl_check_extension(exts, "EGL_EXT_device_query") ||'
+  assert.equal(text.split(query).length, 2, 'Pinned ANGLE hwdec query drifted')
+  assert.equal(text.split(guard).length, 2, 'Pinned ANGLE hwdec capability guard drifted')
+  return text.replace(query, query + '\n    const char *client_exts = eglQueryString(EGL_NO_DISPLAY, EGL_EXTENSIONS);')
+    .replace(guard, '        !(gl_check_extension(exts, "EGL_EXT_device_query") ||\n          (client_exts && gl_check_extension(client_exts, "EGL_EXT_device_query"))) ||')
 }

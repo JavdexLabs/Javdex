@@ -9,6 +9,8 @@
 #include <atomic>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
+#include <cstdio>
 #include <cstring>
 #include <iomanip>
 #include <locale>
@@ -151,6 +153,11 @@ class MpvCore {
             : profile.transfer == "pq" ? 10000 : profile.transfer == "hlg" ? 1000 : 203;
         desiredColor = profile; sourceColorKnown = true; configureColor();
     }
+    bool decoderDeviceKnown = false;
+    double decoderVendor = 0, decoderDevice = 0, decoderLuidLow = 0, decoderLuidHigh = 0;
+    unsigned diagnosticLines = 0;
+    uint64_t hwdownloadSamples = 0;
+    double hwdownloadTotalUs = 0, hwdownloadMaxUs = 0;
     uint64_t frames = 0, presentedFrames = 0, loadedFiles = 0, restarts = 0, commandErrors = 0, subtitleCommandErrors = 0, subtitleCommandsPending = 0, subtitleCommandReplies = 0;
     uint64_t generatedSubtitleCommandErrors = 0, generatedSubtitleCommandsPending = 0, generatedSubtitleCommandReplies = 0;
     GeneratedTimeline generatedTimeline;
@@ -227,6 +234,8 @@ public:
     }
     void initialize(const RenderConfig &config) {
         if (handle || renderer) throw std::runtime_error("Native session is already initialized");
+        decoderDeviceKnown = false;
+        hwdownloadSamples = 0; hwdownloadTotalUs = hwdownloadMaxUs = 0;
         observed.clear(); lastError.clear(); lastErrorCode = 0;
         pauseRequested = true;
         cpuRendering = config.cpu; colorReady = colorPending = colorConfigured = false;
@@ -274,6 +283,10 @@ public:
             // received its required option above. Other errors remain fatal.
             if (scaler < 0 && scaler != MPV_ERROR_OPTION_NOT_FOUND) throw std::runtime_error(mpv_error_string(scaler));
         }
+#ifdef _WIN32
+        const auto diagnostics = std::getenv("JAVDEX_PLAYBACK_DIAGNOSTICS");
+        if (diagnostics && std::string(diagnostics) == "1") mpv_request_log_messages(handle, "v");
+#endif
         int error = mpv_initialize(handle);
         if (error < 0) throw std::runtime_error(mpv_error_string(error));
         mpv_opengl_init_params gl = {config.getProc, config.glContext};
@@ -456,6 +469,30 @@ public:
                 generatedSubtitleCommandReplies++;
             }
         }
+        if (event.event_id == MPV_EVENT_LOG_MESSAGE && event.data) {
+            const auto *message = static_cast<const mpv_event_log_message *>(event.data);
+            const std::string text = message->text ? message->text : "";
+            if (diagnosticLines < 160 && (text.find("d3d11") != std::string::npos || text.find("D3D11") != std::string::npos
+                || text.find("ANGLE") != std::string::npos || text.find("hwdec") != std::string::npos || std::string(message->prefix ? message->prefix : "").find("vd") == 0)) {
+                ++diagnosticLines; std::fprintf(stderr, "[mpv-gpu] %.1000s", text.c_str());
+            }
+            const std::string devicePrefix = "javdex-decoder-device ";
+            if (text.rfind(devicePrefix, 0) == 0 && text.size() < 160) {
+                double vendor = 0, device = 0, low = 0, high = 0;
+                std::istringstream input(text.substr(devicePrefix.size())); input.imbue(std::locale::classic());
+                if (input >> vendor >> device >> low >> high && vendor >= 0 && vendor <= UINT32_MAX && device >= 0 && device <= UINT32_MAX
+                    && low >= 0 && low <= UINT32_MAX && high >= INT32_MIN && high <= INT32_MAX) {
+                    decoderVendor = vendor; decoderDevice = device; decoderLuidLow = low; decoderLuidHigh = high; decoderDeviceKnown = true;
+                }
+            }
+            if (text.rfind("javdex-hwdownload ", 0) == 0 && text.size() < 160) {
+                uint64_t count = 0; double total = 0, maximum = 0;
+                std::istringstream input(text.substr(18)); input.imbue(std::locale::classic());
+                if (input >> count >> total >> maximum && count > 0 && std::isfinite(total) && std::isfinite(maximum)
+                    && total >= 0 && maximum >= 0) { hwdownloadSamples = count; hwdownloadTotalUs = total; hwdownloadMaxUs = maximum; }
+            }
+            return;
+        }
         if (event.event_id == MPV_EVENT_PROPERTY_CHANGE) {
             const auto *property = static_cast<mpv_event_property *>(event.data);
             if (cpuRendering && std::string(property->name) == "video-dec-params" && property->format == MPV_FORMAT_NODE && property->data) {
@@ -486,7 +523,7 @@ public:
             observed[property->name] = std::move(value);
         }
         if (event.event_id == MPV_EVENT_FILE_LOADED) {
-            loadedFiles++;
+            loadedFiles++; decoderDeviceKnown = false; hwdownloadSamples = 0; hwdownloadTotalUs = hwdownloadMaxUs = 0;
             // A repeated file can have identical decoded parameters. Explicitly
             // request them as well as observing changes, without a synchronous
             // property call on a render thread or reusing the old file's reply.
@@ -567,6 +604,15 @@ public:
             if (value.format == MPV_FORMAT_DOUBLE) setNumber(env, result, key.c_str(), value.number);
             if (value.format == MPV_FORMAT_FLAG) setFlag(env, result, key.c_str(), value.number != 0);
             if (value.format == MPV_FORMAT_STRING || value.format == MPV_FORMAT_NODE) setString(env, result, key.c_str(), value.text);
+        }
+        if (decoderDeviceKnown) {
+            setNumber(env, result, "decoderVendorId", decoderVendor); setNumber(env, result, "decoderDeviceId", decoderDevice);
+            setNumber(env, result, "decoderAdapterLuidLow", decoderLuidLow); setNumber(env, result, "decoderAdapterLuidHigh", decoderLuidHigh);
+        }
+        setNumber(env, result, "hwdownloadSamples", hwdownloadSamples);
+        if (hwdownloadSamples) {
+            setNumber(env, result, "hwdownloadMeanMs", hwdownloadTotalUs / hwdownloadSamples / 1000);
+            setNumber(env, result, "hwdownloadMaxMs", hwdownloadMaxUs / 1000);
         }
         setNumber(env, result, "nativeFrames", frames); setNumber(env, result, "presentedFrames", presentedFrames);
         setString(env, result, "colorOutput", "bt709-srgb-rgb-full");

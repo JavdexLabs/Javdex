@@ -63,3 +63,7 @@ Javdex 中的 MetaTube 适配代码为本项目实现；上述说明用于标明
 Sharp 0.35.5 使用 Apache-2.0；Linux Electron 采用官方 `@img/sharp-wasm32` 0.35.5（Apache-2.0、LGPL-3.0-or-later、MIT），包含 libvips 及图片编解码库，版本清单随包保留。后端选择补丁见 `scripts/patch-sharp-electron.mjs`。上游源码和构建入口见 [Sharp v0.35.5](https://github.com/lovell/sharp/tree/v0.35.5) 和 [sharp-libvips](https://github.com/lovell/sharp-libvips)；上游 [Electron/Linux 兼容性说明](https://sharp.pixelplumbing.com/install/#electron-and-linux) 记录 GLib 符号冲突。
 
 Linux x64 文本 GPU 新增固定 llama.cpp b11435 官方发行及 CUDA 12.8 运行依赖，遵守 [CUDA 12.8.1 EULA](https://docs.nvidia.com/cuda/archive/12.8.1/eula/index.html)。Whisper Linux GPU r1 保留 MIT、Vulkan Headers 与 NVIDIA 许可；驱动 `libcuda.so.1`、Vulkan ICD 由宿主提供，不随包覆盖。实际发行及验证范围见 [Linux AI GPU 验收](reviews/linux-local-ai-gpu-20261023.md)。
+
+## Windows ANGLE 播放接入
+
+Windows 播放宿主按绝对路径使用当前 Electron 随附的 `libEGL.dll` 和 `libGLESv2.dll`，不另外分发不同版本的 ANGLE。编译所需 EGL／KHR ABI 头文件固定于 `c5bf49e78850a5335a8fa2a7bfb53b559fbfc927`；每个文件保留上游版权／SPDX，包含 ANGLE BSD 和 Khronos Apache-2.0 声明。来源、逐文件摘要及完整许可证位于 `apps/desktop/src/main/player/native/vendor/angle/`，并进入 Windows 构建指纹和对应源码归档。固定 libmpv 额外保留 client 扩展查询兼容补丁及可选回读计时补丁，不修改其许可。

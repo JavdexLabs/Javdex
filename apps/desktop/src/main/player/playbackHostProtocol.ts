@@ -1,6 +1,10 @@
 import type { NativePlaybackState } from './nativePlayback'
 
 export interface HostBounds { width: number; height: number; scale?: number }
+export interface WindowsPlaybackAdapter {
+  vendorId: number; deviceId: number; gpuPreference?: 2 | 3
+  adapterLuidLow?: number; adapterLuidHigh?: number
+}
 export interface HostFrame {
   sequence: number; width: number; height: number; stride?: number; size?: number; pixels?: Uint8Array
   timeline?: number; ntHandle?: Uint8Array; ioSurface?: Uint8Array
@@ -9,7 +13,7 @@ export interface HostFrame {
   renderStartUs?: number; targetTimeUs?: number; delayUs?: number; selfTest?: 'solid-v1'
 }
 export type HostRequest =
-  | { type: 'create'; bounds: HostBounds }
+  | { type: 'create'; bounds: HostBounds; windowsAdapter?: WindowsPlaybackAdapter }
   | { type: 'bounds'; bounds: HostBounds }
   | { type: 'visible'; value: boolean }
   | { type: 'command'; args: string[]; generated: boolean }

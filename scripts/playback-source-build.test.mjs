@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
-import { playbackMpvRenderFenceFix, playbackBuildFingerprint, playbackLinuxAssDependency, playbackLinuxVaapiRenderDependency, playbackPkgConfigEnvironment, playbackSourceNativePlan, playbackSourcePlan, playbackWindowsExportNames, playbackWindowsSourceEnvironment, stageWindowsStaticZlib, staticPlaybackDependencies, verifyPlaybackSource } from './playback-source-build.mjs'
+import { playbackMpvRenderFenceFix, playbackMpvHwdownloadTiming, playbackMpvAngleDeviceQueryFix, playbackBuildFingerprint, playbackLinuxAssDependency, playbackLinuxVaapiRenderDependency, playbackPkgConfigEnvironment, playbackSourceNativePlan, playbackSourcePlan, playbackWindowsExportNames, playbackWindowsSourceEnvironment, stageWindowsStaticZlib, staticPlaybackDependencies, verifyPlaybackSource } from './playback-source-build.mjs'
 import { mergeTargets } from './dist.mjs'
 import packagingConfig from '../electron-builder.config.mjs'
 
@@ -295,4 +295,22 @@ test('mpv fence backport preserves native swapchain and rejects source drift', (
   const fixed = playbackMpvRenderFenceFix(source)
   assert.equal(fixed, source.replace('if (gl->FenceSync)', 'if (gl->FenceSync && p->params.swap_buffers)'))
   for (const changed of ['', source + source, fixed]) assert.throws(() => playbackMpvRenderFenceFix(changed), /source drift/)
+})
+
+test('Windows ANGLE candidate uses dynamic Electron EGL and source-guarded copy-back diagnostics', () => {
+  const windows = playbackSourcePlan({ ...input, platform: 'win32' })
+  const options = windows.find(step => step.args[0] === 'setup' && step.args.includes(path.join('/sources', 'mpv'))).args
+  for (const flag of ['-Degl-angle=enabled', '-Degl-angle-lib=disabled', '-Degl-angle-win32=disabled']) assert(options.includes(flag))
+  const decoder = '#include <float.h>\n    int hwdec_fail_count;\n        struct mp_image *sw = mp_image_hw_download(res, ctx->hwdec_swpool);'
+  const timed = playbackMpvHwdownloadTiming(decoder)
+  assert.match(timed, /getenv\("JAVDEX_PLAYBACK_DIAGNOSTICS"\)/)
+  assert.match(timed, /mp_time_ns\(\) - started/)
+  assert.match(timed, /javdex_download_count % 30/)
+  assert.throws(() => playbackMpvHwdownloadTiming(decoder + decoder), /drifted/)
+  assert.throws(() => playbackMpvHwdownloadTiming(timed), /already applied/)
+  const interop = '    const char *exts = eglQueryString(egl_display, EGL_EXTENSIONS);\n        !gl_check_extension(exts, "EGL_EXT_device_query") ||'
+  const fixed = playbackMpvAngleDeviceQueryFix(interop)
+  assert.match(fixed, /eglQueryString\(EGL_NO_DISPLAY, EGL_EXTENSIONS\)/)
+  assert.match(fixed, /client_exts && gl_check_extension/)
+  assert.throws(() => playbackMpvAngleDeviceQueryFix(interop + interop), /drifted/)
 })

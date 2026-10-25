@@ -6,6 +6,7 @@ import { channel as diagnosticsChannel } from 'node:diagnostics_channel'
 import type { HostBounds, HostFrame, HostRequest, HostResponse } from './playbackHostProtocol'
 import type { NativePlaybackState } from './nativePlayback'
 import { graphicsPlaybackFailure } from './playbackGraphicsFailure'
+import { selectWindowsPlaybackAdapter } from './windowsPlaybackAdapter'
 
 interface Interop {
   acquire?(pointer: Buffer, pid: number): Buffer
@@ -22,6 +23,8 @@ export function createIsolatedPlaybackHost(runtime: string, mode: 'gpu' | 'cpu')
   let failure: Error | undefined, state: NativePlaybackState = { alive: false }
   let wakeup: (() => void) | null = null, heartbeat: ReturnType<typeof setInterval> | undefined
   let lastHeartbeat = 0, channel = '', interop: Interop | undefined
+  let consumerGpu: unknown
+  let selectingAdapter = false
   let lastSequence = 0, requestsPending = 0
   const queued: HostRequest[] = [], frames: HostFrame[] = []
   // A resource can outlive its producer. This map is captured by that bridge's
@@ -37,7 +40,7 @@ export function createIsolatedPlaybackHost(runtime: string, mode: 'gpu' | 'cpu')
   const report = (value: unknown): void => {
     if (value && typeof value === 'object') {
       try { Object.assign(value, { [mode]: { ...state, pid: child?.pid,
-        outstandingSurfaces: resources.size, queuedFrames: frames.length } }) } catch { /* Read-only diagnostics. */ }
+        outstandingSurfaces: resources.size, queuedFrames: frames.length, ...(consumerGpu ? { consumerGpu } : {}) } }) } catch { /* Read-only diagnostics. */ }
     }
   }
   const control = (value: unknown): void => {
@@ -54,7 +57,7 @@ export function createIsolatedPlaybackHost(runtime: string, mode: 'gpu' | 'cpu')
     if (failure) throw failure
     if (stopped || !child) throw new Error('播放进程未启动')
     const abort = (code: string): never => { fail(code); throw failure }
-    if (ready) {
+    if (ready && !selectingAdapter) {
       if (requestsPending >= 64) abort('HELPER_HEARTBEAT_TIMEOUT')
       try { child.postMessage(message); requestsPending++ } catch { abort('FRAME_CHANNEL_FAILED') }
     }
@@ -106,6 +109,7 @@ export function createIsolatedPlaybackHost(runtime: string, mode: 'gpu' | 'cpu')
     create(bounds: HostBounds): void {
       if (!stopped || resources.size) throw new Error('播放进程资源仍在使用')
       ready = false; failure = undefined; stopped = false
+      selectingAdapter = false; consumerGpu = undefined
       lastSequence = requestsPending = 0
       state = { alive: true, generatedSubtitleOverlayVersion: 1, generatedSubtitleCommandsPending: 0,
         generatedSubtitleCommandErrors: 0, generatedSubtitleCommandReplies: 0 }
@@ -120,13 +124,38 @@ export function createIsolatedPlaybackHost(runtime: string, mode: 'gpu' | 'cpu')
         const launched = utilityProcess.fork(path.join(app.getAppPath(), 'out/main/playbackHost.js'), [runtime, mode, channel, interopFile],
           { serviceName: 'Javdex Playback', stdio: 'pipe', ...(process.platform === 'darwin' ? { allowLoadingUnsignedLibraries: true } : {}) })
         child = launched; lastHeartbeat = performance.now()
+        const initialization: HostRequest = { type: 'create', bounds }
+        if (mode === 'gpu' && process.platform === 'win32' && typeof app.getGPUInfo === 'function') {
+          selectingAdapter = true
+          // Keep create at the head of the queue while a bounded GPU snapshot
+          // selects the device. CPU startup never waits. Late results belong
+          // to this child only and cannot initialize a stopped/replaced host.
+          let timeout: ReturnType<typeof setTimeout>
+          const unavailable = new Promise<undefined>(resolve => { timeout = setTimeout(() => resolve(undefined), 2000); timeout.unref() })
+          void Promise.race([Promise.resolve().then(() => app.getGPUInfo('complete')).catch(() => undefined), unavailable]).then(value => {
+            clearTimeout(timeout)
+            if (child !== launched || stopped) return
+            initialization.windowsAdapter = selectWindowsPlaybackAdapter(value)
+            const info = (value ?? {}) as { gpuDevice?: Array<Record<string, unknown>>; auxAttributes?: Record<string, unknown> }
+            const narrow = (entry: Record<string, unknown>, keys: string[]): Record<string, unknown> => Object.fromEntries(keys.flatMap(key => {
+              const value = entry[key]
+              return typeof value === 'number' && Number.isFinite(value) || typeof value === 'boolean'
+                || typeof value === 'string' && value.length <= 512 ? [[key, value]] : []
+            }))
+            consumerGpu = { adapterSelection: initialization.windowsAdapter ? 'chromium-active-pci' : 'unknown', devices: (info.gpuDevice ?? []).slice(0, 8).map(device => narrow(device,
+              ['active', 'vendorId', 'deviceId', 'deviceString', 'gpuPreference', 'driverVendor', 'driverVersion', 'driverDate', 'luid'])),
+              ...narrow(info.auxAttributes ?? {}, ['glVendor', 'glRenderer', 'glVersion', 'directRenderingVersion']) }
+            selectingAdapter = false
+            if (ready) for (const message of queued.splice(0)) post(message)
+          }).catch(() => { if (child === launched && !stopped) fail('GPU_INITIALIZATION_FAILED') })
+        }
         launched.stderr?.on('data', (data: Buffer) => console.warn('[playback-host]', data.toString('utf8').slice(0, 2048)))
         launched.on('message', (message: HostResponse) => {
           if (stopped || child !== launched) return
           try {
             if (message.type === 'ready') {
               if (ready) throw new Error('Duplicate playback host initialization')
-              ready = true; for (const message of queued.splice(0)) post(message)
+              ready = true; if (!selectingAdapter) for (const message of queued.splice(0)) post(message)
             } else if (message.type === 'state') { state = message.state; lastHeartbeat = performance.now(); wakeup?.() }
             else if (message.type === 'ack') requestsPending = Math.max(0, requestsPending - 1)
             else if (message.type === 'failed') fail('GPU_RUNTIME_FAILED')
@@ -158,7 +187,7 @@ export function createIsolatedPlaybackHost(runtime: string, mode: 'gpu' | 'cpu')
         })
         launched.once('exit', () => { if (!stopped && child === launched) fail('PLAYBACK_HOST_EXITED') })
         heartbeat = setInterval(() => { if (performance.now() - lastHeartbeat > 5000) fail('HELPER_HEARTBEAT_TIMEOUT') }, 250)
-        heartbeat.unref(); post({ type: 'create', bounds })
+        heartbeat.unref(); post(initialization)
       } catch { fail('GPU_INITIALIZATION_FAILED'); throw failure }
     },
     setBounds(bounds: HostBounds): void { post({ type: 'bounds', bounds }) },

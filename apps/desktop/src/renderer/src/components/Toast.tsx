@@ -51,7 +51,7 @@ export function ToastProvider({ children }: { children: ReactNode }): JSX.Elemen
   return (
     <Ctx.Provider value={value}>
       {children}
-      <div className={styles.stack} hidden={Boolean(detail)} data-native-playback-occluder={items.length > 0 && !detail ? true : undefined}
+      <div className={styles.stack} hidden={Boolean(detail)} data-playback-overlay-surface={items.length > 0 && !detail ? true : undefined}
         data-interaction-preserve-surface={items.length > 0 && !detail ? true : undefined}
         aria-live="polite" aria-relevant="additions" role="status">
         {items.map((t) => (

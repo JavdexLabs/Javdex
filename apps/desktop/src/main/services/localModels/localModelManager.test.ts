@@ -76,7 +76,7 @@ test('ForcedAligner switch persists, changes Qwen dependencies and cache identit
   let release = () => {}
   try {
     const initial = await f.manager.snapshot()
-    const environment = (value: typeof initial) => value.environments!.find(item => item.group === 'speech2')!
+    const environment = (value: typeof initial) => value.environments!.find(item => item.group === 'qwen-speech')!
     assert.equal(initial.qwenForcedAligner, true)
     assert.equal(environment(initial).cpuReady, false)
     await assert.rejects(f.manager.setQwenForcedAligner(false, 'stale'), /已更新/)
@@ -117,7 +117,7 @@ test('Qwen ASR binds independently, upgrades only on explicit selection and pres
   let release = () => {}
   try {
     const initial = await f.manager.snapshot()
-    assert.deepEqual(initial.environments?.map(environment => environment.group), ['speech', 'speech2', 'text'])
+    assert.deepEqual(initial.environments?.map(environment => environment.group), ['speech', 'qwen-speech', 'text'])
     const kotobaEnvironment = initial.environments!.find(environment => environment.group === 'speech')!.components.map(component => component.id)
     assert.equal(initial.usage.subtitleRecognition.model, 'kotoba')
     await f.manager.download('qwen3-asr'); await idle(f.manager)
@@ -147,18 +147,18 @@ test('Qwen ASR binds independently, upgrades only on explicit selection and pres
   } finally { release(); await f.cleanup() }
 })
 
-test('removing speech2 runtime preserves audio tools needed by installed Kotoba models', { skip: process.platform !== 'win32' ? 'audio.cpp runtime inventory is Windows-only' : false }, async () => {
+test('removing qwen-speech runtime preserves audio tools needed by installed Kotoba models', { skip: process.platform !== 'win32' ? 'audio.cpp runtime inventory is Windows-only' : false }, async () => {
   const f = await fixture()
   try {
     await f.manager.download('kotoba'); await idle(f.manager)
-    await f.manager.removeRuntime('speech2', 'cpu')
+    await f.manager.removeRuntime('qwen-speech', 'cpu')
     assert.ok(f.removedAssets.includes('audiocpp'))
     assert.ok(f.removedAssets.includes('qwen-aligner'))
     assert.ok(!f.removedAssets.includes('ffmpeg'))
     assert.ok(!f.removedAssets.includes('whisper'))
     assert.equal((await f.manager.snapshot()).models.find(model => model.id === 'kotoba')!.installed, true)
     await f.manager.download('qwen3-asr'); await idle(f.manager)
-    await assert.rejects(f.manager.removeRuntime('speech2', 'cpu'), /模型文件/)
+    await assert.rejects(f.manager.removeRuntime('qwen-speech', 'cpu'), /模型文件/)
   } finally { await f.cleanup() }
 })
 

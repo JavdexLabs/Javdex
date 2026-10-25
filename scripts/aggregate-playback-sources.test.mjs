@@ -7,17 +7,18 @@ import { c as createTar, x as extractTar } from 'tar'
 import test from 'node:test'
 import { aggregatePlaybackSources, splitSourceTar } from './aggregate-playback-sources.mjs'
 import { restorePlatform, sha256, safePath } from './restore-playback-sources.mjs'
+import { linuxReleaseFixture } from './test-support/linux-release-fixture.mjs'
 
 const version = '0.9.0'
 const targetNames = ['win32-x64', 'darwin-x64', 'darwin-arm64', 'linux-x64']
 const names = ['windows-x64', 'macos-x64', 'macos-arm64', 'linux-x64']
-const packagingFiles = ['scripts/playback-runtime.mjs', 'scripts/playback-source-materials.mjs', 'scripts/packaging-runtime.mjs', 'scripts/dist.mjs',
+const packagingFiles = ['scripts/playback-runtime.mjs', 'scripts/playback-source-materials.mjs', 'scripts/packaging-runtime.mjs', 'scripts/packaged-asar.mjs', 'scripts/dist.mjs',
   'electron-builder.config.mjs', 'build/packaging.targets.json', 'package.json', 'package-lock.json', 'LICENSE', 'NOTICE']
 function write(root, name, bytes) {
   fs.mkdirSync(path.dirname(path.join(root, name)), { recursive: true })
   fs.writeFileSync(path.join(root, name), bytes)
 }
-async function fixture(t) {
+async function fixture(t, windowsEntry = 'windowsPlaybackAddon.cpp', omitCpuHeader = false) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-combined-sources-test-'))
   t.after(() => fs.rmSync(root, { recursive: true, force: true }))
   const inputs = []
@@ -39,11 +40,23 @@ async function fixture(t) {
       'scripts/playback-runtime.mjs', 'scripts/playback-source-materials.mjs', 'scripts/packaging-runtime.mjs',
       'scripts/playback-native-build.mjs', 'scripts/check-playback-load.mjs', 'scripts/playback-linux-helper-smoke.mjs',
       'apps/desktop/src/main/player/native/CMakeLists.txt', 'apps/desktop/src/main/player/native/mpvCore.h',
-      'apps/desktop/src/main/player/native/windowsPlayback.cpp', 'apps/desktop/src/main/player/native/macPlayback.mm',
+      `apps/desktop/src/main/player/native/${windowsEntry}`, 'apps/desktop/src/main/player/native/macSharedTexture.mm',
+      'apps/desktop/src/main/player/native/windowsSharedTexture.cpp', 'apps/desktop/src/main/player/native/windowsSoftwarePlayback.cpp', 'apps/desktop/src/main/player/native/windowsTextureTickets.h',
+      'apps/desktop/src/main/player/native/windowsTextureTickets.test.cpp',
       'apps/desktop/src/main/player/native/linuxX11Playback.cpp', 'electron-sdk/include/node/node.h', 'win_delay_load_hook.cc', 'node-gyp-LICENSE']) write(native, name, 'fixture ' + name)
+    if (windowsEntry === 'windowsPlaybackAddon.cpp') {
+      for (const entry of ['macSharedTexture.mm', 'windowsSoftwarePlayback.cpp'])
+        write(native, 'apps/desktop/src/main/player/native/' + entry, '#include "softwarePlayback.h"\n')
+      if (!omitCpuHeader) write(native, 'apps/desktop/src/main/player/native/softwarePlayback.h', 'fixture shared software renderer')
+    }
     write(native, 'package.json', JSON.stringify({ version }))
     write(native, 'package-lock.json', JSON.stringify({ version }))
     write(native, 'build/playback-sources.json', JSON.stringify({ sdk, sources: sourcePins }))
+    // The SDK has its own include root. Its conditionally generated V8 header
+    // is not shipped or needed by this N-API adapter's normal build.
+    write(native, 'electron-sdk/include/node/node.h', '#include "v8.h"\n')
+    write(native, 'electron-sdk/include/node/v8.h', '#include "v8config.h"\n')
+    write(native, 'electron-sdk/include/node/v8config.h', '#ifdef V8_GN_HEADER\n#include "v8-gn.h"\n#endif\n')
     write(native, 'electron-sdk/include/node/node_version.h', '#define NODE_MAJOR_VERSION 1\n#define NODE_MINOR_VERSION 2\n#define NODE_PATCH_VERSION 3\n')
     const nativeTar = path.join(root, 'native-' + i + '.tar.gz')
     await createTar({ cwd: native, file: nativeTar, gzip: true }, ['.'])
@@ -100,8 +113,8 @@ function refreshProof(f, index) {
   fs.writeFileSync(file, JSON.stringify(proof))
 }
 
-test('one combined archive deduplicates content, retains variants and restores all four platform inputs', async t => {
-  const f = await fixture(t)
+for (const entry of ['windowsPlaybackAddon.cpp', 'windowsPlayback.cpp']) test(`combined source archive restores all platforms with Windows entry ${entry}`, async t => {
+  const f = await fixture(t, entry)
   const combined = await aggregatePlaybackSources(f.directory, version)
   const unpacked = path.join(f.root, 'combined'); fs.mkdirSync(unpacked)
   await extractTar({ cwd: unpacked, file: combined })
@@ -135,6 +148,11 @@ test('aggregation rejects missing platforms and tampered input archives', async 
   const value = JSON.parse(fs.readFileSync(sidecar)); value.sourceBundle.sha256 = '0'.repeat(64)
   fs.writeFileSync(sidecar, JSON.stringify(value))
   await assert.rejects(aggregatePlaybackSources(f.directory, version), /AssertionError/)
+})
+
+test('new CPU producers cannot omit the shared implementation from preferred sources', async t => {
+  const f = await fixture(t, 'windowsPlaybackAddon.cpp', true)
+  await assert.rejects(aggregatePlaybackSources(f.directory, version), /softwarePlayback\.h/)
 })
 
 test('aggregation rejects binary/source binding mismatches', async t => {
@@ -218,4 +236,30 @@ test('opaque native blob is rejected even when all outer digests and receipts ag
   fs.writeFileSync(sidecar, JSON.stringify(value)); refreshProof(f, index)
   await assert.rejects(aggregatePlaybackSources(f.directory, version), /archive|TAR|gzip/i)
   assert.ok(!fs.readdirSync(f.directory).some(name => name.startsWith('.playback-source-aggregate-')))
+})
+
+test('integrated Linux and three native targets share one public source archive with exact restoration', async t => {
+  const f = await fixture(t), linuxRoot = path.join(f.root, 'integrated-linux')
+  fs.mkdirSync(linuxRoot)
+  const linux = await linuxReleaseFixture(linuxRoot, version)
+  for (const suffix of ['', '.runtime.json', '.installers.json']) fs.unlinkSync(path.join(f.directory, f.inputs[3].archive + suffix))
+  const name = linux.manifest.sourceBundle.fileName
+  for (const suffix of ['', '.runtime.json']) fs.copyFileSync(path.join(linux.output, name + suffix), path.join(f.directory, name + suffix))
+  const installers = [`Javdex-${version}-amd64.deb`, `Javdex-${version}-x86_64.AppImage`]
+  write(f.directory, name + '.installers.json', JSON.stringify({ schemaVersion: 1, target: 'linux-x64', version,
+    sourceBundle: linux.manifest.sourceBundle, installers: Object.fromEntries(installers.map(n => [n, {
+      sha256: sha256(fs.readFileSync(path.join(f.directory, n))), runtimeInventorySha256: sha256(fs.readFileSync(path.join(f.directory, name + '.runtime.json')))
+    }])) }))
+  const combined = await aggregatePlaybackSources(f.directory, version)
+  const extracted = path.join(f.root, 'integrated-combined'); fs.mkdirSync(extracted)
+  await extractTar({ cwd: extracted, file: combined })
+  const restored = path.join(f.root, 'restored-integrated-linux')
+  restorePlatform(path.join(extracted, 'Playback-Sources'), 'linux-x64', restored)
+  for (const id of ['gpu', 'cpu', 'angle']) assert.deepEqual(fs.readFileSync(path.join(restored, 'reviewed-runtime/sources', id + '.tar.gz')), fs.readFileSync(linux.archives[id]))
+  const manifest = JSON.parse(fs.readFileSync(path.join(extracted, 'Playback-Sources/manifests/linux-x64.json')))
+  assert.equal(manifest.runtime.kind, 'linux-integrated'); assert.equal(manifest.installers.length, 2)
+  assert.ok(fs.existsSync(path.join(restored, 'packaging-tools/scripts/linux-integrated-playback.mjs')))
+  fs.writeFileSync(path.join(f.directory, installers[1]), 'changed installer')
+  fs.rmSync(path.dirname(combined), { recursive: true })
+  await assert.rejects(aggregatePlaybackSources(f.directory, version), /Final installer digest/)
 })

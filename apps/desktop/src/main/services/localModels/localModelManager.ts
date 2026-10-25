@@ -10,8 +10,9 @@ import type { LocalModelRef, LocalModelUsage, LocalModelReadiness, LocalAccelera
 import type { LocalModelGroup, LocalRuntimeComponent, LocalRuntimeEnvironment, LocalPreparationPlan, LocalDependencyCheck } from '@shared/desktop/localModels'
 import { createAiRuntimeInstaller, localModelRuntimeSupported } from './runtimeInstaller'
 import { AI_RUNTIME_PLATFORM_MESSAGE, currentAiRuntimeTarget } from './runtimeManifest'
+import { runtimeSupportsMetal } from './runtimeDistributionAssets'
 import { gpuRuntimeAssets } from './gpuManifest'
-import { detectLocalGpuDevices, type LocalGpuRuntime } from './runtimeAcceleration'
+import { localGpuTargetSupported, detectLocalGpuDevices, type LocalGpuRuntime } from './runtimeAcceleration'
 import { AI_RUNTIME_LICENSES } from './runtimeLicenses'
 import { atomicWrite } from '../../utils/atomicWrite'
 import { MODEL_STORE_ENTRIES, canonicalStoragePath, localAiDirectories, ensureModelStore, ensureStorageDirectory, cleanModelTemporaryFiles, writeModelManifest, runtimeAssetDirectory, modelDownloadFile } from './modelStorage'
@@ -66,7 +67,6 @@ export function createLocalModelManager(userData: string, options: {
   installer?: typeof createAiRuntimeInstaller
   inference?: (paths: Parameters<typeof createLocalTextInference>[0]) => TextEngine
   runtimeSupported?: typeof localModelRuntimeSupported
-  bundleRoot?: string
   detectDevices?: typeof detectLocalGpuDevices
   validate?: typeof validateModelRuntime
 } = {}) {
@@ -127,9 +127,9 @@ export function createLocalModelManager(userData: string, options: {
   let subtitleLeaseInstaller: ReturnType<typeof createAiRuntimeInstaller> | null = null
   const listeners = new Set<() => void>()
   const supported = options.runtimeSupported ?? localModelRuntimeSupported
-  const installer = (selection = selected, model = translationModel, recognitionModel: LocalRecognitionModelId = usage.subtitleRecognition.model) => (options.installer ?? createAiRuntimeInstaller)(directory, undefined, localModelAssets(selection, model, undefined, downloadSource), { bundleRoot: options.bundleRoot, recognitionModel, qwenForcedAligner })
+  const installer = (selection = selected, model = translationModel, recognitionModel: LocalRecognitionModelId = usage.subtitleRecognition.model) => (options.installer ?? createAiRuntimeInstaller)(directory, undefined, localModelAssets(selection, model, undefined, downloadSource), { recognitionModel, qwenForcedAligner })
   const gpuInstaller = (backend: 'cuda' | 'vulkan') => (options.installer ?? createAiRuntimeInstaller)(directory, undefined,
-    [...gpuRuntimeAssets(currentAiRuntimeTarget(), backend), ...(backend === 'vulkan' ? audioCppAsset(currentAiRuntimeTarget(), true) : []), ...localModelAssets(selected, translationModel).filter(asset => !asset.archive)], { bundleRoot: options.bundleRoot })
+    [...gpuRuntimeAssets(currentAiRuntimeTarget(), backend), ...(backend === 'vulkan' ? audioCppAsset(currentAiRuntimeTarget(), true) : []), ...localModelAssets(selected, translationModel).filter(asset => !asset.archive)])
   const runtimePaths = (runtime: ReturnType<typeof createAiRuntimeInstaller>, refs = {
     recognition: usage.subtitleRecognition.variant, translation: usage.subtitleTranslation.variant
   }) => {
@@ -167,22 +167,22 @@ export function createLocalModelManager(userData: string, options: {
     : !installedVariants.get(variant) ? 'missing-model' : !runtimeReady(model) ? 'missing-runtime' : 'ready'
   const sourceUrl = (url: string): string => downloadSource === 'hf-mirror' ? url.replace(/^https:\/\/huggingface\.co\//, 'https://hf-mirror.com/') : url
   function plan(groups: LocalModelGroup[], refs: LocalModelRef[] = [], forceGpu = false, cpuOnly = false): LocalPreparationPlan {
-    const availableGroups = groups.filter(group => group !== 'speech2' || qwenAsrSupported(currentAiRuntimeTarget()))
+    const availableGroups = groups.filter(group => group !== 'qwen-speech' || qwenAsrSupported(currentAiRuntimeTarget()))
     const value = preparationPlan({ groups: availableGroups, refs, components: enabledComponents(), policy: cpuOnly ? { mode: 'cpu' } : accelerationPolicy, devices, forceGpu,
       target: currentAiRuntimeTarget(), supported: supported(), installed: variant => installedVariants.get(variant) === true, resumed: id => resumed.get(id) ?? 0 })
     return { ...value, items: value.items.map(item => ({ ...item, source: sourceUrl(item.source) })) }
   }
-  const detectionComplete = (): boolean => devices.length > 0 || !!gpuRuntimes.vulkan?.translator || process.platform !== 'win32'
+  const detectionComplete = (): boolean => (process.platform !== 'linux' && devices.length > 0) || !!gpuRuntimes.vulkan?.translator || !localGpuTargetSupported()
   function environments(): LocalRuntimeEnvironment[] {
     return LOCAL_MODEL_GROUPS.map(group => {
       const backend = runtimeBackend(group, accelerationPolicy, devices, components)
       const shared = enabledComponents().filter(item => item.group === group)
-      const groupSupported = supported() && (group !== 'speech2' || qwenAsrSupported(currentAiRuntimeTarget()))
+      const groupSupported = supported() && (group !== 'qwen-speech' || qwenAsrSupported(currentAiRuntimeTarget()))
       const gpuItems = shared.filter(item => item.backend === backend)
       return { group, supported: groupSupported, components: components.filter(item => item.group === group).map(item => ({ ...item,
         ...(item.id === 'qwen-aligner-common' ? { enabled: qwenForcedAligner } : {}), source: sourceUrl(item.source) })), cpuReady: groupSupported && shared.length > 0 && shared.filter(item => item.backend === 'cpu' || item.backend === 'common').every(item => item.installed),
-        gpu: { backend: process.platform === 'darwin' && accelerationPolicy.mode === 'auto' ? 'metal' : backend,
-          state: accelerationPolicy.mode === 'cpu' ? 'disabled' : process.platform !== 'win32' ? 'platform' : backend
+        gpu: { backend: group !== 'qwen-speech' && accelerationPolicy.mode === 'auto' && runtimeSupportsMetal(currentAiRuntimeTarget(), group === 'speech' ? 'whisper' : 'translator') ? 'metal' : backend,
+          state: accelerationPolicy.mode === 'cpu' ? 'disabled' : !localGpuTargetSupported() || !shared.some(item => item.backend === 'cuda' || item.backend === 'vulkan') ? 'platform' : backend
             ? gpuItems.length > 0 && gpuItems.every(item => item.installed) ? 'ready' : 'missing'
             : detectionComplete() ? 'unavailable' : 'unchecked' },
         preparation: plan([group]), gpuPreparation: plan([group], [], true) }
@@ -211,7 +211,7 @@ export function createLocalModelManager(userData: string, options: {
     [usage.subtitleTranslation.model]: usage.subtitleTranslation.variant })
   const subtitleInstaller = (): ReturnType<typeof createAiRuntimeInstaller> => subtitleLeaseInstaller ?? installer(subtitleSelection(), usage.subtitleTranslation.model)
   const snapshotValue = (): LocalModelSnapshot => ({ revision, usage: structuredClone(usage), qwenForcedAligner, supported: supported(), directory, defaultDirectory, downloadSource,
-    acceleration: { supported: process.platform === 'win32' && process.arch === 'x64', policy: { ...accelerationPolicy }, devices: structuredClone(devices), detectionComplete: detectionComplete(), ...structuredClone(executionStatus), error: accelerationError },
+    acceleration: { supported: localGpuTargetSupported(), policy: { ...accelerationPolicy }, devices: structuredClone(devices), detectionComplete: detectionComplete(), ...structuredClone(executionStatus), error: accelerationError },
     environments: environments(), checkingDependencies, preparation: preparation && structuredClone(preparation),
     storage: storage && structuredClone(storage), operationError: error && operationError?.message === error ? structuredClone(operationError) : undefined,
     translation, translationModel, operation, activeModel, activeVariant, downloadBytes, downloadTotal, downloadLabel, downloadKind, error,
@@ -373,11 +373,9 @@ export function createLocalModelManager(userData: string, options: {
     }, refs, signal, progress)
   }
   function requireBaseEnvironment(model: LocalModelId): void {
-    if (model === 'qwen3-asr') {
-      if (!qwenAsrSupported(currentAiRuntimeTarget())) throw new Error('Qwen3-ASR 的 audio.cpp 运行库当前支持 Windows x64')
-    }
+    if (model === 'qwen3-asr' && !qwenAsrSupported(currentAiRuntimeTarget())) return
     const group = localModelGroup(model)
-    if (supported() && !runtimeReady(model)) throw new Error(`请先安装${localModelGroupLabel(group)}${group === 'speech2' ? '' : '模型'}的基础运行环境；GPU 加速支持可选`)
+    if (supported() && !runtimeReady(model)) throw new Error(`请先安装${localModelGroupLabel(group)}${group === 'qwen-speech' ? '' : '模型'}的基础运行环境；GPU 加速支持可选`)
   }
   async function runPreparation(createPlan: () => LocalPreparationPlan, refs: LocalModelRef[] = [], signal?: AbortSignal,
     progress?: (bytes: number, label: string) => void, kind: 'model' | 'acceleration' = 'model', retry?: NonNullable<LocalModelSnapshot['operationError']>['command']): Promise<void> {
@@ -703,7 +701,7 @@ export function createLocalModelManager(userData: string, options: {
     },
     async prepareAcceleration(model?: LocalModelId, requestedVariant?: string): Promise<void> {
       await ready; await validation.pause(); available([...LOCAL_MODEL_IDS])
-      if (process.platform !== 'win32' || process.arch !== 'x64') throw new Error('当前平台沿用已有 CPU／Metal 运行库')
+      if (!localGpuTargetSupported() || process.arch !== 'x64') throw new Error('当前平台沿用已有 CPU／Metal 运行库')
       if (configInvalid) throw new Error('本地模型配置损坏，请先重新保存用途设置')
       if (model) localModelVariant(model, requestedVariant ?? selected[model])
       const groups: LocalModelGroup[] = model ? [localModelGroup(model)] : [...LOCAL_MODEL_GROUPS]
@@ -714,7 +712,7 @@ export function createLocalModelManager(userData: string, options: {
     async prepareRuntime(group: LocalModelGroup, target: 'auto' | 'cpu' | 'gpu'): Promise<void> {
       await ready; await validation.pause(); available()
       if (!supported()) throw new Error(AI_RUNTIME_PLATFORM_MESSAGE)
-      if (group === 'speech2' && !qwenAsrSupported(currentAiRuntimeTarget())) throw new Error('语音模型2 的 audio.cpp 运行库当前支持 Windows x64')
+      if (group === 'qwen-speech' && !qwenAsrSupported(currentAiRuntimeTarget())) throw new Error('Qwen 语音 的 audio.cpp 运行库当前支持 Windows x64')
       if (configInvalid) throw new Error('本地模型配置损坏，请先重新保存用途设置')
       const task = runPreparation(() => plan([group], [], target === 'gpu', target === 'cpu'), [], undefined, undefined, 'acceleration', { action: 'prepare-runtime', group, target })
         .catch(() => {}).finally(() => { if (pending === task) pending = null })

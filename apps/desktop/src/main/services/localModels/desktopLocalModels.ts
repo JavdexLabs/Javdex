@@ -18,8 +18,7 @@ export function getLocalModels(): ReturnType<typeof createLocalModelManager> {
   if (!manager) {
     captureInitialLocalModelMode()
     const instance = createLocalModelManager(app.getPath('userData'), {
-      initialTextTranslationMode,
-      bundleRoot: app.isPackaged ? path.join(process.resourcesPath, 'ai-runtime') : path.join(app.getAppPath(), 'out/ai-runtime')
+      initialTextTranslationMode
     })
     manager = instance
     let notificationFailed = false

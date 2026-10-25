@@ -4,7 +4,7 @@
 
 本文面向从源码运行、修改或打包 Javdex 的开发者。安装和日常操作见使用指南。
 
-本文对应 0.9.0，升级基线为已发布的 0.8.0。资料库使用 schema 21，云端模型管理文档使用格式 4；实际正式发布、同版本替换及验证边界见 [发布记录](reviews/README.md)。本文描述当前源码与分发合同，不把历史 CI 或本机测试自动当作新一轮原生产物及 GUI 验收。
+当前源码为 0.9.1-beta.1 预发布，最新正式版仍为 0.9.0；历史升级基线为已发布的 0.8.0。资料库使用 schema 21，云端模型管理文档使用格式 4，Beta 不新增迁移；实际发布、同版本替换及验证边界见 [发布记录](reviews/README.md)。本文描述当前源码与分发合同，不把历史 CI 或本机测试自动当作新一轮原生产物及 GUI 验收。
 
 ## 环境与本地启动
 
@@ -18,7 +18,11 @@ npm run setup:desktop
 npm run dev
 ```
 
-`npm ci` 安装锁定的 workspace 依赖，根安装不再自动触发 Electron rebuild。桌面开发/测试随后显式运行 `npm run setup:desktop`；如原生模块构建失败，按日志补齐开发环境后重试。服务端产物使用独立的生产依赖安装，不运行该桌面准备命令。
+`npm ci` 安装锁定的 workspace 依赖，并通过 `scripts/patch-sharp-electron.mjs` 为固定版本 Sharp 选择 Linux Electron 专用 WASM 后端；安装不自动触发 Electron rebuild。桌面开发/测试随后显式运行 `npm run setup:desktop`；如原生模块构建失败，按日志补齐开发环境后重试。服务端产物使用独立的生产依赖安装，不运行该桌面准备命令。
+
+Linux Electron 图片元数据读取和缩略图使用 Sharp 官方 WASM 后端，避免 Electron 系统 GLib 与原生 libvips 的符号冲突；普通 Node（含独立服务器）和其他桌面平台继续使用原生后端。补丁绑定 Sharp 0.35.5 的 loader 摘要，升级不匹配时中止，禁止静默退回冲突后端。跳过安装脚本后需运行 `npm run prepare:sharp`；测试和打包入口会检查补丁。`node scripts/check-sharp-runtime.cjs` 验证 Node，`ELECTRON_RUN_AS_NODE=1 <Electron或已解包的Javdex可执行文件> scripts/check-sharp-runtime.cjs [resources/app.asar]` 验证实际桌面运行库及 PNG/JPEG/WebP/GIF/AVIF 像素处理。WASM 不支持原生文字渲染和瓦片输出，现有服务图片/缩略图路径不使用这些功能。
+
+桌面打包按平台保留 Sharp 后端：Windows／macOS 不携带 `@img/sharp-wasm32`，保留原生 addon 与 libvips；Linux 继续携带 WASM。此过滤仅影响桌面分发，不改变开发依赖安装、Linux 专用 loader 补丁或独立 Node 服务端的原生图像处理。新增平台文件匹配器必须继承桌面产物白名单，避免仅含排除项时默认收进整个仓库。
 
 开发启动使用应用的用户数据目录，测试隔离机制见 [appIdentity.ts](../packages/contracts/src/appIdentity.ts) 与相关测试。调试数据库、扫描或删除行为前，使用测试资料与独立测试目录。
 
@@ -52,11 +56,14 @@ npm run lint            # TypeScript 与 CSS 检查
 npm run check:encoding  # 检查可疑编码字符
 npm test                # 完整检查与测试
 npm run test:ui         # 小型真实浏览器交互回归（PR CI）
+npm run test:playback:pointer:native # GNOME/Mutter 原生多击计数；会临时移动指针并打开自有测试窗口
 npm run test:ui:matrix   # 完整主题/尺寸/页面矩阵（独立入口）
 npm run build           # 生产构建与运行时资源校验
 npm run measure:renderer # 已构建 renderer 的静态闭包体积与选择性加载检查
 npm start               # 预览生产构建
 ```
+
+原生点击检查要求 Linux GNOME/Mutter 和现有 Python `dbus` 模块，不自动安装依赖或改系统设置；缺失支持会失败。默认使用 Wayland，追加 `-- --x11` 检查 XWayland。浏览器用例人工提供 `clickCount`，原生入口则检查实际 Electron 收到的计数、无临时播放／暂停命令及第二次按住的情况。两者都模拟视频帧绑定与播放 RPC，不能作为视频画面或音画同步验收。若本地系统限制导致开发版 Electron 沙箱无法启动，可显式追加 `--no-sandbox`，仅用于该隔离测试窗口，不改变应用启动策略。
 
 `npm test` 会先运行架构边界、lint、CSS 架构和 UI 控件检查，再执行类型检查、打包运行时测试及 Electron 测试。Electron 测试自动发现 `apps/` 与 `packages/` 下的 `*.test.ts` / `*.test.tsx`，排除 `apps/server`。服务端测试单独运行 `npm run server:test`，发布元数据测试运行 `node --test scripts/release-metadata.test.mjs`；两者各有 CI 入口。测试具体入口见 [package.json](../package.json)。
 
@@ -100,7 +107,11 @@ npm run dist:linux           # Linux 目标
 
 Windows 本地使用内置播放时，先完成 `playback:native:build`，再运行 `dist:win:local`。该入口显式检查 `out/native-playback/playback.node` 的 PE 架构及普通／延迟 DLL 导入闭包，只复制实际依赖，不复制旧 addon、测试程序或开发目录；缺少依赖时停止打包。包内 `local-runtime.json` 标记本地开发用途及文件摘要。正式分发继续使用 `JAVDEX_PLAYBACK_RUNTIME_DIR` 的审核清单与对应源码材料；本地入口与该配置互斥，打包不执行发布。
 
+Linux x64 普通打包与 Release 使用 GPU／CPU 双 helper 及匹配 Electron 的 ANGLE，构建和来源校验见 [Linux 播放](LINUX_COMPATIBLE_PLAYBACK.md)。[Linux portable phase 1](LINUX_PORTABLE_PHASE1.md) 仅保留为独立历史测试入口，不代替当前发行合同。
+
 版本号、标签、数据库升级说明、Release 工作流和发布验证统一遵循 [版本与发布规范](VERSIONING_AND_RELEASE.md)。
+
+Linux glibc 桌面包在创建 ASAR 前按目标架构过滤 Sharp/libvips、剪贴板及终端辅助模块的其他平台二进制；保留加载代码、元数据和许可证。此过滤不涉及 GPU/CPU 播放运行库、ANGLE 或 Electron 的图形兼容组件。`node --test scripts/packaging-runtime.test.mjs` 检查平台选择，`scripts/check-linux-integrated-appimage.mjs` 检查最终 x64 AppImage 的原生模块及播放闭包。
 
 ### 本地 AI 运行库
 
@@ -114,17 +125,19 @@ Windows x64 的 CUDA／Vulkan 资产见 `localModels/gpuManifest.ts`，CPU 目�
 
 Windows Whisper Vulkan 改为从 [Javdex Runtime 固定发行](https://github.com/JavdexLabs/javdex-runtime/releases/tag/whisper-b5130-r1) 按需下载，主安装包不再编译或携带可选语音 Vulkan 工具。`gpuManifest.ts` 锁定实际 ZIP 大小、SHA-256、展开上限、原生 CI 源码与 run；客户端不跟随 `latest` 或远程清单自动更换运行库。首次准备 GPU 环境时显示下载计划，经现有续传与外层摘要检查后，在隔离暂存目录核对平铺包的目标、接口、来源、逐文件摘要及精确文件集合，再原子晋升；失败保留旧安装。
 
-运行库仓库保留同一 b5130 上游提交、固定开发材料、静态 CRT 与原编译选项，以及完整 Zstandard 解码后再提取的修复；普通用户不安装编译器、SDK 或驱动。已安装且完整的旧 b5130 Windows Vulkan 工具继续复用，不改写其来源标识；缺失或损坏时下载固定新包。模型权重、计算策略、CUDA、macOS Metal 和 Linux CPU 路径保持不变。开发者构建配方与许可材料在独立运行库仓库，本仓库的 `ai-runtime:build` 仅保留现有 macOS 构建。
+运行库仓库保留同一 b5130 上游提交、固定开发材料、静态 CRT 与原编译选项，以及完整 Zstandard 解码后再提取的修复；普通用户不安装编译器、SDK 或驱动。已安装且完整的旧 b5130 Windows Vulkan 工具继续复用，不改写其来源标识；缺失或损坏时下载固定新包。模型权重、计算策略、CUDA、macOS Metal 和 Linux CPU 路径保持不变。开发者构建配方与许可材料在独立运行库仓库，本仓库不再构建或随包交付 AI 工具，包含 macOS 在内的工具均按需下载。
 
 每个运行租约冻结精度与路径，字幕使用自己的两阶段绑定，文本引擎使用文本用途绑定。文件 snapshot 区分权重存在、完整运行依赖、平台支持、配置引用和运行租约；引用文件删除在主进程阻止。用途保存通过 revision 检查避免覆盖并发更改。文件页下载／导入只维护资源，不暗改用途；用途草稿跨三个模型页签保持挂载，离开该组仍有保存保护。
 
-本地识别／翻译与模型商店共用 [运行库安装器](../apps/desktop/src/main/services/localModels/runtimeInstaller.ts)：Windows x64 保留原目录与 ZIP；macOS、Linux 的 arm64／x64 工具在 `tools/<platform>-<arch>/` 隔离，权重目录和默认精度保持。macOS 最低 13.3；Linux 当前使用固定 Ubuntu 发布资产，需 glibc 2.38+、GCC 14 C++ 运行库及 xz-utils（例如已更新的 Ubuntu 24.04）。旧 glibc／musl 仍可管理权重，但不能推理；仅检查 CPU 架构不能代表 ABI 兼容。
+本地识别／翻译与模型商店共用 [运行库安装器](../apps/desktop/src/main/services/localModels/runtimeInstaller.ts)：原包镜像保留既有摘要和安装身份；各平台工具在 `runtimes/` 中按引擎、版本、目标和后端隔离。新 FFmpeg 使用独立的 `8.1.3-r1` 目录，权重目录和默认精度保持。macOS 最低 13.3；Linux 当前使用固定 Ubuntu 发布资产，需 glibc 2.38+、GCC 14 C++ 运行库（例如已更新的 Ubuntu 24.04）。旧 glibc／musl 仍可管理权重，但不能推理；仅检查 CPU 架构不能代表 ABI 兼容。
 
-macOS 上 `npm run ai-runtime:build` 使用固定 commit 的 whisper.cpp b5130 与 FFmpeg 8.1.3 源码，验证 SHA-256 后编译静态 CLI。首次开发构建需要 Xcode Command Line Tools、CMake、make 及网络；不自动安装系统工具。`dev`、`desktop:build`、`start`／`preview` 自动准备本机产物，后续复用已验证的构建缓存。Mac 打包另按目标架构编译，输出 `out/ai-runtime/darwin-<arch>/`，支持 arm64 和 x64 单架构包，不支持 universal AI 工具包。
+macOS AI 工具也从 [Javdex Runtime](https://github.com/JavdexLabs/javdex-runtime) 固定发行按需下载。主应用的开发、构建、启动和打包不再编译、复制或签名 Whisper／FFmpeg，安装包不携带 `Resources/ai-runtime`。用户准备语音能力时，先展示包含语音引擎、音频提取工具和 VAD 的网络计划，再走统一续传、SHA-256、隔离解压和原子安装流程。完整旧 b5130 macOS Whisper 安装在逐文件摘要验证后可继续复用；损坏时下载修复，不从旧应用目录重新复制。
 
-工具只链接系统库，识别启用 Metal／Accelerate，FFmpeg 仅输出 PCM／WAV，不启用 GPL、nonfree 或自动探测的第三方编解码库。源文件、构建参数、许可证与哈希写入 bundle 清单；打包放入 `Resources/ai-runtime`，不进 asar。CLI 在外层 app 签名前单独签名并更新清单，外层签名跳过重复签 CLI；`afterSign` 只校验，不能修改已封装资源。此流程有真实 ad-hoc 签名回归，不等于正式 DMG、Developer ID 签名或公证已经验收。源码与构建资料发布要求见 [第三方说明](THIRD_PARTY_NOTICES.md#本地-ai-运行库)。
+Whisper b5130 的 macOS arm64／x64 工具保留静态运行库、Metal／Accelerate 和内嵌 Metal shader；FFmpeg 8.1.3 的五目标最小音频工具禁用 GPL、nonfree 与外部库自动发现。固定配方、完整对应源码、ad-hoc CLI 签名及原生 Kotoba/VAD CPU 检查在运行库仓库维护；托管 CI 的 CPU 检查不代表 Metal／独显推理或 Developer ID 公证已验收。
 
-Windows／Linux 及 macOS 翻译工具按需下载固定发布资产；安装校验压缩包 SHA，保留 POSIX `bin/lib` 布局，把安全的库别名转为普通文件。解压在独立暂存目录，完成后替换工具目录，失败保留旧安装。模型目录迁移不需要放宽原有禁止符号链接的规则。开发构建源码、合成音频、下载权重与验收产物均从安装包排除。
+所有平台的 AI 工具按需下载固定 Javdex Runtime 发布资产；安装校验压缩包 SHA，保留 POSIX `bin/lib` 布局，把安全的库别名转为普通文件。解压在独立暂存目录，完成后替换工具目录，失败保留旧安装。模型目录迁移不需要放宽原有禁止符号链接的规则。开发构建源码、合成音频、下载权重与验收产物均从安装包排除。
+
+Linux x64 的 llama.cpp b11435 CUDA 12.8、Vulkan 和 CUDA/cuBLAS 依赖固定消费 `llama-b11435-linux-gpu-r1`，不再直连上游 Release。原包大小、SHA-256、解压前缀和缓存文件名保持一致，已有有效安装和续传数据继续复用；源码和 NVIDIA CUDA 12.8.1 条款由运行库发行一并留存。消费方测试不再允许 Linux GPU 上游地址例外。
 
 无 GUI 的实际推理检查：生成／提供一段公开或合成日语音频后，运行 `node --import tsx scripts/local-ai-platform-acceptance.ts --audio <音频>`。默认仅使用忽略目录 `out/ai-runtime-acceptance/`，不访问应用用户目录；首次联网下载权重，后续可用 `--offline`。Linux 验证镜像由 `scripts/local-ai-linux-acceptance.Dockerfile` 构建，只挂载此专用目录，在 `--network none` 下运行编译后的检查脚本；不是服务端或 GUI 验收。详细命令与边界见 [AI 字幕历史验证](archive/local-ai/implementation-and-validation-2026-10.md#macoslinux-运行库适配2026-10-07)。
 
@@ -133,23 +146,47 @@ Windows／Linux 及 macOS 翻译工具按需下载固定发布资产；安装校
 
 ### 内置播放运行库
 
-Windows 与 Linux X11 adapter 通过 `rendererFullscreenControls` 能力统一使用 renderer 经典工具栏与播放设置，原生 child window 只负责画面、输入和帧提交；旧 Windows adapter 保留原生全屏控件。全屏按指针所在的顶部／底部区域分别显示标题栏／控制栏，鼠标在画面中间移动或暂停不会唤出它们；打开播放设置时同时固定显示标题栏与控制栏，关闭后恢复分区触发；键盘焦点、拖动和子菜单所有权保持操作区域可见。原生指针先由客户区像素换算为 DIP，再按网页缩放倍率换算为 CSS 像素，不能用播放时钟更新或任意鼠标活动唤出控制栏。全屏视频始终占满窗口，标题栏、控制栏和设置使用覆盖布局，显隐不改变 drawable 尺寸；renderer 报告这些表面及菜单与视频的交叠矩形，Windows 用窗口区域裁剪，Linux 用 X Shape 1.1 同时裁剪可见区域和输入区域，让 HTML 控件可见且可点击。Linux 保留圆角边缘，关闭覆盖层后恢复完整画面；视频区域的 Tab／Shift+Tab 将焦点交回共享面板。此改动同时涉及 renderer 与原生运行文件，开发调试需重建两者并完整退出、重启 Electron；仅刷新页面仍会保留旧原生实现。
+Linux 发布 runner 会先升级字体／音频客户端的已安装依赖闭包，再复制库并按实际 `source:Version` 获取源码，避免预装库旧补丁已从当前 APT 源索引移除。此准备只发生在临时 CI runner，不用新源码替代旧二进制的对应源码。
+
+Windows、macOS 与 Linux 的正常内置播放均通过主窗口 Canvas 与 HTML 控件合成。Windows 使用 D3D11 共享纹理生产端，故障时自动使用 CPU 内存帧；旧 HWND 视频子窗口、原生工具栏和滑块实现已移除。
+
+Windows Canvas 无需启动开关，使用正常 DirectComposition；不再按 addon 是否存在选择旧合成路径。同一个 `playback.node` 仅导出 `sharedTexture` 和 `software`，经 WGL 私有 D3D11 bridge、GPU copy、三个 BGRA NT 导出槽和 Electron 共享纹理进入现有 Canvas2D。不宣称零复制。生产完成、消费者 GPU 释放及 `allReferencesReleased` 分别确认；设备或同步状态不明时保持旧 GPU 租约有界隔离，不强行释放。历史试验材料见 [Windows Canvas 接入记录](reviews/windows-canvas-implementation-2026-10-23.md)。
+
+Windows GPU 路径有独立的 CPU 故障回退，另可使用启动参数 `--javdex-cpu`。同一 addon 的 `software` 导出执行纯 CPU 解码／SW 渲染，通过最多两帧复制通道交给现有 preload Canvas，无需图形驱动互操作；与 Linux 一样按实际物理 viewport 渲染，保留 8192 单边／256 MiB 单帧边界，不额外限制 1080p。图形故障后恢复当前授权来源和播放状态，本次进程继续使用 CPU；页面销毁、媒体／授权／音频错误与 CPU 故障不触发循环重试。`node scripts/windows-software-acceptance.mjs --mode=disabled <合成媒体...>` 使用禁用 GPU 加速的真实应用验收；`initialization` 只注入 GL 创建失败，`gpu-fault` 实际终止自有测试宿主的 GPU 子进程。`producer-fault` 在真实 Canvas 播放后注入一次原生 `nextFrame` 异常，经正常共享帧桥验证 CPU 接管、字幕及控制状态恢复；每次只传一个素材并使用新宿主，因为回退会保持到进程重启。均使用隔离资料库，不改系统显卡设置。使用 `JAVDEX_PLAYBACK_ACCEPTANCE_EXECUTABLE` 检查实际包内程序时，原生诊断也从该包加载；`windowsSoftwareNative.test.ts` 可通过 `JAVDEX_TEST_WINDOWS_PLAYBACK_NATIVE` 指定新构建的 addon，显式路径缺失即失败。结果与未测范围见 [Windows CPU 记录](reviews/windows-cpu-fallback-2026-10-24.md)。
+
+Windows Canvas 显式创建 OpenGL 3.2 core context；旧兼容 context 在 Arc B390 上可播放视频，却会在 mpv 绘制 ASS／PGS 时产生 GL 1282。共享帧桥在主进程错误对象中保留 `playbackFailureKind`，图形故障回退不依赖本地化错误文案，页面退出仍单独排除。`windows-canvas-acceptance.mjs` 还检查 ASS／PGS 在展开和全屏状态的字幕开关像素差异、GPU 模式及停止后引用归零。本机修复与实际打包复验见 [Arc B390 Canvas 字幕修复](reviews/windows-arc-b390-canvas-fix-2026-10-24.md)。
 
 内置播放行为与平台边界见 [播放合同](BUILTIN_PLAYBACK.md)，实际源码构建及发布证据见下文。`npm run playback:native:build` 只生成链接本机开发库的运行文件：macOS/Windows 为 addon，Linux 为独立 `playback-helper`；正式打包输入由 `npm run playback:runtime:build` 从固定源码构建。普通桌面打包明确排除 `out/native-playback`、`out/playback-acceptance`、`out/libmpv-prototype` 与 `out/playback-runtime`，审核后的运行库通过打包钩子复制到 Resources，不把构建目录、合成素材、截图或临时 Electron bundle 收入 `app.asar`。
 
-原生核心的初始化、异步命令、事件复制、状态缓存与帧计数共用 `native/mpvCore.h`；Cocoa/WGL/X11 仅拥有平台窗口、GL context 和原生输入。macOS 构建先编译运行 C++ 的键位与核心回归，再生成 Cocoa addon；Linux CMake 构建运行共用核心与私有 X11 几何／句柄／键盘回归。`npm run test:playback:build` 检查构建命令选择，已纳入根测试；它本身不编译其它平台源码，也不证明可播放。
+三平台共用 `PlaybackEngine` 的自动／GPU／CPU 模式、恢复及诊断，设置 `playbackRenderMode` 在重开影片时应用。未发布的 Linux 专属设置直接替换，没有迁移逻辑。默认字幕采用系统字体，片源 ASS 保留自己的样式与字体选择。具名 `RenderConfig`、物理尺寸与帧内存上界、时序及色彩策略在原生共用层维护；CPU 与 GPU 均输出 BT.709／sRGB／full 的 203nit SDR，CPU 在 libass 合成前转换源色彩。
 
-Windows WGL 适配已在 Windows 11 x64 用 MSVC 实际编译，并在 Electron 中加载、播放本地与 loopback 远程合成素材；范围及剩余关口见 [Windows 验收记录](BUILTIN_PLAYBACK_WINDOWS_ACCEPTANCE.md)。开发构建需要 Windows 本机的 MSVC、Visual Studio CMake generator、同架构 libmpv headers/import library/DLL，以及对应 Electron 的 headers 和 `node.lib`。设置 `JAVDEX_MPV_PREFIX` 为已安装开发前缀；默认 Electron 输入为 `~/.electron-gyp/<version>/include/node` 与 `<arch>/node.lib`，可分别用 `JAVDEX_ELECTRON_HEADERS` / `JAVDEX_ELECTRON_NODE_LIBRARY` 覆盖。Windows 开发构建完成后按实际 PE 导入闭包，从该前缀的 `bin` 复制所需 DLL 到 `out/native-playback`，普通 `npm run dev` / `npm start` 无需额外配置 libmpv PATH；缺失依赖或架构不匹配会拒绝构建，前缀中的 Mesa `opengl32.dll` 不复制，以保留系统 WGL。旧的 addon-only 开发产物需重新构建并正常退出、重启应用。构建器不下载依赖、不修改用户系统环境；这些开发文件仍排除在正式安装包之外。WGL 不等于 ANGLE 直接硬解，本轮 H.264/HEVC Main10 的实际内核状态为 `d3d11va-copy`。
+Windows/macOS 的 `playbackHost.js` utility process 加载 `playback.node`，负责 libmpv、GL／D3D 与软件帧生产；Electron 主进程只通过 `playback-interop.node` 导入／释放 NT 句柄或 IOSurface。Linux 保留隔离 helper 和 FD 通道。GPU 资源以槽位及每次分配的身份缓存，不以可重用的 OS 句柄数值认定身份；消费者持有的资源在宿主退出后仍等实际释放。`libmpvPlayback.ts` 组合宿主工厂与生成字幕显示管理；验收通过私有诊断通道观察宿主，不在主进程加载解码器。
 
-Windows 正常桌面入口检测到 `out/native-playback/playback.node`（开发）或 `resources/native-playback/playback.node`（分发）时，会在应用 ready 前选择 Chromium 的非 DirectComposition 合成路径，避免 WGL 主窗口 child 被遮挡。没有原生 addon 的包及刮削 helper 不改变该选择；仍保留 GPU compositing、rasterization 和视频硬解，不是关闭硬件加速或用户设置项。原生 adapter 用标准 Win32 child/sibling 裁剪，释放时还原其添加的样式位；暂停 resize 在尺寸提交后重绘，最小化恢复也重绘已有帧。libmpv 新帧通知通过 `PostMessage` 唤醒拥有 HWND/WGL 的线程，避免依靠 JavaScript 定时轮询限制 60fps 提交；回调本身不执行 GL 或 N-API。新构建需正常退出再启动，不能在 ready 后切换该后端。
+Windows CMake 同时构建生产 addon、仅导入资源的 interop addon，以及核心和 ticket 回归，保留两份 addon 各自的 Electron delay-load hook。D3D11／DXGI 使用系统 ABI，不打包驱动。macOS 的 `npm run playback:native:build` 编译并运行核心回归，构建两份 addon，再运行跨进程 IOSurface/Mach 预检；生产进程退出后接收方必须仍可读取并释放该资源，失败即停止构建。Linux CMake 构建共用核心、GPU／CPU helper 和 FD 传输，运行协议／槽位及 FD 回归。
+
+`npm run test:playback:build` 只检查构建合同，不代替原生编译。[Playback Native Preflight](../.github/workflows/playback-native.yml) 在两种 Mac 架构及 Linux 使用系统开发库编译并运行原生预检；它不构建正式发行运行库，也不证明 Canvas 或物理 GPU 可用。正式构建仍消费固定源码配方和审核材料，必须带上匹配的新 addon、宿主版本和对应源码，不能用旧审核清单覆盖新二进制。
+
+完成原生和桌面构建后，Windows 可运行 `node scripts/windows-canvas-acceptance.mjs` 检查真实生产／Canvas 提交、暂停 seek、全屏、慢消费和停止重开。三平台共用 `node scripts/playback-color-fixtures.mjs <ffmpeg> <新目录>` 与 `node scripts/playback-color-acceptance.mjs <素材目录> gpu|cpu|recovery`；CPU 可加 `--compare=<GPU 报告>`，比较五组 SDR／HDR10／HLG／缺失元数据样本在八种播放状态中的 sRGB Canvas 输出。报告标记 `pixelSource` 并拒绝混用旧窗口截图报告；同时保留 Canvas 和窗口 PNG。数值读取可能改变 Canvas 加速状态，媒体、压力和负载检查分别执行。每个阶段验证实际播放路径，不能把自动回退后的画面当作 GPU 结果。这些检查不代表物理 HDR 输出或显示器校准。`node scripts/playback-load-acceptance.mjs <合成媒体> gpu|cpu --source-fps=30` 记录可见窗口短时负载、实际尺寸、帧生产、丢帧及资源归还，并要求产帧至少达到已知源帧率的 97%、播放区间新增丢帧不超过 1；不提供源帧率时只记录负载，不判定产帧质量。生产计数仍不是物理上屏证明。Windows/macOS 的 `playback-mode-acceptance.mjs <合成媒体>` 验证真实模式切换和初始化失败。
+
+`node scripts/run-electron-tests.mjs apps/desktop/src/main/player/macSharedTextureNative.test.ts apps/desktop/src/main/player/macSoftwareNative.test.ts` 自动使用本机正常构建的 addon，检查真实 CGL/IOSurface 的线程保护、事件合并、三槽、resize、destroy 与跨会话租约，以及独立 CPU 帧的物理尺寸、行对齐／清零、线程保护和重开；非 macOS 或缺少编译产物时明确跳过。Release CI 用 `JAVDEX_TEST_MAC_PLAYBACK_NATIVE=<审核矩阵中的 playback.node 绝对路径>` 检查刚构建的同架构 GPU／CPU 运行库，显式输入缺失即失败。 发布 CI 显式设置 `JAVDEX_TEST_MAC_ALLOW_NO_GPU=1` 时，仅允许将“没有加速 OpenGL pixel format”这一能力缺失记为结果，并将两个 GPU 租约／重绘用例明确标为跳过；默认实机运行仍要求 GPU，其他创建、加载或绘制错误继续失败。CPU、线程保护和 Mach 资源传输不随之跳过。`node scripts/software-playback-acceptance.mjs --mode=forced <合成媒体...>` 检查真实 CPU Canvas；`disabled`、`initialization`、`producer-fault` 和 `gpu-fault` 分别检查禁用加速、初始化失败、隔离宿主退出和自有 GPU 子进程退出。`host-stall` 检查宿主心跳超时；`producer-fault` 每次只传一个素材；所有宿主使用隔离资料目录，不改系统驱动。
+
+`node scripts/mac-shared-texture-acceptance.mjs <同目录下的合成媒体...> --fps=24,30,60` 通过不带后端参数的正常应用入口，捕获真实 Chromium 窗口并核对视频／Canvas 速率、VideoToolbox、暂停、连续 seek、轨道、全屏、焦点、缩放与停止释放。fps 数量需与文件对应；多音轨夹具的真实速率以文件为准。`--color` 检查四种参考色块；`--stress` 对首个文件运行五轮 1.5 秒阻塞消费、立即停止与重开；`--crash` 只崩溃自有验收 renderer，检查未知引用隔离到退出。正常退出须无强制结束、exit=0、无信号；实际故障隔离不代表自动恢复。物理上屏、声音听感、多显示器、长时间能耗及正式包另行判断。
+
+共享帧的主线程调度使用有界 [Node-API 线程安全回调](https://nodejs.org/api/n-api.html#asynchronous-thread-safe-function-calls)，同一 dispatcher 只保留一个待处理唤醒；暂停时的非视频命令、字幕事件与关闭重开也有原生回归。dispatcher 不拥有 IOSurface 租约，停止先解绑 JS 回调，退出时先结束 mpv 线程再终止队列；不能用它替代 GPU 完成或 `allReferencesReleased`。
+
+旧新后端对照、阶段剥离和 WebGL/video/WebGPU 候选已停止维护并移出活动入口；脚本、失败记录、profile 与逐文件哈希保留在 [正式化记录](reviews/macos-canvas-default-2026-10-23.md)指向的可恢复归档，不销毁研究证据。既有播放态 CPU 对照没有显示采用 Canvas 的性能收益，历史数字按一核满载为 100% 计量，不是整机归一化百分比。需要按需排查时仍可拉取 `javdex.playback.mac-shared-texture.statistics` 现有主进程统计；它不暴露原生句柄或媒体位置，也不是物理上屏回执。
+
+历史 Windows WGL 子窗口适配曾在 Windows 11 x64 用 MSVC 实际编译，并在 Electron 中加载、播放本地与 loopback 远程合成素材；范围及剩余关口见 [Windows 验收记录](BUILTIN_PLAYBACK_WINDOWS_ACCEPTANCE.md)。开发构建需要 Windows 本机的 MSVC、Visual Studio CMake generator、同架构 libmpv headers/import library/DLL，以及对应 Electron 的 headers 和 `node.lib`。设置 `JAVDEX_MPV_PREFIX` 为已安装开发前缀；默认 Electron 输入为 `~/.electron-gyp/<version>/include/node` 与 `<arch>/node.lib`，可分别用 `JAVDEX_ELECTRON_HEADERS` / `JAVDEX_ELECTRON_NODE_LIBRARY` 覆盖。Windows 开发构建完成后按实际 PE 导入闭包，从该前缀的 `bin` 复制所需 DLL 到 `out/native-playback`，普通 `npm run dev` / `npm start` 无需额外配置 libmpv PATH；缺失依赖或架构不匹配会拒绝构建，前缀中的 Mesa `opengl32.dll` 不复制，以保留系统 WGL。旧的 addon-only 开发产物需重新构建并正常退出、重启应用。构建器不下载依赖、不修改用户系统环境；这些开发文件仍排除在正式安装包之外。WGL 不等于 ANGLE 直接硬解，本轮 H.264/HEVC Main10 的实际内核状态为 `d3d11va-copy`。
+
+Windows 的播放、全屏、滑块与键盘输入均由现有 HTML 面板处理，不再创建显示用的原生子窗口、原生全屏工具栏或裁剪弹层。共享生产端的隐藏 WGL drawable 只服务 GPU 互操作，不承载输入或呈现。主线程通过有界唤醒消费 mpv 帧通知，常规观察继续处理故障；正常启动保留 Chromium DirectComposition，不再注入 `disable-direct-composition`。
 
 默认 Windows MSVC 构建直接编入已安装 `@electron/rebuild` 所依赖的 node-gyp 延迟加载钩子，并链接 `delayimp`、`/DELAYLOAD:node.exe`；仅链接 `node.lib` 不足以在 Electron 或改名后的应用可执行文件中加载。构建器解析依赖自身的钩子路径，不下载或修改上游文件，缺少钩子时停止。CMake 也支持 LLVM MinGW/CLANG64：使用 Ninja、显式指定匹配的 `clang++.exe` 与 libmpv 前缀、Electron headers/node.lib，编入仓库的 `windowsElectronDelayHook.cpp` 并使用 `--delayload=node.exe`。npm 开发构建命令仍默认 MSVC。两条路径均重定向到当前应用宿主；MinGW 路径已在实际改名的 ZIP/NSIS 应用中加载。MSVC 钩子许可见 [第三方说明](THIRD_PARTY_NOTICES.md#node-gyp-延迟加载钩子)，宿主要求见 [Electron 原生模块说明](https://www.electronjs.org/docs/latest/tutorial/using-native-node-modules#a-note-about-win_delay_load_hook)。
 
-Linux X11／XWayland adapter 与显式启动选项已加入，原生 Wayland 后续补齐。先退出应用，再以 `--javdex-x11`（或 Electron 的 `--ozone-platform=x11`）启动；未显式选择时内置播放不可用，不依据环境变量或 Buffer 宽度猜测 backend。冲突的 ozone 选项拒绝启动；缺少 `DISPLAY` / X server 时给出不可用原因，不自动回退外部播放器。当前提供命令行选择，尚未提供设置页启动开关；不切换系统桌面、不静默强制 X11。开发构建需要 CMake、C++17 编译器、make、pkg-config、X11/Xext/GLX/OpenGL 开发库及同架构 libmpv；设置 `JAVDEX_MPV_PREFIX`（系统前缀如 `/usr`），然后运行 `npm run playback:native:build`。运行时要求 X Shape 1.1，不再绘制或链接 Xft 全屏工具栏。库路径须由开发环境提供，构建器不复制 `.so` 或安装依赖。实际源码、隔离编译及未验收项见 [平台记录](archive/playback/platform-validation-2026-10.md#10-本轮实施记录2026-10-03)。
+Linux X11／XWayland 和原生 Wayland 共用 DMA-BUF／CPU 内存帧链路，原生子窗口代码及构建目标已移除。`--javdex-x11` 和 `--javdex-wayland` 只选择显示后端，冲突参数仍拒绝启动。原生开发构建需要 CMake、C++17、pkg-config、EGL/GBM/DRM 开发库及 libmpv，设置 JAVDEX_MPV_PREFIX 后运行 npm run playback:native:build，构建 GPU helper、CPU helper 和 FD addon。完整隔离双运行库构建见 LINUX_COMPATIBLE_PLAYBACK.md；旧包的验证合同仅用于历史回归。
 
-Linux 的 `playback-helper` 在独立进程直接链接 libmpv，拥有 X11 child windows、GLX context 和播放器核心；子窗口仍嵌入原 Electron parent，不另开可见顶层播放窗口。Electron 通过私有继承管道传送带长度的命令字段并缓存返回状态，不经 shell 或监听端口。此边界用于隔离 Electron 全局导出的 FFmpeg／分配器符号；同进程的 `RTLD_DEEPBIND`、`dlmopen` 实验未通过真实播放／清理检查，未作为支持方案。独立进程不等于解码器沙箱，仍须验收异常退出、关闭／重开、输入焦点和媒体行为。
+Linux 的 playback-dmabuf-helper／playback-software-helper 在独立进程链接各自 libmpv，使用私有控制管道和 FD 3 帧通道，不接收 Electron 原生窗口句柄、不创建 X11 child 或 GLX context。主进程只持有 FD 桥，renderer 使用同一个 Canvas 显示。当前 Linux 源构建默认使用 dmabuf profile，不再构建 x11 profile。
 
-检测到 OpenGL renderer 名称含 `llvmpipe` 或 `softpipe` 时，Linux helper 使用软件 OpenGL 兼容策略：亮度、色度及缩小采用 bilinear，关闭 correct-downscaling，并启用 `gpu-dumb-mode`。这会牺牲高级 shader 缩放以换取该软件渲染路径的兼容性，不是硬解或真实 GPU 通过的声明。其它 renderer 不自动应用此策略；真实 GPU／驱动及高阶画质路径仍待分别验收。
+Linux GPU 模式要求可用的硬件 EGL 设备；可检测故障按自动模式策略切换至 CPU 兼容模式。CPU 视频链路使用软件 render API，不依赖 GLX 或 X11 原生窗口。
 
 显示选择只读取启动参数，不将 Electron 在 ready 前返回的默认 `ozone-platform=x11` 当成用户选择。解析遵循最后一个 ozone 参数生效、`--` 终止选项的规则；ozone 值使用 `=`，例如 `--ozone-platform=x11`。`--javdex-x11` 与最终显式非 X11 选择冲突时拒绝启动，不静默覆盖。
 
@@ -159,17 +196,19 @@ Linux 的 `playback-helper` 在独立进程直接链接 libmpv，拥有 X11 chil
 
 对该目录运行 `docker build -t <本轮专用标签> <该目录>`。镜像内安装 Debian 开发依赖，运行 C++ 回归及独立的真实 ELF 搬移测试；该 Docker 检查要求 Linux ELF 测试实际运行，跳过不能代替成功。完整安装包／源码绑定测试仍在仓库根的 `test:packaging` 中执行，不塞入最小编译 context。随后 `docker run --rm --init --network none <本轮专用标签>` 仅验证 helper 加载、私有协议、EOF／destroy、无效 backend／句柄及无显示时的受控失败。此 helper 协议检查也由 Linux 开发构建调用，不创建 GL context，不播放素材。镜像中的系统 libmpv 没有来源闭包清单，检查必须拒绝将该 helper 单独作为正式运行库。
 
-经审核的运行库通过 `JAVDEX_PLAYBACK_RUNTIME_DIR` 显式指定矩阵目录，每个目标在 `<platform>-<arch>/` 下独立提供入口、依赖库及 `runtime.json`，例如 `darwin-arm64/`、`win32-x64/` 和 `linux-x64/`。macOS/Windows 的入口为 `playback.node`；Linux 必须为有执行权限的 `playback-helper`，不接受旧的同进程 `playback.node`。未指定时不加入运行库；已指定但目录、架构、版本或文件不匹配时停止打包，不静默生成缺少运行库的内置播放包。技术检查覆盖 macOS Mach-O、Windows PE 与 Linux ELF；Windows 本地 ZIP/NSIS 的合成媒体播放回归见 [Windows 验收记录](BUILTIN_PLAYBACK_WINDOWS_ACCEPTANCE.md)，四目标源码构建与最终安装产物的验证合同见下文。独立干净机器、可信分发签名、公证与 GUI／硬解等验收须按具体记录判断，不能由清单或命令选择测试推定。
+Windows/macOS 经审核的运行库通过 `JAVDEX_PLAYBACK_RUNTIME_DIR` 显式指定矩阵目录，每个目标在 `<platform>-<arch>/` 下独立提供 `playback.node`、依赖库及 `runtime.json`，例如 `darwin-arm64/` 和 `win32-x64/`。这些目标在本机未指定时可不加入运行库；已指定但目录、架构、版本或文件不匹配时停止打包，不静默生成缺少运行库的内置播放包。历史 `linux-x64/playback-helper` 清单仅用于旧包检查；当前 Linux x64 普通打包始终要求双运行库和 ANGLE，不读取该旧矩阵作为替代。技术检查覆盖 macOS Mach-O、Windows PE 与 Linux ELF；Windows 本地 ZIP/NSIS 的合成媒体播放回归见 [Windows 验收记录](BUILTIN_PLAYBACK_WINDOWS_ACCEPTANCE.md)，四目标源码构建与最终安装产物的验证合同见下文。独立干净机器、可信分发签名、公证与 GUI／硬解等验收须按具体记录判断，不能由清单或命令选择测试推定。
 
-上述“未指定时不加入”仅适用于普通本机开发打包。CI／GitHub Actions 必须提供完整运行库矩阵，否则 `beforePack` 立即报错；本地开发专用目录不能替代 CI 的来源清单。打包后运行 `npm run packaging:verify-playback-runtime`，逐个检查应用 Resources 的 `native-playback`、平台／架构、准确文件集合、动态依赖、许可材料及配套源码归档。macOS 验证外层 app 与每个原生文件的真实签名，保留输入 `pre-sign` 摘要，不把签名改变的字节误判为输入损坏，也不在资源封装后改写清单；非二进制仍核对原摘要。其它平台继续核对全部文件摘要。各平台配套源码归档留存为 CI 产物；Release 交付下述总源码包，并将总包加入 SHA256SUMS。
+上述“未指定时不加入”仅适用于 Windows/macOS 普通本机开发打包。CI／GitHub Actions 必须提供完整运行库输入，否则 `beforePack` 立即报错；本地开发专用目录不能替代 CI 的来源清单。打包后运行 `npm run packaging:verify-playback-runtime`，Windows/macOS 检查 Resources 的 `native-playback`，Linux 检查 `linux-playback-release.json` 绑定的两个 helper 闭包与 ANGLE，均核对平台／架构、准确文件集合、动态依赖、许可材料及配套源码归档。macOS 验证外层 app 与每个原生文件的真实签名，保留输入 `pre-sign` 摘要，不把签名改变的字节误判为输入损坏，也不在资源封装后改写清单；非二进制仍核对原摘要。其它平台继续核对全部文件摘要。各平台配套源码归档留存为 CI 产物；Release 交付下述总源码包，并将总包加入 SHA256SUMS。
 
 历史上曾有未传入运行库矩阵的公开安装包，后续源码构建与打包门禁的完成不追溯改变这些旧附件。已公开版本的标签、镜像与安装包不覆盖；改变分发内容须使用新版本。
 
 ### 固定源码构建与分发验证
 
-`npm run playback:runtime:build` 从 [固定源码清单](../build/playback-sources.json) 构建正式打包输入，输出到 `out/playback-runtime/<platform>-<arch>`。下载前后的大小与 SHA-256 必须匹配；清单包含 libmpv、FFmpeg、字幕/字体、AV1、TLS 依赖及 libplacebo 的固定子模块，也锁定 Electron headers 的 Node 版本和许可来源。Meson 禁止自动下载或探测未声明的可选依赖，不复制 Homebrew／系统 FFmpeg。源码和配方变化后使用新空前缀；pkgconf 保留私有 `-I/-L`，避免从系统静态库解析 FFmpeg。工具安装在任务自己的 Python venv，不改本机系统 Python。
+`npm run playback:runtime:build` 从 [固定源码清单](../build/playback-sources.json) 构建正式打包输入。Windows/macOS 输出到 `out/playback-runtime/<platform>-<arch>`；Linux x64 默认构建 dmabuf GPU profile 到 `out/linux-portable-runtime/linux-x64`，另以 `--linux-software` 构建 `out/linux-software-runtime/linux-x64`，并由 `scripts/build-linux-angle.py` 生成 `out/linux-angle-runtime/linux-x64`。下载前后的大小与 SHA-256 必须匹配；清单包含 libmpv、FFmpeg、字幕/字体、AV1、TLS 依赖及 libplacebo 的固定子模块，也锁定 Electron headers 的 Node 版本和许可来源。Meson 禁止自动下载或探测未声明的可选依赖，不复制 Homebrew／系统 FFmpeg。源码和配方变化后使用新空前缀；pkgconf 保留私有 `-I/-L`，避免从系统静态库解析 FFmpeg。工具安装在任务自己的 Python venv，不改本机系统 Python。
 
-当前清单固定 mpv 0.41.0、FFmpeg 9.0.2、Electron 43.8.0 和 Node SDK headers 24.22.0；其余来源、版本、字节数、摘要与工具版本以清单及 [构建配方](../scripts/playback-source-build.mjs) 为准。这套播放 FFmpeg 与本地 AI 使用的 FFmpeg 8.1.3 是独立构建，不能混用版本或许可说明。
+当前清单固定 mpv 0.41.0、FFmpeg 9.0.2、Electron 43.8.1 和 Node SDK headers 24.22.0；其余来源、版本、字节数、摘要与工具版本以清单及 [构建配方](../scripts/playback-source-build.mjs) 为准。这套播放 FFmpeg 与本地 AI 使用的 FFmpeg 8.1.3 是独立构建，不能混用版本或许可说明。
+
+Pi 的嵌套 Undici 与 brace-expansion 使用根 manifest 的安全覆盖版本。npm 10 在 `hasShrinkwrap` 存在时会重新采用上游锁定，忽略根锁文件中的覆盖；因此本项目锁文件明确不保留 Pi 的该字段。更新依赖后须以 `npm ci` 和 `npm run check:workspaces` 核对实际安装，不能仅依赖 `npm audit` 读取的锁文件结果。
 
 当前配置将解码和字幕依赖静态链接进一个共享 libmpv，另构建 Javdex 原生 addon／Linux helper；所有内置 FFmpeg 解码器保留，支持本地及内置网络协议，HTTPS 分别使用 macOS SecureTransport、Windows Schannel、Linux 自建 OpenSSL。视频编码／采集不进入播放配置，保留 PNG/MJPEG 图像编码。libass 保留系统字体提供者、HarfBuzz、FriBidi 和 libunibreak。Lua 5.2.4 是 mpv 0.41 支持的版本，保留它是为了使现有核心能够显式关闭脚本、ytdl、OSC，而不是忽略缺失的必需初始化选项。构建仅保留软件用到的基础播放能力，不加入额外的蓝光/DVD 导航、SFTP/SRT 等可选依赖；不能宣称与任意开发库的可选功能全集一致。
 
@@ -179,7 +218,11 @@ Release 分别在 Windows x64、macOS Intel、macOS arm64、Linux x64 的本架�
 
 Windows 的自建 pkgconf 仅为构建工具，静态配置显式声明 `PKGCONFIG_IS_STATIC`，同时覆盖它的库和 CLI，避免 DLL 导入声明与静态归档不一致；该定义不传播到播放依赖。Linux 原生核心/控制/helper 测试发生在搬移之前，只对这些测试子进程传入私有前缀的 `LD_LIBRARY_PATH`；不修改全局构建环境。正式 helper 保持 `$ORIGIN`，搬移后的运行库与包内加载/解码检查仍清除开发搜索路径。
 
+Windows 源码构建还通过私有 `LIBRARY_PATH` 固定 GCC 的静态库搜索目录，避免 Meson 内置探测选中 MSYS2 自带的 iconv/zlib。zlib 1.3.2 在 Windows 生成 `libzs.a`，安装后以同一字节副本提供其 pkg-config 所声明的 `libz.a`，拒绝覆盖不同内容，并将摘要写入构建记录。构建结束核对编译器实际解析的两个归档均来自本次前缀。新版 MinGW 把 `__mingw_fe_dfl_env` 移入 `libmingw32.a` 后，只有检测到真实定义时才显式保留该 CRT 符号；不提供替代浮点环境实现。工具链指纹包含 GCC、CRT 与头文件包版本。
+
 Windows 的 MSVC 导入库从此次自建 DLL 的导出名称表生成，不从其它 SDK 获取。解析同时支持 GNU objdump 旧格式及带 base/hint 列的新格式，只接收名称表中的安全 `mpv_*` 符号；导出数量、真实链接/加载和解码门禁不因工具输出格式变化而放宽。
+
+Windows 依赖库由 GCC 构建，适配器另用 MSVC；进入适配器阶段前清除前者的编译／链接及库搜索变量，由 CMake 显式提供头文件、导入库和静态 CRT 设置，避免 GCC 专用参数传入 MSVC 后被静默忽略。
 
 Linux 构建基线为 Ubuntu 22.04：libass 等自建依赖保持 PIC 静态库，系统 fontconfig 字体提供者采用动态 ABI，避免 Meson 递归选择非 PIC 的系统 UUID 静态库；没有改用系统 libass/FFmpeg 或放宽运行库闭包。macOS C/Swift 最低部署目标均显式为 12.0；这些基线不是对应旧系统的实际安装验收。根打包入口增加 `--arch x64|arm64`，各 macOS 任务只生产自己的 DMG。缓存键包含源码清单、构建/原生代码及依赖锁；构建器还核对编译器、SDK、Python、工具版本与架构，每次命中后重验精确文件、依赖和实际加载，不把缓存命中当作可信证明。
 
@@ -187,7 +230,7 @@ Linux 构建基线为 Ubuntu 22.04：libass 等自建依赖保持 PIC 静态库�
 
 `packaging:verify-playback-runtime` 除静态合同与签名检查，还在清除开发库搜索路径后实际加载包内 addon（Electron ABI）／helper，再从包内相对位置加载 libmpv，初始化核心所需的安全选项并解码原创 PCM WAV 到正常 EOF。不会以 `require` 成功代替解码，也不把无显示检查称作 GUI/GL、硬解、多格式、网络或独立干净机器验收。Linux `.deb` 声明保留 Electron 默认依赖，加上 X11/Xft、GL、ALSA、VA-API 的宿主包；AppImage 不安装系统包，宿主须具备这些显示/音频/驱动 ABI，不需要系统安装 mpv/FFmpeg。早期 verify-only CI 的实际验证及当时边界见 [源码构建复核](reviews/playback-ci-source-build.md)。
 
-`runtime.json` v1 的输入合同如下；清单由实际运行库构建生成，不手工填入虚假的摘要：
+Windows/macOS 及历史 Linux 单运行库的 `runtime.json` v1 输入合同如下；清单由实际运行库构建生成，不手工填入虚假的摘要。当前 Linux 双运行库使用各自的 `portable-runtime.json` 与 ANGLE 的 `javdex-angle.json`，发行时由独立初版 `linux-playback-release.json` 统一绑定，不伪装成旧 `playback-helper` 合同：
 
 | 字段 | 要求 |
 | --- | --- |
@@ -211,7 +254,7 @@ Release 的 `playback-sources` 任务在四个平台打包门禁之后执行 `no
 | Windows x64 | NSIS `.exe`、`.zip` | 静默安装 EXE、提取 ZIP，匹配运行库及来源绑定 |
 | macOS x64 | Intel `.dmg` | 只读挂载，匹配运行库及来源绑定，校验 app 签名 |
 | macOS arm64 | Apple Silicon `.dmg` | 只读挂载，匹配运行库及来源绑定，校验 app 签名 |
-| Linux x64 | `.deb`、`.AppImage` | 分别提取，匹配运行库及来源绑定 |
+| Linux x64 | `.deb`、`.AppImage` | 分别提取，匹配 GPU／CPU／ANGLE 统一投影，实际包内 FD 加载与双 libmpv PCM EOF；AppImage 另核对 uruntime 前缀 |
 
 文件名映射以 [playback-source-materials.mjs](../scripts/playback-source-materials.mjs) 为准。[历史源码与产物核验](reviews/v0.9.0-beta.3-release-audit.md) 记录 Release run `38601458029` 的四目标构建、包内加载与 PCM EOF、六个最终安装产物核验，以及公开总源码包四目标恢复和摘要核对。每轮正式发布须对自身提交执行 [Release 工作流](../.github/workflows/release.yml)，不能沿用历史摘要或把无显示门禁记为新增 GUI、硬解或干净机器验证；0.9.0 原始发行及一次整套替换的实际结果见 [发布记录](reviews/README.md)。
 
@@ -236,6 +279,8 @@ RPATH/RUNPATH 只允许位于运行库内的 `$ORIGIN` 相对目录，RUNPATH �
 **摘要不是签名，清单不是许可合规或播放验收证明。** Javdex 采用 GPL-3.0-or-later，应用 `LICENSE`、`NOTICE`、workspace 元数据、锁文件及当前公开许可说明已同步；此前 MIT 声明保留在 `LICENSES/Javdex-MIT.txt`，既有版本不追溯改写。构建来源、选项、源码与二进制对应关系、全部间接依赖及分发义务仍需逐版本复核，第三方代码保留各自版权和许可。实际版本、许可材料与源码交付见 [第三方说明](THIRD_PARTY_NOTICES.md#内置播放运行库)。本机原生开发可使用 Homebrew／系统开发库，Linux 隔离编译检查可使用 Debian 开发库；Release 使用固定源码构建并交付配套总源码包。两条构建路径及历史验收范围须分别判断。
 
 部分 macOS/Windows 播放回归以隔离资料目录运行：先生成 `playback:native:build`、`desktop:build`（远程另需 `server:build`），再运行 `node scripts/playback-media-acceptance.mjs` 检查合成素材，或 `node scripts/playback-subtitle-acceptance.mjs` 定向检查复杂 ASS 与原创 PGS；可加 `--bitmap-only` 缩短图像字幕回归。`npm run test:playback:fixtures` 独立核对原创 PGS 字节/像素结构，不依赖 FFmpeg、GUI 或播放运行库，已纳入根 `npm test`。远程使用 `npm run test:playback:remote -- --media-matrix`，该入口注册 TypeScript 及共享路径加载器；追加 `--system-subtitle-picker` 时会等待真实系统选择器分别选择生成的 SRT/ASS，不适合无人值守 CI，也不 mock 文件选择器。具体文件、像素证据、失败诊断及未覆盖范围见 [字幕验收说明](BUILTIN_PLAYBACK_SUBTITLE_ACCEPTANCE.md) 与 [PGS 验收合同/结果](BUILTIN_PLAYBACK_BITMAP_ACCEPTANCE.md)。Windows 原生输入可运行 `node scripts/playback-windows-input-acceptance.mjs`，它准备隔离暂停素材并写入只读状态，仍需实际鼠标/键盘检查及解锁的桌面。Windows GUI 宿主还接受 `JAVDEX_PLAYBACK_ACCEPTANCE_EXECUTABLE` 指向实际解压/安装后的绝对 exe 路径；该子进程不带源码入口参数，使用空 cwd、Windows 系统 PATH 并移除开发 mpv prefix，诊断桥从包内 Resources 加载。仍不代表独立干净机器或发布验收。
+
+Windows SDR/HDR 回归使用 `node scripts/windows-hdr-fixtures.mjs <ffmpeg绝对路径> <新素材目录>` 生成 SDR full/limited、带 mastering/CLL 的 HDR10、HLG，以及无亮度元数据的 PQ 亮场。然后运行 `node scripts/windows-hdr-acceptance.mjs <素材目录> gpu`，分别以 `cpu` 和 `recovery` 复验独立 CPU 与真实接管；每次用 `JAVDEX_PLAYBACK_ACCEPTANCE_OUTPUT` 指定新的证据目录。验收采集 Chromium 合成后的可见 Canvas，检查亮度参考、灰阶、色相、暂停/跳转/底栏/全屏/继续及释放；`recovery` 只注入一次原生帧生产异常，CPU 解码和绘制仍真实执行。参考数学回归已纳入 `test:playback:fixtures`。这些是 SDR 输出验收，不代表物理 HDR 输出、GPU/CPU 曲线一致或安装包验收。
 
 `npm run test:playback:remote:connection` 是无媒体的开发启动检查：真实 Node 业务宿主经临时 HTTPS 网关完成统一配对，桌面 runtime 重开后复用原凭据且不打开本地资料库。它使用生产配对与代理实现，但不提供 Linux manager、环境查询或升级接口，不替代 Docker 更新检查、原生媒体或系统密钥存储 GUI 验收；PR 在 `server:build` 后执行。
 
@@ -354,4 +399,10 @@ Javdex 使用 Electron、React、TypeScript、Vite 和 `better-sqlite3`。主要
 
 原生播放区域、弹层遮挡和全屏指针坐标使用 Electron 当前显示器的有效 `scaleFactor`，再结合网页 `zoomFactor` 换算。不能只用 `GetDpiForWindow / 96`：Windows 辅助功能文字缩放可能让 Chromium 的有效缩放与 HWND DPI 不同，例如 175% 显示缩放加 110% 文字缩放时为 192.5%。网页 DPR 变化时，即使 CSS 矩形未变，也需重新上报播放区域。
 
-构建原生运行库后，在未设置 `ELECTRON_RUN_AS_NODE` 的环境运行 `node_modules/electron/dist/electron.exe scripts/playback-windows-geometry-acceptance.cjs`。该检查使用隔离空窗口，不读取个人资料库，核对底栏／展开／全屏模式下多档显示和网页缩放的实际 HWND 位置与尺寸；不代替真实跨屏移动和播放画面验收。更新原生运行库与主进程后须完整退出并重新启动应用。
+Windows 正常 Canvas 验收使用 `node scripts/windows-canvas-acceptance.mjs`，另以 `scripts/windows-software-acceptance.mjs` 检查 CPU 和故障恢复；关闭生命周期用 `scripts/playback-close-acceptance.mjs`。旧 HWND 的综合、几何、原生焦点和长播脚本已退出活动入口，本机可恢复材料及逐文件摘要在 `out/windows-hwnd-archive-20261024/inventory.json`；历史实测记录保留，不作为新 Canvas 的验收证据。
+
+Linux x86_64 当前标准包的双播放运行库构建与验收见 [LINUX_COMPATIBLE_PLAYBACK.md](LINUX_COMPATIBLE_PLAYBACK.md)；CPU 专用源构建参数为 `--linux-software`，不修改系统驱动。旧第一阶段独立包仍可按原文档复现。
+
+### Linux AppImage 自动解包回退
+
+Linux x86_64 AppImage 的固定运行时与构建校验见 [兼容播放文档](LINUX_COMPATIBLE_PLAYBACK.md#direct-appimage-startup)。打包钩子在 electron-builder 生成更新摘要前接入 uruntime；直接双击同一个包可在 FUSE 失败时自动解包启动，不要求额外执行脚本或安装 libfuse2。`node --test scripts/linux-appimage-runtime.test.mjs scripts/linux-apprun.test.mjs` 包含本机 Linux x86_64 的运行时故障注入；需要现有 `aa-exec`、支持 seccomp-filter 的 `setpriv` 和可用的临时目录，不安装系统设置。普通用户最终包首页启动与播放验收分别记录。

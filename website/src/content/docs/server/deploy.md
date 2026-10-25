@@ -55,7 +55,7 @@ Javdex 在服务端底层使用 SQLite WAL 高性能并发模式。网络文件�
 
 ### 用户权限匹配（UID / GID）
 - 容器内的业务进程默认降权至 UID `1000`、GID `1000`（`node:node`）运行。
-- 请确保宿主机上映射到 `/data` 与 `/media` 的文件夹，允许 UID `1000` 进行读写。你也可以通过环境变量 `JAVDEX_BUSINESS_UID` 与 `JAVDEX_BUSINESS_GID` 自定义目标用户 ID。
+- 请确保宿主机上映射到 `/data` 与 `/media` 的文件夹，允许 UID `1000` 进行读写。你也可以通过环境变量 `JAVDEX_SERVER_UID` 与 `JAVDEX_SERVER_GID` 自定义目标用户 ID。
 
 ---
 
@@ -69,7 +69,7 @@ Javdex 在服务端底层使用 SQLite WAL 高性能并发模式。网络文件�
 ```yaml
 services:
   javdex:
-    image: ghcr.io/javdexlabs/javdex-server:0.9.0
+    image: ghcr.io/javdexlabs/javdex-server:0.9.1
     container_name: javdex-server
     restart: unless-stopped
     stop_grace_period: 150s # 预留充裕时间让容器优雅停服保存数据库
@@ -85,9 +85,13 @@ services:
       # 4. 你的视频媒体目录（根据实际路径修改，确保拥有读写权限）
       - /volume1/video:/media/movies:rw
     environment:
+      # 必填：改为桌面客户端可访问且在 accessHosts 中的 HTTPS 根地址
+      - JAVDEX_PUBLIC_URL=https://192.168.1.100:8096
       # 可选：指定宿主机文件所有者 UID/GID
-      - JAVDEX_BUSINESS_UID=1000
-      - JAVDEX_BUSINESS_GID=1000
+      - JAVDEX_SERVER_UID=1000
+      - JAVDEX_SERVER_GID=1000
+      # 可选：媒体目录另有组权限时，填写实际附加 GID；空配置不继承管理器组
+      # - JAVDEX_SERVER_GROUPS=101,100
       # 首次配置局域网 Web 登录密码（12 ~ 128 位）
       - JAVDEX_WEB_PASSWORD=YourStrongPassword123
 ```

@@ -56,6 +56,8 @@ python website/scripts/optimize-assets.py
 
 截图脚本仅使用 `output/playwright/website-product-profile` 隔离目录。README 配图使用 `capture.mjs --readme` 与 `optimize-assets.py --readme`，写入 `docs/images/`；网站截图写入 `assets/screenshots/`。压缩需要 Pillow，不在网站构建时安装。
 
+仓库分享预览图使用 `node website/scripts/capture.mjs --social` 与 `node website/scripts/social-preview.mjs`：在上述隔离目录的 `social/` 子目录生成虚构演示库，用官方图标和真实应用截图排版，输出 `docs/images/social-preview.png`（1280×640、小于 1 MB）及 `out/marketing/` 中的高清原图。上传仓库 Social preview 是独立操作，生成文件不会修改 GitHub 设置。
+
 保留 `assets/LUCIDE-LICENSE.txt` 与平台图标的许可/声明；品牌图标由 `build/icon-1024.png` 缩小生成。封面和背景来源见 `assets/artwork/README.md`，原始素材不进入发布站点。
 
 ## 验证边界

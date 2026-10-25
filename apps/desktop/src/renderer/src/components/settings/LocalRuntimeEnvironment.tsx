@@ -64,8 +64,8 @@ export default function LocalRuntimeEnvironment({ environment, state, disabled, 
   const completedIds = new Set(active?.plan.items.slice(0, active.completedItems).map(item => item.id))
   const missingDevice = state.acceleration?.policy.mode === 'gpu' && !state.acceleration.devices.some(item => item.id === state.acceleration!.policy.device)
   const gpuDescription = gpu.state === 'disabled' ? '当前使用 CPU，GPU 暂不使用。'
-    : gpu.state === 'unavailable' ? missingDevice ? '指定显卡不可用，请重新选择运行方式。' : '未检测到可用独显，可使用 CPU。'
-      : gpu.state === 'platform' ? gpu.backend === 'metal' ? 'Metal 由系统提供，无需单独安装。' : '当前平台使用基础运行环境。'
+    : gpu.state === 'unavailable' ? missingDevice ? '指定显卡不可用，请重新选择运行方式。' : '未检测到受支持的 GPU，可使用 CPU。'
+      : gpu.state === 'platform' ? gpu.backend === 'metal' ? 'macOS 内置 Metal 加速支持，无需额外安装。实际启用状态见模型验证结果。' : environment.group === 'text' ? '当前文本运行库仅支持 CPU。' : '当前平台未提供此引擎的 GPU 运行库，使用 CPU。'
         : gpu.state === 'unchecked' ? '安装检测组件后继续识别显卡。'
           : [gpu.backend?.toUpperCase(), device?.name].filter(Boolean).join(' · ')
   const groupName = localModelGroupLabel(environment.group)
@@ -103,7 +103,7 @@ export default function LocalRuntimeEnvironment({ environment, state, disabled, 
           const partial = row.installed > 0 || environment.components.some(item => item.enabled !== false && item.hasFiles && (row.id === 'cpu' ? baseIds.has(item.id) : !baseIds.has(item.id)))
             || row.items.some(item => item.action === 'verify' || item.action === 'download' && item.downloadBytes < item.bytes)
           const label = !supported ? '平台不支持' : checking ? '正在检查' : working ? active.phase === 'checking' ? '正在校验' : active.phase === 'installing' ? '正在安装' : '正在下载'
-            : queued ? '等待安装' : installed ? '已安装' : partial ? '部分安装' : row.id === 'gpu' && gpu.state === 'platform' ? '无需安装' : '未安装'
+            : queued ? '等待安装' : installed ? '已安装' : partial ? '部分安装' : row.id === 'gpu' && gpu.state === 'platform' ? gpu.backend === 'metal' ? '无需安装' : '仅 CPU' : '未安装'
           const action = installed ? '检查与修复' : partial ? '继续安装' : row.id === 'cpu' ? '安装运行环境' : '安装 GPU 加速支持'
           const plan = active && active.plan.items.some(item => ids.has(item.id)) ? active.plan : row.plan
           const plannedIds = new Set(plan.items.map(item => item.id))
@@ -131,7 +131,7 @@ export default function LocalRuntimeEnvironment({ environment, state, disabled, 
             </div></td>
             <td className={styles.runtimeCell}><div className={styles.runtimeActions}>{row.available && supported ? <Button size="sm" className={styles.runtimeAction} busy={working && state.downloadKind === 'acceleration'} disabled={disabled || checking}
               aria-label={`${groupName}${row.id === 'gpu' ? ' GPU 加速支持' : '基础运行环境'}：${action}`}
-              onClick={() => void execute({ action: 'prepare-runtime', group: environment.group, target: row.id })}>{action}</Button> : <span className={styles.note}>{!supported ? '不支持安装' : gpu.state === 'disabled' ? '仅 CPU 模式' : gpu.state === 'platform' ? '无需安装' : missingDevice ? '请重新选择显卡' : '暂无可用显卡'}</span>}
+              onClick={() => void execute({ action: 'prepare-runtime', group: environment.group, target: row.id })}>{action}</Button> : <span className={styles.note}>{!supported ? '不支持安装' : gpu.state === 'disabled' ? '仅 CPU 模式' : gpu.state === 'platform' ? gpu.backend === 'metal' ? '无需安装' : '仅 CPU' : missingDevice ? '请重新选择显卡' : '暂无可用显卡'}</span>}
               {removable.length > 0 && <IconButton size="control" tone="danger" icon={<Trash2 {...UI_ICON_SM} />}
                 label={`删除${groupName}${row.name}`} disabled={disabled || checking}
                 onClick={() => requestDelete(`${groupName}${row.name}`, row.id)} />}

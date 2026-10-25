@@ -169,6 +169,7 @@ export interface AppIpcContract {
   [IPC.BACKUP_FILE]: { args: [import('./protocol/backup').DesktopBackupFileRequest]; result: import('./protocol/backup').DesktopBackupFileResult }
   [IPC.DESKTOP_SESSION_GET]: { args: []; result: DesktopSessionSnapshot }
   [IPC.DESKTOP_RECONNECT]: { args: []; result: DesktopSessionSnapshot }
+  [IPC.DESKTOP_POINTER_TIMING]: { args: []; result: import('./desktop/input').PointerTiming }
   [IPC.THIS_COMPUTER_GET]: { args: []; result: ThisComputerSettings }
   [IPC.THIS_COMPUTER_UPDATE]: {
     args: [patch: ThisComputerSettingsPatch]

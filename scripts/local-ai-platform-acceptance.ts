@@ -28,7 +28,7 @@ async function main(): Promise<void> {
     }
     return fetch(input, init)
   }
-  const installer = createAiRuntimeInstaller(root, download, undefined, { bundleRoot: path.resolve('out/ai-runtime') })
+  const installer = createAiRuntimeInstaller(root, download, undefined)
   const report: { status: string; target: typeof target; checks: unknown[]; failure?: string } = { status: 'running', target, checks: [] }
   let inference: ReturnType<typeof createOfflineSubtitleInference> | undefined
   try {

@@ -101,37 +101,30 @@ function sharedEnvironment(installed = (id: string) => id.endsWith('-cpu') || id
   })
 }
 
-test('temporary speech2 keeps Qwen separate from Kotoba and saves its ForcedAligner switch', async () => {
+test('speech models share one section with independent Qwen runtime and ForcedAligner settings', async () => {
   sharedEnvironment()
   const model = family('qwen3-asr', 'Qwen3-ASR 1.7B', 'audio-cpp', 2473010048)
   model.installed = false
   model.variants = [{ ...model.variants[0], id: 'qwen3-asr-q8_0', precision: 'Q8_0', installed: false, ready: false, runtimeReady: false }]
   state.models.push(model)
-  const components = [{ ...runtimeComponentsFixture[0], id: 'audiocpp-cpu', group: 'speech2' as const, name: 'audio.cpp 语音引擎', installed: false }]
-  const plan = runtimePlanFixture('speech2', components)
-  state.environments!.push({ group: 'speech2', supported: true, components, cpuReady: false, gpu: { state: 'missing', backend: 'vulkan' }, preparation: plan, gpuPreparation: plan })
+  const components = [{ ...runtimeComponentsFixture[0], id: 'audiocpp-cpu', group: 'qwen-speech' as const, name: 'audio.cpp 语音引擎', installed: false }]
+  const plan = runtimePlanFixture('qwen-speech', components)
+  state.environments!.push({ group: 'qwen-speech', supported: true, components, cpuReady: false, gpu: { state: 'missing', backend: 'vulkan' }, preparation: plan, gpuPreparation: plan })
   await mount()
   const first = renderer!.root.findAllByType('section').find(node => node.props['aria-label'] === '语音模型')!
-  const second = renderer!.root.findAllByType('section').find(node => node.props['aria-label'] === '语音模型2')!
   assert.ok(renderedText(first).includes('Kotoba'))
-  assert.ok(!renderedText(first).includes('Qwen3-ASR'))
-  assert.ok(renderedText(second).includes('Qwen3-ASR'))
-  assert.ok(!renderedText(second).includes('Kotoba'))
-  assert.equal(first.findAllByType(SettingsSwitchRow).length, 0)
+  assert.ok(renderedText(first).includes('Qwen3-ASR'))
+  await expand('Qwen3-ASR 1.7B')
+  const second = first.findAllByType('article').find(node => node.props['aria-label'] === 'Qwen3-ASR 1.7B 模型文件')!
   const aligner = () => second.findByType(SettingsSwitchRow)
   assert.equal(aligner().props.checked, true)
-  assert.match(aligner().props.description, /时间轴较粗/)
   await act(async () => aligner().props.onChange(false))
   assert.deepEqual(commands[0], { action: 'qwen-forced-aligner', enabled: false, expectedRevision: 'r1' })
   state.qwenForcedAligner = false
   await act(async () => changed({ ...state }))
   assert.equal(aligner().props.checked, false)
   await act(async () => button('安装运行环境', second).props.onClick())
-  assert.deepEqual(commands[1], { action: 'prepare-runtime', group: 'speech2', target: 'cpu' })
-  await act(async () => select('语音模型2筛选').props.onChange({ target: { value: 'installed' } }))
-  assert.equal(second.findAllByType('article').length, 0)
-  assert.equal(first.findAllByType('article').length, 1)
-  assert.equal(select('语音模型筛选').props.value, 'all')
+  assert.deepEqual(commands[1], { action: 'prepare-runtime', group: 'qwen-speech', target: 'cpu' })
   const active = structuredClone(state); active.models.find(item => item.id === 'qwen3-asr')!.inUse = true
   await act(async () => changed(active))
   assert.equal(aligner().props.disabled, true)
@@ -349,7 +342,7 @@ test('local models separate speech and text modalities, keep families compact, a
   assert.equal(text.findAllByType('article').length, 2)
   assert.equal(renderer!.root.findAllByType('table').filter(node => String(node.props['aria-label']).endsWith('精度列表')).length, 2)
   const labels = renderer!.root.findAllByType(Select).map(node => node.props['aria-label'])
-  assert.deepEqual(labels, ['语音模型筛选', '语音模型2筛选', '文本模型筛选', '模型下载来源'])
+  assert.deepEqual(labels, ['语音模型筛选', 'Qwen 语音筛选', '文本模型筛选', '模型下载来源'])
 })
 
 test('precision browsing retains exact publisher identity and downloads never change usage', async () => {
@@ -641,7 +634,7 @@ test('all models and precisions remain visible even when no files are installed'
   assert.equal(renderer!.root.findAllByType('article').length, empty.models.length)
   assert.equal(renderer!.root.findAllByProps({ 'data-variant': 'qwen3-q6_k' }).length, 1)
   assert.equal(renderer!.root.findAllByProps({ 'data-variant': 'qwen3-official-q8_0' }).length, 1)
-  assert.deepEqual(renderer!.root.findAllByType(Select).map(node => node.props['aria-label']), ['语音模型筛选', '语音模型2筛选', '文本模型筛选', '模型下载来源'])
+  assert.deepEqual(renderer!.root.findAllByType(Select).map(node => node.props['aria-label']), ['语音模型筛选', 'Qwen 语音筛选', '文本模型筛选', '模型下载来源'])
 })
 
 test('targeted installation expands and highlights a missing nonrecommended precision, with a return route preserving scope', async () => {
@@ -866,4 +859,30 @@ test('a newer operation failure arriving during successful copy retains the curr
   assert.notEqual(button('错误详情').props.disabled, true)
   assert.equal(renderer!.root.findAllByProps({ role: 'alert' }).length, 1)
   assert.ok(JSON.stringify(renderer!.toJSON()).includes('操作失败，请查看错误详情'))
+})
+
+test('Intel Mac environments distinguish CPU-only text from system Metal speech support', async () => {
+  sharedEnvironment()
+  for (const environment of state.environments!) {
+    environment.gpu = { state: 'platform', backend: environment.group === 'speech' ? 'metal' : undefined }
+    environment.components = environment.components.filter(item => item.backend === 'cpu' || item.backend === 'common')
+  }
+  await mount()
+  const text = renderedText(renderer!.root)
+  assert.ok(text.includes('当前文本运行库仅支持 CPU。'))
+  assert.ok(text.includes('macOS 内置 Metal 加速支持，无需额外安装。实际启用状态见模型验证结果。'))
+  assert.equal(renderer!.root.findAllByType('button').some(node => String(node.props['aria-label']).includes('安装 GPU 加速支持')), false)
+})
+
+test('Metal CPU fallback remains visible without a CUDA or Vulkan device inventory', async () => {
+  sharedEnvironment()
+  state.acceleration!.devices = []
+  state.acceleration!.supported = false
+  for (const environment of state.environments!) environment.gpu = { state: 'platform', backend: 'metal' }
+  const variant = state.models[0].variants[0]
+  variant.validation = { state: 'passed', execution: { backend: 'cpu', reason: 'GPU 显存分配失败，已自动回退 CPU' } }
+  await mount()
+  assert.match(renderedText(row(variant.id)), /CPU 可用 · 显卡未启用/)
+  assert.match(renderedText(row(variant.id)), /显存不足，已验证 CPU/)
+  assert.equal(renderer!.root.findAllByType('button').some(node => renderedText(node) === '修复并验证'), false)
 })

@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
-import { captureAcceptanceFrame, closeAcceptance, recordAcceptanceCleanup, createAcceptanceDirectory, launchAcceptance, nativeEvidence, seedAcceptanceCatalog, waitForState, waitForValue } from './playback-acceptance-support.mjs'
+import { captureAcceptanceFrame, closeAcceptance, recordAcceptanceCleanup, createAcceptanceDirectory, launchAcceptance, nativeEvidence, seedAcceptanceCatalog, waitForState, waitForValue, waitForNativeFrame } from './playback-acceptance-support.mjs'
 import { prepareMediaFixtures } from './playback-media-fixtures.mjs'
-import { checkBitmapSubtitlePixels, checkComplexSubtitlePixels } from './playback-subtitle-checks.mjs'
-import { openPlaybackSettings, closePlaybackSettings, selectPlaybackSetting, playbackSettingLabels } from './playback-settings-ui.mjs'
+import { checkBitmapSubtitlePixels, checkComplexSubtitlePixels, fullscreenSubtitleComposition } from './playback-subtitle-checks.mjs'
+import { openPlaybackSettings, closePlaybackSettings, selectPlaybackSetting, playbackSettingLabels, hideFullscreenControls } from './playback-settings-ui.mjs'
 import { prepareNonRecordingPlayback } from './playback-acceptance-settings.mjs'
 
-assert.ok(['darwin', 'win32'].includes(process.platform), 'this runner accepts macOS and Windows only')
+assert.ok(['darwin', 'win32', 'linux'].includes(process.platform), 'unsupported desktop acceptance host')
 const fixtures = prepareMediaFixtures()
 const directory = createAcceptanceDirectory('media-')
 const targets = seedAcceptanceCatalog(directory, fixtures.media)
@@ -24,7 +24,8 @@ const errors = []
 const frame = (name, options) => captureAcceptanceFrame(application, fixtures.directory, name, options)
 
 try {
-  application = await launchAcceptance(directory, 'media-application.log')
+  const cpu = process.argv.includes('--javdex-cpu')
+  application = await launchAcceptance(directory, 'media-application.log', cpu ? ['--javdex-cpu'] : [])
   const page = await application.firstWindow()
   page.on('pageerror', error => errors.push(error.message))
   await page.waitForFunction(() => window.api?.playback && document.querySelector('nav'))
@@ -34,9 +35,10 @@ try {
     assert.equal(result.ok, true, result.error)
     const state = await waitForState(page, state => state?.phase === 'playing' && state.position > 0.6
       && state.info.videoCodec?.includes(codec), `fixture ${index} did not play`)
-    const native = await nativeEvidence(application)
+    const native = await waitForValue(() => nativeEvidence(application), value => value.alive && value.renderedFrames > 0,
+      `fixture ${index} did not produce a video frame`)
     assert.equal(native.loadedFiles, 1)
-    assert.ok(native.presentedFrames > 0)
+    assert.ok(native.renderedFrames > 0)
     assert.equal(state.recordingProgress, false)
     return state
   }
@@ -66,10 +68,10 @@ try {
   for (const track of audio) {
     await select('音轨', new RegExp(`^${track.title}`))
     await waitForState(page, state => state?.tracks.some(item => item.type === 'audio' && item.id === track.id && item.selected)
-      && state.info.audioOutput === (process.platform === 'win32' ? 'wasapi' : 'coreaudio') && decodedCodec[track.codec].test(state.info.audioCodec ?? ''), `switch ${track.codec}`)
+      && state.info.audioOutput === ({ win32: 'wasapi', darwin: 'coreaudio', linux: 'pulse' }[process.platform]) && decodedCodec[track.codec].test(state.info.audioCodec ?? ''), `switch ${track.codec}`)
     const before = await waitForValue(() => nativeEvidence(application), value => Number.isFinite(value.audioPosition), `${track.codec} audio clock missing`)
     const after = await waitForValue(() => nativeEvidence(application), value => value.audioPosition > before.audioPosition + 0.4
-      && value.presentedFrames > before.presentedFrames, `${track.codec} clock/frames did not advance`)
+      && value.renderedFrames > before.renderedFrames, `${track.codec} clock/frames did not advance`)
     assert.equal(after.commandErrors, 0)
     assert.equal(after.loadedFiles, 1)
     assert.equal((await page.evaluate(() => window.api.playback.snapshot())).sessionId, multi.sessionId)
@@ -93,13 +95,14 @@ try {
   await select('字幕', '关闭字幕')
   await page.evaluate(id => window.api.playback.control(id, { kind: 'seek', seconds: 4 }), multi.sessionId)
   await waitForState(page, state => state.paused && !state.seeking && Math.abs(state.position - 4) < 0.15, 'ASS baseline seek')
+  await waitForNativeFrame(application, page, null)
   await page.waitForTimeout(300)
   await frame('ass-off', { baseline: true })
   await select('字幕', /^Styled/)
   await waitForState(page, state => state.tracks.some(track => track.codec === 'ass' && track.selected), 'ASS selected')
   await page.evaluate(id => window.api.playback.control(id, { kind: 'seek', seconds: 4 }), multi.sessionId)
-  await page.waitForTimeout(300)
-  const assFrame = await frame('ass-on', { compare: true })
+  await waitForNativeFrame(application, page, multi.tracks.find(track => track.codec === 'ass').id)
+  const assFrame = await waitForValue(() => frame('ass-on', { compare: true }), image => image.differentPixels > 200, 'ASS styled pixels', 5000)
   assert.ok(assFrame.differentPixels > 200, 'ASS must render actual styled pixels, not only a selected track')
   await page.getByRole('button', { name: '延后 0.5 秒', exact: true }).click()
   await waitForState(page, state => state.subtitleDelay === 0.5 && state.paused, 'ASS delay')
@@ -108,26 +111,28 @@ try {
   await page.getByRole('button', { name: '全屏', exact: true }).click()
   await waitForState(page, state => state.presentation === 'fullscreen' && state.paused, 'ASS fullscreen')
   await page.waitForTimeout(1500)
-  // An options pane changes geometry, so take a fresh baseline in native fullscreen.
   const sid = multi.tracks.find(track => track.codec === 'ass').id
-  await page.evaluate(id => window.api.playback.control(id, { kind: 'track', type: 'sub', id: null }), multi.sessionId)
-  await waitForState(page, state => !state.tracks.some(track => track.type === 'sub' && track.selected), 'fullscreen ASS off')
-  await page.waitForTimeout(300)
-  await frame('ass-fullscreen-off', { baseline: true })
-  await page.evaluate(({ id, sid }) => window.api.playback.control(id, { kind: 'track', type: 'sub', id: sid }), { id: multi.sessionId, sid })
-  await waitForState(page, state => state.tracks.some(track => track.type === 'sub' && track.selected), 'fullscreen ASS on')
-  await page.waitForTimeout(300)
-  const assFullscreen = await frame('ass-fullscreen-on', { compare: true })
-  assert.ok(assFullscreen.differentPixels > 200)
-  assert.ok(Number.isFinite(assFullscreen.controlsTop))
-  assert.ok(assFullscreen.bottom < assFullscreen.controlsTop, 'ASS cannot overlap native fullscreen controls')
+  const assFullscreen = await fullscreenSubtitleComposition(application, page, fixtures.directory, 'ass', async () => {
+    await page.evaluate(id => window.api.playback.control(id, { kind: 'track', type: 'sub', id: null }), multi.sessionId)
+    await waitForState(page, state => !state.tracks.some(track => track.type === 'sub' && track.selected), 'fullscreen ASS off')
+    await waitForNativeFrame(application, page, null)
+    await page.waitForTimeout(300)
+    await frame('ass-fullscreen-off', { baseline: true })
+    await page.evaluate(({ id, sid }) => window.api.playback.control(id, { kind: 'track', type: 'sub', id: sid }), { id: multi.sessionId, sid })
+    await waitForState(page, state => state.tracks.some(track => track.type === 'sub' && track.selected), 'fullscreen ASS on')
+    await waitForNativeFrame(application, page, sid)
+    const captured = await waitForValue(() => frame('ass-fullscreen-on', { compare: true }),
+      image => image.differentPixels > 200, 'fullscreen ASS styled pixels', 5000)
+    return captured
+  })
   report.checks.push({ name: 'ASS styled pixels, disabled size, delay and fullscreen clearance', expanded: assFrame, fullscreen: assFullscreen })
   await page.evaluate(id => window.api.playback.control(id, { kind: 'presentation', value: 'expanded' }), multi.sessionId)
   await page.waitForTimeout(1500)
   await stop()
 
   const hevc = await open(1, 'HEVC')
-  if (process.platform === 'darwin') assert.equal(hevc.info.hardwareDecoder, 'videotoolbox', 'Main10 hardware decode must be observed, not inferred from hwdec=auto')
+  if (cpu) { assert.equal(hevc.info.playbackMode, 'cpu'); assert.equal(hevc.info.hardwareDecoder, 'no') }
+  else if (process.platform === 'darwin') assert.equal(hevc.info.hardwareDecoder, 'videotoolbox', 'Main10 hardware decode must be observed, not inferred from hwdec=auto')
   assert.deepEqual([hevc.info.width, hevc.info.height], [640, 360])
   const hevcFrame = await frame('hevc-main10')
   assert.ok(hevcFrame.visiblePixels > hevcFrame.width * hevcFrame.height * 0.2)
@@ -173,6 +178,7 @@ try {
     await page.getByRole('button', { name: '暂停', exact: true }).click()
     await waitForState(page, state => state.paused, 'pause aspect fixture')
     const measure = async presentation => {
+      if (presentation === 'fullscreen') await hideFullscreenControls(page)
       const viewport = await page.evaluate(() => {
         const video = document.querySelector('[data-playback-session] button[aria-label="视频画面，单击播放或暂停，双击全屏"], [data-playback-session] button[aria-label="恢复展开播放器"]')
         const bounds = video.getBoundingClientRect()
@@ -185,7 +191,7 @@ try {
           || presentation !== 'fullscreen' && Math.abs(image.height - viewport.height) > 2) return false
         // The native view already reserves the fullscreen controls outside its
         // render surface; controlsTop can therefore be below the captured image.
-        const height = Math.min(image.controlsTop ?? image.height, image.height)
+        const height = image.rendererFullscreen ? image.height : Math.min(image.controlsTop ?? image.height, image.height)
         const width = Math.min(image.width, height * ratio), expectedHeight = Math.min(height, image.width / ratio)
         return Math.abs(bounds.width - width) <= 4 && Math.abs(bounds.height - expectedHeight) <= 4
           && Math.abs(bounds.x - (image.width - bounds.width) / 2) <= 3
@@ -250,6 +256,10 @@ try {
 } catch (error) {
   report.status = 'failed'
   report.failure = error.stack ?? String(error)
+  if (application) report.failureState = await application.evaluate(async ({ BrowserWindow }) => {
+    const window = BrowserWindow.getAllWindows()[0]
+    return window ? window.webContents.executeJavaScript('window.api.playback.snapshot()') : null
+  }).catch(failure => ({ observationError: failure.message }))
   save()
   throw error
 } finally {

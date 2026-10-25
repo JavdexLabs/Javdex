@@ -1,3 +1,4 @@
+import pins from './runtimeDistributions.json'
 import type { AiRuntimeAsset, AiRuntimeTarget } from './runtimeManifest'
 
 // audio.cpp-native standalone GGUFs include the tokenizer/processor sidecars.
@@ -13,10 +14,10 @@ export const QWEN_ALIGNER: AiRuntimeAsset = {
 }
 export function audioCppAsset(target: AiRuntimeTarget, gpu = false): AiRuntimeAsset[] {
   if (!qwenAsrSupported(target)) return []
-  const filename = `audio-${AUDIOCPP_VERSION}-bin-windows-x64-${gpu ? 'vulkan' : 'cpu'}.zip`
-  return [{ id: 'audiocpp', label: `audio.cpp 语音引擎 · ${gpu ? 'Vulkan' : 'CPU'}`, filename, archive: true,
-    bytes: gpu ? 63369491 : 28876613,
-    sha256: gpu ? '7d002f9989357ff4196c275d06d10932b7683d0a485c37b39e0b7a69c7eb42f6' : 'cc34162b028d2b948d174259d58f63a1caf42fd45884bfb32fb632bdc062dd86',
-    url: `https://github.com/0xShug0/audio.cpp/releases/download/${AUDIOCPP_VERSION}/${filename}`,
-    ...(gpu ? { backend: 'vulkan' as const } : {}) }]
+  return pins.optionalAssets.filter(asset => asset.id === 'audiocpp' && asset.target === `${target.platform}-${target.arch}`
+    && asset.backend === (gpu ? 'vulkan' : 'cpu')).map(asset => ({
+    id: 'audiocpp', label: `audio.cpp 语音引擎 · ${gpu ? 'Vulkan' : 'CPU'}`, filename: asset.name,
+    archive: true, bytes: asset.bytes, sha256: asset.sha256, url: asset.url,
+    ...(gpu ? { backend: 'vulkan' as const } : {})
+  }))
 }

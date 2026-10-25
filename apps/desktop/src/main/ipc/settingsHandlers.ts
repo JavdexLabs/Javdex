@@ -3,6 +3,7 @@ import { webAccess } from '../web/webAccess'
 import { clipboard, dialog, shell } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
+import { localModelGroup, localModelGroupLabel } from '@shared/desktop/localModels'
 import { IPC } from '@shared/ipc-channels'
 import type { AppSettings, SettingsSnapshot } from '@shared/settingsTypes'
 import type { AssetCryptoProgress, LibraryOverviewStats } from '@shared/libraryTypes'
@@ -310,7 +311,7 @@ export function registerSettingsHandlers(ctx: IpcContext, backend: CatalogBacken
       const snapshot = await models.snapshot()
       const model = snapshot.models.find(item => item.id === command.model)!
       const variant = model.variants.find(item => item.id === (command.variant ?? model.selectedVariant))!
-      if (snapshot.supported && !variant.runtimeReady) throw new Error(`请先安装${command.model === 'kotoba' ? '语音' : '文本'}模型的基础运行环境；GPU 加速支持可选`)
+      if (snapshot.supported && variant.readiness !== 'unsupported' && !variant.runtimeReady) throw new Error(`请先安装${localModelGroupLabel(localModelGroup(command.model))}模型的基础运行环境；GPU 加速支持可选`)
       const options = { title: `导入 ${model.name} · ${variant.precision} · ${variant.publisher}`,
         properties: ['openFile'] as Array<'openFile'>,
         filters: [{ name: '模型文件', extensions: variant.format === 'GGUF' ? ['gguf'] : ['bin'] }, { name: '所有文件', extensions: ['*'] }] }

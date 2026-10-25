@@ -27,6 +27,19 @@ afterEach(() => {
 })
 
 describe('desktop session IPC', () => {
+  it('exposes bounded local pointer timing without accepting query arguments', async () => {
+    tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-pointer-timing-'))
+    const settings = createThisComputerSettingsStore(thisComputerSettingsPath(tempRoot))
+    const backend = createUnconfiguredRemoteBackend()
+    const handlers = new Map<IpcChannel, (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown>()
+    const adapter = createTypedIpcAdapter<AppIpcContract>(appIpcSchemas, (channel, handler) => handlers.set(channel, handler))
+    registerDesktopSessionHandlers({ getWindow: () => null }, { backend, settings }, adapter)
+    const read = handlers.get(IPC.DESKTOP_POINTER_TIMING)!
+    const result = await read({} as IpcMainInvokeEvent) as { doubleClickMs: number; source: string }
+    assert.ok(result.doubleClickMs > 0 && result.doubleClickMs <= 5000)
+    assert.ok(['chromium', 'system', 'fallback'].includes(result.source))
+    await assert.rejects(async () => read({} as IpcMainInvokeEvent, 'untrusted command'), (error: unknown) => isStructuredError(error) && error.code === 'INVALID_INPUT')
+  })
   it('requires a nonblank program path when saving external playback and permits unrelated legacy updates', async () => {
     tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-player-required-'))
     const settings = createThisComputerSettingsStore(thisComputerSettingsPath(tempRoot))

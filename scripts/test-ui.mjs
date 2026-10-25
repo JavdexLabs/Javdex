@@ -161,10 +161,12 @@ try {
   await playbackOptions.click()
   await page.getByRole('tab', { name: '字幕', exact: true }).click()
   const subtitle = page.getByRole('button', { name: '选择本机外挂字幕', exact: true })
+  const beforeToastViewports = await page.evaluate(() => window.fixtureViewports.length)
   await subtitle.click()
   const toast = page.locator('[data-interaction-preserve-surface]')
   await toast.waitFor()
-  await page.waitForFunction(() => window.fixtureViewports.at(-1)?.visible === false)
+  assert.equal(await page.evaluate(before => window.fixtureViewports.slice(before).some(value => !value.visible), beforeToastViewports), false,
+    'HTML feedback must not hide Canvas video production')
   assert.equal(await subtitle.evaluate(element => document.activeElement === element), true, 'toast arrival does not steal focus')
   assert.equal(await toast.evaluate(element => element.closest('[inert]') == null), true, 'toast remains interactive above expanded playback')
   assert.equal(await page.locator('#fixture-background').evaluate(element => element.closest('[inert]') != null), true, 'ordinary background stays inert')

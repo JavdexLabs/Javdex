@@ -1,132 +1,26 @@
-import { app, screen, type BrowserWindow } from 'electron'
-import fs from 'node:fs'
-import path from 'node:path'
-import { createRequire } from 'node:module'
-import { setTimeout as delay } from 'node:timers/promises'
-import type { PlaybackAvailability, PlaybackControl, PlaybackOcclusion, PlaybackSnapshot } from '@shared/desktop/playback'
-import type { NativePlayback, NativePlaybackState } from './nativePlayback'
+import { screen, type BrowserWindow } from 'electron'
+import type { PlaybackControl } from '@shared/desktop/playback'
+import type { NativePlayback } from './nativePlayback'
 import { linuxPlaybackBackend } from './playbackDisplay'
-import { createLinuxPlaybackBridge } from './linuxPlaybackBridge'
+import { createPlaybackHostBridge, type PlaybackHostBridge } from './playbackHostFactory'
+import { createGeneratedSubtitleDisplay } from './generatedSubtitleDisplay'
+export { builtinPlaybackAvailability } from './playbackHostFactory'
 
-interface Bridge {
-  create(handle: Buffer, bounds: { x: number; y: number; width: number; height: number; scale?: number }, host?: { backend: 'x11' }): void
-  setBounds(bounds: { x: number; y: number; width: number; height: number; scale?: number }): void
-  setVisible(visible: boolean): void
-  setPresentation(presentation: string): void
-  setRendererControls?(enabled: boolean): void
-  setOcclusions?(rects: PlaybackOcclusion[]): void
-  command(args: string[], generatedSubtitle?: boolean): void
-  generatedSubtitles?(operation: 'update' | 'visible' | 'clear', document: string, visible: boolean, revision: number): void
-  render(): void
-  state(): NativePlaybackState
-  inspect(): NativePlaybackState
-  destroy(): void
-}
-function runtimePath(): string {
-  const filename = process.platform === 'linux' ? 'playback-helper' : 'playback.node'
-  return app.isPackaged ? path.join(process.resourcesPath, 'native-playback', filename)
-    : path.join(app.getAppPath(), 'out', 'native-playback', filename)
-}
-export function builtinPlaybackAvailability(): PlaybackAvailability {
-  if (!['darwin', 'win32', 'linux'].includes(process.platform)) return { available: false, reason: '此平台的原生播放适配尚未实现，请显式使用外部播放器' }
-  if (process.platform === 'linux' && linuxPlaybackBackend() !== 'x11') return { available: false, reason: 'Linux 内置播放首版需要 X11／XWayland；请退出后以 --javdex-x11 启动，或显式使用外部播放器' }
-  if (process.platform === 'linux' && !process.env.DISPLAY) return { available: false, reason: '未提供 X11 显示（DISPLAY）；请启用 X11／XWayland，或显式使用外部播放器' }
-  return fs.existsSync(runtimePath()) ? { available: true, reason: null }
-    : { available: false, reason: app.isPackaged
-      ? '安装包缺少内置播放运行库，请使用包含播放运行库的安装包。'
-      : '未安装内置播放运行库；开发构建可运行 npm run playback:native:build' }
-}
-export function createLibmpvPlayback(getWindow: () => BrowserWindow | null): NativePlayback {
-  const generatedId = Number.MAX_SAFE_INTEGER
-  let bridge: Bridge | null = null
+export function createLibmpvPlayback(getWindow: () => BrowserWindow | null, backend = linuxPlaybackBackend()): NativePlayback {
+  let bridge: PlaybackHostBridge | null = null
   let alive = false
-  let generation = 0
-  let generatedRepliesExpected = 0
-  let subtitleSelectionRevision = 0
-  let overlayRevision = 0
-  let generated: { file: string; visible: boolean; ownsSelection: boolean } | null = null
-  const command = (args: string[], generatedSubtitle = false): void => {
-    if (!alive || !bridge) throw new Error('播放内核未启动')
-    const state = bridge.inspect()
-    bridge.command(args, generatedSubtitle)
-    if (generatedSubtitle && (['sub-add', 'sub-reload', 'sub-remove'].includes(args[0])
-      || args[0] === 'set' && ['sid', 'sub-delay', 'sub-font-size'].includes(args[1]))) {
-      // Linux sends through a pipe: its last snapshot may predate this command.
-      generatedRepliesExpected = Math.max(generatedRepliesExpected, (state.generatedSubtitleCommandReplies ?? 0) + (state.generatedSubtitleCommandsPending ?? 0)) + 1
-    }
-  }
-  const nativeTracks = (state = bridge?.inspect()): Array<Record<string, unknown>> => {
-    try {
-      const value: unknown = JSON.parse(state?.['track-list'] ?? '[]')
-      if (!Array.isArray(value)) return []
-      const tracks = value.filter(item => item && typeof item === 'object').map((track: Record<string, unknown>) => {
-        const selection = track.type === 'sub' ? state?.sid : track.type === 'audio' ? state?.aid : undefined
-        // track-list observations can retain old selected flags after a sid/aid change.
-        return selection === 'no' || /^\d+$/.test(selection ?? '') ? { ...track, selected: String(track.id) === selection } : track
-      })
-      if (generated) tracks.push({ id: generatedId, type: 'sub', selected: generated.visible && state?.sid === 'no',
-        title: 'AI 日中字幕', codec: 'ass', 'external-filename': generated.file })
-      return tracks
-    } catch { return [] }
-  }
-  const matchesGenerated = (file: string): boolean => {
-    const normalize = (filename: string): string => process.platform === 'win32' ? path.resolve(filename).toLowerCase() : path.resolve(filename)
-    return generated !== null && normalize(generated.file) === normalize(file)
-  }
-  const overlay = (operation: 'update' | 'visible' | 'clear', document = '', visible = false): number => {
-    if (!alive || !bridge?.generatedSubtitles || bridge.inspect().generatedSubtitleOverlayVersion !== 1)
-      throw new Error('播放运行库需更新，请重新构建播放运行库并重启应用')
-    const revision = ++overlayRevision
-    bridge.generatedSubtitles(operation, document, visible, revision)
-    return revision
-  }
-  const showGenerated = (visible: boolean): void => {
-    if (!generated || generated.visible === visible) return
-    generated.visible = visible
-    overlay('visible', '', visible)
-  }
-  async function subtitleIdle(epoch: number): Promise<void> {
-    const deadline = Date.now() + 5000
-    for (;;) {
-      if (!alive || !bridge || generation !== epoch) throw new Error('播放会话已结束')
-      const state = bridge.inspect()
-      if ((state.generatedSubtitleCommandsPending == null || state.generatedSubtitleCommandErrors == null) && process.platform !== 'linux') throw new Error('播放运行库需更新，请重新构建播放运行库并重启应用')
-      if (state.generatedSubtitleCommandsPending === 0 && (state.generatedSubtitleCommandReplies ?? -1) >= generatedRepliesExpected) return
-      if (Date.now() >= deadline) throw new Error('等待播放器更新字幕超时')
-      // The platform render loop drains replies; Linux delivers them in snapshots.
-      await delay(20)
-    }
-  }
-  async function subtitleState(epoch: number, matches: () => boolean): Promise<void> {
-    const deadline = Date.now() + 5000
-    for (;;) {
-      if (!alive || generation !== epoch) throw new Error('播放会话已结束')
-      if (matches()) return
-      if (Date.now() >= deadline) throw new Error('等待播放器字幕轨道状态超时')
-      // Command replies may arrive before the corresponding property observation.
-      await delay(20)
-    }
-  }
+  const subtitles = createGeneratedSubtitleDisplay()
+  const command = subtitles.command
+
   return {
+    renderPolling: false,
     create(): void {
-      const availability = builtinPlaybackAvailability()
-      if (!availability.available) throw new Error(availability.reason ?? '内置播放不可用')
-      const window = getWindow()
-      if (!window || window.isDestroyed()) throw new Error('主窗口不可用')
-      if (!bridge) bridge = process.platform === 'linux' ? createLinuxPlaybackBridge(runtimePath())
-        : createRequire(path.join(app.getAppPath(), 'package.json'))(runtimePath()) as Bridge
-      if (process.platform === 'linux') {
-        bridge.create(window.getNativeWindowHandle(), { x: 0, y: 0, width: 1, height: 1,
-          scale: screen.getDisplayMatching(window.getBounds()).scaleFactor }, { backend: 'x11' })
-      } else bridge.create(window.getNativeWindowHandle(), { x: 0, y: 0, width: 1, height: 1 })
-      if (['win32', 'linux'].includes(process.platform)) bridge.setRendererControls?.(true)
-      generatedRepliesExpected = 0
-      overlayRevision = 0; generated = null
+      bridge = createPlaybackHostBridge(getWindow, backend)
+      subtitles.bind(bridge)
       alive = true
     },
     load(locator, options): void {
-      generation++
-      generated = null
+      subtitles.loaded()
       command(['set', 'pause', 'yes'])
       command(['set', 'speed', '1'])
       command(['loadfile', locator, 'replace'])
@@ -138,97 +32,30 @@ export function createLibmpvPlayback(getWindow: () => BrowserWindow | null): Nat
       else if (control.kind === 'volume') command(['set', 'volume', String(control.value)])
       else if (control.kind === 'mute') command(['set', 'mute', control.muted ? 'yes' : 'no'])
       else if (control.kind === 'speed') command(['set', 'speed', String(control.value)])
-      else if (control.kind === 'track') {
-        if (control.type === 'sub') {
-          subtitleSelectionRevision++
-          if (control.id === generatedId && generated) {
-            generated.ownsSelection = true
-            command(['set', 'sid', 'no']); showGenerated(true)
-          } else { if (generated) generated.ownsSelection = false; showGenerated(false); command(['set', 'sid', control.id === null ? 'no' : String(control.id)]) }
-        } else command(['set', 'aid', control.id === null ? 'no' : String(control.id)])
-      }
+      else if (control.kind === 'track') subtitles.selectTrack(control.type, control.id)
       else if (control.kind === 'subtitle-delay') command(['set', 'sub-delay', String(control.seconds)])
       else if (control.kind === 'subtitle-size') command(['set', 'sub-font-size', String(control.value)])
       else throw new Error('此控制应由播放会话处理')
     },
     read: () => {
       const value = bridge && alive ? bridge.state() : { alive: false }
-      if (value['track-list'] || generated) value['track-list'] = JSON.stringify(nativeTracks(value))
-      const zoom = getWindow()?.webContents.getZoomFactor() ?? 1
-      return value.fullscreenPointerY == null ? value : { ...value, fullscreenPointerY: value.fullscreenPointerY / zoom }
+      return subtitles.decorate(value)
     },
-    viewport(rect, visible, state: PlaybackSnapshot, occlusions = []): void {
+    viewport(rect, visible): void {
       if (!alive || !bridge) return
       const window = getWindow()
       if (!window || window.isDestroyed()) return
-      // Synchronous geometry changes need no hide/show cycle. Hiding a focused
-      // NSView hands first responder back to Chromium on every fullscreen resize.
+      // Resize the current surface without a hide/show cycle or a new session.
       if (!visible) bridge.setVisible(false)
       const zoom = window.webContents.getZoomFactor()
       bridge.setBounds({ x: rect.x * zoom, y: rect.y * zoom, width: rect.width * zoom, height: rect.height * zoom,
         // Chromium's effective scale can include Windows accessibility text
         // scaling, which GetDpiForWindow alone does not include.
-        ...(['linux', 'win32'].includes(process.platform) ? { scale: screen.getDisplayMatching(window.getBounds()).scaleFactor } : {}) })
-      bridge.setOcclusions?.(occlusions.map(area => ({ x: area.x * zoom, y: area.y * zoom, width: area.width * zoom, height: area.height * zoom,
-        ...(area.radii ? { radii: area.radii.map(radius => radius * zoom) as PlaybackOcclusion['radii'] } : {}) })))
-      bridge.setPresentation(state.presentation)
+        scale: screen.getDisplayMatching(window.getBounds()).scaleFactor })
       if (visible) bridge.setVisible(true)
     },
     render(): void { if (alive) bridge?.render() },
-    addSubtitle(file): void { subtitleSelectionRevision++; if (generated) generated.ownsSelection = false; showGenerated(false); command(['sub-add', file, 'select']) },
-    async updateGeneratedSubtitle(file, select, signal, document): Promise<void> {
-      const epoch = generation
-      const selection = subtitleSelectionRevision
-      await subtitleIdle(epoch)
-      signal?.throwIfAborted()
-      const errors = bridge?.inspect().generatedSubtitleCommandErrors ?? 0
-      if (typeof document !== 'string') throw new Error('缺少生成的字幕时间轴')
-      if (!bridge?.generatedSubtitles || bridge.inspect().generatedSubtitleOverlayVersion !== 1)
-        throw new Error('播放运行库需更新，请重新构建播放运行库并重启应用')
-      if (!matchesGenerated(file)) generated = { file, visible: false, ownsSelection: false }
-      const owner = generated!
-      if (select && selection === subtitleSelectionRevision) {
-        command(['set', 'sid', 'no'], true)
-        owner.ownsSelection = true
-        await subtitleIdle(epoch)
-        await subtitleState(epoch, () => signal?.aborted === true || selection !== subtitleSelectionRevision || bridge?.inspect().sid === 'no')
-        signal?.throwIfAborted()
-        if (selection === subtitleSelectionRevision && generated === owner) owner.visible = true
-      }
-      if (!alive || generation !== epoch) throw new Error('播放会话已结束')
-      if (generated !== owner) return
-      const revision = overlay('update', document, owner.visible)
-      await subtitleState(epoch, () => (bridge?.inspect().generatedSubtitleRevision ?? 0) >= revision)
-      await subtitleIdle(epoch)
-      signal?.throwIfAborted()
-      if ((bridge?.inspect().generatedSubtitleCommandErrors ?? 0) > errors) throw new Error('播放器未能更新 AI 字幕显示')
-    },
-    async removeGeneratedSubtitle(file, restoreId): Promise<void> {
-      const epoch = generation, selection = subtitleSelectionRevision
-      await subtitleIdle(epoch)
-      const errors = bridge?.inspect().generatedSubtitleCommandErrors ?? 0
-      if (!matchesGenerated(file)) return
-      // Ownership records the command intent, even if a sid observation is late
-      // or startup was cancelled between its reply and the property event.
-      const selected = generated!.ownsSelection
-      generated = null
-      const revision = overlay('clear')
-      await subtitleState(epoch, () => (bridge?.inspect().generatedSubtitleRevision ?? 0) >= revision)
-      await subtitleIdle(epoch)
-      if ((bridge?.inspect().generatedSubtitleCommandErrors ?? 0) > errors) throw new Error('播放器未能移除生成的字幕')
-      if (selected && selection === subtitleSelectionRevision) {
-        command(['set', 'sid', restoreId !== null && nativeTracks().some(item => item.type === 'sub' && item.id === restoreId) ? String(restoreId) : 'no'], true)
-        await subtitleIdle(epoch)
-      }
-    },
-    generatedSubtitleSelected: file => matchesGenerated(file) && generated!.visible && bridge?.inspect().sid === 'no',
-    subtitleCommandErrors: () => bridge?.inspect().subtitleCommandErrors ?? 0,
-    generatedSubtitleCommandErrors: () => bridge?.inspect().generatedSubtitleCommandErrors ?? 0,
-    selectedAudioStream(): number | null {
-      const track = nativeTracks().find(track => track.type === 'audio' && track.selected === true)
-      const index = track?.['ff-index']
-      return track && !track.external && typeof index === 'number' && Number.isInteger(index) && index >= 0 ? index : null
-    },
-    destroy(): void { generation++; generated = null; bridge?.destroy(); alive = false }
+    ...subtitles.display,
+    destroy(): void { subtitles.destroy(); bridge?.destroy(); alive = false }
   }
 }

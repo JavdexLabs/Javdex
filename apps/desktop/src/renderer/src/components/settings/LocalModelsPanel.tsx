@@ -58,7 +58,7 @@ function VariantActions({ model, variant, state, busy, execute, requestDelete, r
   function checkEnvironment(): boolean {
     const group = localModelGroup(model.id)
     const baseReady = state.environments?.find(item => item.group === group)?.cpuReady ?? variant.runtimeReady ?? true
-    if (state.supported && !baseReady) { requestEnvironment(group); return false }
+    if (state.supported && variant.readiness !== 'unsupported' && !baseReady) { requestEnvironment(group); return false }
     return true
   }
   function download(): void {
@@ -120,8 +120,8 @@ function VariantActions({ model, variant, state, busy, execute, requestDelete, r
   </div>
 }
 
-function ModelFamily({ model, state, busy, execute, requestDelete, requestDetails, requestEnvironment, requestUsage, failure, requestError, expanded, onToggle, targetVariant, filter }: ModelProps & {
-  expanded: boolean; onToggle: () => void; targetVariant?: string | null; filter: string
+function ModelFamily({ model, state, busy, execute, requestDelete, requestDetails, requestEnvironment, requestUsage, failure, requestError, expanded, onToggle, targetVariant, filter, requestFiles }: ModelProps & {
+  expanded: boolean; onToggle: () => void; targetVariant?: string | null; filter: string; requestFiles: (variant?: string) => void
 }): JSX.Element {
   const tableId = useId()
   const targetRef = useRef<HTMLTableRowElement>(null)
@@ -138,7 +138,16 @@ function ModelFamily({ model, state, busy, execute, requestDelete, requestDetail
       <span className={styles.familySummary}>{model.purpose} · {model.variants.length} 个精度 · 已下载 {model.variants.filter(variant => variant.installed).length}
         {model.variants.some(variant => variant.hasFiles && !variant.installed) && ` · 未完成 ${model.variants.filter(variant => variant.hasFiles && !variant.installed).length}`}</span>
     </Button>
-    {expanded && <div className={styles.tableScroll} id={tableId} role="region" aria-label={`${model.name} 精度表格，可横向滚动`} tabIndex={0}>
+    {expanded && <>
+      {model.id === 'qwen3-asr' && <SettingsSwitchRow title="ForcedAligner 时间轴对齐"
+        description="默认开启逐词对齐。关闭后整段文字会显示在最长 30 秒的片段内，无法逐句跟随对白。立即保存，对新任务生效，已有对齐模型文件保留。"
+        checked={state.qwenForcedAligner !== false} disabled={busy || state.operation !== null || model.inUse || state.checkingDependencies}
+        onChange={enabled => void execute({ action: 'qwen-forced-aligner', enabled, expectedRevision: state.revision })} />}
+      {state.environments?.find(environment => environment.group === localModelGroup(model.id)) && isSpeechModel(model.id) && <LocalRuntimeEnvironment
+        environment={state.environments.find(environment => environment.group === localModelGroup(model.id))!} state={state}
+        disabled={busy || state.operation !== null || state.models.some(item => item.inUse)} execute={execute}
+        failure={failure} requestError={requestError} requestFiles={requestFiles} />}
+      <div className={styles.tableScroll} id={tableId} role="region" aria-label={`${model.name} 精度表格，可横向滚动`} tabIndex={0}>
       <table className={styles.table} aria-label={`${model.name} 精度列表`}>
         <colgroup><col className={styles.precisionColumn} /><col className={styles.fileColumn} /><col className={styles.purposeColumn} />
           <col className={styles.validationColumn} /><col className={styles.actionColumn} /></colgroup>
@@ -169,7 +178,7 @@ function ModelFamily({ model, state, busy, execute, requestDelete, requestDetail
           </td></tr>}
         </Fragment>)}</tbody>
       </table>
-    </div>}
+    </div></>}
   </article>
 }
 
@@ -181,7 +190,7 @@ export default function LocalModelsPanel(): JSX.Element {
   const targetModel = query.get('model') as LocalModelId | null
   const targetVariant = query.get('variant')
   const [expanded, setExpanded] = useState<Partial<Record<LocalModelId, boolean>>>({})
-  const [filters, setFilters] = useState({ speech: 'all', speech2: 'all', text: 'all' })
+  const [filters, setFilters] = useState({ speech: 'all', text: 'all' })
   const [showError, setShowError] = useState(false)
   const [inspecting, setInspecting] = useState<{ model: LocalModelId; variant: string } | null>(null)
   const [deleting, setDeleting] = useState<{ model: LocalModelView; variant: LocalModelVariantView } | null>(null)
@@ -193,7 +202,7 @@ export default function LocalModelsPanel(): JSX.Element {
   useEffect(() => {
     if (!targetModel) return
     setExpanded(value => ({ ...value, [targetModel]: true }))
-    setFilters(value => ({ ...value, [localModelGroup(targetModel)]: 'all' }))
+    setFilters(value => ({ ...value, [isSpeechModel(targetModel) ? 'speech' : 'text']: 'all' }))
   }, [targetModel, targetVariant])
   if (!state) return <p role="status">{error || '正在读取本地模型…'}</p>
   const working = busy || state.operation !== null
@@ -209,7 +218,7 @@ export default function LocalModelsPanel(): JSX.Element {
   function locateFiles(group: LocalModelGroup, variant?: string): void {
     const model = state!.models.find(item => item.variants.some(entry => entry.id === variant))
       ?? state!.models.find(item => localModelGroup(item.id) === group && item.variants.some(entry => entry.hasFiles || entry.installed))
-    setFilters(value => ({ ...value, [group]: 'all' }))
+    setFilters(value => ({ ...value, [group === 'qwen-speech' ? 'speech' : group]: 'all' }))
     setExpanded(value => ({ ...value, ...Object.fromEntries(state!.models.filter(item => localModelGroup(item.id) === group).map(item => [item.id, true])) }))
     if (model) {
       const next = new URLSearchParams(location.search)
@@ -222,31 +231,26 @@ export default function LocalModelsPanel(): JSX.Element {
   const inspected = inspectedModel?.variants.find(variant => variant.id === inspecting?.variant)
   return <div className={styles.root}>
     <LocalAccelerationPanel state={state} disabled={working || anyInUse} execute={execute} failure={failure} requestError={() => setShowError(true)} />
-    {([{ id: 'speech', title: '语音模型', icon: <AudioLines {...UI_ICON_SM} />, models: state.models.filter(model => localModelGroup(model.id) === 'speech') },
-      { id: 'speech2', title: '语音模型2', icon: <AudioLines {...UI_ICON_SM} />, models: state.models.filter(model => localModelGroup(model.id) === 'speech2') },
+    {([{ id: 'speech', title: '语音模型', icon: <AudioLines {...UI_ICON_SM} />, models: state.models.filter(model => isSpeechModel(model.id)) },
       { id: 'text', title: '文本模型', icon: <TextCursorInput {...UI_ICON_SM} />, models: state.models.filter(model => localModelGroup(model.id) === 'text') }] as const).map(group => {
       const models = [...group.models].filter(model => matchesFilter(model, filters[group.id]))
         .sort((a, b) => Number(b.variants.some(variant => variant.references.length)) - Number(a.variants.some(variant => variant.references.length)))
       return <SettingsCard as="section" key={group.id} aria-label={group.title} title={<span className={styles.title}>{group.icon}{group.title}</span>}
-        hint={group.id === 'speech2' ? '临时用于 Qwen3-ASR 与 ForcedAligner；环境、文件和用途分别管理。' : '管理模型文件、精度与运行状态；用途在“功能”中配置。'} actions={<>
+        hint="管理模型文件、精度与运行状态；用途在“功能”中配置。" actions={<>
           <SelectControl aria-label={`${group.title}筛选`} value={filters[group.id]}
             onChange={event => setFilters(value => ({ ...value, [group.id]: event.target.value }))}>
             <option value="all">全部精度</option><option value="selected">当前选用</option><option value="installed">已下载</option><option value="partial">未完成下载</option>
           </SelectControl>
           {targetModel && group.models.some(model => model.id === targetModel) && <Button size="sm" onClick={returnToUsage}>返回用途配置</Button>}
         </>}>
-        {group.id === 'speech2' && <SettingsSwitchRow title="ForcedAligner 时间轴对齐"
-          description="开启后使用 ForcedAligner 0.6B 对齐时间轴；关闭后仅按识别片段显示字幕，时间轴较粗。立即保存，对新任务生效，已有对齐模型文件保留。"
-          checked={state.qwenForcedAligner !== false} disabled={working || anyInUse || state.checkingDependencies}
-          onChange={enabled => void execute({ action: 'qwen-forced-aligner', enabled, expectedRevision: state.revision })} />}
-        {state.environments?.find(environment => environment.group === group.id) && <LocalRuntimeEnvironment
-          environment={state.environments.find(environment => environment.group === group.id)!} state={state} disabled={working || anyInUse} execute={execute}
-          failure={failure} requestError={() => setShowError(true)} requestFiles={variant => locateFiles(group.id, variant)} />}
+        {group.id === 'text' && state.environments?.find(environment => environment.group === 'text') && <LocalRuntimeEnvironment
+          environment={state.environments.find(environment => environment.group === 'text')!} state={state} disabled={working || anyInUse} execute={execute}
+          failure={failure} requestError={() => setShowError(true)} requestFiles={variant => locateFiles('text', variant)} />}
         {models.length ? models.map(model => <ModelFamily key={model.id} {...{ model, state, busy, execute }}
           filter={filters[group.id]} expanded={expanded[model.id] ?? expandedByDefault(model, filters[group.id])} targetVariant={model.id === targetModel ? targetVariant : undefined}
           onToggle={() => setExpanded(value => ({ ...value, [model.id]: !(value[model.id] ?? expandedByDefault(model, filters[group.id])) }))}
           requestDelete={(family, variant) => setDeleting({ model: family, variant })}
-          requestEnvironment={setRequiredEnvironment}
+          requestEnvironment={setRequiredEnvironment} requestFiles={variant => locateFiles(localModelGroup(model.id), variant)}
           failure={failure} requestError={() => setShowError(true)}
           requestUsage={(family, variant) => navigate(modelUsageLocation(location.search, isSpeechModel(family.id) || state.usage.subtitleTranslation.variant === variant.id ? 'ai-subtitles' : 'text-translation'))}
           requestDetails={(family, variant) => setInspecting({ model: family.id, variant: variant.id })} />)
@@ -271,7 +275,7 @@ export default function LocalModelsPanel(): JSX.Element {
       onCancel={() => setRequiredEnvironment(null)} onConfirm={async () => {
         if (await execute({ action: 'prepare-runtime', group: requiredEnvironment, target: 'cpu' })) setRequiredEnvironment(null)
       }}>
-      <p>下载或导入模型前，请先安装{localModelGroupLabel(requiredEnvironment)}{requiredEnvironment === 'speech2' ? '' : '模型'}的基础运行环境。仅安装基础环境即可使用 CPU，GPU 加速支持可选。</p>
+      <p>下载或导入模型前，请先安装{localModelGroupLabel(requiredEnvironment)}{requiredEnvironment === 'qwen-speech' ? '' : '模型'}的基础运行环境。仅安装基础环境即可使用 CPU，GPU 加速支持可选。</p>
       <p>本次只安装环境；完成后请再次选择下载或导入。</p>
       {currentError && <p role="alert" className={styles.fullError}>{currentError}</p>}
     </Modal>}
@@ -296,7 +300,7 @@ export default function LocalModelsPanel(): JSX.Element {
         <p>固定版本：{inspectedModel.version}。下载及导入均核验对应精度和发布者的 SHA-256；导入会复制文件，原文件保留。导出不包含运行依赖和缓存，分发请遵守上游许可证。文件大小不是运行内存需求。</p>
         {inspected.references.length > 0 && <p>删除此精度会使相关用途暂不可用；用途选择会保留，重新安装后恢复。</p>}
         {inspectedModel.id === 'kotoba' && <p>日语语音转写使用 Kotoba v2.0；中文翻译由单独的文本模型负责。</p>}
-        {inspectedModel.id === 'qwen3-asr' && <p>Qwen3-ASR 1.7B 识别日语，ForcedAligner 0.6B 生成时间轴。在“语音模型2”先安装基础环境（开启对齐时含约 1.13 GB 的对齐模型），再下载识别权重；当前支持 Windows x64 的 CPU／Vulkan。</p>}
+        {inspectedModel.id === 'qwen3-asr' && <p>Qwen3-ASR 1.7B 识别日语，ForcedAligner 0.6B 生成时间轴。在 Qwen 模型下先安装基础环境（开启对齐时含约 1.13 GB 的对齐模型），再下载识别权重；当前支持 Windows x64 的 CPU／Vulkan。</p>}
         {inspectedModel.id === 'hy-mt2-7b' && <p>腾讯官方 GGUF，Apache-2.0。当前目录只收录已有完整校验信息的精度。</p>}
       </SettingsDisclosure>
     </Modal>}

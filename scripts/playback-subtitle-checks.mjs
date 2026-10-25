@@ -2,9 +2,65 @@
 import assert from 'node:assert/strict'
 import path from 'node:path'
 import sharp from 'sharp'
-import { captureAcceptanceFrame, nativeEvidence, waitForState, waitForValue } from './playback-acceptance-support.mjs'
+import { captureAcceptanceFrame, nativeEvidence, waitForState, waitForValue, waitForNativeFrame } from './playback-acceptance-support.mjs'
 import { bitmapFixture } from './playback-pgs-fixture.mjs'
-import { openPlaybackSettings, closePlaybackSettings, selectPlaybackSetting } from './playback-settings-ui.mjs'
+import { bitmapBoundsMatch } from './playback-pixel-math.mjs'
+import { openPlaybackSettings, closePlaybackSettings, selectPlaybackSetting, revealFullscreenControls, hideFullscreenControls } from './playback-settings-ui.mjs'
+
+// Integrate alpha coverage against the subtitle-off image. Counting only bright
+// interior pixels loses filtered edges when a bitmap is smaller than its source.
+export function whiteBitmapCoverage(current, baseline, minimumDelta = 0) {
+  assert.equal(current.length, baseline.length)
+  let coverage = 0
+  for (let at = 0; at < current.length; at += 4) {
+    const before = Math.min(baseline[at], baseline[at + 1], baseline[at + 2])
+    const after = Math.min(current[at], current[at + 1], current[at + 2])
+    if (before < 255 && after - before > minimumDelta) coverage += Math.max(0, Math.min(1, (after - before) / (255 - before)))
+  }
+  return coverage
+}
+
+export function bitmapTransparency(frame, current, baseline, cue) {
+  const { canvas, object } = bitmapFixture
+  const scale = Math.min(frame.width / canvas.width, frame.height / canvas.height)
+  const ox = (frame.width - canvas.width * scale) / 2, oy = (frame.height - canvas.height * scale) / 2
+  const ink = frame.whiteBounds, { hole } = object
+  // A 4-source-pixel border can be less than 2 output pixels in the dock.
+  // Sampling 1.5 source pixels from the origin then hits bilinear white fringe.
+  // Preserve the original 2.5-source-pixel ink clearance when enlarged, with
+  // at least two output pixels for downsampling and compositor filtering.
+  const guard = Math.max(2, Math.ceil((object.border - 1.5) * scale))
+  const points = [
+    ['left border', ink.x - guard, ink.y + ink.height / 2],
+    ['right border', ink.x + ink.width + guard - 1, ink.y + ink.height / 2],
+    ['top border', ink.x + ink.width / 2, ink.y - guard],
+    ['bottom border', ink.x + ink.width / 2, ink.y + ink.height + guard - 1],
+    ['center hole', ox + (cue.x + hole.x + hole.width / 2) * scale, oy + (cue.y + hole.y + hole.height / 2) * scale]
+  ]
+  return points.map(([name, x, y]) => {
+    x = Math.floor(x); y = Math.floor(y)
+    assert.ok(x >= 0 && y >= 0 && x < frame.width && y < frame.height, 'transparent sample must remain in the captured video')
+    const at = (y * frame.width + x) * 4
+    const delta = Math.max(...[0, 1, 2].map(channel => Math.abs(current[at + channel] - baseline[at + channel])))
+    assert.ok(delta <= 16, `PGS ${name} must remain transparent over the original video, not become an opaque black patch: ${delta}`)
+    return { name, x, y, delta }
+  })
+}
+
+export async function fullscreenSubtitleComposition(application, page, directory, prefix, compare) {
+  await revealFullscreenControls(page)
+  const controls = await captureAcceptanceFrame(application, directory, `${prefix}-fullscreen-controls`)
+  assert.ok(Number.isFinite(controls.controlsTop), 'visible fullscreen toolbar geometry must be measured')
+  if (controls.rendererFullscreen) await hideFullscreenControls(page)
+  const frame = await compare()
+  if (controls.rendererFullscreen) {
+    assert.equal(frame.rendererFullscreen, true)
+    assert.equal(frame.controlsTop, undefined, 'subtitle pixel assertions must not count HTML toolbar icons')
+    assert.deepEqual([frame.width, frame.height], [controls.width, controls.height], 'overlay chrome cannot resize the video')
+  } else assert.ok(Number.isFinite(frame.controlsTop) && frame.bottom < frame.controlsTop,
+    'subtitles must remain above native fullscreen controls')
+  return { ...frame, visibleFullscreenControls: { width: controls.width, height: controls.height, top: controls.controlsTop } }
+}
 
 export async function checkBitmapSubtitlePixels(application, page, directory, prefix) {
   assert.match(prefix, /^[a-z-]+$/)
@@ -26,7 +82,7 @@ export async function checkBitmapSubtitlePixels(application, page, directory, pr
     const offset = { x: (frame.width - canvas.width * scale) / 2, y: (frame.height - canvas.height * scale) / 2 }
     const expected = { x: offset.x + (cue.x + object.border) * scale, y: offset.y + (cue.y + object.border) * scale,
       width: (object.width - 2 * object.border) * scale, height: (object.height - 2 * object.border) * scale }
-    return { scale, offset, expected, tolerance: Math.max(3, Math.ceil(scale)) }
+    return { scale, offset, expected }
   }
   const ready = async (name, cue) => {
     const start = Date.now()
@@ -39,10 +95,10 @@ export async function checkBitmapSubtitlePixels(application, page, directory, pr
     }, frame => {
       if (!frame.clock.paused || frame.clock.seeking || Math.abs(frame.clock.position - intendedPosition) >= 0.15) return false
       if (!cue) return frame.whitePixels === 0
-      const { expected, tolerance } = geometry(frame, cue)
+      const { expected, scale } = geometry(frame, cue)
       // White pixels from a stale, different cue are not completion evidence.
       return frame.whitePixels > 100 && frame.whiteBounds
-        && ['x', 'y', 'width', 'height'].every(key => Math.abs(frame.whiteBounds[key] - expected[key]) <= tolerance)
+        && bitmapBoundsMatch(frame.whiteBounds, expected, scale)
     },
       `PGS native pixels did not ${cue ? 'reconstruct' : 'clear'} at ${name}`, 5000)
     return { ...frame, readyAfterMs: Date.now() - start, reads }
@@ -60,40 +116,28 @@ export async function checkBitmapSubtitlePixels(application, page, directory, pr
       assert.equal(frame.whitePixels, 0)
       return frame
     }
-    const { object } = bitmapFixture
-    const { scale, offset, expected, tolerance } = geometry(frame, cue)
+    const { scale, expected } = geometry(frame, cue)
     assert.ok(frame.whiteBounds, 'PGS must render a white bitmap, not just enumerate a selected track')
-    // Bounding bright pixels is not the full rescaled rectangle: integer corner
-    // rounding and filtered edge pixels allow at most one source pixel (min 3px).
-    for (const key of ['x', 'y', 'width', 'height']) assert.ok(Math.abs(frame.whiteBounds[key] - expected[key]) <= tolerance,
-      `PGS ${key} must follow positioned video-space coordinates: ${frame.whiteBounds[key]} vs ${expected[key]}`)
-    assert.ok(Math.abs(frame.whitePixels / (3648 * scale * scale) - 1) < 0.16, 'PGS visible area must scale with the same fitted video')
+    assert.ok(bitmapBoundsMatch(frame.whiteBounds, expected, scale),
+      `PGS bounds must follow positioned video-space coordinates: ${JSON.stringify(frame.whiteBounds)} vs ${JSON.stringify(expected)}`)
     const current = await sharp(path.join(directory, `${prefix}-${name}.png`)).ensureAlpha().raw().toBuffer()
     const baseline = await sharp(path.join(directory, `${prefix}-${name.replace(/-on$/, '-off')}.png`)).ensureAlpha().raw().toBuffer()
-    const { hole } = object
-    const points = [
-      ['left border', 1.5, object.height / 2], ['right border', object.width - 1.5, object.height / 2],
-      ['top border', object.width / 2, 1.5], ['bottom border', object.width / 2, object.height - 1.5],
-      ['center hole', hole.x + hole.width / 2, hole.y + hole.height / 2]
-    ]
-    const transparency = points.map(([name, x, y]) => {
-      const px = Math.floor(offset.x + (cue.x + x) * scale), py = Math.floor(offset.y + (cue.y + y) * scale)
-      const at = (py * frame.width + px) * 4
-      const delta = Math.max(...[0, 1, 2].map(channel => Math.abs(current[at + channel] - baseline[at + channel])))
-      assert.ok(delta <= 16, `PGS ${name} must remain transparent over the original video, not become an opaque black patch: ${delta}`)
-      return { name, x: px, y: py, delta }
-    })
-    return { ...frame, expected, transparency }
+    const coverage = whiteBitmapCoverage(current, baseline)
+    assert.ok(Math.abs(coverage / (3648 * scale * scale) - 1) < 0.16, 'PGS visible area must scale with the same fitted video')
+    const transparency = bitmapTransparency(frame, current, baseline, cue)
+    return { ...frame, expected, coverage, transparency }
   }
   const compare = async (name, cue) => {
     const beforeToggle = await ready(`${name}-before-toggle`, cue)
     await control({ kind: 'track', type: 'sub', id: null })
     await waitForState(page, state => !state.tracks.some(track => track.type === 'sub' && track.selected), 'PGS off')
-    await page.waitForTimeout(300)
+    await waitForNativeFrame(application, page, null)
+    await ready(`${name}-off-ready`, null)
     const off = await capture(`${name}-off`, { baseline: true })
     assert.equal(off.whitePixels, 0)
     await control({ kind: 'track', type: 'sub', id: sid })
-    await waitForState(page, state => state.tracks.some(track => track.type === 'sub' && track.id === sid && track.selected), 'PGS on')
+    await waitForState(page, state => !state.seeking && state.tracks.some(track => track.type === 'sub' && track.id === sid && track.selected), 'PGS on after paused refresh')
+    await waitForNativeFrame(application, page, sid)
     const reconstructed = await ready(`${name}-ready`, cue)
     const on = await capture(`${name}-on`, { compare: true })
     assert.ok(cue ? on.differentPixels > 100 : on.differentPixels === 0, 'PGS display/clear must change only its intended pixels')
@@ -156,9 +200,7 @@ export async function checkBitmapSubtitlePixels(application, page, directory, pr
   await page.getByRole('button', { name: '全屏', exact: true }).click()
   await waitForState(page, state => state.presentation === 'fullscreen' && state.paused, 'PGS fullscreen')
   await page.waitForTimeout(1500)
-  const fullscreen = await compare('fullscreen', second)
-  assert.ok(Number.isFinite(fullscreen.controlsTop) && fullscreen.bottom < fullscreen.controlsTop,
-    'PGS must remain above visible native fullscreen controls')
+  const fullscreen = await fullscreenSubtitleComposition(application, page, directory, prefix, () => compare('fullscreen', second))
   await control({ kind: 'presentation', value: 'expanded' })
   await waitForState(page, state => state.presentation === 'expanded' && state.paused, 'PGS exit fullscreen')
   await page.waitForTimeout(1500)
@@ -183,12 +225,14 @@ export async function checkComplexSubtitlePixels(application, page, directory, p
   const compare = async name => {
     await control({ kind: 'track', type: 'sub', id: null })
     await waitForState(page, state => !state.tracks.some(track => track.type === 'sub' && track.selected), 'complex ASS off')
+    await waitForNativeFrame(application, page, null)
     await page.waitForTimeout(300)
     await captureAcceptanceFrame(application, directory, `${prefix}-${name}-off`, { baseline: true })
     await control({ kind: 'track', type: 'sub', id: sid })
     await waitForState(page, state => state.tracks.some(track => track.type === 'sub' && track.id === sid && track.selected), 'complex ASS on')
-    await page.waitForTimeout(300)
-    const frame = await captureAcceptanceFrame(application, directory, `${prefix}-${name}-on`, { compare: true })
+    await waitForNativeFrame(application, page, sid)
+    const frame = await waitForValue(() => captureAcceptanceFrame(application, directory, `${prefix}-${name}-on`, { compare: true }),
+      image => image.differentPixels > 200, 'complex ASS native pixels', 5000)
     assert.ok(frame.differentPixels > 200, 'the selected ASS track must change native pixels')
     for (const count of Object.values(frame.differentQuadrants)) assert.ok(count > 10, 'signs/dialogue must compose in all four quadrants')
     for (const name of ['cyan', 'magenta', 'green', 'yellow', 'red', 'white']) {
@@ -227,9 +271,7 @@ export async function checkComplexSubtitlePixels(application, page, directory, p
   await page.getByRole('button', { name: '全屏', exact: true }).click()
   await waitForState(page, state => state.presentation === 'fullscreen' && state.paused, 'complex ASS fullscreen')
   await page.waitForTimeout(1500)
-  const fullscreen = await compare('fullscreen')
-  assert.ok(Number.isFinite(fullscreen.controlsTop) && fullscreen.bottom < fullscreen.controlsTop,
-    'complex ASS must remain above visible native fullscreen controls')
+  const fullscreen = await fullscreenSubtitleComposition(application, page, directory, prefix, () => compare('fullscreen'))
   await control({ kind: 'presentation', value: 'expanded' })
   await waitForState(page, state => state.presentation === 'expanded', 'complex ASS fullscreen exit')
   await page.waitForTimeout(1500)
@@ -276,17 +318,24 @@ export async function checkLocalSubtitlePicker(application, page, directory, fil
   const compare = async (name, minimum) => {
     await control({ kind: 'track', type: 'sub', id: null })
     await waitForState(page, state => !state.tracks.some(track => track.type === 'sub' && track.selected), 'local SRT off')
+    await waitForNativeFrame(application, page, null)
     await page.waitForTimeout(300)
     await captureAcceptanceFrame(application, directory, `remote-local-srt-${name}-off`, { baseline: true })
     await control({ kind: 'track', type: 'sub', id: sid })
     await waitForState(page, state => state.tracks.some(track => track.id === sid && track.type === 'sub' && track.selected), 'local SRT on')
-    await page.waitForTimeout(300)
-    const frame = await captureAcceptanceFrame(application, directory, `remote-local-srt-${name}-on`, { compare: true })
-    assert.ok(frame.changedColors.white > minimum, 'the actual local SRT must render white pixels over remote media')
-    const current = await page.evaluate(() => window.api.playback.snapshot())
-    assert.equal(current.sessionId, before.sessionId)
-    assert.equal(current.paused, true)
-    assert.ok(Math.abs(current.position - before.position) < 0.15)
+    await waitForNativeFrame(application, page, sid)
+    const baseline = await sharp(path.join(directory, `remote-local-srt-${name}-off.png`)).ensureAlpha().raw().toBuffer()
+    const frame = await waitForValue(async () => {
+      const captured = await captureAcceptanceFrame(application, directory, `remote-local-srt-${name}-on`, { compare: true })
+      const current = await sharp(path.join(directory, `remote-local-srt-${name}-on.png`)).ensureAlpha().raw().toBuffer()
+      // Retain the original >50 contrast guard: tiny whole-frame drift is not text.
+      return { ...captured, whiteCoverage: whiteBitmapCoverage(current, baseline, 50) }
+    }, image => image.whiteCoverage > minimum, 'the actual local SRT must render white coverage over remote media', 5000)
+    assert.ok(frame.whiteCoverage > minimum, 'the actual local SRT must render white coverage over remote media')
+    const state = await page.evaluate(() => window.api.playback.snapshot())
+    assert.equal(state.sessionId, before.sessionId)
+    assert.equal(state.paused, true)
+    assert.ok(Math.abs(state.position - before.position) < 0.15)
     assert.equal((await nativeEvidence(application)).loadedFiles, 1)
     return frame
   }
@@ -300,9 +349,7 @@ export async function checkLocalSubtitlePicker(application, page, directory, fil
   await page.getByRole('button', { name: '全屏', exact: true }).click()
   await waitForState(page, state => state.presentation === 'fullscreen' && state.paused, 'local SRT remote fullscreen')
   await page.waitForTimeout(1500)
-  const fullscreen = await compare('fullscreen', 150)
-  assert.ok(Number.isFinite(fullscreen.controlsTop) && fullscreen.bottom < fullscreen.controlsTop,
-    'local SRT must remain above remote fullscreen controls')
+  const fullscreen = await fullscreenSubtitleComposition(application, page, directory, 'remote-local-srt', () => compare('fullscreen', 150))
   await control({ kind: 'presentation', value: 'expanded' })
   await waitForState(page, state => state.presentation === 'expanded', 'local SRT fullscreen exit')
   await page.waitForTimeout(1500)

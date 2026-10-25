@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import childProcess, { type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { syncBuiltinESMExports } from 'node:module'
+import { reportLocalExecution } from './runtimeAcceleration'
 import { runLocalModelProcess, LocalModelProcessFailure } from './processRunner'
 
 const env = { ...process.env, ELECTRON_RUN_AS_NODE: '1' }
@@ -72,4 +73,17 @@ test('cancellation reaps a real owned child even when it ignores SIGTERM', { ski
     await pending.catch(() => {})
     t.mock.restoreAll(); syncBuiltinESMExports()
   }
+})
+
+test('long diagnostics retain GPU startup evidence and recent errors within a bounded buffer', async () => {
+  let diagnostic = ''
+  await runLocalModelProcess(process.execPath, ['-e', `process.stderr.write('loading\\n'.repeat(10000)); process.stderr.write('whisper_backend_init_gpu: using MTL0 backend\\n');
+    process.stderr.write('progress\\n'.repeat(10000)); process.stderr.write('last diagnostic');`],
+  { env, diagnostic: value => { diagnostic = value } })
+  let backend = 'idle'
+  reportLocalExecution({ policy: { mode: 'auto' }, devices: [], runtimes: {}, status: (_engine, value) => { backend = value.backend } },
+    'recognition', { executable: '/whisper', backend: 'metal', args: [], env: {}, release() {} }, diagnostic)
+  assert.equal(backend, 'metal')
+  assert.ok(diagnostic.endsWith('last diagnostic'))
+  assert.ok(diagnostic.length <= 65536)
 })

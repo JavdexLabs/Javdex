@@ -67,7 +67,7 @@ test('player subtitle IPC cannot bypass the central model management and deletio
 
 test('runtime deletion accepts only a whole environment and rejects individual components or renderer paths', () => {
   const schema = appIpcSchemas[IPC.LOCAL_MODELS_COMMAND]
-  for (const group of ['speech', 'speech2', 'text']) for (const target of ['cpu', 'gpu']) {
+  for (const group of ['speech', 'qwen-speech', 'text']) for (const target of ['cpu', 'gpu']) {
     assert.equal(schema.safeParse([{ action: 'delete-runtime', group, target }]).success, true)
   }
   for (const command of [
@@ -99,7 +99,7 @@ test('purpose bindings allow independent exact variants but reject cross-family 
 
 test('shared runtime preparation accepts only a known modality and a managed preparation target', () => {
   const schema = appIpcSchemas[IPC.LOCAL_MODELS_COMMAND]
-  for (const group of ['speech', 'speech2', 'text']) for (const target of ['auto', 'cpu', 'gpu']) {
+  for (const group of ['speech', 'qwen-speech', 'text']) for (const target of ['auto', 'cpu', 'gpu']) {
     assert.equal(schema.safeParse([{ action: 'prepare-runtime', group, target }]).success, true)
   }
   for (const command of [

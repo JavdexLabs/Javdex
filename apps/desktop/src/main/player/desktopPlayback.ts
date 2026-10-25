@@ -1,3 +1,4 @@
+import { createPlaybackEngine } from './playbackEngine'
 import { app, dialog, shell, powerSaveBlocker, powerMonitor, type BrowserWindow } from 'electron'
 import path from 'node:path'
 import type { CatalogBackend } from '../application/catalogBackend'
@@ -7,17 +8,18 @@ import { createPlaybackSourceResolver, playbackCatalogKey } from './playbackSour
 import { builtinPlaybackAvailability, createLibmpvPlayback } from './libmpvPlayback'
 import { appCommandAdapter, appEventAdapter } from '../ipc/appContractAdapter'
 import { IPC } from '@shared/ipc-channels'
-import type { PlaybackTarget } from '@shared/desktop/playback'
+import type { PlaybackRenderMode, PlaybackTarget } from '@shared/desktop/playback'
 import type { PlayResult } from '@shared/libraryTypes'
 import type { DesktopSettingsStore } from '../application/desktopPorts'
 import { createPlaybackVolume } from './playbackVolume'
 import { createPlaybackResumeStore } from './playbackResumeStore'
-import { PlaybackFailure, playbackFailure } from './playbackFailure'
-import { navigateWindowHistory } from '../desktop/windowNavigation'
+import { playbackFailure } from './playbackFailure'
 import fs from 'node:fs/promises'
 import { localAiDirectories } from '../services/localModels/modelStorage'
 import { createAiSubtitleController } from './aiSubtitles/aiSubtitleController'
 import { getLocalModels } from '../services/localModels/desktopLocalModels'
+import { softwareStartupRequested } from '../bootstrap/startupGraphicsRecovery'
+import { waitForLinuxPlaybackCompositing } from './linuxPlaybackDevice'
 
 let active: ReturnType<typeof createPlaybackSession> | null = null
 let dispose: (() => Promise<void>) | null = null
@@ -30,7 +32,14 @@ export function disposeBuiltinPlayback(): Promise<void> {
 }
 
 export function registerBuiltinPlayback(backend: CatalogBackend, getWindow: () => BrowserWindow | null, settings: DesktopSettingsStore, recentStarted?: (videoId: number) => Promise<void>): (target: PlaybackTarget) => Promise<PlayResult> {
-  const native = createLibmpvPlayback(getWindow)
+  const forceCpu = softwareStartupRequested(process.argv)
+    || process.argv.slice(1, process.argv.indexOf('--') < 0 ? undefined : process.argv.indexOf('--')).includes('--javdex-cpu')
+  let renderMode: PlaybackRenderMode = forceCpu ? 'cpu' : 'auto'
+  const native = createPlaybackEngine(createLibmpvPlayback(getWindow), createLibmpvPlayback(getWindow, 'software'), {
+    mode: () => renderMode,
+    gpuAvailable: () => app.isHardwareAccelerationEnabled() && builtinPlaybackAvailability().available,
+    gpuUnavailableReason: () => app.isHardwareAccelerationEnabled() ? 'GPU_INITIALIZATION_FAILED' : 'GPU_DISABLED'
+  }, process.platform === 'darwin' ? 'darwin' : process.platform === 'win32' ? 'win32' : 'linux')
   const resolver = createPlaybackSourceResolver(backend)
   const volume = createPlaybackVolume(settings)
   let recordingEnabled = false
@@ -65,6 +74,9 @@ export function registerBuiltinPlayback(backend: CatalogBackend, getWindow: () =
   let observationRevision = 0
   const session = createPlaybackSession({
     native, ...resolver,
+    ...(process.platform === 'linux' ? { prepareNative: async () => {
+      if (renderMode !== 'cpu') await waitForLinuxPlaybackCompositing()
+    } } : {}),
     ending: () => { void stopSubtitles().catch(() => { console.warn('[playback] unable to finish subtitle cleanup') }) },
     readVolume: volume.read,
     volumeChanged: volume.remember,
@@ -95,14 +107,6 @@ export function registerBuiltinPlayback(backend: CatalogBackend, getWindow: () =
         if (process.platform === 'win32') window.focusOnWebView()
         else window.webContents.focus()
       }
-    },
-    navigate: direction => navigateWindowHistory(getWindow(), direction),
-    escape: () => {
-      const window = getWindow()
-      if (!window || window.isDestroyed()) return
-      // Preserve the renderer's layered Escape behavior, separate from system Back.
-      window.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Escape' })
-      window.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Escape' })
     },
     started: async source => {
       const current = (): boolean => source.identityKey === playbackCatalogKey(backend)
@@ -156,14 +160,14 @@ export function registerBuiltinPlayback(backend: CatalogBackend, getWindow: () =
     }
   })
   const stopSubtitles = aiSubtitles.stop
-  const renderTimer = setInterval(() => {
-    try { native.render() } catch { session.fail(new PlaybackFailure('video').message) }
+  const renderTimer = native.renderPolling === false ? null : setInterval(() => {
+    try { native.render() } catch (error) { session.fail(playbackFailure(error, 'video').message) }
   }, 16)
   const stateTimer = setInterval(() => {
-    try { session.tick() } catch { session.fail(new PlaybackFailure('native').message) }
+    try { session.tick() } catch (error) { session.fail(playbackFailure(error, 'native').message) }
     try { aiSubtitles.tick(session.snapshot()) } catch { /* Optional subtitles cannot fail the video decoder. */ }
   }, 200)
-  renderTimer.unref(); stateTimer.unref()
+  renderTimer?.unref(); stateTimer.unref()
   const onSuspend = (): void => { session.pause() }
   powerMonitor.on('suspend', onSuspend)
   const unsubscribe = backend.onSessionChanged?.(() => session.stop())
@@ -172,20 +176,26 @@ export function registerBuiltinPlayback(backend: CatalogBackend, getWindow: () =
     if (!recordingEnabled) session.stopRecording()
   })
   dispose = () => {
-    clearInterval(renderTimer); clearInterval(stateTimer); unsubscribe?.(); unsubscribeSettings?.()
+    if (renderTimer) clearInterval(renderTimer)
+    clearInterval(stateTimer); unsubscribe?.(); unsubscribeSettings?.()
     powerMonitor.off('suspend', onSuspend)
     bound?.off('closed', onClosed); bound?.off('hide', onHidden); bound?.off('leave-full-screen', onFullscreenExit)
     bound?.off('minimize', onMinimized)
     session.stop()
     return aiSubtitles.close()
   }
-  appCommandAdapter.register(IPC.PLAYBACK_AVAILABILITY, builtinPlaybackAvailability)
+  const availability = () => {
+    const gpu = builtinPlaybackAvailability(renderMode === 'cpu' ? 'software' : undefined)
+    return renderMode === 'auto' && !gpu.available ? builtinPlaybackAvailability('software') : gpu
+  }
+  appCommandAdapter.register(IPC.PLAYBACK_AVAILABILITY, availability)
   appCommandAdapter.register(IPC.PLAYBACK_SNAPSHOT, () => ({ revision: observationRevision, snapshot: session.snapshot() }))
   appCommandAdapter.register(IPC.PLAYBACK_AI_SUBTITLE_SNAPSHOT, aiSubtitles.snapshot)
   appCommandAdapter.register(IPC.PLAYBACK_AI_SUBTITLE_COMMAND, aiSubtitles.command)
   const open = async (target: PlaybackTarget): Promise<PlayResult> => {
-    const availability = builtinPlaybackAvailability()
-    if (!availability.available) return { ok: false, error: availability.reason ?? '内置播放不可用' }
+    renderMode = forceCpu ? 'cpu' : (await settings.read()).playbackRenderMode ?? 'auto'
+    const available = availability()
+    if (!available.available) return { ok: false, error: available.reason ?? '内置播放不可用' }
     try {
       bind()
       if (!await session.open(target)) return { ok: false, error: '播放请求已更新或取消' }

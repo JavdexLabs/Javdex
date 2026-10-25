@@ -43,13 +43,13 @@ async function main(): Promise<void> {
   assert.equal(await cpu.installed(), true, 'Source store must have the default CPU tools and models')
   for (const backend of ['cuda', 'vulkan'] as const) {
     const assets = gpuRuntimeAssets(target, backend)
-    const installer = createAiRuntimeInstaller(root, download, [...assets, ...localModelAssets(DEFAULT_LOCAL_MODEL_VARIANTS).filter(asset => !asset.archive)], { bundleRoot: path.resolve('out/ai-runtime') })
+    const installer = createAiRuntimeInstaller(root, download, [...assets, ...localModelAssets(DEFAULT_LOCAL_MODEL_VARIANTS).filter(asset => !asset.archive)])
     console.log('Install/verify', backend)
     let last = 0
     await installer.install(new AbortController().signal, (bytes, label) => { if (Date.now() - last > 10000) { console.log(label, bytes); last = Date.now() } }, assets.map(asset => asset.id))
   }
   const gpuPaths = (backend: 'cuda' | 'vulkan') => createAiRuntimeInstaller(root, download,
-    [...gpuRuntimeAssets(target, backend), ...localModelAssets(DEFAULT_LOCAL_MODEL_VARIANTS).filter(asset => !asset.archive)], { bundleRoot: path.resolve('out/ai-runtime') }).paths()
+    [...gpuRuntimeAssets(target, backend), ...localModelAssets(DEFAULT_LOCAL_MODEL_VARIANTS).filter(asset => !asset.archive)]).paths()
   const cuda = gpuPaths('cuda'), vulkan = gpuPaths('vulkan')
   const devices = await detectLocalGpuDevices({ translator: vulkan.translator })
   assert.ok(devices.some(device => /RTX 4080/.test(device.name)), 'A real RTX 4080 must be enumerated')

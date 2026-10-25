@@ -123,6 +123,7 @@ export default defineConfig({
       rollupOptions: {
         input: {
           index: resolve('apps/desktop/src/main/index.ts'),
+          playbackHost: resolve('apps/desktop/src/main/player/playbackHost.ts'),
           backupSourceWorker: resolve('apps/desktop/src/main/services/backupSourceWorker.ts'),
           catalogReadWorker: resolve('apps/desktop/src/main/services/catalogReadWorker.ts')
         }

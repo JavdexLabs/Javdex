@@ -42,17 +42,22 @@ export function playbackNativeBuild({ platform, arch, root, prefix, include, nod
   const source = path.join(root, 'apps/desktop/src/main/player/native')
   if (!['x64', 'arm64'].includes(arch)) throw new Error('Unsupported native playback architecture')
   if (platform === 'darwin') {
-    const navigation = path.join(output, 'navigation-key-test'), core = path.join(output, 'mpv-core-test')
+    const core = path.join(output, 'mpv-core-test')
     const architecture = ['-arch', arch === 'x64' ? 'x86_64' : 'arm64']
     return [
-      { command: 'clang++', args: ['-std=c++17', ...architecture, path.join(source, 'macNavigationKey.test.cpp'), '-o', navigation] },
-      { command: navigation, args: [] },
       { command: 'clang++', args: ['-std=c++17', ...architecture, `-I${include}`, `-I${prefix}/include`, path.join(source, 'mpvCore.test.cpp'),
         `-L${prefix}/lib`, '-lmpv', '-o', core] },
       { command: core, args: [] },
       { command: 'clang++', args: ['-std=c++17', ...architecture, '-fobjc-arc', '-shared', '-undefined', 'dynamic_lookup', '-Wno-deprecated-declarations',
-        `-I${include}`, `-I${prefix}/include`, path.join(source, 'macPlayback.mm'), `-L${prefix}/lib`, '-lmpv',
-        '-framework', 'Cocoa', '-framework', 'OpenGL', '-o', path.join(output, 'playback.node')] }
+        `-I${include}`, `-I${prefix}/include`, path.join(source, 'macSharedTexture.mm'), `-L${prefix}/lib`, '-lmpv',
+        '-framework', 'CoreFoundation', '-framework', 'OpenGL', '-framework', 'IOSurface', '-o', path.join(output, 'playback.node')] },
+      { command: 'clang++', args: ['-std=c++17', ...architecture, '-shared', '-undefined', 'dynamic_lookup', '-Wno-deprecated-declarations',
+        `-I${include}`, path.join(source, 'playbackInterop.cpp'), '-framework', 'CoreFoundation', '-framework', 'IOSurface',
+        '-o', path.join(output, 'playback-interop.node')] },
+      { command: 'clang++', args: ['-std=c++17', ...architecture, '-UNDEBUG', '-Wno-deprecated-declarations',
+        path.join(source, 'macSurfaceTransport.test.cpp'), '-framework', 'CoreFoundation', '-framework', 'IOSurface',
+        '-o', path.join(output, 'mac-surface-transport-test')] },
+      { command: path.join(output, 'mac-surface-transport-test'), args: [] }
     ]
   }
   if (platform === 'win32') {
@@ -65,7 +70,7 @@ export function playbackNativeBuild({ platform, arch, root, prefix, include, nod
         `-DMPV_PREFIX=${prefix}`, `-DPLAYBACK_OUTPUT_DIR=${output}`] },
       { command: 'cmake', args: ['--build', build, '--config', 'Release'] },
       { command: path.join(output, 'mpv-core-test.exe'), args: [] },
-      { command: path.join(output, 'slider-feedback-test.exe'), args: [] }
+      { command: path.join(output, 'windows-texture-tickets-test.exe'), args: [] }
     ]
   }
   if (platform === 'linux') {
@@ -75,9 +80,8 @@ export function playbackNativeBuild({ platform, arch, root, prefix, include, nod
         `-DELECTRON_INCLUDE_DIR=${include}`, `-DMPV_PREFIX=${prefix}`, `-DPLAYBACK_OUTPUT_DIR=${output}`] },
       { command: 'cmake', args: ['--build', build, '--config', 'Release'] },
       { command: path.join(output, 'mpv-core-test'), args: [] },
-      { command: path.join(output, 'x11-controls-test'), args: [] },
-      { command: path.join(output, 'x11-surface-test'), args: [] },
-      { command: process.execPath, args: [path.join(root, 'scripts/playback-linux-helper-smoke.mjs'), path.join(output, 'playback-helper')] }
+      { command: path.join(output, 'linux-dmabuf-test'), args: [] },
+      { command: process.execPath, args: [path.join(root, 'scripts/linux-fd-transport.test.cjs')] }
     ]
   }
   throw new Error('Native playback adapter is not implemented for this host')

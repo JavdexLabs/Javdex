@@ -5,6 +5,7 @@ import axios from 'axios'
 import { createHttpClient } from '../utils/http'
 import { getSettings } from '../settings/settingsStore'
 import { resolveScrapeProxyUrl } from '@shared/settingsTypes'
+import { isExperimentalLinuxBuild } from '../experimentalLinuxBuild'
 import type {
   AppReleaseInfo,
   ProjectPage,
@@ -191,6 +192,7 @@ function mapCheckError(error: unknown): UpdateCheckErrorCode {
 }
 
 export async function checkForLatestRelease(): Promise<UpdateCheckState> {
+  if (isExperimentalLinuxBuild()) return publish({ status: 'error', currentVersion: app.getVersion(), errorCode: 'experimental-build' })
   if (checkPromise) return checkPromise
   checkPromise = (async () => {
     const previous = getUpdateCheckState()
@@ -235,6 +237,7 @@ export async function checkForLatestRelease(): Promise<UpdateCheckState> {
 }
 
 export async function openReleasePage(): Promise<boolean> {
+  if (isExperimentalLinuxBuild()) return false
   const release = getUpdateCheckState().latestRelease
   if (!release || !isTrustedReleaseUrl(release.releaseUrl)) return false
   await shell.openExternal(release.releaseUrl)
@@ -257,6 +260,7 @@ export function ignoreUpdateVersion(version: string): UpdateCheckState {
 }
 
 export function shouldRunAutomaticCheck(now = Date.now()): boolean {
+  if (isExperimentalLinuxBuild()) return false
   const checkedAt = readPersistedState().lastCheckedAt
   if (!checkedAt) return true
   const timestamp = Date.parse(checkedAt)

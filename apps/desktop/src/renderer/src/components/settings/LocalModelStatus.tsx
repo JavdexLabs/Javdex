@@ -20,10 +20,11 @@ export default function LocalModelStatus({ model, variant, state, busy, execute 
   const check = variant.validation, backend = check?.execution?.backend
   const downloading = state.operation === 'download' && state.activeVariant === variant.id
   const reason = check?.message ?? check?.execution?.reason
+  const environment = state.environments?.find(item => item.group === localModelGroup(model.id))
   const gpuFallback = backend === 'cpu' && !!reason && state.acceleration?.policy.mode !== 'cpu'
-    && (!!state.acceleration?.devices.length || state.acceleration?.policy.mode === 'gpu')
+    && (!!state.acceleration?.devices.length || state.acceleration?.policy.mode === 'gpu' || environment?.gpu.backend === 'metal')
   const optionalGpuMissing = state.acceleration?.policy.mode === 'auto'
-    && state.environments?.find(item => item.group === localModelGroup(model.id))?.gpu.state === 'missing'
+    && environment?.gpu.state === 'missing'
   const repairGpu = gpuFallback && /运行库|未启用|启动失败|试运行失败|推理失败/.test(reason ?? '')
   const fallbackSummary = /运行库/.test(reason ?? '') ? '加速运行支持未就绪'
     : /指定显卡/.test(reason ?? '') ? '指定显卡不可用'

@@ -1,17 +1,13 @@
 /** Desktop only. Locators, grants and arbitrary mpv commands never cross this interface. */
 export type PlaybackPresentation = 'expanded' | 'docked' | 'fullscreen'
+/** Drawing path; GPU output may still use software video decoding. */
+export type PlaybackRenderMode = 'auto' | 'gpu' | 'cpu'
 export interface PlaybackTarget {
   libraryId: number
   videoId: number
   resourceId: number
 }
 export type PlaybackClearProgress = { scope: 'all' } | { scope: 'current'; sessionId: string }
-export interface PlaybackOcclusion {
-  x: number; y: number; width: number; height: number
-  /** CSS corner radii: top left, top right, bottom right, bottom left.
-   * Rounded shapes retain their original bounds when crossing the video edge. */
-  radii?: [number, number, number, number]
-}
 export interface PlaybackViewport {
   sessionId: string
   presentationRevision: number
@@ -19,8 +15,6 @@ export interface PlaybackViewport {
   presentation: PlaybackPresentation
   rect: { x: number; y: number; width: number; height: number }
   visible: boolean
-  /** Visible HTML popup shapes intersecting this viewport. */
-  occlusions?: PlaybackOcclusion[]
 }
 export type PlaybackControl =
   | { kind: 'pause'; paused: boolean }
@@ -53,15 +47,8 @@ export interface PlaybackSnapshot {
   presentation: PlaybackPresentation
   presentationRevision: number
   phase: 'opening' | 'playing' | 'paused' | 'buffering' | 'ended' | 'error'
-  /** Transient native-to-HTML keyboard handoff; never persisted. */
-  focusRequest?: { sequence: number; backwards: boolean }
-  /** Windows native drawable hands chrome and keyboard traversal to the renderer. */
-  rendererFullscreenControls?: boolean
-  nativeVideoFocused?: boolean
-  /** Changes only on native pointer/keyboard activity, never on playback ticks. */
-  interactionSequence?: number
-  /** Fullscreen pointer in CSS pixels; -1 when outside the active player. */
-  fullscreenPointerY?: number
+  /** Shared Canvas generation. Never a locator or platform GPU handle. */
+  sharedTextureSurface?: string
   paused: boolean
   seeking: boolean
   position: number | null
@@ -83,6 +70,15 @@ export interface PlaybackSnapshot {
     audioCodec: string | null
     width: number | null
     height: number | null
+    playbackMode?: 'gpu' | 'cpu'
+    playbackFallback?: boolean
+    playbackDiagnostics?: {
+      decoding: 'hardware' | 'software' | 'unknown'
+      /** Observed hardware-to-software transition, not a diagnosis of its cause. */
+      decoderFallback: boolean
+      displayProbe: 'pending' | 'passed' | 'not-applicable'
+      fallbackReason: string | null
+    }
     hardwareDecoder: string | null
     audioOutput: string | null
     droppedFrames: number | null

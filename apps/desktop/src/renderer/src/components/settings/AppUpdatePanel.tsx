@@ -11,6 +11,7 @@ import SettingsPanel, { SettingsPanelHead, SettingsPanelTitle } from './Settings
 import styles from './AppUpdatePanel.module.css'
 
 const ERROR_LABELS: Record<UpdateCheckErrorCode, string> = {
+  'experimental-build': 'Linux 共享纹理实验包不参与正式版更新，请单独获取新的测试包',
   'network-unavailable': '无法连接更新服务器，请检查网络或代理设置',
   'rate-limited': 'GitHub 请求过于频繁，请稍后再试',
   'invalid-response': '更新服务器返回了无法识别的版本信息',

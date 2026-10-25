@@ -6,13 +6,17 @@ import '../../apps/desktop/src/renderer/src/styles/global.css'
 window.React = React
 window.fixtureCommands = []
 window.fixtureViewports = []
-const fullscreen = new URLSearchParams(location.search).has('fullscreen')
+const query = new URLSearchParams(location.search)
+const fullscreen = query.has('fullscreen')
+const paused = !query.has('playing')
+const surface = query.get('surface')
 let revision = 1
 const listeners = new Set()
 let snapshot = {
   sessionId: 'settings-fixture', target: { libraryId: 1, videoId: 2, resourceId: 3 }, title: 'Synthetic settings',
-  source: 'local', presentation: fullscreen ? 'fullscreen' : 'expanded', rendererFullscreenControls: fullscreen,
-  presentationRevision: 1, phase: 'paused', paused: true, seeking: false,
+  source: 'local', presentation: fullscreen ? 'fullscreen' : 'expanded',
+  presentationRevision: 1, phase: paused ? 'paused' : 'playing', paused, seeking: false,
+  ...(surface ? { sharedTextureSurface: surface === 'cpu' ? 'cpu:settings-fixture' : 'settings-fixture' } : {}),
   position: 1, duration: 120, seekable: true, volume: 50, muted: false, speed: 1, subtitleDelay: 0, subtitleSize: 55,
   tracks: [
     { type: 'audio', id: 1, title: 'Main', language: 'eng', codec: 'aac', channelCountHint: 2, selected: true },
@@ -26,8 +30,10 @@ let snapshot = {
   info: { videoCodec: 'fixture', audioCodec: null, width: 640, height: 360, hardwareDecoder: null, audioOutput: null, droppedFrames: null }
 }
 window.api = {
+  desktop: { pointerTiming: async () => ({ doubleClickMs: Number(query.get('doubleClickMs') || 500), source: 'chromium' }) },
   settings: { onLocalModelsChanged: () => () => {}, getLocalModels: async () => { throw new Error('No synthetic model store') } },
   playback: {
+    bindSharedTextureSurface: () => () => {},
     snapshot: async () => snapshot,
     observation: async () => ({ snapshot, revision }),
     onChanged: callback => { listeners.add(callback); return () => listeners.delete(callback) },

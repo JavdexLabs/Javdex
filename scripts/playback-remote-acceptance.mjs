@@ -5,7 +5,7 @@ import electron from 'electron'
 import { captureAcceptanceFrame, closeAcceptance, recordAcceptanceCleanup, createAcceptanceDirectory, launchAcceptance, nativeEvidence, output, root, seedAcceptanceCatalog, waitForValue as until } from './playback-acceptance-support.mjs'
 import { prepareMediaFixtures } from './playback-media-fixtures.mjs'
 import { checkBitmapSubtitlePixels, checkComplexSubtitlePixels, checkLocalSubtitlePicker } from './playback-subtitle-checks.mjs'
-import { openPlaybackSettings, closePlaybackSettings, selectPlaybackSetting } from './playback-settings-ui.mjs'
+import { openPlaybackSettings, closePlaybackSettings, selectPlaybackSetting, revealFullscreenControls } from './playback-settings-ui.mjs'
 import { startPlaybackRemoteServer } from './playback-remote-server.ts'
 import { assertOrdinaryAcceptanceExit } from './playback-acceptance-cleanup.mjs'
 
@@ -69,14 +69,14 @@ try {
   assert.equal(playing.recordingProgress, false)
   const nativeState = () => nativeEvidence(application)
   const nativeBefore = await nativeState()
-  assert.ok(nativeBefore.presentedFrames > 0, 'remote playback presents actual native frames')
+  assert.ok(nativeBefore.renderedFrames > 0, 'remote playback produces actual native frames')
   const before = await until(traffic, value => value?.grantRequests === 1 && value.rangeRequests > 0 && value.mediaBytesQueued > 0,
     'server did not grant and serve original Range bytes')
   await page.getByRole('button', { name: '收起到底栏', exact: true }).click()
   await until(state, value => value?.presentation === 'docked', 'remote dock')
   const docked = await state()
   await until(state, value => value?.position > docked.position + 1, 'remote docked clock did not advance')
-  assert.ok((await nativeState()).presentedFrames > nativeBefore.presentedFrames)
+  assert.ok((await nativeState()).renderedFrames > nativeBefore.renderedFrames)
   await page.getByRole('button', { name: '恢复展开', exact: true }).click()
   await until(state, value => value?.presentation === 'expanded', 'remote expand')
   assert.equal((await state()).sessionId, playing.sessionId)
@@ -109,7 +109,7 @@ try {
       const switched = await until(state, value => value?.tracks.some(item => item.type === 'audio' && item.id === track.id && item.selected)
         && value.info.audioOutput === (process.platform === 'win32' ? 'wasapi' : 'coreaudio') && decodedCodec[track.codec].test(value.info.audioCodec ?? ''), `remote ${track.codec}`)
       const first = await until(nativeState, value => Number.isFinite(value.audioPosition), 'remote audio clock')
-      const next = await until(nativeState, value => value.audioPosition > first.audioPosition + 0.3 && value.presentedFrames > first.presentedFrames, 'remote audio/frame advance')
+      const next = await until(nativeState, value => value.audioPosition > first.audioPosition + 0.3 && value.renderedFrames > first.renderedFrames, 'remote audio/frame advance')
       assert.equal(next.loadedFiles, 1)
       assert.equal(switched.sessionId, playing.sessionId)
       matrix.push({ name: `remote ${track.codec}`, decoder: switched.info.audioCodec, channelHint: track.channelCountHint,
@@ -135,6 +135,7 @@ try {
     await page.getByRole('button', { name: '全屏', exact: true }).click()
     await until(state, value => value?.presentation === 'fullscreen' && value.paused, 'remote ASS fullscreen')
     await page.waitForTimeout(1500)
+    await revealFullscreenControls(page)
     await page.evaluate(id => window.api.playback.control(id, { kind: 'track', type: 'sub', id: null }), playing.sessionId)
     await until(state, value => !value.tracks.some(track => track.type === 'sub' && track.selected), 'remote fullscreen subtitle off')
     await page.waitForTimeout(300)
@@ -164,7 +165,7 @@ try {
     assert.equal(hevc.info.audioOutput, process.platform === 'win32' ? 'wasapi' : 'coreaudio')
     const hevcBefore = await nativeState()
     await until(state, value => value?.position > hevc.position + 0.6, 'remote HEVC clock')
-    assert.ok((await nativeState()).presentedFrames > hevcBefore.presentedFrames)
+    assert.ok((await nativeState()).renderedFrames > hevcBefore.renderedFrames)
     assert.equal((await nativeState()).loadedFiles, 1)
     await until(traffic, value => value?.grantRequests === 2 && value.mediaBytesQueued > after.mediaBytesQueued, 'HEVC original Range bytes')
     matrix.push({ name: 'remote HEVC Main10 SDR', state: hevc, humanListening: 'pending', HDR: 'not tested' })

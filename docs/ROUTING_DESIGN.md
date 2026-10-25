@@ -161,6 +161,10 @@ AI 服务三页签之间保留已挂载的用途草稿；下载跳转用 `model`
 
 macOS 全屏焦点交接以 AppKit `NSWindowDidEnterFullScreenNotification` 完成通知补充一次确认，不能仅根据提前设置的 fullscreen style bit 判断动画结束；仅当前原生播放窗口且仍在全屏展示时请求交接，不在普通帧中反复抢占控制焦点，销毁播放实例时解除观察。
 
+Linux 侧键按下会先触发原生窗口的 `app-command`，随后鼠标事件仍可能让 Chromium 在松开时默认再遍历一次（本机 X11／XWayland 已复现）。由 `app-command` 统一处理导航，同时在主进程 `before-mouse-event` 消费 `back`／`forward` 鼠标事件；被前景任务禁止的导航也不能放行浏览器默认动作。Electron 43 的运行时已返回这两个按钮名，类型声明尚未列出。不能用时间去抖吞掉用户连续返回；Windows／macOS 不增加这层鼠标拦截。`npm run test:playback:navigation` 在 Linux 使用真实 Chromium 鼠标事件配合原生命令重放，检查播放收起、业务页返回／前进及前景任务保护；物理事件注入和平台结果见[验收记录](reviews/linux-mouse-navigation-2026-10-25.md)。
+
+Linux 专用键盘 `BrowserBack`／`BrowserForward` 在 `before-input-event` 接管，只在有效的非重复 `keyDown` 精确遍历一项；其 `keyUp`、重复和组合键事件仍消费，避免未处理的按下／松开再次进入 Electron 的 `app-command`。前景任务或更早的事件处理者否决时不能绕过保护。普通 Alt+方向键及 macOS 文本按词移动规则不变。
+
 ### 清单、分类与关联影片连续浏览
 
 清单、导演、系列和机构主列表使用后端分页与 `ContinuousGrid`。清单影片、分类关联影片和演员作品使用 `ContinuousPosterGrid`，在详情已有的滚动容器中计算可见区域，不再设置第二层影片滚动条。接口仍按现有页大小读取；每个挂载列表只留最近需要的三页。

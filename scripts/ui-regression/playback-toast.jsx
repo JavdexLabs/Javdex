@@ -15,6 +15,7 @@ const snapshot = {
   info: { videoCodec: 'fixture', audioCodec: null, width: 640, height: 360, hardwareDecoder: null, audioOutput: null, droppedFrames: null }
 }
 window.api = {
+  desktop: { pointerTiming: async () => ({ doubleClickMs: 500, source: 'chromium' }) },
   settings: {
     onLocalModelsChanged: () => () => {},
     getLocalModels: async () => { throw new Error('Synthetic model store is unavailable') }

@@ -10,9 +10,11 @@
 
 ## 内置播放运行库
 
+Linux x86_64 AppImage 使用 [uruntime v0.8.1](https://github.com/VHSgunzo/uruntime/tree/v0.8.1) 的 SquashFS lite 静态运行时，MIT 原文见 [uruntime 声明](../LICENSES/uruntime-MIT.txt)。下载身份、上游提交和内嵌策略固定在 `build/linux-appimage-runtime.json`；包内 `resources/appimage-runtime.json` 记录配置后的摘要。原运行时内含上游固定的 squashfuse / unsquashfs 工具；其源构建入口分别见 [squashfuse-static v0.6.3.r2](https://github.com/VHSgunzo/squashfuse-static/tree/v0.6.3.r2) 与 [squashfs-tools-static v4.7.5.r2](https://github.com/VHSgunzo/squashfs-tools-static/tree/v4.7.5.r2)。运行时和工具按各自许可分发，不改变 Javdex 授权。
+
 内置播放使用固定源码构建的 mpv 0.41.0 与 FFmpeg 9.0.2；[源码清单](../build/playback-sources.json) 将二者记录为 GPL-3.0-or-later，[构建配方](../scripts/playback-source-build.mjs) 显式启用 mpv GPL 及 FFmpeg GPL/version3 选项，不是本地 AI 工具所用的 LGPL FFmpeg 构建。实际输入、包内材料与验证合同见 [开发指南](DEVELOPMENT.md#固定源码构建与分发验证)。上游许可说明见 [mpv Copyright](https://github.com/mpv-player/mpv/blob/v0.41.0/Copyright) 与 [FFmpeg 官方说明](https://ffmpeg.org/legal.html)。
 
-固定源码清单单独保留 FreeType、HarfBuzz、FriBidi、libass、libunibreak、libplacebo/fast_float/Vulkan headers、dav1d、zlib、Lua 及平台 TLS/字符转换依赖的版本、原始来源、摘要和许可文件。依赖静态嵌入 libmpv 时，原许可全文合并展示但不改写各项目许可；Node headers、Windows node-gyp 钩子及适用的 GCC runtime exception 声明一并保留。当前 SDK 固定为 Electron 43.8.0／Node headers 24.22.0，以源码清单为准；`build.json` 记录实际来源、构建选项、工具链与配方，`runtime.json` 绑定 `mpv` 和 `javdex-native` 两个二进制所有者。
+固定源码清单单独保留 FreeType、HarfBuzz、FriBidi、libass、libunibreak、libplacebo/fast_float/Vulkan headers、dav1d、zlib、Lua 及平台 TLS/字符转换依赖的版本、原始来源、摘要和许可文件。依赖静态嵌入 libmpv 时，原许可全文合并展示但不改写各项目许可；Node headers、Windows node-gyp 钩子及适用的 GCC runtime exception 声明一并保留。当前 SDK 固定为 Electron 43.8.1／Node headers 24.22.0，以源码清单为准；`build.json` 记录实际来源、构建选项、工具链与配方，`runtime.json` 绑定 `mpv` 和 `javdex-native` 两个二进制所有者。
 
 应用 Resources 的 `native-playback/` 包含二进制、`licenses/libmpv.txt`、`licenses/javdex.txt`、`SOURCE-ACCESS.txt` 与分发清单。完整对应源码和配方独立交付为一个 `Javdex-Playback-Sources-<version>.tar.gz`，纳入 Release 的 `SHA256SUMS.txt`，不装入应用。总包按内容摘要去重四目标材料，保留原始上游归档、Javdex 原生源码、SDK headers、许可、构建和打包工具，以及六个最终安装产物的来源绑定；附 `restore.mjs`，可分别恢复 Windows x64、macOS x64／arm64、Linux x64 的原始材料。四份单平台源码包及 `.runtime.json`／`.installers.json` 回执保留为 CI 产物，不作为额外 Release 附件。具体恢复方法见 [开发指南](DEVELOPMENT.md#固定源码构建与分发验证)。
 
@@ -32,15 +34,19 @@ Windows 原生播放 addon 的 MSVC 构建复用已安装的 [node-gyp](https://
 
 ## 本地 AI 运行库
 
-- 可选 Qwen3-ASR 1.7B 与 Qwen3-ForcedAligner 0.6B 使用 Qwen 发布的模型，按 Apache-2.0 声明保存许可；独立 GGUF 由 [audio-cpp](https://huggingface.co/audio-cpp/audio.cpp-gguf) 发布。Windows CPU／Vulkan 推理由 [audio.cpp](https://github.com/0xShug0/audio.cpp) 提供，项目许可为 Apache-2.0；安装保留固定发行的 LICENSE 和运行 DLL，不能把模型许可当作运行库全部第三方组件的许可。固定发行、revision、文件大小与 SHA-256 见 `localModels/qwenAsrManifest.ts` 及 `modelCatalogAssets.json`；无需 Python，不进入服务端。
+- 可选 Qwen3-ASR 1.7B／Qwen3-ForcedAligner 0.6B 权重及 audio.cpp 引擎：Apache-2.0。Windows x64 CPU／Vulkan 固定使用 audio.cpp `v0.9.2-drama3-base-small` 上游发行，下载后保留引擎许可与运行 DLL 声明；完整固定地址及摘要见 `localModels/runtimeDistributions.json` 的 `optionalAssets`，权重来源见 `modelCatalogAssets.json` 和 `qwenAsrManifest.ts`。不随主安装包交付。
 
-- whisper.cpp b5130 与 llama.cpp b11435：MIT；固定下载地址、大小、SHA-256 见 [资产清单](../apps/desktop/src/main/services/localModels/runtimeManifest.ts)。各系统的资产独立，不能用 Windows ZIP 代替 POSIX 运行库。安装保留上游许可文件，模型许可与运行库许可分别记录。
-- macOS 随应用分发固定源码构建的 whisper-cli、FFmpeg／ffprobe；来源与摘要见 [源码清单](../scripts/ai-runtime-sources.json)，构建步骤见 [构建器](../scripts/ai-runtime-build.mjs)。FFmpeg 8.1.3 为 LGPL-2.1-or-later 静态构建，不启用 GPL／nonfree／自动探测外部编解码依赖；bundle 内附 `COPYING.LGPLv2.1`、`SOURCE.txt` 和完整构建来源清单。
-- Windows／Linux 的 FFmpeg 按需下载 BtbN 固定日期 LGPL shared 发布资产，保留包中的许可文件，不能把 macOS 自建工具的 LGPL 版本用于判断这些上游包的全部间接依赖许可。
-- Windows 可选 CUDA 资产固定于同一 whisper／llama 发布版本，另含 NVIDIA CUDA Runtime／cuBLAS，不能以引擎的 MIT 许可覆盖这些 NVIDIA 组件；它们按需从上游下载，适用 [NVIDIA CUDA Toolkit EULA](https://docs.nvidia.com/cuda/eula/index.html)。GPU 下载地址、大小及 SHA-256 见 `localModels/gpuManifest.ts`。
+- whisper.cpp b5130 与 llama.cpp b11435：MIT；原始上游包由 Javdex Runtime 固定镜像，下载地址、大小、SHA-256 见 [资产清单](../apps/desktop/src/main/services/localModels/runtimeManifest.ts)。各系统的资产独立，不能用 Windows ZIP 代替 POSIX 运行库。安装保留上游许可文件，模型许可与运行库许可分别记录。
+- macOS Whisper b5130 及五目标 FFmpeg／ffprobe 8.1.3 由 [Javdex Runtime](https://github.com/JavdexLabs/javdex-runtime) 固定源码构建并按需下载，不再随主应用交付。FFmpeg 采用 LGPL-2.1-or-later 的静态最小音频构建，不启用 GPL／nonfree／自动探测外部编解码依赖；各目标附件同时提供对应源码及构建配方，包内保留许可和来源。主播放器的 GPL FFmpeg 9.0.2 保持独立。
+- Silero VAD v6.2 小型辅助模型以原始字节镜像到运行库仓库，保留固定摘要与 MIT 声明；其他大模型继续使用固定 Hugging Face 来源。
+- Windows 可选 CUDA 资产固定于同一 whisper／llama 发布版本，另含 NVIDIA CUDA Runtime／cuBLAS，不能以引擎的 MIT 许可覆盖这些 NVIDIA 组件；它们以原包字节经 Javdex Runtime 镜像按需下载，附 NVIDIA 条款，适用 [NVIDIA CUDA Toolkit EULA](https://docs.nvidia.com/cuda/archive/12.4.0/eula/index.html)。GPU 下载地址、大小及 SHA-256 见 `localModels/gpuManifest.ts`。
 - Windows Whisper Vulkan 从 [Javdex Runtime 固定发行](https://github.com/JavdexLabs/javdex-runtime/releases/tag/whisper-b5130-r1) 按需取得，不随主安装包分发：引擎 MIT、Vulkan headers／loader Apache-2.0，ZIP 内附各自许可、来源与完整文件摘要。固定构建配方和开发材料移至该仓库；仓库自有构建脚本的 GPL 声明不替代第三方二进制许可。shaderc、glslang、SPIR-V 与 GCC 工具 DLL 只用于构建；GPU 驱动由系统提供，不进入运行库包。
 
-分发 macOS 工具时应一并提供对应 Javdex 源码版本中的构建器、固定源码清单及可获得的完整对应源码，不以二进制哈希代替许可义务。源资料和构建来源不是正式分发验收证明；播放器 libmpv 的许可／来源闭包仍独立检查。
+运行库仓库保存原包、固定源码和配方，按引擎独立发布，不自动清理。播放器另归档四个平台从固定 Javdex 0.9.0 原安装包提取的真实运行库与对应源码总包，保留原安装包摘要、源码提交和 CI 来源；该归档不代表当前 Wayland 开发代码或新的 GUI／GPU 验收。
+
+## Linux X11 ANGLE
+
+Linux x64 包使用与 Electron 版本匹配的 ANGLE 源码和 Electron 上游补丁序列，另应用本仓库 `build/patches/angle-x11-vulkan-visual.patch`。固定版本及摘要见 `build/angle-runtime.json`，构建参数见 `build/angle-args.gn`。ANGLE 使用 BSD 风格许可，包内保留 `ANGLE-LICENSE.txt`；完整依赖源码及其许可保留在独立的 `Javdex-ANGLE-Sources-*.tar.gz`，应随二进制交付。Vulkan loader 沿用 Electron 包，GPU 驱动仍由宿主提供。
 
 ## MetaTube
 
@@ -53,3 +59,9 @@ Windows 原生播放 addon 的 MSVC 构建复用已安装的 [node-gyp](https://
 - 字段约定：MetaTube 的 `actors` 全部按女性演员导入；`label` 近似映射为 Javdex 的发行方。该语义差异同时在插件说明与设置界面披露。
 
 Javdex 中的 MetaTube 适配代码为本项目实现；上述说明用于标明所对接 API、上游来源和许可边界。
+
+## 图片处理
+
+Sharp 0.35.5 使用 Apache-2.0；Linux Electron 采用官方 `@img/sharp-wasm32` 0.35.5（Apache-2.0、LGPL-3.0-or-later、MIT），包含 libvips 及图片编解码库，版本清单随包保留。后端选择补丁见 `scripts/patch-sharp-electron.mjs`。上游源码和构建入口见 [Sharp v0.35.5](https://github.com/lovell/sharp/tree/v0.35.5) 和 [sharp-libvips](https://github.com/lovell/sharp-libvips)；上游 [Electron/Linux 兼容性说明](https://sharp.pixelplumbing.com/install/#electron-and-linux) 记录 GLib 符号冲突。
+
+Linux x64 文本 GPU 新增固定 llama.cpp b11435 官方发行及 CUDA 12.8 运行依赖，遵守 [CUDA 12.8.1 EULA](https://docs.nvidia.com/cuda/archive/12.8.1/eula/index.html)。Whisper Linux GPU r1 保留 MIT、Vulkan Headers 与 NVIDIA 许可；驱动 `libcuda.so.1`、Vulkan ICD 由宿主提供，不随包覆盖。实际发行及验证范围见 [Linux AI GPU 验收](reviews/linux-local-ai-gpu-20261023.md)。

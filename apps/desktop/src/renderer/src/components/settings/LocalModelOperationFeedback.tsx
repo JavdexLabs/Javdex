@@ -9,7 +9,7 @@ export function failureModel(failure?: ModelOperationFailure) {
 }
 export function failureGroup(failure?: ModelOperationFailure) {
   const command = failure?.command
-  return command?.action === 'qwen-forced-aligner' ? 'speech2' : command && 'group' in command ? command.group : command?.action === 'prepare-acceleration' && command.model ? localModelGroup(command.model) : undefined
+  return command?.action === 'qwen-forced-aligner' ? 'qwen-speech' : command && 'group' in command ? command.group : command?.action === 'prepare-acceleration' && command.model ? localModelGroup(command.model) : undefined
 }
 export default function LocalModelOperationFeedback({ failure, disabled, execute, details, detailsLabel = '错误详情', showMessage = true }: {
   failure: ModelOperationFailure; disabled: boolean; execute: (command: LocalModelCommand) => Promise<boolean>; details: () => void

@@ -8,6 +8,7 @@ import type { PendingAuditIds, PendingScanQueueQuery } from '../../../../package
 import type { WebAccessInput } from '../../../../packages/contracts/src/webTypes'
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { IPC } from '../../../../packages/contracts/src/ipc-channels'
+import { installSharedTextureReceiver } from './sharedTextureReceiver'
 import type { UpdateCheckState } from '../../../../packages/contracts/src/updateTypes'
 import type {
   AppIpcArgs,
@@ -220,6 +221,8 @@ function onScrapeEvent<Channel extends ScrapeIpcEventChannel>(
   return () => ipcRenderer.removeListener(channel, listener)
 }
 
+const bindSharedTextureSurface = installSharedTextureReceiver()
+
 const api = {
   nfoExport: {
     getOptions: () => invokeNfoExport(IPC.NFO_EXPORT_GET_OPTIONS),
@@ -310,6 +313,7 @@ const api = {
     file: (input: import('@shared/protocol/backup').DesktopBackupFileRequest) => invokeApp(IPC.BACKUP_FILE, input)
   },
   desktop: {
+    pointerTiming: () => invokeApp(IPC.DESKTOP_POINTER_TIMING),
     getSession: () => invokeApp(IPC.DESKTOP_SESSION_GET),
     reconnect: () => invokeApp(IPC.DESKTOP_RECONNECT),
     claimWriter: (input: DesktopWriterClaimRequest) => invokeApp(IPC.WRITER_CLAIM, input),
@@ -861,6 +865,7 @@ const api = {
     end: (token: string) => invokeScrape(IPC.AVATAR_AUTO_CROP_BATCH_END, token)
   },
   playback: {
+    bindSharedTextureSurface,
     availability: () => invokeApp(IPC.PLAYBACK_AVAILABILITY),
     open: (target: import('@shared/desktop/playback').PlaybackTarget) => invokeApp(IPC.PLAYBACK_OPEN, target),
     snapshot: async () => (await invokeApp(IPC.PLAYBACK_SNAPSHOT)).snapshot,

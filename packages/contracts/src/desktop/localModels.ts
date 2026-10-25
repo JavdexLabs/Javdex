@@ -9,7 +9,7 @@ export const LOCAL_MODEL_DOWNLOAD_SOURCES = ['official', 'hf-mirror'] as const
 export type LocalModelDownloadSource = typeof LOCAL_MODEL_DOWNLOAD_SOURCES[number]
 export type LocalTranslationMode = 'app-default' | 'local'
 export interface LocalAccelerationPolicy { mode: 'auto' | 'cpu' | 'gpu'; device?: string }
-export interface LocalGpuDevice { id: string; name: string; backend: 'cuda' | 'vulkan'; index: number; memoryMiB: number }
+export interface LocalGpuDevice { id: string; name: string; backend: 'cuda' | 'vulkan'; index: number; memoryMiB: number; integrated?: boolean; audioCppOnly?: boolean }
 export interface LocalExecutionStatus {
   backend: 'cpu' | 'cuda' | 'vulkan' | 'metal' | 'idle'
   device?: string
@@ -31,10 +31,10 @@ export interface LocalAccelerationSnapshot {
   /** False when Vulkan enumeration still needs its probe component. */
   detectionComplete?: boolean
 }
-export const LOCAL_MODEL_GROUPS = ['speech', 'speech2', 'text'] as const
+export const LOCAL_MODEL_GROUPS = ['speech', 'qwen-speech', 'text'] as const
 export type LocalModelGroup = typeof LOCAL_MODEL_GROUPS[number]
-export const localModelGroup = (model: LocalModelId): LocalModelGroup => model === 'qwen3-asr' ? 'speech2' : model === 'kotoba' ? 'speech' : 'text'
-export const localModelGroupLabel = (group: LocalModelGroup): string => group === 'speech2' ? '语音模型2' : group === 'speech' ? '语音' : '文本'
+export const localModelGroup = (model: LocalModelId): LocalModelGroup => model === 'qwen3-asr' ? 'qwen-speech' : model === 'kotoba' ? 'speech' : 'text'
+export const localModelGroupLabel = (group: LocalModelGroup): string => group === 'qwen-speech' ? 'Qwen 语音' : group === 'speech' ? '语音' : '文本'
 export interface LocalRuntimeComponent {
   /** False when an optional component is disabled but retained for file management. */
   enabled?: boolean

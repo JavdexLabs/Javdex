@@ -1,5 +1,6 @@
 import { localModelGroup, type LocalAccelerationPolicy, type LocalGpuDevice, type LocalModelGroup, type LocalModelRef, type LocalPreparationPlan, type LocalRuntimeComponent } from '@shared/desktop/localModels'
-import { aiRuntimeAssets, type AiRuntimeAsset, type AiRuntimeTarget, AI_MAC_BUNDLE_VERSION } from './runtimeManifest'
+import { aiRuntimeAssets, type AiRuntimeAsset, type AiRuntimeTarget } from './runtimeManifest'
+import { runtimeSupportsMetal } from './runtimeDistributionAssets'
 import { gpuRuntimeAssets } from './gpuManifest'
 import { localModelVariant } from './modelCatalog'
 import { audioCppAsset, AUDIOCPP_VERSION, QWEN_ALIGNER, qwenAsrSupported } from './qwenAsrManifest'
@@ -14,12 +15,11 @@ const names = { whisper: '语音引擎', translator: '文本引擎', ffmpeg: '�
 export function runtimeComponentDefinitions(target: AiRuntimeTarget): RuntimeComponentDefinition[] {
   const base = aiRuntimeAssets(target)
   const definition = (id: typeof baseIds[number] | 'cuda', backend: LocalRuntimeComponent['backend'], asset?: AiRuntimeAsset): RuntimeComponentDefinition => {
-    const bundled = target.platform === 'darwin' && (id === 'whisper' || id === 'ffmpeg')
     return { assetId: id, asset, component: {
       id: `${id}-${backend}`, group: id === 'translator' || id === 'cuda' ? 'text' : 'speech',
-      name: names[id], backend, delivery: bundled ? 'bundled' : 'download', bytes: asset?.bytes ?? 0,
-      version: asset?.model?.family ?? (id === 'whisper' ? 'b5130' : id === 'ffmpeg' ? '8.1.3' : id === 'cuda' ? '12.4' : 'b11435'),
-      source: bundled ? `应用内置 · ${AI_MAC_BUNDLE_VERSION}` : asset?.url ?? ''
+      name: names[id], backend, delivery: 'download', bytes: asset?.bytes ?? 0,
+      version: asset?.model?.family ?? (id === 'whisper' ? 'b5130' : id === 'ffmpeg' ? '8.1.3' : id === 'cuda' ? target.platform === 'linux' ? '12.8.1' : '12.4' : 'b11435'),
+      source: asset?.url ?? ''
     } }
   }
   return [
@@ -27,8 +27,8 @@ export function runtimeComponentDefinitions(target: AiRuntimeTarget): RuntimeCom
     ...(['cuda', 'vulkan'] as const).flatMap(backend => gpuRuntimeAssets(target, backend)
       .map(asset => definition(asset.id as 'whisper' | 'translator' | 'cuda', backend, asset))),
     ...(qwenAsrSupported(target) ? [...audioCppAsset(target), QWEN_ALIGNER, ...audioCppAsset(target, true), base.find(asset => asset.id === 'ffmpeg')!].map(asset => ({
-      assetId: asset.id, asset, component: { id: asset.id === 'ffmpeg' ? 'ffmpeg-speech2-common' : `${asset.id}-${asset.backend ?? (asset.archive ? 'cpu' : 'common')}`,
-        group: 'speech2' as const, name: asset.id === 'ffmpeg' ? '音频提取工具（共用）' : asset.label,
+      assetId: asset.id, asset, component: { id: asset.id === 'ffmpeg' ? 'ffmpeg-qwen-speech-common' : `${asset.id}-${asset.backend ?? (asset.archive ? 'cpu' : 'common')}`,
+        group: 'qwen-speech' as const, name: asset.id === 'ffmpeg' ? '音频提取工具（共用）' : asset.label,
         backend: asset.id === 'ffmpeg' ? 'common' as const : asset.backend ?? (asset.archive ? 'cpu' as const : 'common' as const),
         delivery: 'download' as const, bytes: asset.bytes, version: asset.id === 'ffmpeg' ? '8.1.3' : asset.archive ? AUDIOCPP_VERSION : '0.6B Q8_0', source: asset.url }
     })) : [])
@@ -38,9 +38,10 @@ export function runtimeComponentDefinitions(target: AiRuntimeTarget): RuntimeCom
 /** Match execution selection, including an installed alternative backend in automatic mode. */
 export function runtimeBackend(group: LocalModelGroup, policy: LocalAccelerationPolicy, devices: LocalGpuDevice[], components: LocalRuntimeComponent[]): 'cuda' | 'vulkan' | undefined {
   if (policy.mode === 'cpu') return undefined
-  if (group === 'speech2') {
+  if (group === 'qwen-speech') {
     return policy.mode === 'gpu' || devices.length > 0 ? 'vulkan' : undefined
   }
+  devices = devices.filter(device => !device.audioCppOnly)
   const engine = group === 'speech' ? 'whisper' : 'translator'
   const ready = (device: LocalGpuDevice) => components.some(item => item.id === `${engine}-${device.backend}` && item.installed)
     && (device.backend !== 'cuda' || group === 'speech' || components.some(item => item.id === 'cuda-cuda' && item.installed))
@@ -56,7 +57,7 @@ export function preparationPlan(options: {
 }): LocalPreparationPlan {
   const { groups, policy, devices, target, components } = options
   const items: LocalPreparationPlan['items'] = []
-  let backend: LocalPreparationPlan['backend'] = target.platform === 'darwin' && policy.mode === 'auto' ? 'metal' : 'cpu'
+  let backend: LocalPreparationPlan['backend'] = policy.mode === 'auto' && groups.some(group => group !== 'qwen-speech' && runtimeSupportsMetal(target, group === 'speech' ? 'whisper' : 'translator')) ? 'metal' : 'cpu'
   for (const ref of options.refs ?? []) {
     const variant = localModelVariant(ref.model, ref.variant), installed = options.installed(variant.id), id = `model:${variant.id}`
     if (items.some(item => item.id === id)) continue
@@ -66,11 +67,12 @@ export function preparationPlan(options: {
   }
   if (options.supported) for (const group of groups) {
     const gpu = runtimeBackend(group, policy, devices, components)
-      ?? (options.forceGpu && target.platform === 'win32' ? (group === 'speech2' ? 'vulkan' : devices.find(item => item.backend === 'cuda')?.backend ?? 'vulkan') : undefined)
+      ?? (options.forceGpu && ['win32', 'linux'].includes(target.platform) ? (group === 'qwen-speech' ? 'vulkan' : devices.find(item => item.backend === 'cuda')?.backend ?? 'vulkan') : undefined)
     if (gpu) backend = gpu
     const wanted = components.filter(item => item.group === group && (item.backend === 'cpu' || item.backend === 'common' || item.backend === gpu))
-    // Vulkan device enumeration currently uses the text engine, even for speech-only setup.
-    if (gpu === 'vulkan' && !devices.some(device => device.backend === 'vulkan')) {
+    // Linux also needs Vulkan enumeration on NVIDIA hosts to discover secondary Intel/AMD GPUs.
+    if (gpu && (gpu === 'vulkan' || target.platform === 'linux') && !devices.some(device => device.backend === 'vulkan')
+      && (group !== 'qwen-speech' || !devices.some(device => !device.integrated && device.memoryMiB > 0))) {
       const probe = components.find(item => item.id === 'translator-vulkan')
       if (probe) wanted.push(probe)
     }

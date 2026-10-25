@@ -708,6 +708,7 @@ export const appIpcSchemas = {
   [IPC.BACKUP_FILE]: z.tuple([desktopBackupFileSchema]),
   [IPC.DESKTOP_SESSION_GET]: noArgs,
   [IPC.DESKTOP_RECONNECT]: noArgs,
+  [IPC.DESKTOP_POINTER_TIMING]: noArgs,
   [IPC.THIS_COMPUTER_GET]: noArgs,
   [IPC.THIS_COMPUTER_UPDATE]: z.tuple([
     z
@@ -716,6 +717,7 @@ export const appIpcSchemas = {
         remoteBaseUrl: z.string().max(2048).nullable().optional(),
         playerPath: z.string().max(4096).nullable().optional(),
         playerPreference: z.enum(['external', 'builtin']).optional(),
+        playbackRenderMode: z.enum(['auto', 'gpu', 'cpu']).optional(),
         resumePlayback: z.boolean().optional()
       })
       .strict()

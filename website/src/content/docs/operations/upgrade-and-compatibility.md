@@ -1,15 +1,23 @@
 ---
 title: 版本升级与 Schema 兼容性
-description: Javdex 0.8.0 至 0.9.0 升级注意事项、SQLite Schema 21 自动迁移、Docker /program 程序卷配置与安全回滚策略。
+description: Javdex 0.9.1 升级、0.8.0 至 0.9.0 迁移、SQLite Schema 21 与 Docker 程序卷兼容性。
 ---
 
 Javdex 在迭代过程中严格实施数据库版本门禁与客户端/服务端同版本约束。从 `0.8.0` 升级至 `0.9.0` 引入了多可信设备授权、容器内托管更新网关（`/opt/javdex-manager` + `/program`）及本地 AI 模型管理 Schema v4。
 
 在执行升级前，请仔细阅读本页的兼容性边界与操作步骤。
 
+## 从 0.9.0 升级至 0.9.1
+
+桌面和服务端一起升级到 **0.9.1**，服务端使用固定镜像 `ghcr.io/javdexlabs/javdex-server:0.9.1`。保留原有 `/data`、`/program` 和媒体挂载，升级前正常退出并备份；不要删除程序卷或降级资料库。
+
+资料库 schema 21、模型管理文档格式 4、运行环境兼容版本 1 保持不变，不增加新迁移。已有资料、播放与模型设置保留；macOS／Linux 的有效运行库和下载缓存继续复用，新工具按需下载。
+
+本版三平台使用 Canvas，并提供 GPU／CPU 兼容模式；Linux 原生 Wayland 也可内置播放，不再沿用下面历史 0.9.0 步骤的 X11 限制。具体系统要求和启动参数见[安装指南](/Javdex/getting-started/installation/)；CPU 高分辨率播放仍受设备性能限制。
+
 ---
 
-## 核心兼容性铁律
+## 0.9.0 引入的数据格式与迁移基线
 
 1. **数据库 Schema 19 → 21 单向自动迁移（不可逆）**：
    - `0.9.0` 核心资料库的 SQLite 结构版本为 **`CURRENT_SCHEMA_VERSION = 21`**（`packages/library/src/db/migrations.ts`）。
@@ -20,7 +28,7 @@ Javdex 在迭代过程中严格实施数据库版本门禁与客户端/服务端
 2. **模型管理配置 Schema 3 → 4 自动迁移**：
    - 桌面端的 AI 模型配置文件（`ai-configuration.json`）在 `0.9.0` 中为 **`MODEL_MANAGEMENT_SCHEMA_VERSION = 4`**，首次启动时会自动从 v3 迁移至 v4。
 3. **桌面客户端与独立服务端必须同版本**：
-   - 连接远程服务端时，桌面端与服务端业务版本必须严格一致（均为 `0.9.0`）。
+   - 连接远程服务端时，桌面端与服务端业务版本必须严格一致；当前正式版两端均使用 `0.9.1`。
 
 ---
 

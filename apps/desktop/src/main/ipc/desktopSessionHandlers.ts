@@ -12,6 +12,7 @@ import type { DesktopSettingsStore } from '../application/desktopPorts'
 import { appCommandAdapter, appEventAdapter } from './appContractAdapter'
 import type { IpcContext } from './shared'
 import { detectDefaultPlayer } from '../desktop/defaultPlayerService'
+import { readPointerTiming } from '../desktop/pointerTiming'
 import { readServerPin } from '../desktop/serverConnectionStore'
 import { assertRemoteBaseUrl } from '../desktop/remoteConnectionUrl'
 import { createServerCertificateTrust } from '../desktop/serverCertificateTrust'
@@ -135,6 +136,12 @@ export function registerDesktopSessionHandlers(
   ports.backend.onSessionChanged?.(publish)
 
   adapter.register(IPC.DESKTOP_SESSION_GET, () => snapshot(ports.backend))
+  // Coalesce concurrent requests; focus refreshes can observe changed settings.
+  let pointerTiming: ReturnType<typeof readPointerTiming> | undefined
+  adapter.register(IPC.DESKTOP_POINTER_TIMING, () => {
+    pointerTiming ??= readPointerTiming().finally(() => { pointerTiming = undefined })
+    return pointerTiming
+  })
 
   adapter.register(IPC.DESKTOP_RECONNECT, async () => {
     await ports.backend.reconnect()

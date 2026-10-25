@@ -12,6 +12,7 @@ import { LocalModelProcessFailure, type runLocalModelProcess } from '../../servi
 import { createSubtitleCache } from './subtitleCache'
 import { createSubtitleScheduler, type SubtitleSchedulerState } from './subtitleScheduler'
 
+const target = { platform: 'win32', arch: 'x64' }
 const word = (text: string, start: number, end: number) => ({ word: text, start_sample: start * 16000, end_sample: end * 16000 })
 
 test('Qwen word offsets retain source-media time, Japanese punctuation and only the owning chunk', () => {
@@ -28,6 +29,13 @@ test('Qwen word offsets retain source-media time, Japanese punctuation and only 
   assert.throws(() => parseQwenCues([], '未对齐', 0, 0, 30), /时间戳/)
 })
 
+test('Qwen rejects incomplete text coverage and zero-duration speech instead of silently dropping words', () => {
+  assert.throws(() => parseQwenCues([word('今日', 0, 1)], '今日は晴れ。', 0, 0, 30), /完整覆盖/)
+  assert.throws(() => parseQwenCues([word('今日', 0, 0)], '今日。', 0, 0, 30), /时长/)
+  assert.deepEqual(parseQwenCues([word('Ａ', 0, 1)], 'A。', 0, 0, 30).length, 1)
+  assert.deepEqual(parseQwenCues([word('境界', 2, 4)], '境界。', 27, 30, 60), [{ start: 29, end: 31, japanese: '境界。' }])
+})
+
 test('Qwen cue grouping splits long speech and preserves pauses instead of translating each word', () => {
   const words = Array.from({ length: 15 }, (_, i) => word('あいうえお', i / 2, i / 2 + 0.4))
   const cues = parseQwenCues(words, '', 0, 0, 30)
@@ -36,9 +44,9 @@ test('Qwen cue grouping splits long speech and preserves pauses instead of trans
   assert.equal(cues.map(cue => cue.japanese).join(''), words.map(word => word.word).join(''))
 })
 
-test('audio.cpp device parsing excludes integrated adapters and never treats requested backend text as device proof', () => {
-  const output = 'Vulkan:0 "Discrete" [GPU]\nVulkan:1 "Integrated" [GPU]\nCPU:0 "CPU" [CPU]\n'
-  assert.deepEqual(parseAudioCppVulkanDevices(output, 'Discrete | uma: 0 | fp16: 1\nIntegrated | uma: 1'), [{ index: 0, name: 'Discrete' }])
+test('audio.cpp device parsing requires hardware evidence for discrete and integrated adapters', () => {
+  const output = 'Vulkan:0 "Discrete" [GPU]\nVulkan:1 "Integrated" [IGPU]\nCPU:0 "CPU" [CPU]\n'
+  assert.deepEqual(parseAudioCppVulkanDevices(output, 'Discrete | uma: 0 | fp16: 1\nIntegrated | uma: 1'), [{ index: 0, name: 'Discrete' }, { index: 1, name: 'Integrated', integrated: true }])
   assert.deepEqual(parseAudioCppVulkanDevices(output, 'backend=vulkan'), [])
 })
 
@@ -57,7 +65,7 @@ test('Qwen uses the existing extraction pipeline and exposes timed cues without 
     }
     return ''
   }
-  const paths = createAiRuntimeInstaller(root, undefined, localModelAssets(DEFAULT_LOCAL_MODEL_VARIANTS), { recognitionModel: 'qwen3-asr' }).paths()
+  const paths = createAiRuntimeInstaller(root, undefined, localModelAssets(DEFAULT_LOCAL_MODEL_VARIANTS, undefined, target), { target, recognitionModel: 'qwen3-asr' }).paths()
   const inference = createOfflineSubtitleInference(paths, path.join(root, 'work'), { run })
   try {
     assert.deepEqual(await inference.recognize('authorized-resource', 2, 30, 60, new AbortController().signal),
@@ -71,7 +79,7 @@ test('Qwen uses the existing extraction pipeline and exposes timed cues without 
 
 test('disabling ForcedAligner runs ASR alone without overlap, aligner files or word timestamps', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'javdex-qwen-unaligned-'))
-  const paths = createAiRuntimeInstaller(root, undefined, localModelAssets(DEFAULT_LOCAL_MODEL_VARIANTS), { recognitionModel: 'qwen3-asr', qwenForcedAligner: false }).paths()
+  const paths = createAiRuntimeInstaller(root, undefined, localModelAssets(DEFAULT_LOCAL_MODEL_VARIANTS, undefined, target), { target, recognitionModel: 'qwen3-asr', qwenForcedAligner: false }).paths()
   const device = { id: 'gpu', name: 'Discrete', backend: 'vulkan' as const, index: 0, memoryMiB: 16384 }
   paths.acceleration = { policy: { mode: 'gpu', device: device.id }, devices: [device], runtimes: { vulkan: { audiocpp: 'gpu.exe' } } }
   await fs.mkdir(path.dirname(paths.qwenAsr!.model), { recursive: true }); await fs.writeFile(paths.qwenAsr!.model, 'weight')
@@ -103,7 +111,7 @@ test('disabling ForcedAligner runs ASR alone without overlap, aligner files or w
 
 test('Qwen cancellation and invalid model failures never switch to Kotoba or another model', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'javdex-qwen-failure-'))
-  const paths = createAiRuntimeInstaller(root, undefined, localModelAssets(DEFAULT_LOCAL_MODEL_VARIANTS), { recognitionModel: 'qwen3-asr' }).paths()
+  const paths = createAiRuntimeInstaller(root, undefined, localModelAssets(DEFAULT_LOCAL_MODEL_VARIANTS, undefined, target), { target, recognitionModel: 'qwen3-asr' }).paths()
   let calls = 0
   const recognize = createQwenAsrRecognition(paths, async () => { calls++; throw new LocalModelProcessFailure('audiocpp_cli.exe', 1) })
   try {
@@ -116,7 +124,7 @@ test('Qwen cancellation and invalid model failures never switch to Kotoba or ano
 
 test('punctuation-only ASR output with an empty alignment does not prevent the next speech chunk', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'javdex-qwen-punctuation-'))
-  const paths = createAiRuntimeInstaller(root, undefined, localModelAssets(DEFAULT_LOCAL_MODEL_VARIANTS), { recognitionModel: 'qwen3-asr' }).paths()
+  const paths = createAiRuntimeInstaller(root, undefined, localModelAssets(DEFAULT_LOCAL_MODEL_VARIANTS, undefined, target), { target, recognitionModel: 'qwen3-asr' }).paths()
   let calls = 0
   const recognize = createQwenAsrRecognition(paths, async (_executable, args) => {
     const silent = calls++ === 0
@@ -133,7 +141,7 @@ test('punctuation-only ASR output with an empty alignment does not prevent the n
 
 test('audio.cpp can omit the words file for empty transcripts and subsequent speech still aligns', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'javdex-qwen-empty-output-'))
-  const paths = createAiRuntimeInstaller(root, undefined, localModelAssets(DEFAULT_LOCAL_MODEL_VARIANTS), { recognitionModel: 'qwen3-asr' }).paths()
+  const paths = createAiRuntimeInstaller(root, undefined, localModelAssets(DEFAULT_LOCAL_MODEL_VARIANTS, undefined, target), { target, recognitionModel: 'qwen3-asr' }).paths()
   const transcripts = ['', '\r\n', '…\r\n', '日本語。']
   let calls = 0
   const recognize = createQwenAsrRecognition(paths, async (_executable, args) => {
@@ -151,7 +159,7 @@ test('audio.cpp can omit the words file for empty transcripts and subsequent spe
 
 test('missing word timestamps for speech and malformed outputs remain errors', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'javdex-qwen-missing-output-'))
-  const paths = createAiRuntimeInstaller(root, undefined, localModelAssets(DEFAULT_LOCAL_MODEL_VARIANTS), { recognitionModel: 'qwen3-asr' }).paths()
+  const paths = createAiRuntimeInstaller(root, undefined, localModelAssets(DEFAULT_LOCAL_MODEL_VARIANTS, undefined, target), { target, recognitionModel: 'qwen3-asr' }).paths()
   try {
     const missing = createQwenAsrRecognition(paths, async (_executable, args) => {
       await fs.writeFile(args[args.indexOf('--text-out') + 1], '日本語。')
@@ -170,7 +178,7 @@ test('missing word timestamps for speech and malformed outputs remain errors', a
 
 test('the logged empty-transcript case completes its cache chunk and continues without a subtitle failure', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'javdex-qwen-empty-chunk-'))
-  const paths = createAiRuntimeInstaller(root, undefined, localModelAssets(DEFAULT_LOCAL_MODEL_VARIANTS), { recognitionModel: 'qwen3-asr' }).paths()
+  const paths = createAiRuntimeInstaller(root, undefined, localModelAssets(DEFAULT_LOCAL_MODEL_VARIANTS, undefined, target), { target, recognitionModel: 'qwen3-asr' }).paths()
   let calls = 0
   const inference = createOfflineSubtitleInference(paths, path.join(root, 'work'), { run: async (_executable, args) => {
     if (args.includes('-c:a')) await fs.writeFile(args.at(-1)!, 'wav')
@@ -202,7 +210,7 @@ test('the logged empty-transcript case completes its cache chunk and continues w
 
 test('Qwen GPU failure retries the same ASR and aligner on CPU once and retains CPU for later chunks', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'javdex-qwen-gpu-fallback-'))
-  const paths = createAiRuntimeInstaller(root, undefined, localModelAssets(DEFAULT_LOCAL_MODEL_VARIANTS), { recognitionModel: 'qwen3-asr' }).paths()
+  const paths = createAiRuntimeInstaller(root, undefined, localModelAssets(DEFAULT_LOCAL_MODEL_VARIANTS, undefined, target), { target, recognitionModel: 'qwen3-asr' }).paths()
   const device = { id: 'GPU-selected', name: 'Discrete', index: 0, memoryMiB: 16384, backend: 'cuda' as const }
   const execution: string[] = [], backends: string[] = []
   paths.acceleration = { policy: { mode: 'gpu', device: device.id }, devices: [device], runtimes: { vulkan: { audiocpp: 'gpu.exe' } },

@@ -10,7 +10,7 @@ import { createSubtitleCache, subtitleCacheKey } from './subtitleCache'
 import { writeSubtitleFile } from './writeSubtitleFile'
 import { createOfflineSubtitleInference } from './offlineInference'
 import { createSubtitleScheduler } from './subtitleScheduler'
-import { renderSubtitleAss, renderSubtitleSrt, type SubtitleCue } from './subtitleDocument'
+import { renderSubtitleAss, renderSubtitleSrt, SUBTITLE_CHUNK_SECONDS, type SubtitleCue } from './subtitleDocument'
 import { createSubtitleLog } from './subtitleLog'
 
 interface Dependencies {
@@ -209,6 +209,13 @@ export function createAiSubtitleController(deps: Dependencies) {
           return engine.recognize(renewed.locator, stream.index, start, end, signal)
         },
         translate: (cues, signal, updated) => engine.translate(cues, signal, updated),
+        failed: (index, stage, cause) => {
+          if (generation.signal.aborted || task !== generation) return
+          const failure = cause as Error & { code?: string; tool?: string; exitCode?: number | null }
+          log.write('字幕片段失败', { index, start: index * SUBTITLE_CHUNK_SECONDS, stage,
+            message: (cause instanceof Error ? cause.message : '未知错误').replace(/https?:\/\/[^\s"<>]+/gi, '[远程地址]'),
+            code: failure?.code, tool: failure?.tool, exitCode: failure?.exitCode })
+        },
         changed: value => {
           if (generation.signal.aborted || task !== generation || deps.playback()?.sessionId !== id
             || deps.native.selectedAudioStream?.() !== stream.index) return

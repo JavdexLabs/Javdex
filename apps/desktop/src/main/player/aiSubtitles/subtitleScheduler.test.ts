@@ -45,6 +45,24 @@ test('cached Japanese survives translation failure and retry never repeats recog
   assert.equal(recognizes, 1); assert.equal(translations, 2); assert.equal(states.at(-1)?.error, null)
   await scheduler.stop()
 })
+
+test('a failed recognition records its exact chunk and cause while later chunks keep progressing', async () => {
+  const cause = new Error('Qwen 识别文本未获得对齐时间戳')
+  const failures: Array<{ index: number; stage: string; error: unknown }> = []
+  const states: SubtitleSchedulerState[] = []
+  const scheduler = createSubtitleScheduler(90, {
+    read: async () => null, write: async () => {},
+    recognize: async (start, end) => { if (start === 30) throw cause; return [{ start, end, japanese: 'はい' }] },
+    translate: async cues => cues.map(cue => ({ ...cue, chinese: '是' })), changed: value => states.push(value),
+    failed: (index, stage, error) => failures.push({ index, stage, error })
+  })
+  scheduler.start()
+  try {
+    await until(() => states.at(-1)?.translatedSeconds === 60)
+    assert.deepEqual(failures, [{ index: 1, stage: '语音识别', error: cause }])
+    assert.deepEqual(states.at(-1)?.cues.map(cue => cue.start), [0, 60])
+  } finally { await scheduler.stop() }
+})
 test('complete cached chunks load without starting either model', async () => {
   const states: SubtitleSchedulerState[] = []
   const scheduler = createSubtitleScheduler(45, {

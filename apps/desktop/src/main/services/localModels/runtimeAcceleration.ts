@@ -3,11 +3,12 @@ import path from 'node:path'
 import os from 'node:os'
 import type { LocalAccelerationPolicy, LocalExecutionStatus, LocalGpuDevice } from '@shared/desktop/localModels'
 import { runtimeSupportsMetal } from './runtimeDistributionAssets'
+import { parseAudioCppVulkanDevices } from './audioCppDevices'
 import { currentAiRuntimeTarget } from './runtimeManifest'
 import { runLocalModelProcess } from './processRunner'
 
 export type LocalEngine = 'recognition' | 'translation'
-export interface LocalGpuRuntime { translator?: string; whisper?: string; libraryDirectory?: string }
+export interface LocalGpuRuntime { translator?: string; whisper?: string; audiocpp?: string; libraryDirectory?: string }
 export interface LocalRuntimeAcceleration {
   policy: LocalAccelerationPolicy
   devices: LocalGpuDevice[]
@@ -28,6 +29,15 @@ export const localGpuTargetSupported = (platform: string = process.platform, arc
 
 export class LocalGpuFailure extends Error {}
 const reservations = new Map<string, number>()
+
+/** Audio and text engines share the same conservative per-card budget. */
+export function reserveLocalGpuMemory(name: string, memoryMiB: number, requiredMiB: number): (() => void) | null {
+  const used = reservations.get(name) ?? 0
+  if (requiredMiB > memoryMiB - 2048 - used) return null
+  reservations.set(name, used + requiredMiB)
+  let released = false
+  return () => { if (!released) { released = true; reservations.set(name, Math.max(0, (reservations.get(name) ?? 0) - requiredMiB)) } }
+}
 
 /** Require native backend evidence; Linux may expose hardware UMA with a shared-memory budget. */
 export function parseVulkanDevices(stdout: string, diagnostic: string, includeIntegrated = false): LocalGpuDevice[] {
@@ -58,6 +68,20 @@ export async function detectLocalGpuDevices(vulkan?: LocalGpuRuntime): Promise<L
       devices.push(...parseVulkanDevices(output, diagnostic, process.platform === 'linux'))
     } catch { /* A loader/driver failure must not prevent CPU use. */ }
   }
+  if (vulkan?.audiocpp) {
+    try {
+      let diagnostic = ''
+      const output = await runLocalModelProcess(vulkan.audiocpp, ['--list-devices'], {
+        timeoutMs: 15000, maxBytes: 65536, diagnostic: value => { diagnostic = value }
+      })
+      for (const device of parseAudioCppVulkanDevices(output, diagnostic)) {
+        // Discrete capacity still comes from the shared inventory. UMA uses a bounded RAM budget.
+        if (!device.integrated || devices.some(item => item.backend === 'vulkan' && item.name === device.name)) continue
+        devices.push({ ...device, id: `audio-vulkan:${device.index}:${device.name}`, backend: 'vulkan', audioCppOnly: true,
+          memoryMiB: Math.floor(os.totalmem() / 1024 ** 2 / 2) })
+      }
+    } catch { /* Optional engine probing cannot prevent independent CPU use. */ }
+  }
   return devices
 }
 export function cpuExecution(executable: string, engine: LocalEngine, acceleration?: LocalRuntimeAcceleration, reason?: string): LocalExecution {
@@ -71,9 +95,10 @@ export async function selectLocalExecution(executable: string, model: string, en
   }
   if (!acceleration || !localGpuTargetSupported() || acceleration.policy.mode === 'cpu') return cpuExecution(executable, engine, acceleration)
   const toolName = engine === 'recognition' ? 'whisper' : 'translator'
-  const selected = acceleration.policy.mode === 'gpu' ? acceleration.devices.find(device => device.id === acceleration.policy.device)
-    : acceleration.devices.find(device => device.backend === 'cuda' && acceleration.runtimes.cuda?.[toolName])
-      ?? acceleration.devices.find(device => acceleration.runtimes[device.backend]?.[toolName]) ?? acceleration.devices[0]
+  const supportedDevices = acceleration.devices.filter(device => !device.audioCppOnly)
+  const selected = acceleration.policy.mode === 'gpu' ? supportedDevices.find(device => device.id === acceleration.policy.device)
+    : supportedDevices.find(device => device.backend === 'cuda' && acceleration.runtimes.cuda?.[toolName])
+      ?? supportedDevices.find(device => acceleration.runtimes[device.backend]?.[toolName]) ?? supportedDevices[0]
   const fallback = (reason: string): LocalExecution => cpuExecution(executable, engine, acceleration, reason)
   if (!selected) return fallback(acceleration.policy.mode === 'gpu' ? '指定显卡不可用，已使用 CPU' : '未检测到受支持的 GPU，已使用 CPU')
   const runtime = acceleration.runtimes[selected.backend]

@@ -15,7 +15,7 @@ import { positiveSafeInteger, videoQueryIpcSchema } from './videoQueryIpcSchema'
 import { playbackTargetSchema, playbackSessionIdSchema, playbackControlSchema, playbackViewportSchema, playbackClearProgressSchema, aiSubtitleCommandSchema } from '../player/playbackSchemas'
 import { digestSchema, expectedVersionsSchema } from '@shared/manage/primitives'
 import { localModelVariant } from '../services/localModels/modelCatalog'
-import { LOCAL_MODEL_IDS, LOCAL_TRANSLATION_MODEL_IDS } from '@shared/desktop/localModels'
+import { LOCAL_MODEL_IDS, LOCAL_TRANSLATION_MODEL_IDS, LOCAL_RECOGNITION_MODEL_IDS, LOCAL_MODEL_GROUPS } from '@shared/desktop/localModels'
 
 const scanAuditSnapshot = z.object({libraryId:positiveSafeInteger,runId:z.string().min(1).max(256),finishedAt:z.string().min(1).max(100)}).strict()
 const scanAuditViewQuery = z.object({
@@ -745,19 +745,20 @@ export const appIpcSchemas = {
   [IPC.SETTINGS_MODEL_MANAGEMENT_GET]: noArgs,
   [IPC.LOCAL_MODELS_SNAPSHOT]: noArgs,
   [IPC.LOCAL_MODELS_COMMAND]: z.tuple([z.discriminatedUnion('action', [
+    z.object({ action: z.literal('qwen-forced-aligner'), enabled: z.boolean(), expectedRevision: z.string().min(1).max(128).optional() }).strict(),
     z.object({ action: z.literal('acceleration'), expectedRevision: z.string().min(1).max(128).optional(),
       policy: z.object({ mode: z.enum(['auto', 'cpu', 'gpu']), device: z.string().min(1).max(256).optional() }).strict()
     }).strict().refine(value => value.policy.mode !== 'gpu' || !!value.policy.device, { message: '请选择显卡' }),
     z.object({ action: z.literal('detect-devices') }).strict(),
-    z.object({ action: z.literal('prepare-runtime'), group: z.enum(['speech', 'text']), target: z.enum(['auto', 'cpu', 'gpu']) }).strict(),
-    z.object({ action: z.literal('delete-runtime'), group: z.enum(['speech', 'text']), target: z.enum(['cpu', 'gpu']) }).strict(),
+    z.object({ action: z.literal('prepare-runtime'), group: z.enum(LOCAL_MODEL_GROUPS), target: z.enum(['auto', 'cpu', 'gpu']) }).strict(),
+    z.object({ action: z.literal('delete-runtime'), group: z.enum(LOCAL_MODEL_GROUPS), target: z.enum(['cpu', 'gpu']) }).strict(),
     z.object({ action: z.literal('prepare-acceleration'), model: z.enum(LOCAL_MODEL_IDS).optional(), variant: z.string().min(1).max(64).optional() }).strict()
       .refine(value => !value.variant || !!value.model, { message: '请选择需要修复的模型' }),
     z.object({ action: z.literal('translation'), mode: z.enum(['app-default', 'local']) }).strict(),
     z.object({ action: z.literal('download-source'), source: z.enum(['official', 'hf-mirror']) }).strict(),
     z.object({ action: z.literal('translation-model'), model: z.enum(LOCAL_TRANSLATION_MODEL_IDS) }).strict(),
     z.object({ action: z.literal('usage'), expectedRevision: z.string().min(1).max(128).optional(), usage: z.object({
-      subtitleRecognition: z.object({ model: z.literal('kotoba'), variant: z.string().min(1).max(64) }).strict(),
+      subtitleRecognition: z.object({ model: z.enum(LOCAL_RECOGNITION_MODEL_IDS), variant: z.string().min(1).max(64) }).strict(),
       subtitleTranslation: z.object({ model: z.enum(LOCAL_TRANSLATION_MODEL_IDS), variant: z.string().min(1).max(64) }).strict(),
       textTranslation: z.object({ model: z.enum(LOCAL_TRANSLATION_MODEL_IDS), variant: z.string().min(1).max(64), mode: z.enum(['app-default', 'local']) }).strict()
     }).strict() }).strict(),

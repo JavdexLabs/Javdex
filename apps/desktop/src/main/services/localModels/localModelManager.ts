@@ -21,12 +21,14 @@ import { measureLocalStorage } from './storageUsage'
 import { createLocalTextInference } from './textInference'
 import { createModelValidation } from './modelValidation'
 import { validateModelRuntime } from './validateModelRuntime'
+import { isSpeechModel, LOCAL_RECOGNITION_MODEL_IDS, LOCAL_MODEL_GROUPS, localModelGroup, localModelGroupLabel, type LocalRecognitionModelId } from '@shared/desktop/localModels'
+import { audioCppAsset, qwenAsrSupported } from './qwenAsrManifest'
 type TextEngine = Pick<ReturnType<typeof createLocalTextInference>, 'translateText' | 'close'>
 import { DEFAULT_LOCAL_MODEL_VARIANTS, LOCAL_MODEL_DEFINITIONS, LOCAL_MODEL_VARIANTS, localModelAssets, localModelVariant } from './modelCatalog'
 const selectedSchema = z.object({ kotoba: z.string(), qwen3: z.string(), 'hy-mt2-7b': z.string() }).strict()
 const translationRefSchema = z.object({ model: z.enum(LOCAL_TRANSLATION_MODEL_IDS), variant: z.string().min(1) }).strict()
 const usageSchema = z.object({
-  subtitleRecognition: z.object({ model: z.literal('kotoba'), variant: z.string().min(1) }).strict(),
+  subtitleRecognition: z.object({ model: z.enum(LOCAL_RECOGNITION_MODEL_IDS), variant: z.string().min(1) }).strict(),
   subtitleTranslation: translationRefSchema,
   textTranslation: translationRefSchema.extend({ mode: z.enum(['app-default', 'local']) }).strict()
 }).strict()
@@ -35,8 +37,10 @@ const accelerationSchema = z.object({ mode: z.enum(['auto', 'cpu', 'gpu']), devi
   .refine(policy => policy.mode !== 'gpu' || !!policy.device, { message: '请选择显卡' })
 const configV1 = z.object({ version: z.literal(1), directory: z.string().min(1),
   downloadSource: z.enum(LOCAL_MODEL_DOWNLOAD_SOURCES), selected: selectedSchema,
-  usage: usageSchema, revision: z.string().min(1) }).strict()
-const configSchema = z.discriminatedUnion('version', [configV1, configV1.extend({ version: z.literal(2), acceleration: accelerationSchema })])
+  usage: usageSchema.extend({ subtitleRecognition: z.object({ model: z.literal('kotoba'), variant: z.string().min(1) }).strict() }), revision: z.string().min(1) }).strict()
+const configSchema = z.discriminatedUnion('version', [configV1, configV1.extend({ version: z.literal(2), acceleration: accelerationSchema }),
+  configV1.extend({ version: z.literal(3), selected: selectedSchema.extend({ 'qwen3-asr': z.string().min(1) }), usage: usageSchema, acceleration: accelerationSchema,
+    qwenForcedAligner: z.boolean().optional() })])
 function defaultUsage(selected = DEFAULT_LOCAL_MODEL_VARIANTS): LocalModelUsage {
   return {
     subtitleRecognition: { model: 'kotoba', variant: selected.kotoba },
@@ -82,6 +86,7 @@ export function createLocalModelManager(userData: string, options: {
   let revision: string = randomUUID()
   let configInvalid = false
   let configVersion = 1
+  let qwenForcedAligner = true
   let accelerationPolicy: LocalAccelerationPolicy = { mode: 'auto' }
   let devices: LocalGpuDevice[] = [], accelerationError: string | null = null
   const executionStatus: Record<'recognition' | 'translation', LocalExecutionStatus> = { recognition: { backend: 'idle' }, translation: { backend: 'idle' } }
@@ -95,6 +100,7 @@ export function createLocalModelManager(userData: string, options: {
   let downloadBytes = 0, downloadTotal = 0, downloadLabel: string | null = null, error: string | null = null
   const componentDefinitions = runtimeComponentDefinitions(currentAiRuntimeTarget())
   let components: LocalRuntimeComponent[] = []
+  const enabledComponents = () => components.filter(item => qwenForcedAligner || item.id !== 'qwen-aligner-common')
   let checkingDependencies = false
   const resumed = new Map<string, number>()
   let preparation: LocalModelSnapshot['preparation']
@@ -112,7 +118,8 @@ export function createLocalModelManager(userData: string, options: {
   const installedVariants = new Map<string, boolean>()
   const variantFiles = new Map<string, boolean>()
   const runtimeReady = (model: LocalModelId): boolean => {
-    const shared = components.filter(item => item.group === (model === 'kotoba' ? 'speech' : 'text') && (item.backend === 'cpu' || item.backend === 'common'))
+    if (model === 'qwen3-asr' && !qwenAsrSupported(currentAiRuntimeTarget())) return false
+    const shared = enabledComponents().filter(item => item.group === localModelGroup(model) && (item.backend === 'cpu' || item.backend === 'common'))
     return supported() && shared.length > 0 && shared.every(item => item.installed)
   }
   const variantCounts = new Map<string, number>()
@@ -120,9 +127,9 @@ export function createLocalModelManager(userData: string, options: {
   let subtitleLeaseInstaller: ReturnType<typeof createAiRuntimeInstaller> | null = null
   const listeners = new Set<() => void>()
   const supported = options.runtimeSupported ?? localModelRuntimeSupported
-  const installer = (selection = selected, model = translationModel) => (options.installer ?? createAiRuntimeInstaller)(directory, undefined, localModelAssets(selection, model, undefined, downloadSource))
+  const installer = (selection = selected, model = translationModel, recognitionModel: LocalRecognitionModelId = usage.subtitleRecognition.model) => (options.installer ?? createAiRuntimeInstaller)(directory, undefined, localModelAssets(selection, model, undefined, downloadSource), { recognitionModel, qwenForcedAligner })
   const gpuInstaller = (backend: 'cuda' | 'vulkan') => (options.installer ?? createAiRuntimeInstaller)(directory, undefined,
-    [...gpuRuntimeAssets(currentAiRuntimeTarget(), backend), ...localModelAssets(selected, translationModel).filter(asset => !asset.archive)])
+    [...gpuRuntimeAssets(currentAiRuntimeTarget(), backend), ...(backend === 'vulkan' ? audioCppAsset(currentAiRuntimeTarget(), true) : []), ...localModelAssets(selected, translationModel).filter(asset => !asset.archive)])
   const runtimePaths = (runtime: ReturnType<typeof createAiRuntimeInstaller>, refs = {
     recognition: usage.subtitleRecognition.variant, translation: usage.subtitleTranslation.variant
   }) => {
@@ -147,6 +154,7 @@ export function createLocalModelManager(userData: string, options: {
         if (backend === 'cuda') value.libraryDirectory = runtimeAssetDirectory(directory, 'cuda', currentAiRuntimeTarget(), 'cuda')
       }
       if (await runtime.assetsInstalled(['whisper'])) value.whisper = paths.whisper
+      if (backend === 'vulkan' && paths.qwenAsr && await runtime.assetsInstalled(['audiocpp'])) value.audiocpp = paths.qwenAsr.executable
       gpuRuntimes[backend] = value
     }
   }
@@ -155,33 +163,37 @@ export function createLocalModelManager(userData: string, options: {
     ...(usage.subtitleTranslation.variant === variant ? ['AI 字幕 · 文本翻译'] : []),
     ...(usage.textTranslation.mode === 'local' && usage.textTranslation.variant === variant ? ['文本翻译'] : [])
   ]
-  const variantReadiness = (model: LocalModelId, variant: string): LocalModelReadiness => !supported() ? 'unsupported'
+  const variantReadiness = (model: LocalModelId, variant: string): LocalModelReadiness => !supported() || (model === 'qwen3-asr' && !qwenAsrSupported(currentAiRuntimeTarget())) ? 'unsupported'
     : !installedVariants.get(variant) ? 'missing-model' : !runtimeReady(model) ? 'missing-runtime' : 'ready'
   const sourceUrl = (url: string): string => downloadSource === 'hf-mirror' ? url.replace(/^https:\/\/huggingface\.co\//, 'https://hf-mirror.com/') : url
   function plan(groups: LocalModelGroup[], refs: LocalModelRef[] = [], forceGpu = false, cpuOnly = false): LocalPreparationPlan {
-    const value = preparationPlan({ groups, refs, components, policy: cpuOnly ? { mode: 'cpu' } : accelerationPolicy, devices, forceGpu,
+    const availableGroups = groups.filter(group => group !== 'qwen-speech' || qwenAsrSupported(currentAiRuntimeTarget()))
+    const value = preparationPlan({ groups: availableGroups, refs, components: enabledComponents(), policy: cpuOnly ? { mode: 'cpu' } : accelerationPolicy, devices, forceGpu,
       target: currentAiRuntimeTarget(), supported: supported(), installed: variant => installedVariants.get(variant) === true, resumed: id => resumed.get(id) ?? 0 })
     return { ...value, items: value.items.map(item => ({ ...item, source: sourceUrl(item.source) })) }
   }
   const detectionComplete = (): boolean => (process.platform !== 'linux' && devices.length > 0) || !!gpuRuntimes.vulkan?.translator || !localGpuTargetSupported()
   function environments(): LocalRuntimeEnvironment[] {
-    return (['speech', 'text'] as const).map(group => {
+    return LOCAL_MODEL_GROUPS.map(group => {
       const backend = runtimeBackend(group, accelerationPolicy, devices, components)
-      const shared = components.filter(item => item.group === group)
+      const shared = enabledComponents().filter(item => item.group === group)
+      const groupSupported = supported() && (group !== 'qwen-speech' || qwenAsrSupported(currentAiRuntimeTarget()))
       const gpuItems = shared.filter(item => item.backend === backend)
-      return { group, components: shared.map(item => ({ ...item, source: sourceUrl(item.source) })), cpuReady: supported() && shared.filter(item => item.backend === 'cpu' || item.backend === 'common').every(item => item.installed),
-        gpu: { backend: accelerationPolicy.mode === 'auto' && runtimeSupportsMetal(currentAiRuntimeTarget(), group === 'speech' ? 'whisper' : 'translator') ? 'metal' : backend,
+      return { group, supported: groupSupported, components: components.filter(item => item.group === group).map(item => ({ ...item,
+        ...(item.id === 'qwen-aligner-common' ? { enabled: qwenForcedAligner } : {}), source: sourceUrl(item.source) })), cpuReady: groupSupported && shared.length > 0 && shared.filter(item => item.backend === 'cpu' || item.backend === 'common').every(item => item.installed),
+        gpu: { backend: group !== 'qwen-speech' && accelerationPolicy.mode === 'auto' && runtimeSupportsMetal(currentAiRuntimeTarget(), group === 'speech' ? 'whisper' : 'translator') ? 'metal' : backend,
           state: accelerationPolicy.mode === 'cpu' ? 'disabled' : !localGpuTargetSupported() || !shared.some(item => item.backend === 'cuda' || item.backend === 'vulkan') ? 'platform' : backend
             ? gpuItems.length > 0 && gpuItems.every(item => item.installed) ? 'ready' : 'missing'
             : detectionComplete() ? 'unavailable' : 'unchecked' },
         preparation: plan([group]), gpuPreparation: plan([group], [], true) }
     })
   }
-  function dependencies(value: LocalPreparationPlan): LocalDependencyCheck {
+  function dependencies(value: LocalPreparationPlan, model?: LocalModelId): LocalDependencyCheck {
+    const canRun = supported() && (model !== 'qwen3-asr' || qwenAsrSupported(currentAiRuntimeTarget()))
     const baseMissing = value.items.filter(item => item.action !== 'reuse' && components.some(component => component.id === item.id && (component.backend === 'cpu' || component.backend === 'common')))
     const missing = value.items.filter(item => item.action !== 'reuse').map(item => item.name)
-    return { state: checkingDependencies ? 'checking' : !supported() ? 'unsupported' : baseMissing.length ? 'missing' : missing.length ? 'cpu-fallback' : 'ready', missing, backend: value.backend,
-      message: checkingDependencies ? '正在检查依赖' : !supported() ? '当前平台仅管理文件' : baseMissing.length ? `待补齐：${baseMissing.map(item => item.name).join('、')}`
+    return { state: checkingDependencies ? 'checking' : !canRun ? 'unsupported' : baseMissing.length ? 'missing' : missing.length ? 'cpu-fallback' : 'ready', missing, backend: value.backend,
+      message: checkingDependencies ? '正在检查依赖' : !canRun ? '当前平台仅管理文件' : baseMissing.length ? `待补齐：${baseMissing.map(item => item.name).join('、')}`
         : missing.length ? `CPU 可用；待补齐：${missing.join('、')}` : `依赖检查通过 · ${value.backend.toUpperCase()}` }
   }
   const validation = createModelValidation({
@@ -191,14 +203,14 @@ export function createLocalModelManager(userData: string, options: {
     validate: async (ref, signal) => {
       await shutdownEngine(); signal.throwIfAborted()
       return (options.validate ?? validateModelRuntime)(runtimePaths(installer({ ...selected, [ref.model]: ref.variant },
-        ref.model === 'kotoba' ? translationModel : ref.model)), ref.model, signal)
+        isSpeechModel(ref.model) ? translationModel : ref.model, isSpeechModel(ref.model) ? ref.model : undefined)), ref.model, signal)
     },
     changed: () => publish()
   })
-  const subtitleSelection = (): typeof selected => ({ ...selected, kotoba: usage.subtitleRecognition.variant,
+  const subtitleSelection = (): typeof selected => ({ ...selected, [usage.subtitleRecognition.model]: usage.subtitleRecognition.variant,
     [usage.subtitleTranslation.model]: usage.subtitleTranslation.variant })
   const subtitleInstaller = (): ReturnType<typeof createAiRuntimeInstaller> => subtitleLeaseInstaller ?? installer(subtitleSelection(), usage.subtitleTranslation.model)
-  const snapshotValue = (): LocalModelSnapshot => ({ revision, usage: structuredClone(usage), supported: supported(), directory, defaultDirectory, downloadSource,
+  const snapshotValue = (): LocalModelSnapshot => ({ revision, usage: structuredClone(usage), qwenForcedAligner, supported: supported(), directory, defaultDirectory, downloadSource,
     acceleration: { supported: localGpuTargetSupported(), policy: { ...accelerationPolicy }, devices: structuredClone(devices), detectionComplete: detectionComplete(), ...structuredClone(executionStatus), error: accelerationError },
     environments: environments(), checkingDependencies, preparation: preparation && structuredClone(preparation),
     storage: storage && structuredClone(storage), operationError: error && operationError?.message === error ? structuredClone(operationError) : undefined,
@@ -218,7 +230,7 @@ export function createLocalModelManager(userData: string, options: {
         references: referenceLabels(variant.id), readiness: variantReadiness(id, variant.id), ready: variantReadiness(id, variant.id) === 'ready',
         runtimeReady: runtimeReady(id),
         preparation: plan([], [{ model: id, variant: variant.id }]),
-        dependencies: dependencies(plan([id === 'kotoba' ? 'speech' : 'text'])),
+        dependencies: dependencies(plan([localModelGroup(id)]), id),
         validation: !checkingDependencies && variantReadiness(id, variant.id) === 'ready' && referenceLabels(variant.id).length
           ? structuredClone(validation.get(variant.id) ?? { state: 'waiting',
             message: Object.values(counts).some(Boolean) ? '等待当前任务完成后验证' : '等待自动验证' }) : undefined,
@@ -229,7 +241,7 @@ export function createLocalModelManager(userData: string, options: {
     checkingDependencies = true; validation.invalidate(); publish()
     try {
       for (const variant of LOCAL_MODEL_VARIANTS) {
-        const runtime = installer({ ...selected, [variant.model]: variant.id }, variant.model === 'kotoba' ? translationModel : variant.model)
+        const runtime = installer({ ...selected, [variant.model]: variant.id }, isSpeechModel(variant.model) ? translationModel : variant.model, isSpeechModel(variant.model) ? variant.model : undefined)
         const assetId = LOCAL_MODEL_DEFINITIONS[variant.model].assetId
         const present = await runtime.assetsInstalled([assetId])
         installedVariants.set(variant.id, present)
@@ -263,9 +275,11 @@ export function createLocalModelManager(userData: string, options: {
       directory = path.normalize(config.directory)
       downloadSource = config.downloadSource; revision = config.revision
       configVersion = config.version
-      accelerationPolicy = config.version === 2 ? config.acceleration : { mode: 'auto' }
-      for (const id of LOCAL_MODEL_IDS) localModelVariant(id, config.selected[id])
-      selected = config.selected; usage = defaultUsage(selected)
+      qwenForcedAligner = config.version === 3 ? config.qwenForcedAligner ?? true : true
+      accelerationPolicy = config.version !== 1 ? config.acceleration : { mode: 'auto' }
+      const restored = { ...DEFAULT_LOCAL_MODEL_VARIANTS, ...config.selected }
+      for (const id of LOCAL_MODEL_IDS) localModelVariant(id, restored[id])
+      selected = restored; usage = defaultUsage(selected)
       for (const ref of Object.values(config.usage)) localModelVariant(ref.model, ref.variant)
       usage = config.usage
       translation = usage.textTranslation.mode; translationModel = usage.subtitleTranslation.model
@@ -283,10 +297,14 @@ export function createLocalModelManager(userData: string, options: {
     devices = await (options.detectDevices ?? detectLocalGpuDevices)(gpuRuntimes.vulkan)
     started = true; validation.invalidate()
   })()
-  async function save(nextDirectory = directory, nextSelected = selected, nextSource = downloadSource, nextUsage = usage, nextPolicy = accelerationPolicy, nextVersion = configVersion): Promise<void> {
+  async function save(nextDirectory = directory, nextSelected = selected, nextSource = downloadSource, nextUsage = usage, nextPolicy = accelerationPolicy, nextVersion = configVersion, nextQwenForcedAligner = qwenForcedAligner): Promise<void> {
+    nextVersion = Math.max(configVersion, nextVersion, nextUsage.subtitleRecognition.model === 'qwen3-asr' ? 3 : 1)
+    const { 'qwen3-asr': qwenSelection, ...legacySelected } = nextSelected
     const nextRevision = randomUUID()
-    await atomicWrite(configFile, JSON.stringify({ version: nextVersion, revision: nextRevision, usage: nextUsage, downloadSource: nextSource, directory: nextDirectory, selected: nextSelected,
-      ...(nextVersion === 2 ? { acceleration: nextPolicy } : {}) }))
+    await atomicWrite(configFile, JSON.stringify({ version: nextVersion, revision: nextRevision, usage: nextUsage, downloadSource: nextSource, directory: nextDirectory,
+      selected: nextVersion === 3 ? { ...legacySelected, 'qwen3-asr': qwenSelection } : legacySelected,
+      ...(nextVersion === 3 ? { qwenForcedAligner: nextQwenForcedAligner } : {}),
+      ...(nextVersion >= 2 ? { acceleration: nextPolicy } : {}) }))
     revision = nextRevision
     configVersion = nextVersion
   }
@@ -314,7 +332,7 @@ export function createLocalModelManager(userData: string, options: {
     }
     const refs = [...new Map(requestedRefs.map(ref => [ref.variant, { ...ref }])).values()]
     const models = refs.map(ref => ref.model)
-    if (models.filter(id => id !== 'kotoba').length > 1) throw new Error('一次运行只能使用一个本地翻译模型')
+    if (models.filter(id => !isSpeechModel(id)).length > 1) throw new Error('一次运行只能使用一个本地翻译模型')
     available()
     if (configInvalid) throw new Error('本地模型设置损坏，请重新选择模型设置')
     if (!supported()) throw new Error(AI_RUNTIME_PLATFORM_MESSAGE)
@@ -338,9 +356,9 @@ export function createLocalModelManager(userData: string, options: {
       publish()
     }
     try {
-      const model = models.find((id): id is LocalTranslationModelId => id !== 'kotoba') ?? translationModel
+      const model = models.find((id): id is LocalTranslationModelId => !isSpeechModel(id)) ?? translationModel
       const selection = { ...selected, ...Object.fromEntries(refs.map(ref => [ref.model, ref.variant])) }
-      if (!await installer(selection, model).assetsInstalled([...new Set(models.flatMap(id => LOCAL_MODEL_DEFINITIONS[id].runtimeAssets))])) {
+      if (!await installer(selection, model).assetsInstalled([...new Set(models.flatMap(id => LOCAL_MODEL_DEFINITIONS[id].runtimeAssets))].filter(id => qwenForcedAligner || id !== 'qwen-aligner'))) {
         throw new Error('本地模型运行库不完整，请到模型商店校验与修复当前精度')
       }
       if (closed) throw new Error('本地模型管理已关闭')
@@ -355,7 +373,9 @@ export function createLocalModelManager(userData: string, options: {
     }, refs, signal, progress)
   }
   function requireBaseEnvironment(model: LocalModelId): void {
-    if (supported() && !runtimeReady(model)) throw new Error(`请先安装${model === 'kotoba' ? '语音' : '文本'}模型的基础运行环境；GPU 加速支持可选`)
+    if (model === 'qwen3-asr' && !qwenAsrSupported(currentAiRuntimeTarget())) return
+    const group = localModelGroup(model)
+    if (supported() && !runtimeReady(model)) throw new Error(`请先安装${localModelGroupLabel(group)}${group === 'qwen-speech' ? '' : '模型'}的基础运行环境；GPU 加速支持可选`)
   }
   async function runPreparation(createPlan: () => LocalPreparationPlan, refs: LocalModelRef[] = [], signal?: AbortSignal,
     progress?: (bytes: number, label: string) => void, kind: 'model' | 'acceleration' = 'model', retry?: NonNullable<LocalModelSnapshot['operationError']>['command']): Promise<void> {
@@ -364,7 +384,7 @@ export function createLocalModelManager(userData: string, options: {
     const groups = [...new Set(value.items.map(item => item.group))]
     const includesTranslation = groups.includes('text')
     // Translation families share executable/DLL files; repairs must exclude all active translators.
-    available([...(groups.includes('speech') ? ['kotoba' as const] : []), ...(includesTranslation ? LOCAL_TRANSLATION_MODEL_IDS : [])])
+    available([...(groups.some(group => group !== 'text') ? LOCAL_RECOGNITION_MODEL_IDS : []), ...(includesTranslation ? LOCAL_TRANSLATION_MODEL_IDS : [])])
     operation = 'download'; downloadKind = kind; activeModel = refs.length === 1 ? refs[0].model : null; error = null; operationError = undefined; accelerationError = null
     activeVariant = refs.length === 1 ? refs[0].variant : null
     const abort = new AbortController(); controller = abort
@@ -383,7 +403,7 @@ export function createLocalModelManager(userData: string, options: {
         const definition = componentDefinitions.find(entry => entry.component.id === item.id)
         const ref = refs.find(entry => item.id === `model:${entry.variant}`)
         const runtime = definition && (definition.component.backend === 'cuda' || definition.component.backend === 'vulkan')
-          ? gpuInstaller(definition.component.backend) : installer(selection, ref && ref.model !== 'kotoba' ? ref.model : translationModel)
+          ? gpuInstaller(definition.component.backend) : installer(selection, ref && !isSpeechModel(ref.model) ? ref.model : translationModel)
         const assetId = definition?.assetId ?? (ref ? LOCAL_MODEL_DEFINITIONS[ref.model].assetId : undefined)
         if (!assetId) throw new Error('准备清单包含未知组件')
         preparation.itemId = item.id; preparation.phase = 'checking'; downloadLabel = item.name; publish()
@@ -413,7 +433,7 @@ export function createLocalModelManager(userData: string, options: {
         const phase = preparation?.phase === 'downloading' ? '下载' : preparation?.phase === 'installing' ? '安装' : '校验'
         error = `${downloadLabel ?? '本地运行准备'} · ${phase}（${source}）：${detail}。可重试续传或修复`
         const failedRef = refs.find(ref => item?.id === `model:${ref.variant}`)
-        operationError = { message: error, command: retry ?? (failedRef ? { action: 'download', ...failedRef }
+        operationError = { message: error, command: retry ?? (failedRef || refs.length === 1 ? { action: 'download', ...(failedRef ?? refs[0]) }
           : item ? { action: 'prepare-runtime', group: item.group, target: value.backend === 'cpu' || value.backend === 'metal' ? 'cpu' : 'gpu' } : { action: 'prepare-acceleration' }) }
         throw cause
       }
@@ -429,7 +449,7 @@ export function createLocalModelManager(userData: string, options: {
     operation = 'delete'; activeModel = id; activeVariant = variant; error = null; publish()
     try {
       if (variant === engineVariant) await shutdownEngine()
-      await installer({ ...selected, [id]: variant }, id === 'kotoba' ? translationModel : id).removeAsset(LOCAL_MODEL_DEFINITIONS[id].assetId)
+      await installer({ ...selected, [id]: variant }, isSpeechModel(id) ? translationModel : id).removeAsset(LOCAL_MODEL_DEFINITIONS[id].assetId)
     } finally {
       try { await refresh() }
       finally { operation = null; validation.schedule(); activeModel = null; activeVariant = null; publish() }
@@ -437,7 +457,7 @@ export function createLocalModelManager(userData: string, options: {
   }
   async function removeRuntime(group: LocalModelGroup, target: 'cpu' | 'gpu'): Promise<void> {
     await ready; await validation.pause(); available([...LOCAL_MODEL_IDS])
-    if (!['speech', 'text'].includes(group) || !['cpu', 'gpu'].includes(target)) throw new Error('未知运行环境')
+    if (!LOCAL_MODEL_GROUPS.includes(group) || !['cpu', 'gpu'].includes(target)) throw new Error('未知运行环境')
     const definitions = componentDefinitions.filter(({ component }) => component.group === group
       && (target === 'cpu' ? component.backend === 'cpu' || component.backend === 'common' : component.backend === 'cuda' || component.backend === 'vulkan'))
     if (!definitions.length) throw new Error('没有可删除的运行环境')
@@ -446,9 +466,9 @@ export function createLocalModelManager(userData: string, options: {
     try {
       if (target === 'cpu') {
         let hasModels = false
-        const variants = LOCAL_MODEL_VARIANTS.filter(variant => (variant.model === 'kotoba') === (group === 'speech'))
+        const variants = LOCAL_MODEL_VARIANTS.filter(variant => localModelGroup(variant.model) === group)
         for (const variant of variants) {
-          const runtime = installer({ ...selected, [variant.model]: variant.id }, variant.model === 'kotoba' ? translationModel : variant.model)
+          const runtime = installer({ ...selected, [variant.model]: variant.id }, isSpeechModel(variant.model) ? translationModel : variant.model)
           const id = LOCAL_MODEL_DEFINITIONS[variant.model].assetId
           if (await runtime.assetsInstalled([id]) || await runtime.assetPresent(id)) { hasModels = true; break }
         }
@@ -458,11 +478,15 @@ export function createLocalModelManager(userData: string, options: {
           const remaining = await files(path.join(directory, 'models', family)).catch(cause => { if (cause.code !== 'ENOENT') throw cause; return [] })
           hasModels = remaining.length > 0
         }
-        const groupName = group === 'speech' ? '语音' : '文本'
+        const groupName = localModelGroupLabel(group)
         if (hasModels) throw new Error(`请先删除所有${groupName}模型文件（包括未完成的模型下载），再删除${groupName}基础运行环境`)
       }
       await shutdownEngine()
       for (const definition of definitions) {
+        // Both speech modules reference the same physical audio tools. Retain
+        // those tools while the other module still has model files.
+        if (definition.assetId === 'ffmpeg' && LOCAL_MODEL_VARIANTS.some(variant => isSpeechModel(variant.model)
+          && localModelGroup(variant.model) !== group && (installedVariants.get(variant.id) || variantFiles.get(variant.id)))) continue
         const backend = definition.component.backend
         await (backend === 'cuda' || backend === 'vulkan' ? gpuInstaller(backend) : installer()).removeAsset(definition.assetId)
       }
@@ -479,7 +503,7 @@ export function createLocalModelManager(userData: string, options: {
     const next = { ...selected, [id]: variant }
     operation = 'configure'; error = null; publish()
     try {
-      if (!await installer(next, id === 'kotoba' ? translationModel : id).assetsInstalled([LOCAL_MODEL_DEFINITIONS[id].assetId])) throw new Error('请先下载所选精度的模型')
+      if (!await installer(next, isSpeechModel(id) ? translationModel : id).assetsInstalled([LOCAL_MODEL_DEFINITIONS[id].assetId])) throw new Error('请先下载所选精度的模型')
       const nextUsage = structuredClone(usage)
       for (const ref of Object.values(nextUsage)) if (ref.model === id) ref.variant = variant
       if (nextUsage.textTranslation.variant !== usage.textTranslation.variant) await shutdownEngine()
@@ -514,7 +538,7 @@ export function createLocalModelManager(userData: string, options: {
     operation = 'configure'; error = null; publish()
     try {
       if (changed.includes('textTranslation')) await shutdownEngine()
-      const nextSelected = { ...selected, kotoba: nextUsage.subtitleRecognition.variant,
+      const nextSelected = { ...selected, [nextUsage.subtitleRecognition.model]: nextUsage.subtitleRecognition.variant,
         [nextUsage.textTranslation.model]: nextUsage.textTranslation.variant,
         [nextUsage.subtitleTranslation.model]: nextUsage.subtitleTranslation.variant }
       await save(directory, nextSelected, downloadSource, nextUsage)
@@ -641,6 +665,19 @@ export function createLocalModelManager(userData: string, options: {
     }
   }
   return {
+    async setQwenForcedAligner(enabled: boolean, expectedRevision?: string): Promise<void> {
+      z.boolean().parse(enabled)
+      await ready; await validation.pause(); available(['qwen3-asr'])
+      if (configInvalid) throw new Error('本地模型配置损坏，请先重新保存用途设置')
+      if (expectedRevision !== undefined && revision !== expectedRevision) throw new Error('本地模型设置已更新，请重新读取后保存')
+      operation = 'configure'; error = null; publish()
+      try {
+        await save(directory, selected, downloadSource, usage, accelerationPolicy, 3, enabled)
+        qwenForcedAligner = enabled
+        variantExecution.delete(selected['qwen3-asr'])
+        await refresh()
+      } finally { operation = null; validation.schedule(); publish() }
+    },
     async setAcceleration(value: LocalAccelerationPolicy, expectedRevision?: string): Promise<void> {
       const policy = accelerationSchema.parse(value)
       if (policy.mode === 'gpu' && !policy.device) throw new Error('请选择显卡')
@@ -667,7 +704,7 @@ export function createLocalModelManager(userData: string, options: {
       if (!localGpuTargetSupported() || process.arch !== 'x64') throw new Error('当前平台沿用已有 CPU／Metal 运行库')
       if (configInvalid) throw new Error('本地模型配置损坏，请先重新保存用途设置')
       if (model) localModelVariant(model, requestedVariant ?? selected[model])
-      const groups: LocalModelGroup[] = model ? [model === 'kotoba' ? 'speech' : 'text'] : ['speech', 'text']
+      const groups: LocalModelGroup[] = model ? [localModelGroup(model)] : [...LOCAL_MODEL_GROUPS]
       const task = runPreparation(() => plan(groups, [], true), [], undefined, undefined, 'acceleration', { action: 'prepare-acceleration', model, variant: requestedVariant }).catch(() => {}).finally(() => { if (pending === task) pending = null })
       pending = task
       await new Promise<void>(resolve => setImmediate(resolve))
@@ -675,6 +712,7 @@ export function createLocalModelManager(userData: string, options: {
     async prepareRuntime(group: LocalModelGroup, target: 'auto' | 'cpu' | 'gpu'): Promise<void> {
       await ready; await validation.pause(); available()
       if (!supported()) throw new Error(AI_RUNTIME_PLATFORM_MESSAGE)
+      if (group === 'qwen-speech' && !qwenAsrSupported(currentAiRuntimeTarget())) throw new Error('Qwen 语音 的 audio.cpp 运行库当前支持 Windows x64')
       if (configInvalid) throw new Error('本地模型配置损坏，请先重新保存用途设置')
       const task = runPreparation(() => plan([group], [], target === 'gpu', target === 'cpu'), [], undefined, undefined, 'acceleration', { action: 'prepare-runtime', group, target })
         .catch(() => {}).finally(() => { if (pending === task) pending = null })
@@ -706,7 +744,13 @@ export function createLocalModelManager(userData: string, options: {
       const runtime = installer(subtitleSelection(), usage.subtitleTranslation.model)
       const lease = acquireReady([usage.subtitleRecognition, usage.subtitleTranslation], ['subtitleRecognition', 'subtitleTranslation'])
       subtitleLeaseInstaller = runtime
-      try { return await lease } catch (cause) { if (!purposeCounts.subtitleRecognition) subtitleLeaseInstaller = null; throw cause }
+      try {
+        const release = await lease
+        if (runtime.paths().recognitionModel === 'qwen3-asr' && runtime.paths().qwenAsr?.forcedAligner !== qwenForcedAligner) {
+          release(); throw new Error('对齐设置已更新，请重新启动任务')
+        }
+        return release
+      } catch (cause) { if (!purposeCounts.subtitleRecognition) subtitleLeaseInstaller = null; throw cause }
     },
     async mode(): Promise<LocalTranslationMode> {
       await ready
@@ -716,7 +760,7 @@ export function createLocalModelManager(userData: string, options: {
     async downloadUrl(id: LocalModelId, requestedVariant?: string): Promise<string> {
       await ready
       const entry = localModelVariant(id, requestedVariant ?? selected[id])
-      return localModelAssets({ ...selected, [id]: entry.id }, id === 'kotoba' ? translationModel : id, undefined, downloadSource)
+      return localModelAssets({ ...selected, [id]: entry.id }, isSpeechModel(id) ? translationModel : id, undefined, downloadSource)
         .find(asset => asset.id === LOCAL_MODEL_DEFINITIONS[id].assetId)!.url
     },
     async importModel(id: LocalModelId, source: string, requestedVariant?: string): Promise<void> {
@@ -757,7 +801,7 @@ export function createLocalModelManager(userData: string, options: {
       finally { operation = null; validation.schedule(); publish() }
     },
     async download(id: LocalModelId, variant?: string): Promise<void> {
-      await ready; await validation.pause(); available(id === 'kotoba' ? [id] : [...LOCAL_TRANSLATION_MODEL_IDS])
+      await ready; await validation.pause(); available(isSpeechModel(id) ? [id] : [...LOCAL_TRANSLATION_MODEL_IDS])
       const entry = localModelVariant(id, variant ?? selected[id])
       requireBaseEnvironment(id)
       const task = installModels([id], undefined, undefined, { ...selected, [id]: entry.id }).catch(() => {}).finally(() => {
@@ -775,12 +819,12 @@ export function createLocalModelManager(userData: string, options: {
         assetsInstalled: async ids => { await ready; return subtitleInstaller().assetsInstalled(ids) },
         assetPresent: async id => { await ready; return subtitleInstaller().assetPresent(id) },
         removeAsset: async id => {
-          if (id === 'kotoba') await remove('kotoba', usage.subtitleRecognition.variant)
+          if (id === 'kotoba' || id === 'qwen-asr') await remove(usage.subtitleRecognition.model, usage.subtitleRecognition.variant)
           else if (id === 'translation-model') await remove(usage.subtitleTranslation.model, usage.subtitleTranslation.variant)
           else throw new Error('不支持删除单个组件，请在本地模型页删除整组运行环境')
         },
-        install: async (signal, progress) => { await ready; return installModels(['kotoba', usage.subtitleTranslation.model], signal, progress, subtitleSelection()) },
-        remove: async () => { await remove('kotoba', usage.subtitleRecognition.variant); await remove(usage.subtitleTranslation.model, usage.subtitleTranslation.variant) }
+        install: async (signal, progress) => { await ready; return installModels([usage.subtitleRecognition.model, usage.subtitleTranslation.model], signal, progress, subtitleSelection()) },
+        remove: async () => { await remove(usage.subtitleRecognition.model, usage.subtitleRecognition.variant); await remove(usage.subtitleTranslation.model, usage.subtitleTranslation.variant) }
       }
     },
     async close(): Promise<void> {

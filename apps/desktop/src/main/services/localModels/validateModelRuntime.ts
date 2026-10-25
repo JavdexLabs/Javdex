@@ -6,6 +6,8 @@ import type { AiRuntimePaths } from './runtimeInstaller'
 import { createLocalTextInference } from './textInference'
 import { cpuExecution, executionUsesGpu, reportLocalExecution, selectLocalExecution } from './runtimeAcceleration'
 import { LocalModelProcessFailure, runLocalModelProcess } from './processRunner'
+import { isSpeechModel } from '@shared/desktop/localModels'
+import { createQwenAsrRecognition } from '../../player/aiSubtitles/qwenAsrRecognition'
 
 /** A synthetic, local-only probe exercises the configured model without a user task. */
 export async function validateModelRuntime(paths: AiRuntimePaths, model: LocalModelId, signal: AbortSignal): Promise<LocalExecutionStatus> {
@@ -14,7 +16,7 @@ export async function validateModelRuntime(paths: AiRuntimePaths, model: LocalMo
     status: (_kind: unknown, value: LocalExecutionStatus) => { result = value } } }
   const bounded = AbortSignal.any([signal, AbortSignal.timeout(120000)])
   bounded.throwIfAborted()
-  if (model !== 'kotoba') {
+  if (!isSpeechModel(model)) {
     const inference = createLocalTextInference(probe)
     try { await inference.translateText('こんにちは。', bounded); return result }
     finally { await inference.close() }
@@ -30,6 +32,13 @@ export async function validateModelRuntime(paths: AiRuntimePaths, model: LocalMo
     for (let index = 0; index < samples; index++) wav.writeInt16LE(Math.round(200 * Math.sin(index * Math.PI / 40)), 44 + index * 2)
     const input = path.join(directory, 'probe.wav'), output = path.join(directory, 'probe')
     await fs.writeFile(input, wav)
+    if (model === 'qwen3-asr') {
+      const recognize = createQwenAsrRecognition(probe)
+      await recognize(input, output, 0, 0, 0.5, bounded)
+      // Silence may produce no ASR text; explicitly exercise the aligner as well.
+      if (paths.qwenAsr?.forcedAligner !== false) await recognize(input, output, 0, 0, 0.5, bounded, undefined, 'こんにちは')
+      return result
+    }
     // No VAD: the short probe must actually execute the encoder/decoder.
     const args = ['-m', paths.kotoba, '-f', input, '-l', 'ja', '-t', '2', '-mc', '0', '-ojf', '-of', output]
     const execution = await selectLocalExecution(paths.whisper, paths.kotoba, 'recognition', probe.acceleration)

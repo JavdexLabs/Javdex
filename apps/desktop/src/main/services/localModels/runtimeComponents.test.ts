@@ -27,6 +27,29 @@ test('speech preparation includes auxiliary resources and only its own packaged 
   const plan = preparationPlan({ groups: ['speech'], components: components(), policy: { mode: 'auto' }, devices, target, supported: true, installed: () => false })
   assert.deepEqual(plan.items.map(item => item.id), ['whisper-cpu', 'ffmpeg-common', 'vad-common', 'whisper-cuda'])
 })
+
+test('Qwen preparation includes its pinned aligner and native engine without downloading Kotoba tools', () => {
+  const plan = preparationPlan({ groups: ['qwen-speech'], refs: [{ model: 'qwen3-asr', variant: 'qwen3-asr-q8_0' }],
+    components: components(), policy: { mode: 'auto' }, devices, target, supported: true, installed: () => false })
+  assert.equal(plan.backend, 'vulkan')
+  assert.ok(plan.items.some(item => item.id === 'qwen-aligner-common' && item.bytes === 1129966496))
+  assert.ok(plan.items.some(item => item.id === 'audiocpp-cpu'))
+  assert.ok(plan.items.some(item => item.id === 'audiocpp-vulkan'))
+  assert.ok(plan.items.every(item => !/whisper|kotoba|vad/.test(item.id)))
+  assert.ok(!plan.items.some(item => item.id === 'translator-vulkan'), 'known discrete GPU capacity avoids an unrelated translator download')
+})
+
+test('the two speech engines expose independent environments and reuse one physical audio-tool download', () => {
+  const options = { components: components(), policy: { mode: 'cpu' as const }, devices: [], target, supported: true, installed: () => false }
+  const kotoba = preparationPlan({ ...options, groups: ['speech'] })
+  const qwen = preparationPlan({ ...options, groups: ['qwen-speech'] })
+  assert.ok(kotoba.items.every(item => item.group === 'speech'))
+  assert.ok(qwen.items.every(item => item.group === 'qwen-speech'))
+  assert.ok(qwen.items.some(item => item.id === 'audiocpp-cpu'))
+  assert.ok(kotoba.items.some(item => item.id === 'whisper-cpu'))
+  const both = preparationPlan({ ...options, groups: ['speech', 'qwen-speech'] })
+  assert.equal(both.items.filter(item => item.id.startsWith('ffmpeg-')).length, 1)
+})
 test('automatic CPU fallback avoids speculative GPU downloads; explicit Vulkan preparation declares its probe', () => {
   const options = { groups: ['speech' as const], components: components(), policy: { mode: 'auto' as const }, devices: [], target, supported: true, installed: () => false }
   assert.ok(preparationPlan(options).items.every(item => !/cuda|vulkan/.test(item.id)))

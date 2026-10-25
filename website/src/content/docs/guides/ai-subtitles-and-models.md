@@ -51,6 +51,7 @@ sequenceDiagram
 ### 1. 官方支持的预置模型
 - **语音识别组（Speech）**：
   - **`kotoba`（Kotoba Whisper v2.0 GGML）**：针对日语对白进行了深度强化微调，默认搭配 `Silero VAD v6.2.0` 静音过滤。Windows、macOS、Linux 的语音引擎、音频提取工具和 VAD 均从 Javdex Runtime 固定发行按需下载；macOS AI 工具不再占用主应用安装包。首次准备会列出实际下载量，支持续传和校验修复。
+  - **`qwen3-asr`（Qwen3-ASR 1.7B Q8_0，可选）**：当前支持 Windows x64，使用独立 audio.cpp CPU／Vulkan 引擎。展开该模型先安装基础环境，再下载识别权重，并在功能用途页切换识别模型；Kotoba 继续保留。默认开启 ForcedAligner 0.6B 时间轴对齐，两份权重合计约 3.60 GB。关闭对齐后整段文字使用最长 30 秒的片段时间，无法逐句跟随对白；开关对新任务生效，已有模型文件保留。GPU 不可用时回退同权重 CPU。
 - **文本翻译组（Text）**：
   - **`hy-mt2-7b`（HY-MT2 7B GGUF，默认推荐）**：翻译语意通顺自然，对日语俚语与成人影视特定语境理解极佳。
   - **`qwen3`（Qwen3 1.7B GGUF）**：超轻量级翻译模型，适合显存或性能较受限的设备。

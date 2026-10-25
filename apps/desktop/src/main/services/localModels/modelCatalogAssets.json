@@ -80,5 +80,18 @@
         "size": 7981928896
       }
     ]
+  },
+  {
+    "model": "qwen3-asr",
+    "repoId": "audio-cpp/audio.cpp-gguf",
+    "revision": "661a224e9d9adbd49c01626f85e426f5f425d771",
+    "assets": [
+      {
+        "rfilename": "Qwen3-ASR-1.7B-GGUF/qwen3-asr-1.7b-q8_0.gguf",
+        "precision": "Q8_0",
+        "size": 2473010048,
+        "sha256": "da4fc2ac7f24dee784d1684eb1f35836cdbf559519452ae11777670734c0a4f8"
+      }
+    ]
   }
 ]

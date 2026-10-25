@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { AudioLines, Circle, Languages, Mic } from 'lucide-react'
 import { UI_ICON_SM } from '../iconDefaults'
+import { LOCAL_RECOGNITION_MODEL_IDS, type LocalRecognitionModelId } from '@shared/desktop/localModels'
 import type { LocalModelId, LocalModelRef, LocalModelSnapshot, LocalModelUsage, LocalTranslationModelId } from '@shared/desktop/localModels'
 import Button from '../Button'
 import SelectControl from '../SelectControl'
@@ -115,8 +116,8 @@ function SubtitleUsage({ state, busy, execute, operationError }: {
     </header>
     <SettingsSaveDetailsSlot />
     <div className={styles.subtitleGrid}>
-      <ModelBinding title="语音识别" stage="recognition" state={state} models={['kotoba']} value={form.draft.subtitleRecognition}
-        disabled={saving} onChange={value => form.setDraft(current => ({ ...current, subtitleRecognition: { ...value, model: 'kotoba' } }))} />
+      <ModelBinding title="语音识别" stage="recognition" state={state} models={[...LOCAL_RECOGNITION_MODEL_IDS]} value={form.draft.subtitleRecognition}
+        disabled={saving} onChange={value => form.setDraft(current => ({ ...current, subtitleRecognition: { ...value, model: value.model as LocalRecognitionModelId } }))} />
       <ModelBinding title="字幕翻译" stage="translation" state={state} models={['qwen3', 'hy-mt2-7b']} value={form.draft.subtitleTranslation}
         disabled={saving} onChange={value => form.setDraft(current => ({ ...current, subtitleTranslation: { ...value, model: value.model as LocalTranslationModelId } }))} />
     </div>

@@ -33,19 +33,21 @@ test('cleanup refreshes partial-file inventory, resume bytes and storage before 
 })
 
 async function fixture(options: { inference?: NonNullable<Parameters<typeof createLocalModelManager>[1]>['inference']; runtimeSupported?: () => boolean; runtimeAvailable?: () => boolean;
-  validate?: NonNullable<Parameters<typeof createLocalModelManager>[1]>['validate'] } = {}) {
+  validate?: NonNullable<Parameters<typeof createLocalModelManager>[1]>['validate']; assetAvailable?: (id: string) => boolean } = {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'javdex-local-models-'))
   let fail = false, attempts = 0
   const downloadUrls: string[] = []
-  const installer: typeof createAiRuntimeInstaller = (directory, download, assets) => {
-    const base = createAiRuntimeInstaller(directory, download, assets)
-    const modelFile = (id: string): string => `${id === 'kotoba' ? base.paths().kotoba : base.paths().translationModel}.ready`
-    const weights = (ids: readonly string[]) => ids.filter(id => id === 'kotoba' || id === 'translation-model')
-    const assetsInstalled = async (ids: readonly string[]) => (!ids.some(id => id !== 'kotoba' && id !== 'translation-model') || options.runtimeAvailable?.() !== false)
+  const removedAssets: string[] = []
+  const installer: typeof createAiRuntimeInstaller = (directory, download, assets, settings) => {
+    const base = createAiRuntimeInstaller(directory, download, assets, settings)
+    const modelFile = (id: string): string => `${id === 'kotoba' ? base.paths().kotoba : id === 'qwen-asr' ? base.paths().qwenAsr!.model : base.paths().translationModel}.ready`
+    const weights = (ids: readonly string[]) => ids.filter(id => id === 'kotoba' || id === 'translation-model' || id === 'qwen-asr')
+    const assetsInstalled = async (ids: readonly string[]) => (!ids.some(id => !['kotoba', 'translation-model', 'qwen-asr'].includes(id)) || options.runtimeAvailable?.() !== false)
+      && ids.every(id => options.assetAvailable?.(id) !== false)
       && (await Promise.all(weights(ids).map(id => fs.access(modelFile(id)).then(() => true, () => false)))).every(Boolean)
     return { ...base,
       installed: () => assetsInstalled(['kotoba', 'translation-model']), assetsInstalled,
-      removeAsset: async id => { await fs.rm(modelFile(id), { force: true }) },
+      removeAsset: async id => { removedAssets.push(id); if (weights([id]).length) await fs.rm(modelFile(id), { force: true }) },
       install: async (signal, progress, ids = []) => {
         downloadUrls.push(...(assets ?? []).map(asset => asset.url))
         if (weights(ids).length) attempts++
@@ -61,13 +63,104 @@ async function fixture(options: { inference?: NonNullable<Parameters<typeof crea
     }
   }
   const manager = createLocalModelManager(root, { installer, runtimeSupported: () => true, detectDevices: async () => [], validate: async () => ({ backend: 'cpu' }), ...options })
-  return { root, manager, installer, downloadUrls, setFail: (value: boolean) => { fail = value }, attempts: () => attempts,
+  return { root, manager, installer, downloadUrls, removedAssets, setFail: (value: boolean) => { fail = value }, attempts: () => attempts,
     cleanup: async () => { await manager.close(); await fs.rm(root, { recursive: true, force: true }) } }
 }
 async function idle(manager: ReturnType<typeof createLocalModelManager>): Promise<void> {
   for (let count = 0; count < 200; count++) { if (!(await manager.snapshot()).operation) return; await delay(5) }
   assert.fail('model operation did not settle')
 }
+
+test('ForcedAligner switch persists, changes Qwen dependencies and cache identity, and protects active leases', { skip: process.platform !== 'win32' ? 'audio.cpp host integration is Windows-only' : false }, async () => {
+  const f = await fixture({ assetAvailable: id => id !== 'qwen-aligner' })
+  let release = () => {}
+  try {
+    const initial = await f.manager.snapshot()
+    const environment = (value: typeof initial) => value.environments!.find(item => item.group === 'qwen-speech')!
+    assert.equal(initial.qwenForcedAligner, true)
+    assert.equal(environment(initial).cpuReady, false)
+    await assert.rejects(f.manager.setQwenForcedAligner(false, 'stale'), /已更新/)
+    await f.manager.setQwenForcedAligner(false, initial.revision)
+    const disabled = await f.manager.snapshot()
+    assert.deepEqual(disabled.usage, initial.usage)
+    assert.equal(environment(disabled).cpuReady, true)
+    assert.equal(environment(disabled).components.find(item => item.id === 'qwen-aligner-common')!.enabled, false)
+    assert.equal(environment(disabled).preparation.items.some(item => item.id === 'qwen-aligner-common'), false)
+    await f.manager.download('qwen3-asr'); await idle(f.manager)
+    await f.manager.download('hy-mt2-7b'); await idle(f.manager)
+    await f.manager.setUsage({ ...initial.usage, subtitleRecognition: { model: 'qwen3-asr', variant: 'qwen3-asr-q8_0' } })
+    const unaligned = f.manager.subtitleRuntime().paths()
+    assert.equal(unaligned.qwenAsr!.forcedAligner, false)
+    release = await f.manager.acquireSubtitleRuntime()
+    await assert.rejects(f.manager.setQwenForcedAligner(true), /正在使用/)
+    assert.equal(f.manager.subtitleRuntime().paths().qwenAsr!.forcedAligner, false)
+    release()
+    await f.manager.setQwenForcedAligner(true)
+    assert.notEqual(f.manager.subtitleRuntime().paths().asrVersion, unaligned.asrVersion)
+    assert.equal(environment(await f.manager.snapshot()).cpuReady, false)
+    await assert.rejects(f.manager.acquireSubtitleRuntime(), /运行环境|运行库/)
+    await f.manager.setQwenForcedAligner(false)
+    const config = JSON.parse(await fs.readFile(path.join(f.root, 'local-models.json'), 'utf8'))
+    assert.equal(config.version, 3); assert.equal(config.qwenForcedAligner, false)
+    await f.manager.close()
+    const restarted = createLocalModelManager(f.root, { installer: f.installer, runtimeSupported: () => true, detectDevices: async () => [], validate: async () => ({ backend: 'cpu' }) })
+    try {
+      assert.equal((await restarted.snapshot()).qwenForcedAligner, false)
+      assert.equal(restarted.subtitleRuntime().paths().asrVersion, unaligned.asrVersion)
+      assert.deepEqual(f.removedAssets, [], 'switching must retain downloaded files')
+    } finally { await restarted.close() }
+  } finally { release(); await f.cleanup() }
+})
+
+test('Qwen ASR binds independently, upgrades only on explicit selection and preserves Kotoba across restart', { skip: process.platform !== 'win32' ? 'audio.cpp host integration is Windows-only' : false }, async () => {
+  const f = await fixture()
+  let release = () => {}
+  try {
+    const initial = await f.manager.snapshot()
+    assert.deepEqual(initial.environments?.map(environment => environment.group), ['speech', 'qwen-speech', 'text'])
+    const kotobaEnvironment = initial.environments!.find(environment => environment.group === 'speech')!.components.map(component => component.id)
+    assert.equal(initial.usage.subtitleRecognition.model, 'kotoba')
+    await f.manager.download('qwen3-asr'); await idle(f.manager)
+    assert.equal((await f.manager.snapshot()).usage.subtitleRecognition.model, 'kotoba')
+    await f.manager.download('hy-mt2-7b'); await idle(f.manager)
+    await f.manager.setUsage({ ...initial.usage, subtitleRecognition: { model: 'qwen3-asr', variant: 'qwen3-asr-q8_0' } })
+    assert.deepEqual((await f.manager.snapshot()).environments!.find(environment => environment.group === 'speech')!.components.map(component => component.id), kotobaEnvironment)
+    const before = f.manager.subtitleRuntime().paths()
+    assert.equal(before.recognitionModel, 'qwen3-asr')
+    assert.ok(before.qwenAsr?.model.endsWith('qwen3-asr-1.7b-q8_0.gguf'))
+    assert.ok(before.kotoba.endsWith('ggml-kotoba-whisper-v2.0-q5_0.bin'))
+    release = await f.manager.acquireSubtitleRuntime()
+    await assert.rejects(f.manager.setUsage(initial.usage), /正在使用/)
+    await assert.rejects(f.manager.download('qwen3-asr'), /正在使用/)
+    release()
+    await f.manager.close()
+    const config = JSON.parse(await fs.readFile(path.join(f.root, 'local-models.json'), 'utf8'))
+    assert.equal(config.version, 3)
+    const restarted = createLocalModelManager(f.root, { installer: f.installer, runtimeSupported: () => true, detectDevices: async () => [], validate: async () => ({ backend: 'cpu' }) })
+    try {
+      assert.equal((await restarted.snapshot()).usage.subtitleRecognition.model, 'qwen3-asr')
+      assert.equal(restarted.subtitleRuntime().paths().asrVersion, before.asrVersion)
+      await restarted.setUsage(initial.usage)
+      assert.equal(restarted.subtitleRuntime().paths().recognitionModel, 'kotoba')
+      assert.notEqual(restarted.subtitleRuntime().paths().asrVersion, before.asrVersion)
+    } finally { await restarted.close() }
+  } finally { release(); await f.cleanup() }
+})
+
+test('removing qwen-speech runtime preserves audio tools needed by installed Kotoba models', { skip: process.platform !== 'win32' ? 'audio.cpp runtime inventory is Windows-only' : false }, async () => {
+  const f = await fixture()
+  try {
+    await f.manager.download('kotoba'); await idle(f.manager)
+    await f.manager.removeRuntime('qwen-speech', 'cpu')
+    assert.ok(f.removedAssets.includes('audiocpp'))
+    assert.ok(f.removedAssets.includes('qwen-aligner'))
+    assert.ok(!f.removedAssets.includes('ffmpeg'))
+    assert.ok(!f.removedAssets.includes('whisper'))
+    assert.equal((await f.manager.snapshot()).models.find(model => model.id === 'kotoba')!.installed, true)
+    await f.manager.download('qwen3-asr'); await idle(f.manager)
+    await assert.rejects(f.manager.removeRuntime('qwen-speech', 'cpu'), /模型文件/)
+  } finally { await f.cleanup() }
+})
 
 async function qwenFixture(options: Parameters<typeof fixture>[0] = {}) {
   const f = await fixture(options)
@@ -462,7 +555,7 @@ test('new configuration starts with exact defaults and invalid variant identitie
     const restarted = createLocalModelManager(f.root, { installer: f.installer, detectDevices: async () => [] })
     try {
       const state = await restarted.snapshot()
-      assert.deepEqual(state.models.map(item => item.selectedVariant), ['qwen3-q4_k_m', 'kotoba-q5_0', 'hy-mt2-7b-q4_k_m'])
+      assert.deepEqual(state.models.map(item => item.selectedVariant), ['qwen3-q4_k_m', 'kotoba-q5_0', 'hy-mt2-7b-q4_k_m', 'qwen3-asr-q8_0'])
       assert.deepEqual(state.usage, initial.usage)
       await assert.rejects(restarted.selectVariant('qwen3', 'kotoba-q5_0'), /不匹配/)
       await assert.rejects(restarted.download('kotoba', '../custom-file'), /不匹配/)
@@ -703,7 +796,7 @@ test('all three families and HY precision choices survive migration and restart 
       const before = await restarted.snapshot()
       assert.equal(before.translationModel, 'hy-mt2-7b')
       assert.equal(before.translation, 'local')
-      assert.equal(before.models.every(model => model.installed), true)
+      assert.equal(before.models.filter(model => model.id !== 'qwen3-asr').every(model => model.installed), true)
       const hy = before.models.find(model => model.id === 'hy-mt2-7b')!
       assert.equal(hy.selectedVariant, 'hy-mt2-7b-q8_0')
       assert.equal(hy.variants.filter(variant => variant.installed).length, 2)
@@ -714,7 +807,7 @@ test('all three families and HY precision choices survive migration and restart 
       assert.equal(await restarted.mode(), 'local')
       await assert.rejects(restarted.translateText('はい'), /未安装/)
       assert.equal(await restarted.subtitleRuntime().installed(), false)
-      assert.equal((await restarted.snapshot()).models.filter(model => model.id !== 'hy-mt2-7b').every(model => model.installed), true)
+      assert.equal((await restarted.snapshot()).models.filter(model => model.id !== 'hy-mt2-7b' && model.id !== 'qwen3-asr').every(model => model.installed), true)
     } finally { await restarted.close() }
   } finally { await f.cleanup() }
 })

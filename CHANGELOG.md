@@ -7,6 +7,10 @@
 - Windows GPU 播放统一采用 ANGLE／D3D11 直接硬解与共享槽直接渲染，移除 WGL 和桥接复制输出，以 `glFinish` 确认完成；保留 Canvas、默认缩放和自动 CPU 恢复。
 - Windows 播放生产端按 Chromium 活动显卡身份与 DXGI preference 对齐，增加设备身份及渲染、完成等待、输出交接耗时诊断。
 
+### 新增
+
+- Windows x64 的本地字幕识别可选择 Qwen3-ASR 1.7B Q8_0，支持 ForcedAligner 时间轴对齐开关、独立 CPU／Vulkan 环境和同权重 CPU 回退；与 Kotoba 共用模型管理和字幕流水线，保留原有默认选择。
+
 ### 修复
 
 - 修复播放器慢速双击全屏时可能额外切换播放／暂停或重播的问题；按平台提供点击时序，保留独立单击、交叉控件操作和即时键盘操作。

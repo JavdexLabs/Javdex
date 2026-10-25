@@ -7,6 +7,7 @@ interface Dependencies {
   recognize(start: number, end: number, signal: AbortSignal): Promise<SubtitleCue[]>
   translate(cues: SubtitleCue[], signal: AbortSignal, updated: (cues: SubtitleCue[]) => Promise<void>): Promise<SubtitleCue[]>
   changed(state: SubtitleSchedulerState): void
+  failed?(index: number, stage: string, error: unknown): void
 }
 export interface SubtitleSchedulerState {
   phase: 'recognizing' | 'translating' | 'ready' | 'error'
@@ -72,18 +73,22 @@ export function createSubtitleScheduler(duration: number, deps: Dependencies) {
       const task = { index, controller: new AbortController() }
       active = task
       const signal = task.controller.signal
+      let stage = '读取缓存'
       try {
         let chunk = chunks.get(index) ?? await deps.read(index)
         signal.throwIfAborted()
         if (!chunk) {
           publish('recognizing')
+          stage = '语音识别'
           chunk = { index, translated: false, cues: await deps.recognize(index * SUBTITLE_CHUNK_SECONDS, Math.min(duration, (index + 1) * SUBTITLE_CHUNK_SECONDS), signal) }
           signal.throwIfAborted()
+          stage = '写入识别缓存'
           await deps.write(chunk)
         }
         signal.throwIfAborted(); chunks.set(index, chunk)
         if (!chunk.translated) {
           publish('translating')
+          stage = '字幕翻译'
           const cues = await deps.translate(chunk.cues, signal, async cues => {
             signal.throwIfAborted()
             const partial = { index, translated: false, cues }
@@ -92,12 +97,14 @@ export function createSubtitleScheduler(duration: number, deps: Dependencies) {
           })
           signal.throwIfAborted()
           chunk = { index, translated: true, cues }
+          stage = '写入翻译缓存'
           await deps.write(chunk)
           signal.throwIfAborted(); chunks.set(index, chunk)
         }
         attempted.add(index); publish('ready')
-      } catch {
+      } catch (cause) {
         if (!signal.aborted && !stopped) {
+          deps.failed?.(index, stage, cause)
           error = '部分字幕生成失败，可重试；已生成字幕保留，播放不受影响'
           attempted.add(index); publish('error')
         }

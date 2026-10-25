@@ -2,6 +2,8 @@ import type { LocalModelDownloadSource, LocalModelId, LocalTranslationModelId } 
 import { aiRuntimeAssets, type AiRuntimeAsset, type AiRuntimeTarget } from './runtimeManifest'
 import repositories from './modelCatalogAssets.json'
 import { LOCAL_MODEL_NOTICES } from './modelNotices'
+import { AUDIOCPP_VERSION, audioCppAsset, QWEN_ALIGNER } from './qwenAsrManifest'
+import { currentAiRuntimeTarget } from './runtimeManifest'
 
 export interface LocalModelVariant {
   id: string
@@ -14,7 +16,7 @@ export interface LocalModelVariant {
 }
 
 export const DEFAULT_LOCAL_MODEL_VARIANTS: Record<LocalModelId, string> = {
-  kotoba: 'kotoba-q5_0', qwen3: 'qwen3-q4_k_m', 'hy-mt2-7b': 'hy-mt2-7b-q4_k_m'
+  kotoba: 'kotoba-q5_0', qwen3: 'qwen3-q4_k_m', 'hy-mt2-7b': 'hy-mt2-7b-q4_k_m', 'qwen3-asr': 'qwen3-asr-q8_0'
 }
 
 interface LocalModelDefinition {
@@ -28,6 +30,10 @@ interface LocalModelDefinition {
   runtimeAssets: AiRuntimeAsset['id'][]
 }
 export const LOCAL_MODEL_DEFINITIONS: Record<LocalModelId, LocalModelDefinition> = {
+  'qwen3-asr': { name: 'Qwen3-ASR 1.7B', version: `1.7B · ForcedAligner 0.6B · ${AUDIOCPP_VERSION}`,
+    purpose: '日语语音转写与时间轴对齐（Windows x64）', exportName: 'Qwen3-ASR-1.7B',
+    notice: 'Qwen3-ASR-1.7B / Qwen3-ForcedAligner-0.6B: Apache-2.0\nhttps://github.com/QwenLM/Qwen3-ASR\nGGUF: https://huggingface.co/audio-cpp/audio.cpp-gguf\n',
+    format: 'GGUF', assetId: 'qwen-asr', runtimeAssets: ['qwen-asr', 'qwen-aligner', 'audiocpp', 'ffmpeg'] },
   kotoba: { name: 'Kotoba Whisper', version: 'v2.0 GGML', purpose: '日语语音转写',
     exportName: 'Kotoba-Whisper-ASR', notice: 'Kotoba-Whisper v2.0: Apache-2.0\nhttps://huggingface.co/kotoba-tech/kotoba-whisper-v2.0-ggml\n',
     format: 'GGML', assetId: 'kotoba', runtimeAssets: ['kotoba', 'whisper', 'ffmpeg', 'vad'] },
@@ -46,13 +52,13 @@ export const LOCAL_MODEL_VARIANTS: readonly LocalModelVariant[] = repositories.f
   const publisher = repository.repoId.split('/')[0]
   const id = `${model}-${publisher === 'Qwen' ? 'official-' : ''}${file.precision.toLowerCase()}`
   const assetId = definition.assetId
-  const family = { kotoba: 'kotoba-whisper-v2.0', qwen3: 'qwen3-1.7b', 'hy-mt2-7b': 'hy-mt2-7b' }[model]
+  const family = { kotoba: 'kotoba-whisper-v2.0', qwen3: 'qwen3-1.7b', 'hy-mt2-7b': 'hy-mt2-7b', 'qwen3-asr': 'qwen3-asr-1.7b' }[model]
   return {
     id, model, publisher, precision: file.precision.toUpperCase(), format: definition.format,
     recommended: id === DEFAULT_LOCAL_MODEL_VARIANTS[model],
     asset: { id: assetId, label: `${definition.name} · ${file.precision.toUpperCase()} · ${publisher}`,
-      ...(model === 'kotoba' ? {} : { translationModelId: model }),
-      filename: file.rfilename,
+      ...(model === 'kotoba' || model === 'qwen3-asr' ? {} : { translationModelId: model }),
+      filename: file.rfilename.split('/').at(-1)!,
       model: { family, publisher, revision: repository.revision, precision: file.precision.toUpperCase(), format: definition.format },
       bytes: file.size, sha256: file.sha256,
       url: `https://huggingface.co/${repository.repoId}/resolve/${repository.revision}/${file.rfilename}` }
@@ -66,8 +72,9 @@ export function localModelVariant(model: LocalModelId, variant = DEFAULT_LOCAL_M
 }
 
 export function localModelAssets(selection: Record<LocalModelId, string>, translationModel: LocalTranslationModelId = 'qwen3', target?: AiRuntimeTarget, source: LocalModelDownloadSource = 'official'): readonly AiRuntimeAsset[] {
-  return aiRuntimeAssets(target).map(asset => asset.id === 'kotoba' ? localModelVariant('kotoba', selection.kotoba).asset
-    : asset.id === 'translation-model' ? localModelVariant(translationModel, selection[translationModel]).asset : asset).map(asset => {
+  return [...aiRuntimeAssets(target).map(asset => asset.id === 'kotoba' ? localModelVariant('kotoba', selection.kotoba).asset
+    : asset.id === 'translation-model' ? localModelVariant(translationModel, selection[translationModel]).asset : asset),
+    localModelVariant('qwen3-asr', selection['qwen3-asr']).asset, QWEN_ALIGNER, ...audioCppAsset(target ?? currentAiRuntimeTarget())].map(asset => {
     const url = new URL(asset.url)
     if (source !== 'hf-mirror' || url.origin !== 'https://huggingface.co') return asset
     url.hostname = 'hf-mirror.com'

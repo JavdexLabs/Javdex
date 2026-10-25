@@ -1,14 +1,30 @@
 # AI 字幕与本地推理合同
 
-桌面内置播放器使用 Kotoba 识别日语，再用本机文本模型生成中文；音频和字幕不发送到在线模型。文本翻译可以独立选择本地模型或继承已配置的云端模型，两者不是同一用途。操作见[本地模型管理](../website/src/content/docs/guide/local-models.md)与[字幕指南](../website/src/content/docs/guide/subtitles.md)。
+桌面内置播放器默认使用 Kotoba 识别日语；Windows x64 也可选择 Qwen3-ASR 1.7B Q8_0，默认搭配 ForcedAligner 0.6B Q8_0 对齐时间轴，再用本机文本模型生成中文；音频和字幕不发送到在线模型。文本翻译可以独立选择本地模型或继承已配置的云端模型，两者不是同一用途。操作见[本地模型管理](../website/src/content/docs/guide/local-models.md)与[字幕指南](../website/src/content/docs/guide/subtitles.md)。
 
 ## 模型与配置
 
-当前目录包含 Kotoba 两档、Qwen3 四档及 HY-MT2 7B 三档，共九个权重文件。下载、导入、精度选择和用途绑定是独立动作；不注册已移除的 Index-Translate。实际文件名、发布者、revision、大小与 SHA-256 以 [modelCatalog.ts](../apps/desktop/src/main/services/localModels/modelCatalog.ts) 及其资产表为准，历史来源见[依据索引](references/README.md)。
+当前目录包含 Kotoba 两档、Qwen3 四档及 HY-MT2 7B 三档，加上 Qwen3-ASR 一档，共十个可选识别／翻译权重文件；Qwen 的对齐模型另作为配套依赖管理。下载、导入、精度选择和用途绑定是独立动作；不注册已移除的 Index-Translate。实际文件名、发布者、revision、大小与 SHA-256 以 [modelCatalog.ts](../apps/desktop/src/main/services/localModels/modelCatalog.ts) 及其资产表为准，历史来源见[依据索引](references/README.md)。
 
 新配置分别使用 Kotoba Q5_0 做识别、HY-MT2 7B Q4_K_M 做字幕及文本翻译。已有本地用途保留；0.8.0 已有云端配置的用户继续继承应用默认模型。缺少所选权重或用途错误时明确失败，不暗改家族或切换在线服务。
 
 `local-models.json` 的初始格式为 1，保存加速设置后使用格式 2；有效格式 1 默认自动模式，普通读取和重启不改写。未知或损坏配置保留原文件并阻止推理，显式保存有效设置后恢复。不为未发布开发快照的中间格式增加迁移；资料库 schema、云端模型文档和本地配置各自版本化。
+
+## Qwen 语音识别
+
+“语音模型”统一列出 Kotoba 和 Qwen3-ASR，各自管理引擎、权重与配置验证，共用 FFmpeg 和字幕流水线；用途页显式选择识别模型，下载不切换用途。Qwen 使用独立 audio.cpp CLI，不需要 Python，也不通过 Whisper 执行。当前仅提供 Windows x64 CPU／Vulkan 运行库，其他平台保留文件管理，不能启动 Qwen 推理。既有 Kotoba 默认与文件保留。
+
+Qwen 引擎固定为 `v0.9.2-drama3-base-small`，CPU／Vulkan 上游发行记录集中在 `runtimeDistributions.json` 的 `optionalAssets`，由现有安装器按大小和 SHA-256 校验、原子安装；本次没有发布新的 Javdex Runtime 发行。两份权重使用固定 revision 的 audio-cpp 独立 GGUF，合计约 3.60 GB，不与 Qwen 文本翻译权重共用。只有显式准备该引擎才下载依赖。
+
+ForcedAligner 默认开启，开关位于 Qwen 模型内；立即保存，对新任务生效，运行租约期间禁止切换。关闭后不要求对齐权重、不计入显存预算，已有文件保留；关闭上下文提取，整段文字使用最长 30 秒任务区间，不能逐句跟随对白。切换开关、ASR／对齐权重和分句策略均隔离识别缓存。
+
+显式选择 Qwen 或保存对齐开关时，本地配置写入格式 3；有效格式 1／2 读取时保持 Kotoba 配置及原文件，显式保存才更新。没有为旧的未发布实验模块增加迁移。
+
+对齐开启时按 16 kHz 样本偏移还原影片时间，以词中点归属片段，再按标点、停顿和长度分句；字母数字经过 Unicode 规范化后必须覆盖识别全文，缺失文字、损坏时间戳和无时长文字明确失败。空白／纯标点且没有对齐文件属于正常空片段，不阻断后续识别。失败日志记录阶段、片段、工具退出码及有界输出。
+
+Qwen 采用 audio.cpp 原生 Vulkan 枚举，允许具有原生证据的硬件核显，排除软件／虚拟适配器；仅在该引擎枚举到所选设备且内存预算足够时使用 GPU。独立 CPU 工具在明确 GPU 故障时以同权重重试一次，随后片段沿用 CPU，不切换 Kotoba。仅由 audio.cpp 发现的核显标记为该引擎专用，不能把其设备序号传给 Whisper／llama。
+
+本次移植仅进行类型检查、构建和定向回归；日语识别质量、整片时间轴、各显卡速度与可见界面由用户实测，不沿用历史短片结果作为本次实机验收。
 
 ## 工具安装与设备
 

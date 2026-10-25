@@ -4,7 +4,7 @@ import { runtimeDistributionAssets } from './runtimeDistributionAssets'
 
 /** Fixed upstream releases and repository revisions, never resolve `latest` at installation. */
 export interface AiRuntimeAsset {
-  id: 'whisper' | 'translator' | 'ffmpeg' | 'kotoba' | 'translation-model' | 'vad' | 'cuda'
+  id: 'whisper' | 'translator' | 'ffmpeg' | 'kotoba' | 'translation-model' | 'vad' | 'cuda' | 'audiocpp' | 'qwen-asr' | 'qwen-aligner'
   label: string
   url: string
   sha256: string

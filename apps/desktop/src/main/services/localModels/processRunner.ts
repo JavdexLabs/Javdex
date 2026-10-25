@@ -45,6 +45,8 @@ export function localModelProcessEnvironment(source: NodeJS.ProcessEnv = process
 export function runLocalModelProcess(executable: string, args: string[], options: {
   signal?: AbortSignal; timeoutMs?: number; env?: NodeJS.ProcessEnv; maxBytes?: number
   runtimeEnv?: NodeJS.ProcessEnv; diagnostic?: (text: string) => void
+  /** Opt-in bounded stdout diagnostics, including non-zero exits; never part of public errors. */
+  output?: (text: string) => void
 } = {}): Promise<string> {
   options.signal?.throwIfAborted()
   return new Promise((resolve, reject) => {
@@ -70,8 +72,10 @@ export function runLocalModelProcess(executable: string, args: string[], options
     child.once('close', code => {
       clearTimeout(timeout); options.signal?.removeEventListener('abort', abort)
       options.diagnostic?.(diagnostic)
-      if (failure || code !== 0) reject(failure ?? new LocalModelProcessFailure(path.basename(executable), code, gpuDiagnosticFailure(diagnostic) || gpuLoaderFailure(code)))
-      else resolve(Buffer.concat(chunks).toString('utf8'))
+      const output = Buffer.concat(chunks).toString('utf8')
+      options.output?.(output)
+      if (failure || code !== 0) reject(failure ?? new LocalModelProcessFailure(path.basename(executable), code, gpuDiagnosticFailure(diagnostic) || !!options.output && gpuDiagnosticFailure(output) || gpuLoaderFailure(code)))
+      else resolve(output)
     })
   })
 }

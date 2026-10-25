@@ -121,6 +121,18 @@ test('subtitle model draft survives targeted file navigation, remains independen
   } }])
 })
 
+test('Qwen ASR can be selected independently of both text translation uses and switched back to Kotoba', async () => {
+  state.models.push({ ...structuredClone(original.models[0]), id: 'qwen3-asr', name: 'Qwen3-ASR 1.7B', selectedVariant: 'qwen3-asr-q8_0',
+    variants: [{ ...structuredClone(original.models[0].variants[0]), id: 'qwen3-asr-q8_0', precision: 'Q8_0', format: 'GGUF' }] })
+  await mount()
+  await choose('语音识别模型', 'qwen3-asr')
+  await act(async () => subtitleSave().props.onClick())
+  assert.deepEqual(state.usage, { ...original.usage, subtitleRecognition: { model: 'qwen3-asr', variant: 'qwen3-asr-q8_0' } })
+  await choose('语音识别模型', 'kotoba')
+  await act(async () => subtitleSave().props.onClick())
+  assert.deepEqual(state.usage, original.usage)
+})
+
 test('text translation file navigation preserves its draft and records the correct return section', async () => {
   await mount()
   await choose('文本翻译模型来源', 'local')

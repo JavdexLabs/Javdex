@@ -3,6 +3,15 @@ import { test } from 'node:test'
 import { IPC } from '@shared/ipc-channels'
 import { appIpcSchemas } from './ipcCommandSchemas'
 
+test('Qwen ForcedAligner toggle accepts only a boolean and optional revision', () => {
+  const schema = appIpcSchemas[IPC.LOCAL_MODELS_COMMAND]
+  for (const enabled of [true, false]) assert.equal(schema.safeParse([{ action: 'qwen-forced-aligner', enabled, expectedRevision: 'r1' }]).success, true)
+  for (const command of [
+    { action: 'qwen-forced-aligner' }, { action: 'qwen-forced-aligner', enabled: 'false' },
+    { action: 'qwen-forced-aligner', enabled: false, path: 'C:/external.gguf' }
+  ]) assert.equal(schema.safeParse([command]).success, false)
+})
+
 test('local model commands reject renderer-selected paths, URLs and arbitrary model identities', () => {
   const schema = appIpcSchemas[IPC.LOCAL_MODELS_COMMAND]
   assert.equal(schema.safeParse([{ action: 'export', model: 'qwen3' }]).success, true)
@@ -58,7 +67,7 @@ test('player subtitle IPC cannot bypass the central model management and deletio
 
 test('runtime deletion accepts only a whole environment and rejects individual components or renderer paths', () => {
   const schema = appIpcSchemas[IPC.LOCAL_MODELS_COMMAND]
-  for (const group of ['speech', 'text']) for (const target of ['cpu', 'gpu']) {
+  for (const group of ['speech', 'qwen-speech', 'text']) for (const target of ['cpu', 'gpu']) {
     assert.equal(schema.safeParse([{ action: 'delete-runtime', group, target }]).success, true)
   }
   for (const command of [
@@ -78,6 +87,7 @@ test('purpose bindings allow independent exact variants but reject cross-family 
     textTranslation: { mode: 'local', model: 'qwen3', variant: 'qwen3-official-q8_0' }
   }
   assert.equal(schema.safeParse([{ action: 'usage', usage, expectedRevision: 'current-revision' }]).success, true)
+  assert.equal(schema.safeParse([{ action: 'usage', usage: { ...usage, subtitleRecognition: { model: 'qwen3-asr', variant: 'qwen3-asr-q8_0' } } }]).success, true)
   for (const invalid of [
     { ...usage, subtitleRecognition: { model: 'qwen3', variant: 'qwen3-q4_k_m' } },
     { ...usage, subtitleTranslation: { model: 'qwen3', variant: 'hy-mt2-7b-q8_0' } },
@@ -89,7 +99,7 @@ test('purpose bindings allow independent exact variants but reject cross-family 
 
 test('shared runtime preparation accepts only a known modality and a managed preparation target', () => {
   const schema = appIpcSchemas[IPC.LOCAL_MODELS_COMMAND]
-  for (const group of ['speech', 'text']) for (const target of ['auto', 'cpu', 'gpu']) {
+  for (const group of ['speech', 'qwen-speech', 'text']) for (const target of ['auto', 'cpu', 'gpu']) {
     assert.equal(schema.safeParse([{ action: 'prepare-runtime', group, target }]).success, true)
   }
   for (const command of [

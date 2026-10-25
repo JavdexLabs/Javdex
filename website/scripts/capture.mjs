@@ -10,8 +10,10 @@ const root = path.resolve(
   "../..",
 );
 const readme = process.argv.includes("--readme");
-const profile = path.join(root, "output/playwright/website-product-profile");
-const screenshots = path.join(
+const social = process.argv.includes("--social");
+if (readme && social) throw new Error("Choose either --readme or --social");
+const profile = path.join(root, "output/playwright/website-product-profile", ...(social ? ["social"] : []));
+const screenshots = social ? path.join(profile, "screenshots") : path.join(
   root,
   readme ? "docs/images" : "website/assets/screenshots",
 );
@@ -74,8 +76,8 @@ try {
     BrowserWindow.getAllWindows()[0].setContentSize(1440, 850),
   );
   await page.waitForFunction(() => !!window.api);
-  await app.evaluate(
-    ({ app }, { root, films }) => {
+  const playlistId = await app.evaluate(
+    ({ app }, { root, films, social }) => {
       const require = globalThis.captureRequire;
       const db = new (require(root + "/node_modules/better-sqlite3"))(
         require("node:path").join(app.getPath("userData"), "data/library.db"),
@@ -145,18 +147,34 @@ try {
               "INSERT INTO video_tag(video_id,tag_id) VALUES(?,?)",
             ).run(id, (i % 3) + 1);
           }
-          db.prepare(
-            "INSERT INTO playlists(id,name,description,cover_path) VALUES(1,'光与时间','从一座城市到一片海岸，把想再次回看的作品放在一起。','covers/cityCover.webp')",
-          ).run();
-          for (let i = 1; i <= 6; i++)
-            db.prepare(
-              "INSERT INTO playlist_video(playlist_id,video_id,position) VALUES(1,?,?)",
-            ).run(i, i);
         })();
       }
+      // Built-in playlists already occupy IDs in a newly created library.
+      const existing = db.prepare("SELECT id FROM playlists WHERE name=? AND system_kind IS NULL").get("光与时间");
+      const playlistId = existing?.id ?? Number(db.prepare(
+        "INSERT INTO playlists(name,description,cover_path) VALUES('光与时间','从一座城市到一片海岸，把想再次回看的作品放在一起。','covers/cityCover.webp')"
+      ).run().lastInsertRowid);
+      for (let id = 1; id <= 6; id++) db.prepare(
+        "INSERT OR IGNORE INTO playlist_video(playlist_id,video_id,position) VALUES(?,?,?)"
+      ).run(playlistId, id, id);
+      if (social) db.transaction(() => {
+        for (let id = 7; id <= 30; id++) {
+          if (db.prepare("SELECT 1 FROM videos WHERE id=?").get(id)) continue;
+          const original = (id - 1) % films.length + 1;
+          db.prepare("INSERT INTO videos(id,code,title,summary,cover_path,poster_path,rating,release_date,duration_seconds,scraped_status,maker_organization_id,publisher_organization_id,director_id,series_id) SELECT ?,?,title,summary,cover_path,poster_path,rating,release_date,duration_seconds,scraped_status,maker_organization_id,publisher_organization_id,director_id,series_id FROM videos WHERE id=?")
+            .run(id, `DEMO-${String(id).padStart(3, "0")}`, original);
+          db.prepare("INSERT INTO library_video_memberships(library_id,video_id,discovery_key) VALUES(1,?,?)").run(id, id * 13001);
+          db.prepare("INSERT INTO video_actress(video_id,actress_id) VALUES(?,1)").run(id);
+          db.prepare("INSERT INTO video_tag(video_id,tag_id) VALUES(?,?)").run(id, (id - 1) % 3 + 1);
+        }
+        // Keep the six artwork themes interleaved under release-date sorting.
+        for (let id = 1; id <= 30; id++) db.prepare("UPDATE videos SET release_date=? WHERE id=?")
+          .run(`2025-06-${String(31 - id).padStart(2, "0")}`, id);
+      })();
       db.close();
+      return playlistId;
     },
-    { root, films },
+    { root, films, social },
   );
   await page.reload();
   async function route(route, name) {
@@ -180,7 +198,9 @@ try {
     });
   }
   await route("/libraries/1", "library");
-  if (readme) {
+  if (social) {
+    console.log("Captured social-preview library with fictional demonstration data.");
+  } else if (readme) {
     await page.evaluate(() =>
       window.api.settings.update({ theme: "graphite" }),
     );
@@ -192,7 +212,7 @@ try {
     console.log("Captured current README library and film detail views.");
   } else {
     await route("/libraries/1/video/1", "video-detail");
-    await route("/playlists/1", "playlist");
+    await route(`/playlists/${playlistId}`, "playlist");
     await route("/settings/plugins/video", "sources");
     await route("/settings/storage/export", "nfo");
     await page.getByRole("button", { name: "新建媒体库", exact: true }).click();

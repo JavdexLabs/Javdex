@@ -4,7 +4,7 @@ import { createReadStream } from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
 import { AI_RUNTIME_ASSET_IDS, AI_RUNTIME_PLATFORM_MESSAGE,
-  aiRuntimeAssets, aiRuntimeTargetSupported, currentAiRuntimeTarget, type AiRuntimeAsset, type AiRuntimeTarget } from './runtimeManifest'
+  aiRuntimeAssets, aiRuntimeTargetSupported, currentAiRuntimeTarget, modelAssetFiles, modelAssetBytes, type AiRuntimeAsset, type AiRuntimeTarget } from './runtimeManifest'
 import { runLocalModelProcess } from './processRunner'
 import { atomicWrite } from '../../utils/atomicWrite'
 import type { LocalRecognitionModelId, LocalTranslationModelId } from '@shared/desktop/localModels'
@@ -116,6 +116,7 @@ export function createAiRuntimeInstaller(root: string, download: typeof fetch = 
     vad: modelFile(assets.find(asset => asset.id === 'vad')!),
     asrVersion: options.recognitionModel === 'qwen3-asr'
       ? createHash('sha256').update(JSON.stringify([AUDIOCPP_VERSION, assets.find(asset => asset.id === 'qwen-asr')!.sha256,
+        ...modelAssetFiles(assets.find(asset => asset.id === 'qwen-asr')!).slice(1).map(file => file.sha256),
         ...(options.qwenForcedAligner === false ? ['unaligned-chunk-v1'] : [assets.find(asset => asset.id === 'qwen-aligner')!.sha256, 'ja-words-to-cues-v2'])])).digest('hex')
       : assets.find(asset => asset.id === 'kotoba')!.sha256,
     translationModelId: assets.find(asset => asset.id === 'translation-model')!.translationModelId ?? 'qwen3',
@@ -168,8 +169,11 @@ export function createAiRuntimeInstaller(root: string, download: typeof fetch = 
           if (!await validTools(id)) return false
         } else {
           if (!asset) return false
-          const stat = await fs.lstat(modelFile(asset))
-          if (!stat.isFile() || stat.size !== asset.bytes) return false
+          for (const file of modelAssetFiles(asset)) {
+            const stat = await fs.lstat(modelFile(file))
+            if (!stat.isFile() || stat.isSymbolicLink() || stat.size !== file.bytes) return false
+            if (file.filename !== asset.filename && await hashFile(modelFile(file)) !== file.sha256) return false
+          }
         }
       }
       return true
@@ -220,6 +224,27 @@ export function createAiRuntimeInstaller(root: string, download: typeof fetch = 
       emit('checking')
       const asset = assets.find(asset => asset.id === id)
       if (!asset) throw new Error('未知或缺失的本地模型资源')
+      if (asset.supportFiles?.length) {
+        const files = modelAssetFiles(asset)
+        let transferred = 0, reused = true
+        for (const [index, file] of files.entries()) {
+          const single = createAiRuntimeInstaller(root, download, assets.map(entry => entry === asset ? file : entry), options)
+          let current = 0
+          await single.install(signal, () => {}, [id], event => {
+            current = event.networkBytes
+            if (event.phase === 'installing' || event.phase === 'downloading') reused = false
+            onEvent?.({ phase: event.phase === 'reused' || event.phase === 'complete' ? 'checking' : event.phase,
+              networkBytes: transferred + current,
+              networkTotal: transferred + event.networkTotal + files.slice(index + 1).reduce((sum, remaining) => sum + remaining.bytes, 0) })
+            progress(completed + transferred + current, asset.label)
+          })
+          transferred += current
+        }
+        await writeModelManifest(root, asset)
+        completed += modelAssetBytes(asset); progress(completed, asset.label)
+        onEvent?.({ phase: reused ? 'reused' : 'complete', networkBytes: transferred, networkTotal: transferred })
+        continue
+      }
       const targetDirectory = assetDirectory(asset)
       await ensureStorageDirectory(root, targetDirectory)
       const filename = modelFile(asset)
@@ -300,7 +325,7 @@ export function createAiRuntimeInstaller(root: string, download: typeof fetch = 
   async function assetPresent(id: AiRuntimeAsset['id']): Promise<boolean> {
     const asset = assets.find(asset => asset.id === id)
     if (!asset) throw new Error('未知本地模型')
-    const locations = [asset.archive ? toolDirectory(id) : assetDirectory(asset), modelDownloadDirectory(root, asset)]
+    const locations = [asset.archive ? toolDirectory(id) : assetDirectory(asset), ...modelAssetFiles(asset).map(file => modelDownloadDirectory(root, file))]
     for (const location of locations) {
       if (await directoryPresent(location) && (await fs.readdir(location)).length > 0) return true
     }
@@ -311,12 +336,12 @@ export function createAiRuntimeInstaller(root: string, download: typeof fetch = 
       const asset = assets.find(asset => asset.id === id)
       if (!asset) throw new Error('未知本地模型')
       const destination = asset.archive ? toolDirectory(id) : assetDirectory(asset)
-      const download = modelDownloadDirectory(root, asset)
+      const downloads = modelAssetFiles(asset).map(file => modelDownloadDirectory(root, file))
       // Validate every target before removing anything, including archived runtime resume data.
       await ensureStorageDirectory(root, destination)
-      await ensureStorageDirectory(root, download)
+      for (const download of downloads) await ensureStorageDirectory(root, download)
       await fs.rm(destination, { recursive: true, force: true })
-      await fs.rm(download, { recursive: true, force: true })
+      for (const download of downloads) await fs.rm(download, { recursive: true, force: true })
     },
     async remove(): Promise<void> {
       await ensureModelStore(root)

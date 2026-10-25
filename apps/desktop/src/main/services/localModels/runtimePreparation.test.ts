@@ -180,7 +180,7 @@ test('model downloads require the base environment and never install GPU compone
     assert.equal(state.environments!.find(item => item.group === 'text')!.gpu.state, 'missing')
     assert.equal(state.models.find(model => model.id === 'hy-mt2-7b')!.variants[0].ready, true)
     assert.equal(state.environments!.find(item => item.group === 'speech')!.cpuReady, false)
-    await assert.rejects(f.manager.download('kotoba'), /请先安装语音模型的基础运行环境/)
+    await assert.rejects(f.manager.download('kotoba'), /请先安装语音模型-Whisper的基础运行环境/)
     await f.manager.download('qwen3'); await f.idle()
     assert.equal(f.downloads.length, 3)
     state = await f.manager.snapshot()

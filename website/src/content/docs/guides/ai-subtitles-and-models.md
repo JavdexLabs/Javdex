@@ -49,9 +49,10 @@ sequenceDiagram
 前往 **“设置 -> AI 服务 -> 本地模型”**，你可以集中管理所有端侧模型：
 
 ### 1. 官方支持的预置模型
-- **语音识别组（Speech）**：
+- **语音模型-Whisper**：
   - **`kotoba`（Kotoba Whisper v2.0 GGML）**：针对日语对白进行了深度强化微调，默认搭配 `Silero VAD v6.2.0` 静音过滤。Windows、macOS、Linux 的语音引擎、音频提取工具和 VAD 均从 Javdex Runtime 固定发行按需下载；macOS AI 工具不再占用主应用安装包。首次准备会列出实际下载量，支持续传和校验修复。
-  - **`qwen3-asr`（Qwen3-ASR 1.7B Q8_0，可选）**：当前支持 Windows x64，使用独立 audio.cpp CPU／Vulkan 引擎。展开该模型先安装基础环境，再下载识别权重，并在功能用途页切换识别模型；Kotoba 继续保留。默认开启 ForcedAligner 0.6B 时间轴对齐，两份权重合计约 3.60 GB。关闭对齐后整段文字使用最长 30 秒的片段时间，无法逐句跟随对白；开关对新任务生效，已有模型文件保留。GPU 不可用时回退同权重 CPU。
+- **语音模型-ASR**：
+  - **`qwen3-asr`（Qwen3-ASR-1.7B-JA-Anime-Galgame BF16，可选）**：针对日语动漫和游戏台词微调。当前支持 Windows x64，使用独立 audio.cpp CPU／Vulkan 引擎。在此模块先安装基础环境，再下载约 4.09 GB 的识别权重及配套文件，并在功能用途页切换识别模型。Whisper 模块的环境、模型和默认选择保持独立。默认开启 ForcedAligner 0.6B 时间轴对齐，对齐权重另约 1.13 GB。关闭对齐后整段文字使用最长 30 秒的片段时间，无法逐句跟随对白；开关对新任务生效，已有模型文件保留。GPU 不可用时回退同权重 CPU。
 - **文本翻译组（Text）**：
   - **`hy-mt2-7b`（HY-MT2 7B GGUF，默认推荐）**：翻译语意通顺自然，对日语俚语与成人影视特定语境理解极佳。
   - **`qwen3`（Qwen3 1.7B GGUF）**：超轻量级翻译模型，适合显存或性能较受限的设备。
@@ -62,9 +63,11 @@ sequenceDiagram
 - **完整性校验**：下载完成后，系统会自动比对 SHA-256 哈希值，并在后台运行一段 0.5 秒合成音频冒烟测试，确保模型文件完好无损。
 
 ### 3. 离线导入、导出与存储位置迁移
-- **离线导入**：如果你的电脑无法联网，可在其他电脑下载好 `.bin` 或 `.gguf` 文件后，点击“导入模型”，系统会自动校验其哈希并激活。
+- **离线导入**：如果你的电脑无法联网，可在其他电脑下载好 `.bin` 或 `.gguf` 文件后，点击“导入模型”，系统会自动校验其哈希。JA-Anime-Galgame 需选择 `model.safetensors`，并将同一固定版本的 `config.json`、`generation_config.json`、`preprocessor_config.json`、`tokenizer.json`、`tokenizer_config.json` 放在同一目录；全部文件校验通过后才可使用。导入不会自动切换功能用途。
 - **导出备份**：支持将安装好的模型连同许可协议一键导出为标准模型包。
 - **自定义模型存储路径**：模型权重通常体积较大（2GB ~ 8GB）。在“本地模型 -> 存储位置”中，你可以一键将 `local-ai` 目录整体安全迁移至任意大容量硬盘分区，系统会自动校验并迁移历史数据。
+
+JA-Anime-Galgame 使用作者原始 BF16 权重，公开的其他引擎 GGUF 不能直接导入此模块。微调权重的许可标记为 `other`，使用和分发请查看[作者模型卡](https://huggingface.co/jaykwok/Qwen3-ASR-1.7B-JA-Anime-Galgame)及其数据集条款。
 
 ---
 

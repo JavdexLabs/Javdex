@@ -9,7 +9,7 @@
 
 ### 新增
 
-- Windows x64 的本地字幕识别可选择 Qwen3-ASR 1.7B Q8_0，支持 ForcedAligner 时间轴对齐开关、独立 CPU／Vulkan 环境和同权重 CPU 回退；与 Kotoba 共用模型管理和字幕流水线，保留原有默认选择。
+- 本地模型管理保留原语音模块并更名为“语音模型-Whisper”，新增“语音模型-ASR”独立管理运行环境与模型。Windows x64 的 ASR 使用 Qwen3-ASR-1.7B-JA-Anime-Galgame BF16，支持整组配套文件下载／导入导出、ForcedAligner 时间轴对齐开关、独立 CPU／Vulkan 环境和同权重 CPU 回退；保留原 Kotoba 默认选择。
 
 ### 修复
 

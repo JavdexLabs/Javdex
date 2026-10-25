@@ -9,7 +9,7 @@ import { LOCAL_MODEL_DOWNLOAD_SOURCES, type LocalModelDownloadSource, LOCAL_MODE
 import type { LocalModelRef, LocalModelUsage, LocalModelReadiness, LocalAccelerationPolicy, LocalGpuDevice, LocalExecutionStatus } from '@shared/desktop/localModels'
 import type { LocalModelGroup, LocalRuntimeComponent, LocalRuntimeEnvironment, LocalPreparationPlan, LocalDependencyCheck } from '@shared/desktop/localModels'
 import { createAiRuntimeInstaller, localModelRuntimeSupported } from './runtimeInstaller'
-import { AI_RUNTIME_PLATFORM_MESSAGE, currentAiRuntimeTarget } from './runtimeManifest'
+import { AI_RUNTIME_PLATFORM_MESSAGE, currentAiRuntimeTarget, modelAssetFiles, modelAssetBytes } from './runtimeManifest'
 import { runtimeSupportsMetal } from './runtimeDistributionAssets'
 import { gpuRuntimeAssets } from './gpuManifest'
 import { localGpuTargetSupported, detectLocalGpuDevices, type LocalGpuRuntime } from './runtimeAcceleration'
@@ -220,11 +220,11 @@ export function createLocalModelManager(userData: string, options: {
       name: LOCAL_MODEL_DEFINITIONS[id].name,
       version: LOCAL_MODEL_DEFINITIONS[id].version,
       purpose: LOCAL_MODEL_DEFINITIONS[id].purpose,
-      bytes: localModelVariant(id, selected[id]).asset.bytes,
+      bytes: modelAssetBytes(localModelVariant(id, selected[id]).asset),
       selectedVariant: selected[id],
       installed: installed[id], inUse: counts[id] > 0,
       variants: LOCAL_MODEL_VARIANTS.filter(variant => variant.model === id).map(variant => ({
-        id: variant.id, precision: variant.precision, format: variant.format, bytes: variant.asset.bytes,
+        id: variant.id, precision: variant.precision, format: variant.format, bytes: modelAssetBytes(variant.asset),
         recommended: variant.recommended, source: variant.asset.url.split('/resolve/')[0], publisher: variant.publisher,
         installed: installedVariants.get(variant.id) === true, hasFiles: variantFiles.get(variant.id) === true, inUse: (variantCounts.get(variant.id) ?? 0) > 0,
         references: referenceLabels(variant.id), readiness: variantReadiness(id, variant.id), ready: variantReadiness(id, variant.id) === 'ready',
@@ -259,8 +259,17 @@ export function createLocalModelManager(userData: string, options: {
       const assets = [...componentDefinitions.map(definition => ({ id: definition.component.id, asset: definition.asset })),
         ...LOCAL_MODEL_VARIANTS.map(variant => ({ id: `model:${variant.id}`, asset: variant.asset }))]
       for (const { id, asset } of assets) if (asset) {
-        const stat = await fs.lstat(modelDownloadFile(directory, asset)).catch(() => null)
-        if (stat?.isFile() && !stat.isSymbolicLink() && stat.size <= asset.bytes) resumed.set(id, stat.size)
+        let bytes = 0
+        for (const file of modelAssetFiles(asset)) {
+          const installed = asset.supportFiles && await fs.lstat(installer().modelFile(file)).catch(() => null)
+          if (installed && installed.isFile() && !installed.isSymbolicLink() && installed.size === file.bytes) {
+            bytes += file.bytes
+          } else {
+            const stat = await fs.lstat(modelDownloadFile(directory, file)).catch(() => null)
+            if (stat?.isFile() && !stat.isSymbolicLink() && stat.size <= file.bytes) bytes += stat.size
+          }
+        }
+        resumed.set(id, bytes)
       }
       // Disk-usage accounting must not turn a usable runtime into an installation failure.
       await refreshStorage().catch(() => { storage = undefined })
@@ -375,7 +384,7 @@ export function createLocalModelManager(userData: string, options: {
   function requireBaseEnvironment(model: LocalModelId): void {
     if (model === 'qwen3-asr' && !qwenAsrSupported(currentAiRuntimeTarget())) return
     const group = localModelGroup(model)
-    if (supported() && !runtimeReady(model)) throw new Error(`请先安装${localModelGroupLabel(group)}${group === 'qwen-speech' ? '' : '模型'}的基础运行环境；GPU 加速支持可选`)
+    if (supported() && !runtimeReady(model)) throw new Error(`请先安装${localModelGroupLabel(group)}${group === 'text' ? '模型' : ''}的基础运行环境；GPU 加速支持可选`)
   }
   async function runPreparation(createPlan: () => LocalPreparationPlan, refs: LocalModelRef[] = [], signal?: AbortSignal,
     progress?: (bytes: number, label: string) => void, kind: 'model' | 'acceleration' = 'model', retry?: NonNullable<LocalModelSnapshot['operationError']>['command']): Promise<void> {
@@ -479,7 +488,7 @@ export function createLocalModelManager(userData: string, options: {
           hasModels = remaining.length > 0
         }
         const groupName = localModelGroupLabel(group)
-        if (hasModels) throw new Error(`请先删除所有${groupName}模型文件（包括未完成的模型下载），再删除${groupName}基础运行环境`)
+        if (hasModels) throw new Error(`请先删除所有${groupName}${group === 'text' ? '模型' : ''}文件（包括未完成的模型下载），再删除${groupName}基础运行环境`)
       }
       await shutdownEngine()
       for (const definition of definitions) {
@@ -627,15 +636,16 @@ export function createLocalModelManager(userData: string, options: {
       stage = path.join(root, `.javdex-export-${randomUUID()}`)
       if (await fs.access(target).then(() => true, () => false)) throw new Error('导出目录已有同名模型，请选择其他目录')
       const asset = entry.asset
-      const source = installer().modelFile(asset)
       await fs.mkdir(stage, { recursive: true })
-      const filename = path.join(stage, asset.filename)
-      await fs.copyFile(source, filename)
-      if (await localModelFileHash(filename) !== asset.sha256) throw new Error('模型完整性校验失败，导出已取消')
-      await fs.writeFile(path.join(stage, 'LICENSE.txt'), AI_RUNTIME_LICENSES['Apache-2.0.txt'], 'utf8')
+      for (const file of modelAssetFiles(asset)) {
+        const filename = path.join(stage, file.filename)
+        await fs.copyFile(installer().modelFile(file), filename)
+        if (await localModelFileHash(filename) !== file.sha256) throw new Error('模型完整性校验失败，导出已取消')
+      }
+      await fs.writeFile(path.join(stage, 'LICENSE.txt'), asset.modelNotice ?? AI_RUNTIME_LICENSES['Apache-2.0.txt'], 'utf8')
       await fs.writeFile(path.join(stage, 'NOTICE.txt'), `${LOCAL_MODEL_DEFINITIONS[id].notice}\nSource: ${asset.url}\n`, 'utf8')
       await fs.writeFile(path.join(stage, 'MODEL.json'), JSON.stringify({ name: id, variant, precision: entry.precision, publisher: entry.publisher, format: entry.format,
-        url: asset.url, sha256: asset.sha256, bytes: asset.bytes }, null, 2), 'utf8')
+        url: asset.url, sha256: asset.sha256, bytes: asset.bytes, ...(asset.supportFiles ? { supportFiles: asset.supportFiles } : {}) }, null, 2), 'utf8')
       await fs.rename(stage, target)
     } finally {
       if (stage) await fs.rm(stage, { recursive: true, force: true }).catch(() => {})
@@ -712,7 +722,7 @@ export function createLocalModelManager(userData: string, options: {
     async prepareRuntime(group: LocalModelGroup, target: 'auto' | 'cpu' | 'gpu'): Promise<void> {
       await ready; await validation.pause(); available()
       if (!supported()) throw new Error(AI_RUNTIME_PLATFORM_MESSAGE)
-      if (group === 'qwen-speech' && !qwenAsrSupported(currentAiRuntimeTarget())) throw new Error('Qwen 语音 的 audio.cpp 运行库当前支持 Windows x64')
+      if (group === 'qwen-speech' && !qwenAsrSupported(currentAiRuntimeTarget())) throw new Error('语音模型-ASR 的 audio.cpp 运行库当前支持 Windows x64')
       if (configInvalid) throw new Error('本地模型配置损坏，请先重新保存用途设置')
       const task = runPreparation(() => plan([group], [], target === 'gpu', target === 'cpu'), [], undefined, undefined, 'acceleration', { action: 'prepare-runtime', group, target })
         .catch(() => {}).finally(() => { if (pending === task) pending = null })
@@ -775,7 +785,15 @@ export function createLocalModelManager(userData: string, options: {
         const destination = installer().modelFile(entry.asset)
         await ensureStorageDirectory(directory, path.dirname(destination))
         await ensureStorageDirectory(directory, path.join(directory, 'staging'))
-        await importModelFile(source, destination, entry.asset, path.join(directory, 'staging'))
+        for (const [index, file] of modelAssetFiles(entry.asset).entries()) {
+          const input = index === 0 ? source : path.join(path.dirname(source), file.filename)
+          const stat = await fs.stat(input).catch(() => null)
+          if (!stat?.isFile() || stat.size !== file.bytes) throw new Error(`文件大小与所选模型精度不匹配，请检查下载是否完整：${file.filename}`)
+        }
+        for (const [index, file] of modelAssetFiles(entry.asset).entries()) {
+          await importModelFile(index === 0 ? source : path.join(path.dirname(source), file.filename),
+            installer().modelFile(file), file, path.join(directory, 'staging'))
+        }
         await writeModelManifest(directory, entry.asset)
       } finally {
         try { await refresh() }

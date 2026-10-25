@@ -34,7 +34,7 @@ Windows 原生播放 addon 的 MSVC 构建复用已安装的 [node-gyp](https://
 
 ## 本地 AI 运行库
 
-- 可选 Qwen3-ASR 1.7B／Qwen3-ForcedAligner 0.6B 权重及 audio.cpp 引擎：Apache-2.0。Windows x64 CPU／Vulkan 固定使用 audio.cpp `v0.9.2-drama3-base-small` 上游发行，下载后保留引擎许可与运行 DLL 声明；完整固定地址及摘要见 `localModels/runtimeDistributions.json` 的 `optionalAssets`，权重来源见 `modelCatalogAssets.json` 和 `qwenAsrManifest.ts`。不随主安装包交付。
+- 可选 Qwen3-ASR-1.7B-JA-Anime-Galgame：作者 jaykwok 的微调权重许可标记为 `other`，使用与再分发按[作者模型卡](https://huggingface.co/jaykwok/Qwen3-ASR-1.7B-JA-Anime-Galgame)及 `litagin/Galgame_Speech_ASR_16kHz` 数据集条款；基础 Qwen3-ASR-1.7B 为 Apache-2.0，不自动覆盖微调权重的条款。Qwen3-ForcedAligner 0.6B 与 audio.cpp 引擎为 Apache-2.0。Windows x64 CPU／Vulkan 固定使用 audio.cpp `v0.9.2-drama3-base-small` 上游发行，下载后保留引擎许可与运行 DLL 声明；完整固定地址及摘要见 `localModels/runtimeDistributions.json` 的 `optionalAssets`，权重来源见 `modelCatalogAssets.json` 和 `qwenAsrManifest.ts`。不随主安装包交付。
 
 - whisper.cpp b5130 与 llama.cpp b11435：MIT；原始上游包由 Javdex Runtime 固定镜像，下载地址、大小、SHA-256 见 [资产清单](../apps/desktop/src/main/services/localModels/runtimeManifest.ts)。各系统的资产独立，不能用 Windows ZIP 代替 POSIX 运行库。安装保留上游许可文件，模型许可与运行库许可分别记录。
 - macOS Whisper b5130 及五目标 FFmpeg／ffprobe 8.1.3 由 [Javdex Runtime](https://github.com/JavdexLabs/javdex-runtime) 固定源码构建并按需下载，不再随主应用交付。FFmpeg 采用 LGPL-2.1-or-later 的静态最小音频构建，不启用 GPL／nonfree／自动探测外部编解码依赖；各目标附件同时提供对应源码及构建配方，包内保留许可和来源。主播放器的 GPL FFmpeg 9.0.2 保持独立。

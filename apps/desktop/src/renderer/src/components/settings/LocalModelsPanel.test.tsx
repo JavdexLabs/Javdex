@@ -101,40 +101,48 @@ function sharedEnvironment(installed = (id: string) => id.endsWith('-cpu') || id
   })
 }
 
-test('speech models share one section with independent Qwen runtime and ForcedAligner settings', async () => {
+test('Whisper and ASR sections independently manage environments, filters and ForcedAligner settings', async () => {
   sharedEnvironment()
-  const model = family('qwen3-asr', 'Qwen3-ASR 1.7B', 'audio-cpp', 2473010048)
+  const model = family('qwen3-asr', 'Qwen3-ASR JA-Anime-Galgame', 'jaykwok', 4087640292)
   model.installed = false
-  model.variants = [{ ...model.variants[0], id: 'qwen3-asr-q8_0', precision: 'Q8_0', installed: false, ready: false, runtimeReady: false }]
+  model.variants = [{ ...model.variants[0], id: 'qwen3-asr-bf16', precision: 'BF16', format: 'Safetensors', installed: false, ready: false, runtimeReady: false }]
   state.models.push(model)
   const components = [{ ...runtimeComponentsFixture[0], id: 'audiocpp-cpu', group: 'qwen-speech' as const, name: 'audio.cpp 语音引擎', installed: false }]
   const plan = runtimePlanFixture('qwen-speech', components)
   state.environments!.push({ group: 'qwen-speech', supported: true, components, cpuReady: false, gpu: { state: 'missing', backend: 'vulkan' }, preparation: plan, gpuPreparation: plan })
   await mount()
-  const first = renderer!.root.findAllByType('section').find(node => node.props['aria-label'] === '语音模型')!
+  const first = renderer!.root.findAllByType('section').find(node => node.props['aria-label'] === '语音模型-Whisper')!
   assert.ok(renderedText(first).includes('Kotoba'))
-  assert.ok(renderedText(first).includes('Qwen3-ASR'))
-  await expand('Qwen3-ASR 1.7B')
-  const second = first.findAllByType('article').find(node => node.props['aria-label'] === 'Qwen3-ASR 1.7B 模型文件')!
-  const aligner = () => second.findByType(SettingsSwitchRow)
+  assert.doesNotMatch(renderedText(first), /Qwen3-ASR|audio\.cpp|ForcedAligner/)
+  const asr = renderer!.root.findAllByType('section').find(node => node.props['aria-label'] === '语音模型-ASR')!
+  assert.doesNotMatch(renderedText(asr), /Kotoba/)
+  assert.equal(asr.findAllByProps({ 'data-runtime-group': 'qwen-speech' }).length, 1, 'environment is visible before expanding the model')
+  await expand('Qwen3-ASR JA-Anime-Galgame')
+  const second = asr.findAllByType('article').find(node => node.props['aria-label'] === 'Qwen3-ASR JA-Anime-Galgame 模型文件')!
+  assert.equal(second.findAllByProps({ 'data-runtime-group': 'qwen-speech' }).length, 0)
+  const aligner = () => asr.findByType(SettingsSwitchRow)
   assert.equal(aligner().props.checked, true)
   await act(async () => aligner().props.onChange(false))
   assert.deepEqual(commands[0], { action: 'qwen-forced-aligner', enabled: false, expectedRevision: 'r1' })
   state.qwenForcedAligner = false
   await act(async () => changed({ ...state }))
   assert.equal(aligner().props.checked, false)
-  await act(async () => button('安装运行环境', second).props.onClick())
+  await act(async () => button('安装运行环境', asr).props.onClick())
   assert.deepEqual(commands[1], { action: 'prepare-runtime', group: 'qwen-speech', target: 'cpu' })
+  await act(async () => select('语音模型-ASR筛选').props.onChange({ target: { value: 'installed' } }))
+  assert.equal(asr.findAllByType('article').length, 0)
+  assert.ok(renderedText(first).includes('Kotoba'))
+  await act(async () => select('语音模型-ASR筛选').props.onChange({ target: { value: 'all' } }))
   const active = structuredClone(state); active.models.find(item => item.id === 'qwen3-asr')!.inUse = true
   await act(async () => changed(active))
   assert.equal(aligner().props.disabled, true)
 })
 for (const group of ['speech', 'text'] as const) test(`${group} environment deletion checks only its own precision files and reacts to live changes`, async () => {
   sharedEnvironment(); await mount()
-  const groupName = group === 'speech' ? '语音' : '文本'
+  const groupName = group === 'speech' ? '语音模型-Whisper' : '文本'
   await act(async () => button(`删除${groupName}基础运行环境`).props.onClick())
   assert.equal(renderer!.root.findByType(Modal).props.confirmDisabled, true)
-  assert.match(renderedText(renderer!.root.findByType(Modal)), new RegExp(`以下${groupName}模型文件`))
+  assert.match(renderedText(renderer!.root.findByType(Modal)), new RegExp(`以下${groupName}${group === 'text' ? '模型' : ''}文件`))
   assert.equal(renderer!.root.findByType(Modal).findAllByType('button').some(node => renderedText(node) === '删除'), false)
   assert.ok(button('查看相关文件', renderer!.root.findByType(Modal)))
   await act(async () => renderer!.root.findByType(Modal).props.onConfirm())
@@ -255,15 +263,15 @@ test('shared environment inventory belongs to each modality and precision tables
 test('runtime rows expand their own required components and retain expansion across state changes', async () => {
   sharedEnvironment(id => id.endsWith('-cpu') || id.endsWith('-common') || id.endsWith('-vulkan'))
   await mount()
-  const speech = () => renderer!.root.findByProps({ 'aria-label': '语音运行环境' })
+  const speech = () => renderer!.root.findByProps({ 'aria-label': '语音模型-Whisper运行环境' })
   assert.doesNotMatch(renderedText(speech()), /组件与安装清单|本次不需要/)
   assert.equal(speech().findAllByProps({ 'data-runtime-details': 'cpu' }).length, 0)
-  await act(async () => button('语音基础运行环境组件清单', speech()).props.onClick())
-  const base = speech().findByProps({ 'aria-label': '语音基础运行环境组件' })
+  await act(async () => button('语音模型-Whisper基础运行环境组件清单', speech()).props.onClick())
+  const base = speech().findByProps({ 'aria-label': '语音模型-Whisper基础运行环境组件' })
   assert.match(renderedText(base), /音频提取工具.*语音检测模型/)
   assert.doesNotMatch(renderedText(base), /CUDA|VULKAN/)
-  await act(async () => button('语音GPU 加速支持组件清单', speech()).props.onClick())
-  const gpu = speech().findByProps({ 'aria-label': '语音GPU 加速支持组件' })
+  await act(async () => button('语音模型-WhisperGPU 加速支持组件清单', speech()).props.onClick())
+  const gpu = speech().findByProps({ 'aria-label': '语音模型-WhisperGPU 加速支持组件' })
   assert.match(renderedText(gpu), /CUDA/)
   assert.match(renderedText(gpu), /VULKAN/)
   assert.doesNotMatch(renderedText(gpu), /CPU|音频提取工具|语音检测模型|本次不需要/)
@@ -272,9 +280,9 @@ test('runtime rows expand their own required components and retain expansion acr
   assert.match(renderedText(base), /文件大小.*8\.6 MB.*81\.0 MB.*885\.1 KB/)
   assert.doesNotMatch(renderedText(speech()), /复用|无需下载|需下载|处理方式|新增下载/)
   await act(async () => changed({ ...state, checkingDependencies: true }))
-  assert.equal(button('语音基础运行环境组件清单', speech()).props['aria-expanded'], true)
-  assert.equal(button('语音GPU 加速支持组件清单', speech()).props['aria-expanded'], true)
-  await act(async () => button('语音基础运行环境组件清单', speech()).props.onClick())
+  assert.equal(button('语音模型-Whisper基础运行环境组件清单', speech()).props['aria-expanded'], true)
+  assert.equal(button('语音模型-WhisperGPU 加速支持组件清单', speech()).props['aria-expanded'], true)
+  await act(async () => button('语音模型-Whisper基础运行环境组件清单', speech()).props.onClick())
   assert.equal(speech().findAllByProps({ 'data-runtime-details': 'cpu' }).length, 0)
   assert.equal(speech().findAllByProps({ 'data-runtime-details': 'gpu' }).length, 1)
   assert.deepEqual(commands, [])
@@ -282,7 +290,7 @@ test('runtime rows expand their own required components and retain expansion acr
 
 test('first installation, partial installation and CPU-only mode offer the corresponding environment actions', async () => {
   sharedEnvironment(() => false); await mount()
-  const speech = () => renderer!.root.findByProps({ 'aria-label': '语音运行环境' })
+  const speech = () => renderer!.root.findByProps({ 'aria-label': '语音模型-Whisper运行环境' })
   assert.match(renderedText(speech()), /基础运行环境.*未安装/)
   await act(async () => button('安装运行环境', speech()).props.onClick())
   assert.deepEqual(commands, [{ action: 'prepare-runtime', group: 'speech', target: 'cpu' }])
@@ -336,13 +344,13 @@ test('dependency checking replaces old success after configuration and each prec
 
 test('local models separate speech and text modalities, keep families compact, and do not expose usage selectors', async () => {
   await mount()
-  const speech = renderer!.root.findAllByType('section').find(node => node.props['aria-label'] === '语音模型')!
+  const speech = renderer!.root.findAllByType('section').find(node => node.props['aria-label'] === '语音模型-Whisper')!
   const text = renderer!.root.findAllByType('section').find(node => node.props['aria-label'] === '文本模型')!
   assert.equal(speech.findAllByType('article').length, 1)
   assert.equal(text.findAllByType('article').length, 2)
   assert.equal(renderer!.root.findAllByType('table').filter(node => String(node.props['aria-label']).endsWith('精度列表')).length, 2)
   const labels = renderer!.root.findAllByType(Select).map(node => node.props['aria-label'])
-  assert.deepEqual(labels, ['语音模型筛选', 'Qwen 语音筛选', '文本模型筛选', '模型下载来源'])
+  assert.deepEqual(labels, ['语音模型-Whisper筛选', '语音模型-ASR筛选', '文本模型筛选', '模型下载来源'])
 })
 
 test('precision browsing retains exact publisher identity and downloads never change usage', async () => {
@@ -391,11 +399,11 @@ test('GPU detection preparation exposes its probe before detection and missing s
   environment.preparation = runtimePlanFixture('speech', inventory)
   environment.gpuPreparation = runtimePlanFixture('speech', inventory, 'vulkan', true)
   await mount()
-  const speech = () => renderer!.root.findByProps({ 'aria-label': '语音运行环境' })
-  await act(async () => button('语音GPU 加速支持组件清单', speech()).props.onClick())
+  const speech = () => renderer!.root.findByProps({ 'aria-label': '语音模型-Whisper运行环境' })
+  await act(async () => button('语音模型-WhisperGPU 加速支持组件清单', speech()).props.onClick())
   assert.match(renderedText(speech()), /安装检测组件后继续识别显卡/)
   assert.match(renderedText(speech()), /文本引擎VULKAN/)
-  const components = speech().findByProps({ 'aria-label': '语音GPU 加速支持组件' })
+  const components = speech().findByProps({ 'aria-label': '语音模型-WhisperGPU 加速支持组件' })
   const componentRows = components.findByType('tbody').findAllByType('tr')
   assert.deepEqual(componentRows.map(component => component.children.map(cell => renderedText(cell))), [
     ['语音引擎', 'VULKAN', '未安装', '18.1 MB', 'b5130', 'github.com'],
@@ -589,7 +597,7 @@ test('imports use their own model group prerequisite and do not resume automatic
     await act(async () => menuItem(variant, '导入模型文件').props.onClick())
     assert.deepEqual(commands, expected)
     const prompt = renderer!.root.findByType(Modal)
-    assert.match(renderedText(prompt), new RegExp(`下载或导入模型前，请先安装${group === 'speech' ? '语音' : '文本'}模型的基础运行环境`))
+    assert.match(renderedText(prompt), new RegExp(`下载或导入模型前，请先安装${group === 'speech' ? '语音模型-Whisper' : '文本模型'}的基础运行环境`))
     await act(async () => prompt.props.onConfirm())
     expected.push({ action: 'prepare-runtime', group, target: 'cpu' })
     assert.deepEqual(commands, expected)
@@ -634,7 +642,7 @@ test('all models and precisions remain visible even when no files are installed'
   assert.equal(renderer!.root.findAllByType('article').length, empty.models.length)
   assert.equal(renderer!.root.findAllByProps({ 'data-variant': 'qwen3-q6_k' }).length, 1)
   assert.equal(renderer!.root.findAllByProps({ 'data-variant': 'qwen3-official-q8_0' }).length, 1)
-  assert.deepEqual(renderer!.root.findAllByType(Select).map(node => node.props['aria-label']), ['语音模型筛选', 'Qwen 语音筛选', '文本模型筛选', '模型下载来源'])
+  assert.deepEqual(renderer!.root.findAllByType(Select).map(node => node.props['aria-label']), ['语音模型-Whisper筛选', '语音模型-ASR筛选', '文本模型筛选', '模型下载来源'])
 })
 
 test('targeted installation expands and highlights a missing nonrecommended precision, with a return route preserving scope', async () => {

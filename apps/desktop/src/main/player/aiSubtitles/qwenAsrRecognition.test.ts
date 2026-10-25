@@ -57,7 +57,7 @@ test('Qwen uses the existing extraction pipeline and exposes timed cues without 
     calls.push([executable, ...args])
     if (args.includes('-c:a')) await fs.writeFile(args.at(-1)!, 'wav')
     else {
-      assert.equal(args[args.indexOf('--model') + 1].endsWith('qwen3-asr-1.7b-q8_0.gguf'), true)
+      assert.match(args[args.indexOf('--model') + 1], /qwen3-asr-1\.7b-ja-anime-galgame[\\/]jaykwok[\\/][a-f0-9]{40}[\\/]BF16$/)
       assert.equal(args[args.indexOf('--backend') + 1], 'cpu')
       assert.ok(args.some(arg => arg.startsWith('qwen3_asr.forced_aligner_path=')))
       await fs.writeFile(args[args.indexOf('--text-out') + 1], '今日は晴れ。')
@@ -219,7 +219,7 @@ test('Qwen GPU failure retries the same ASR and aligner on CPU once and retains 
   const run: typeof runLocalModelProcess = async (_executable, args, options) => {
     if (args.includes('--list-devices')) { options?.diagnostic?.('Discrete | uma: 0'); return 'Vulkan:0 "Discrete" [GPU]\n' }
     const backend = args[args.indexOf('--backend') + 1]; backends.push(backend)
-    assert.equal(args[args.indexOf('--model') + 1], paths.qwenAsr!.model)
+    assert.equal(args[args.indexOf('--model') + 1], path.dirname(paths.qwenAsr!.model))
     if (backend === 'vulkan') throw new LocalModelProcessFailure('gpu.exe', 1, true)
     await fs.writeFile(args[args.indexOf('--text-out') + 1], '日本語。')
     await fs.writeFile(args[args.indexOf('--words-out') + 1], JSON.stringify([word('日本語', 0, 1)]))

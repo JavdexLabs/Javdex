@@ -29,7 +29,7 @@ test('speech preparation includes auxiliary resources and only its own packaged 
 })
 
 test('Qwen preparation includes its pinned aligner and native engine without downloading Kotoba tools', () => {
-  const plan = preparationPlan({ groups: ['qwen-speech'], refs: [{ model: 'qwen3-asr', variant: 'qwen3-asr-q8_0' }],
+  const plan = preparationPlan({ groups: ['qwen-speech'], refs: [{ model: 'qwen3-asr', variant: 'qwen3-asr-bf16' }],
     components: components(), policy: { mode: 'auto' }, devices, target, supported: true, installed: () => false })
   assert.equal(plan.backend, 'vulkan')
   assert.ok(plan.items.some(item => item.id === 'qwen-aligner-common' && item.bytes === 1129966496))

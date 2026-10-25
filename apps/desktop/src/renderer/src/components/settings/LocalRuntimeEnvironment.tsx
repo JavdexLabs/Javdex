@@ -176,13 +176,13 @@ export default function LocalRuntimeEnvironment({ environment, state, disabled, 
         else setDeleteError(true)
       }}>
       <p>{deleting.name}</p>
-      {blocked ? <><p role="alert">请先删除以下{groupName}模型文件，再删除基础运行环境：</p>
+      {blocked ? <><p role="alert">请先删除以下{groupName}{environment.group === 'text' ? '模型' : ''}文件，再删除基础运行环境：</p>
         <ul>{remainingModels.map(({ model, variant }) => <li key={variant.id}><Button variant="ghost" size="sm" onClick={() => { setDeleting(null); requestFiles(variant.id) }}>
           {model.name} · {variant.precision} · {variant.publisher} · {variant.installed ? '已下载' : '部分文件'}
         </Button></li>)}</ul></>
         : <><p>将删除以下组件的安装文件和未完成下载：</p>
           <ul>{deletingComponents.map(component => <li key={component.id}>{component.name} · {component.backend.toUpperCase()}</li>)}</ul>
-          <p>{deletingBase ? `删除后，下载或导入${groupName}模型前需要重新安装基础运行环境。`
+          <p>{deletingBase ? `删除后，下载或导入${groupName}${environment.group === 'text' ? '模型' : ''}前需要重新安装基础运行环境。`
             : '删除后会重新检查依赖和精度状态；基础环境可用时自动使用 CPU。'}</p></>}
       {deletingBase && environment.group !== 'text' && <p>仍被其他语音模块的模型文件使用的共用音频工具会保留。</p>}
       {deleteError && <p role="alert" className={styles.fullError}>{failure?.message ?? '删除失败，请查看页面错误详情后重试。'}</p>}

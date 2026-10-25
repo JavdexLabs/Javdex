@@ -10,7 +10,10 @@ export interface AiRuntimeAsset {
   sha256: string
   bytes: number
   filename: string
-  model?: { family: string; publisher: string; revision: string; precision: string; format: 'GGML' | 'GGUF' }
+  model?: { family: string; publisher: string; revision: string; precision: string; format: 'GGML' | 'GGUF' | 'Safetensors' }
+  /** Pinned processor/tokenizer files installed beside non-standalone weights. */
+  supportFiles?: Array<Pick<AiRuntimeAsset, 'filename' | 'url' | 'sha256' | 'bytes'>>
+  modelNotice?: string
   archive?: true
   /** POSIX archives retain their bin/lib layout after removing this fixed prefix. */
   archivePrefix?: string
@@ -22,6 +25,13 @@ export interface AiRuntimeAsset {
   runtimePackage?: RuntimePackagePin
   /** Only a reviewed same-engine installation may survive a distribution-only move. */
   legacyInstalledIdentity?: string
+}
+export function modelAssetFiles(asset: AiRuntimeAsset): AiRuntimeAsset[] {
+  const { supportFiles, ...weights } = asset
+  return [weights, ...(supportFiles ?? []).map(file => ({ ...weights, ...file }))]
+}
+export function modelAssetBytes(asset: AiRuntimeAsset): number {
+  return modelAssetFiles(asset).reduce((total, file) => total + file.bytes, 0)
 }
 const portableAssets: readonly AiRuntimeAsset[] = [
   { id: 'kotoba', label: 'Kotoba 日语模型', filename: 'ggml-kotoba-whisper-v2.0-q5_0.bin',

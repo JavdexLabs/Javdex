@@ -1,12 +1,17 @@
 import assert from 'node:assert/strict'
 
 export async function waitForLocalModelSettings(page) {
-  for (const name of ['语音模型', '文本模型']) await page.getByRole('heading', { name, exact: true }).waitFor()
+  for (const name of ['语音模型-Whisper', '语音模型-ASR', '文本模型']) await page.getByRole('heading', { name, exact: true }).waitFor()
   await page.locator('[aria-label="存储与维护"]').waitFor()
 }
 
 export async function checkLocalModelCatalog(page, models) {
   assert.equal(await page.getByRole('article').count(), models.length)
+  for (const [name, group] of [['语音模型-Whisper', 'speech'], ['语音模型-ASR', 'qwen-speech']]) {
+    const section = page.getByRole('region', { name, exact: true })
+    assert.equal(await section.locator(`[data-runtime-group="${group}"]`).count(), 1)
+    assert.equal(await section.getByRole('article').locator('[data-runtime-group]').count(), 0, 'environment belongs to its module')
+  }
   for (const model of models) {
     const family = page.getByRole('article', { name: `${model.name} 模型文件`, exact: true })
     const toggle = family.getByRole('button', { name: `${model.name} 精度列表`, exact: true })
@@ -28,7 +33,7 @@ export async function checkLocalModelCatalog(page, models) {
 }
 
 export async function checkLocalModelInstalledFilters(page) {
-  for (const name of ['语音模型', '文本模型']) {
+  for (const name of ['语音模型-Whisper', '语音模型-ASR', '文本模型']) {
     const filter = page.getByRole('button', { name: `${name}筛选`, exact: true })
     await filter.click()
     await page.getByRole('option', { name: '已下载', exact: true }).click()

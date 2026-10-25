@@ -5,7 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { test } from 'node:test'
 import { createAiRuntimeInstaller, type RuntimeInstallEvent } from './runtimeInstaller'
-import { LOCAL_MODEL_ASSETS, aiRuntimeAssets, type AiRuntimeAsset } from './runtimeManifest'
+import { LOCAL_MODEL_ASSETS, aiRuntimeAssets, modelAssetFiles, modelAssetBytes, type AiRuntimeAsset } from './runtimeManifest'
 import { modelAssetDirectory, modelDownloadFile, runtimeAssetDirectory } from './modelStorage'
 import { runtimeTar } from './runtimeArchiveFixtures'
 import { gpuRuntimeAssets } from './gpuManifest'
@@ -19,6 +19,75 @@ function asset(filename: string): AiRuntimeAsset {
 function assets(filename: string): AiRuntimeAsset[] {
   return LOCAL_MODEL_ASSETS.map(item => item.id === 'translation-model' ? asset(filename) : item)
 }
+
+test('multi-file weights verify all companion files, repair only damaged members and remove every resume file', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'javdex-model-bundle-'))
+  const config = Buffer.from('{"fixture":true}')
+  const bundle: AiRuntimeAsset = { ...asset('model.safetensors'), modelNotice: 'Publisher checkpoint terms',
+    model: { ...asset('fixture').model!, format: 'Safetensors' }, supportFiles: [{ filename: 'config.json', bytes: config.length,
+      url: 'https://model.invalid/config', sha256: createHash('sha256').update(config).digest('hex') }] }
+  const requests: string[] = [], events: RuntimeInstallEvent[] = []
+  const runtime = createAiRuntimeInstaller(root, async url => {
+    requests.push(String(url)); return new Response(String(url) === bundle.url ? contents : config)
+  }, LOCAL_MODEL_ASSETS.map(item => item.id === bundle.id ? bundle : item))
+  try {
+    await runtime.install(new AbortController().signal, () => {}, [bundle.id], event => events.push(event))
+    assert.equal(await runtime.assetsInstalled([bundle.id]), true)
+    assert.equal(events.at(-1)?.networkBytes, modelAssetBytes(bundle))
+    assert.equal(events.filter(event => event.phase === 'complete').length, 1, 'only the complete bundle is published')
+    assert.ok(events.every((event, index) => !index || event.networkBytes >= events[index - 1].networkBytes))
+    const configFile = runtime.modelFile(modelAssetFiles(bundle)[1])
+    await fs.writeFile(configFile, Buffer.alloc(config.length, 0))
+    assert.equal(await runtime.assetsInstalled([bundle.id]), false, 'same-sized corrupt configuration is unusable')
+    events.length = 0
+    await runtime.install(new AbortController().signal, () => {}, [bundle.id], event => events.push(event))
+    assert.deepEqual(requests, [bundle.url, bundle.supportFiles![0].url, bundle.supportFiles![0].url])
+    assert.equal(events.at(-1)?.networkBytes, config.length, 'repair reuses verified weights')
+    events.length = 0
+    await runtime.install(new AbortController().signal, () => {}, [bundle.id], event => events.push(event))
+    assert.equal(events.at(-1)?.phase, 'reused'); assert.equal(events.at(-1)?.networkBytes, 0)
+    assert.equal(await fs.readFile(path.join(path.dirname(configFile), 'LICENSE.txt'), 'utf8'), bundle.modelNotice)
+    const manifest = JSON.parse(await fs.readFile(path.join(path.dirname(configFile), 'manifest.json'), 'utf8'))
+    assert.equal(manifest.filename, bundle.filename); assert.deepEqual(manifest.supportFiles, bundle.supportFiles)
+    for (const file of modelAssetFiles(bundle)) {
+      await fs.mkdir(path.dirname(modelDownloadFile(root, file)), { recursive: true })
+      await fs.writeFile(modelDownloadFile(root, file), 'partial')
+    }
+    await runtime.removeAsset(bundle.id)
+    assert.equal(await runtime.assetPresent(bundle.id), false)
+    for (const file of modelAssetFiles(bundle)) await assert.rejects(fs.access(modelDownloadFile(root, file)), { code: 'ENOENT' })
+  } finally { await fs.rm(root, { recursive: true, force: true }) }
+})
+
+test('failed companion downloads keep verified weights and resume the remaining file before declaring readiness', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'javdex-model-bundle-resume-'))
+  const bundle: AiRuntimeAsset = { ...asset('model.safetensors'), supportFiles: [{ filename: 'tokenizer.json', bytes: contents.length,
+    url: 'https://model.invalid/tokenizer', sha256: asset('fixture').sha256 }] }
+  let failed = false
+  const requests: Array<[string, string | null]> = []
+  const runtime = createAiRuntimeInstaller(root, async (url, options) => {
+    const range = new Headers(options?.headers).get('range')
+    requests.push([String(url), range])
+    if (String(url) === bundle.url) return new Response(contents)
+    if (!failed) {
+      failed = true
+      return new Response(new ReadableStream({ async start(controller) {
+        controller.enqueue(contents.subarray(0, 5))
+        await new Promise(resolve => setTimeout(resolve, 30))
+        controller.error(new Error('connection interrupted'))
+      } }))
+    }
+    return new Response(contents.subarray(5), { status: 206, headers: { 'content-range': `bytes 5-${contents.length - 1}/${contents.length}` } })
+  }, LOCAL_MODEL_ASSETS.map(item => item.id === bundle.id ? bundle : item))
+  try {
+    await assert.rejects(runtime.install(new AbortController().signal, () => {}, [bundle.id]), /connection interrupted/)
+    assert.equal(await runtime.assetsInstalled([bundle.id]), false)
+    assert.equal(await runtime.assetPresent(bundle.id), true)
+    await runtime.install(new AbortController().signal, () => {}, [bundle.id])
+    assert.equal(await runtime.assetsInstalled([bundle.id]), true)
+    assert.deepEqual(requests, [[bundle.url, null], [bundle.supportFiles![0].url, null], [bundle.supportFiles![0].url, 'bytes=5-']])
+  } finally { await fs.rm(root, { recursive: true, force: true }) }
+})
 
 test('inventory rejects file ancestors instead of treating their missing descendants as uninstalled', async t => {
   const parent = await fs.mkdtemp(path.join(os.tmpdir(), 'javdex-inventory-ancestor-'))

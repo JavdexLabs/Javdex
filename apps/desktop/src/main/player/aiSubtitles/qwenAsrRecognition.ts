@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises'
 import os from 'node:os'
+import path from 'node:path'
 import type { AiRuntimePaths } from '../../services/localModels/runtimeInstaller'
 import { LocalModelProcessFailure, runLocalModelProcess } from '../../services/localModels/processRunner'
 import { reserveLocalGpuMemory } from '../../services/localModels/runtimeAcceleration'
@@ -86,7 +87,7 @@ export function createQwenAsrRecognition(paths: AiRuntimePaths, run = runLocalMo
       } catch (cause) { if (signal.aborted) throw cause; execution.reason = '显卡检测失败，已使用 CPU' }
     } else if (policy.mode !== 'cpu' && !cpuReason) execution.reason = 'Qwen GPU 运行库未就绪，已使用 CPU'
     const args = ['--task', forcedText ? 'align' : 'asr', '--family', forcedText ? 'qwen3_forced_aligner' : 'qwen3_asr',
-      '--model', forcedText ? model.aligner : model.model, '--audio', wav, '--language', 'Japanese',
+      '--model', forcedText ? model.aligner : model.model.endsWith('.safetensors') ? path.dirname(model.model) : model.model, '--audio', wav, '--language', 'Japanese',
       '--audio-chunk-mode', 'none', '--text', forcedText ?? '', ...(align ? ['--words-out', `${output}.json`] : []),
       '--threads', String(Math.max(1, Math.min(6, Math.floor(os.availableParallelism() / 2)))), '--max-tokens', '1024',
       '--request-option', 'clamp_timestamps_to_audio=true', '--metrics',
@@ -125,7 +126,7 @@ export function createQwenAsrRecognition(paths: AiRuntimePaths, run = runLocalMo
       const cues = align ? parseQwenCues(words, transcript, extractStart, start, end)
         : text ? [{ start, end, japanese: text }] : []
       const milliseconds = Math.round(performance.now() - began)
-      log?.(align ? 'Qwen 识别与对齐完成' : 'Qwen 识别完成（未对齐）', { model: 'Qwen3-ASR-1.7B Q8_0', forcedAligner: align, milliseconds, audioSeconds: end - extractStart + (align ? 3 : 0),
+      log?.(align ? 'Qwen 识别与对齐完成' : 'Qwen 识别完成（未对齐）', { model: 'Qwen3-ASR-1.7B-JA-Anime-Galgame BF16', forcedAligner: align, milliseconds, audioSeconds: end - extractStart + (align ? 3 : 0),
         backend: execution.backend, transcript, words, cues })
       return cues
     } finally { release?.() }

@@ -76,9 +76,10 @@ export async function writeModelManifest(root: string, asset: AiRuntimeAsset): P
   const directory = modelAssetDirectory(root, asset)
   await ensureStorageDirectory(root, directory)
   await atomicWrite(path.join(directory, 'manifest.json'), JSON.stringify({ version: 1, ...asset.model,
-    filename: asset.filename, sha256: asset.sha256, bytes: asset.bytes, source: asset.url }, null, 2))
-  await atomicWrite(path.join(directory, 'LICENSE.txt'), asset.id === 'vad' ? AI_RUNTIME_LICENSES['Silero-MIT.txt'] : AI_RUNTIME_LICENSES['Apache-2.0.txt'])
-  await atomicWrite(path.join(directory, 'NOTICE.txt'), asset.translationModelId === 'hy-mt2-7b' ? LOCAL_MODEL_NOTICES['hy-mt2-7b'] : `${asset.label}\nSource: ${asset.url}\n`)
+    filename: asset.filename, sha256: asset.sha256, bytes: asset.bytes, source: asset.url,
+    ...(asset.supportFiles ? { supportFiles: asset.supportFiles } : {}) }, null, 2))
+  await atomicWrite(path.join(directory, 'LICENSE.txt'), asset.modelNotice ?? (asset.id === 'vad' ? AI_RUNTIME_LICENSES['Silero-MIT.txt'] : AI_RUNTIME_LICENSES['Apache-2.0.txt']))
+  await atomicWrite(path.join(directory, 'NOTICE.txt'), asset.modelNotice ?? (asset.translationModelId === 'hy-mt2-7b' ? LOCAL_MODEL_NOTICES['hy-mt2-7b'] : `${asset.label}\nSource: ${asset.url}\n`))
 }
 export async function cleanModelTemporaryFiles(root: string, allDownloads = false, now = Date.now()): Promise<void> {
   await ensureModelStore(root)

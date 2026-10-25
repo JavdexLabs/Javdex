@@ -14,7 +14,7 @@ test('catalog enumerates curated published assets with immutable provenance and 
   assert.equal(LOCAL_MODEL_VARIANTS.filter(item => item.publisher === 'Qwen').length, 1)
   assert.deepEqual(LOCAL_MODEL_VARIANTS.filter(item => item.model === 'hy-mt2-7b').map(item => item.precision), ['Q4_K_M', 'Q6_K', 'Q8_0'])
   for (const item of LOCAL_MODEL_VARIANTS) {
-    assert.match(item.asset.url, /^https:\/\/huggingface\.co\/(?:kotoba-tech|Qwen|bartowski|tencent|audio-cpp)\/[^/]+\/resolve\/[a-f0-9]{40}\/.+$/)
+    assert.match(item.asset.url, /^https:\/\/huggingface\.co\/(?:kotoba-tech|Qwen|bartowski|tencent|jaykwok)\/[^/]+\/resolve\/[a-f0-9]{40}\/.+$/)
     assert.match(item.asset.sha256, /^[a-f0-9]{64}$/)
     assert.ok(Number.isSafeInteger(item.asset.bytes) && item.asset.bytes > 0)
     assert.equal(path.basename(item.asset.filename), item.asset.filename)
@@ -65,7 +65,8 @@ test('mirror preserves every pinned model identity and only rewrites Hugging Fac
     const mirrored = localModelAssets(selection, model, undefined, 'hf-mirror')
     original.forEach((asset, index) => {
       const expected = asset.url.replace('https://huggingface.co/', 'https://hf-mirror.com/')
-      assert.deepEqual(mirrored[index], { ...asset, url: expected })
+      assert.deepEqual(mirrored[index], { ...asset, url: expected, ...(asset.supportFiles ? { supportFiles: asset.supportFiles.map(file => ({ ...file,
+        url: file.url.replace('https://huggingface.co/', 'https://hf-mirror.com/') })) } : {}) })
     })
     assert.deepEqual(localModelAssets(selection, model), original)
   }
@@ -79,6 +80,9 @@ test('Qwen subtitle cache identity includes both models and never changes the pr
   const changedAsr = createAiRuntimeInstaller('/models', undefined, assets.map(asset => asset.id === 'qwen-asr' ? { ...asset, sha256: 'b'.repeat(64) } : asset), options).paths()
   assert.notEqual(original.asrVersion, changedAligner.asrVersion)
   assert.notEqual(original.asrVersion, changedAsr.asrVersion)
+  const changedTokenizer = createAiRuntimeInstaller('/models', undefined, assets.map(asset => asset.supportFiles
+    ? { ...asset, supportFiles: asset.supportFiles.map(file => ({ ...file, sha256: 'c'.repeat(64) })) } : asset), options).paths()
+  assert.notEqual(original.asrVersion, changedTokenizer.asrVersion)
   const kotoba = createAiRuntimeInstaller('/models', undefined, assets).paths()
   assert.equal(kotoba.asrVersion, localModelVariant('kotoba').asset.sha256)
   assert.notEqual(kotoba.asrVersion, original.asrVersion)

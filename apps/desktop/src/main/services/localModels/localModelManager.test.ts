@@ -88,7 +88,7 @@ test('ForcedAligner switch persists, changes Qwen dependencies and cache identit
     assert.equal(environment(disabled).preparation.items.some(item => item.id === 'qwen-aligner-common'), false)
     await f.manager.download('qwen3-asr'); await idle(f.manager)
     await f.manager.download('hy-mt2-7b'); await idle(f.manager)
-    await f.manager.setUsage({ ...initial.usage, subtitleRecognition: { model: 'qwen3-asr', variant: 'qwen3-asr-q8_0' } })
+    await f.manager.setUsage({ ...initial.usage, subtitleRecognition: { model: 'qwen3-asr', variant: 'qwen3-asr-bf16' } })
     const unaligned = f.manager.subtitleRuntime().paths()
     assert.equal(unaligned.qwenAsr!.forcedAligner, false)
     release = await f.manager.acquireSubtitleRuntime()
@@ -123,11 +123,11 @@ test('Qwen ASR binds independently, upgrades only on explicit selection and pres
     await f.manager.download('qwen3-asr'); await idle(f.manager)
     assert.equal((await f.manager.snapshot()).usage.subtitleRecognition.model, 'kotoba')
     await f.manager.download('hy-mt2-7b'); await idle(f.manager)
-    await f.manager.setUsage({ ...initial.usage, subtitleRecognition: { model: 'qwen3-asr', variant: 'qwen3-asr-q8_0' } })
+    await f.manager.setUsage({ ...initial.usage, subtitleRecognition: { model: 'qwen3-asr', variant: 'qwen3-asr-bf16' } })
     assert.deepEqual((await f.manager.snapshot()).environments!.find(environment => environment.group === 'speech')!.components.map(component => component.id), kotobaEnvironment)
     const before = f.manager.subtitleRuntime().paths()
     assert.equal(before.recognitionModel, 'qwen3-asr')
-    assert.ok(before.qwenAsr?.model.endsWith('qwen3-asr-1.7b-q8_0.gguf'))
+    assert.ok(before.qwenAsr?.model.endsWith('model.safetensors'))
     assert.ok(before.kotoba.endsWith('ggml-kotoba-whisper-v2.0-q5_0.bin'))
     release = await f.manager.acquireSubtitleRuntime()
     await assert.rejects(f.manager.setUsage(initial.usage), /正在使用/)
@@ -158,7 +158,7 @@ test('removing qwen-speech runtime preserves audio tools needed by installed Kot
     assert.ok(!f.removedAssets.includes('whisper'))
     assert.equal((await f.manager.snapshot()).models.find(model => model.id === 'kotoba')!.installed, true)
     await f.manager.download('qwen3-asr'); await idle(f.manager)
-    await assert.rejects(f.manager.removeRuntime('qwen-speech', 'cpu'), /模型文件/)
+    await assert.rejects(f.manager.removeRuntime('qwen-speech', 'cpu'), /语音模型-ASR文件/)
   } finally { await f.cleanup() }
 })
 
@@ -555,7 +555,7 @@ test('new configuration starts with exact defaults and invalid variant identitie
     const restarted = createLocalModelManager(f.root, { installer: f.installer, detectDevices: async () => [] })
     try {
       const state = await restarted.snapshot()
-      assert.deepEqual(state.models.map(item => item.selectedVariant), ['qwen3-q4_k_m', 'kotoba-q5_0', 'hy-mt2-7b-q4_k_m', 'qwen3-asr-q8_0'])
+      assert.deepEqual(state.models.map(item => item.selectedVariant), ['qwen3-q4_k_m', 'kotoba-q5_0', 'hy-mt2-7b-q4_k_m', 'qwen3-asr-bf16'])
       assert.deepEqual(state.usage, initial.usage)
       await assert.rejects(restarted.selectVariant('qwen3', 'kotoba-q5_0'), /不匹配/)
       await assert.rejects(restarted.download('kotoba', '../custom-file'), /不匹配/)
@@ -897,7 +897,7 @@ test('imports cannot bypass the base environment prerequisite for either model t
     const source = path.join(f.root, 'import.gguf')
     await fs.writeFile(source, 'not a model')
     for (const model of ['kotoba', 'qwen3', 'hy-mt2-7b'] as const) {
-      await assert.rejects(f.manager.importModel(model, source), new RegExp(`请先安装${model === 'kotoba' ? '语音' : '文本'}模型的基础运行环境`))
+      await assert.rejects(f.manager.importModel(model, source), new RegExp(`请先安装${model === 'kotoba' ? '语音模型-Whisper' : '文本模型'}的基础运行环境`))
     }
     assert.equal((await f.manager.snapshot()).operation, null)
     assert.deepEqual((await f.manager.snapshot()).usage, before.usage)

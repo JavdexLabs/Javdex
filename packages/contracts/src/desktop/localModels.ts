@@ -34,7 +34,7 @@ export interface LocalAccelerationSnapshot {
 export const LOCAL_MODEL_GROUPS = ['speech', 'qwen-speech', 'text'] as const
 export type LocalModelGroup = typeof LOCAL_MODEL_GROUPS[number]
 export const localModelGroup = (model: LocalModelId): LocalModelGroup => model === 'qwen3-asr' ? 'qwen-speech' : model === 'kotoba' ? 'speech' : 'text'
-export const localModelGroupLabel = (group: LocalModelGroup): string => group === 'qwen-speech' ? 'Qwen 语音' : group === 'speech' ? '语音' : '文本'
+export const localModelGroupLabel = (group: LocalModelGroup): string => group === 'qwen-speech' ? '语音模型-ASR' : group === 'speech' ? '语音模型-Whisper' : '文本'
 export interface LocalRuntimeComponent {
   /** False when an optional component is disabled but retained for file management. */
   enabled?: boolean
@@ -107,7 +107,7 @@ export interface LocalModelVariantView {
   hasFiles?: boolean
   id: string
   precision: string
-  format: 'GGML' | 'GGUF'
+  format: 'GGML' | 'GGUF' | 'Safetensors'
   bytes: number
   installed: boolean
   inUse: boolean

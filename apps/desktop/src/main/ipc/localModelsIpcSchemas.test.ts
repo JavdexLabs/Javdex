@@ -87,7 +87,7 @@ test('purpose bindings allow independent exact variants but reject cross-family 
     textTranslation: { mode: 'local', model: 'qwen3', variant: 'qwen3-official-q8_0' }
   }
   assert.equal(schema.safeParse([{ action: 'usage', usage, expectedRevision: 'current-revision' }]).success, true)
-  assert.equal(schema.safeParse([{ action: 'usage', usage: { ...usage, subtitleRecognition: { model: 'qwen3-asr', variant: 'qwen3-asr-q8_0' } } }]).success, true)
+  assert.equal(schema.safeParse([{ action: 'usage', usage: { ...usage, subtitleRecognition: { model: 'qwen3-asr', variant: 'qwen3-asr-bf16' } } }]).success, true)
   for (const invalid of [
     { ...usage, subtitleRecognition: { model: 'qwen3', variant: 'qwen3-q4_k_m' } },
     { ...usage, subtitleTranslation: { model: 'qwen3', variant: 'hy-mt2-7b-q8_0' } },

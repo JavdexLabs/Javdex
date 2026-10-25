@@ -1,10 +1,10 @@
 # AI 字幕与本地推理合同
 
-桌面内置播放器默认使用 Kotoba 识别日语；Windows x64 也可选择 Qwen3-ASR 1.7B Q8_0，默认搭配 ForcedAligner 0.6B Q8_0 对齐时间轴，再用本机文本模型生成中文；音频和字幕不发送到在线模型。文本翻译可以独立选择本地模型或继承已配置的云端模型，两者不是同一用途。操作见[本地模型管理](../website/src/content/docs/guide/local-models.md)与[字幕指南](../website/src/content/docs/guide/subtitles.md)。
+桌面内置播放器默认使用 Kotoba 识别日语；Windows x64 也可选择 Qwen3-ASR-1.7B-JA-Anime-Galgame BF16，默认搭配 ForcedAligner 0.6B Q8_0 对齐时间轴，再用本机文本模型生成中文；音频和字幕不发送到在线模型。文本翻译可以独立选择本地模型或继承已配置的云端模型，两者不是同一用途。操作见[字幕与本地模型指南](../website/src/content/docs/guides/ai-subtitles-and-models.md)。
 
 ## 模型与配置
 
-当前目录包含 Kotoba 两档、Qwen3 四档及 HY-MT2 7B 三档，加上 Qwen3-ASR 一档，共十个可选识别／翻译权重文件；Qwen 的对齐模型另作为配套依赖管理。下载、导入、精度选择和用途绑定是独立动作；不注册已移除的 Index-Translate。实际文件名、发布者、revision、大小与 SHA-256 以 [modelCatalog.ts](../apps/desktop/src/main/services/localModels/modelCatalog.ts) 及其资产表为准，历史来源见[依据索引](references/README.md)。
+当前目录包含 Kotoba 两档、Qwen3 四档及 HY-MT2 7B 三档，加上 Qwen3-ASR 一档，共十个可选识别／翻译精度；Qwen 的对齐模型另作为配套依赖管理。下载、导入、精度选择和用途绑定是独立动作；不注册已移除的 Index-Translate。实际文件名、发布者、revision、大小与 SHA-256 以 [modelCatalog.ts](../apps/desktop/src/main/services/localModels/modelCatalog.ts) 及其资产表为准，历史来源见[依据索引](references/README.md)。
 
 新配置分别使用 Kotoba Q5_0 做识别、HY-MT2 7B Q4_K_M 做字幕及文本翻译。已有本地用途保留；0.8.0 已有云端配置的用户继续继承应用默认模型。缺少所选权重或用途错误时明确失败，不暗改家族或切换在线服务。
 
@@ -12,9 +12,11 @@
 
 ## Qwen 语音识别
 
-“语音模型”统一列出 Kotoba 和 Qwen3-ASR，各自管理引擎、权重与配置验证，共用 FFmpeg 和字幕流水线；用途页显式选择识别模型，下载不切换用途。Qwen 使用独立 audio.cpp CLI，不需要 Python，也不通过 Whisper 执行。当前仅提供 Windows x64 CPU／Vulkan 运行库，其他平台保留文件管理，不能启动 Qwen 推理。既有 Kotoba 默认与文件保留。
+原“语音模型”模块仅更名为“语音模型-Whisper”，保留 Kotoba 的环境、权重和管理行为；新增“语音模型-ASR”，独立管理 audio.cpp CPU／Vulkan 环境、对齐依赖、识别权重、筛选与配置验证。两组共用 FFmpeg 音频工具和字幕流水线，删除环境时保留仍被另一组模型使用的音频工具。用途页显式选择识别模型，下载不切换用途。Qwen 不需要 Python，也不通过 Whisper 执行。当前仅提供 Windows x64 CPU／Vulkan 运行库，其他平台保留文件管理，不能启动 Qwen 推理。既有 Kotoba 默认与文件保留。
 
-Qwen 引擎固定为 `v0.9.2-drama3-base-small`，CPU／Vulkan 上游发行记录集中在 `runtimeDistributions.json` 的 `optionalAssets`，由现有安装器按大小和 SHA-256 校验、原子安装；本次没有发布新的 Javdex Runtime 发行。两份权重使用固定 revision 的 audio-cpp 独立 GGUF，合计约 3.60 GB，不与 Qwen 文本翻译权重共用。只有显式准备该引擎才下载依赖。
+Qwen 引擎固定为 `v0.9.2-drama3-base-small`，CPU／Vulkan 上游发行记录集中在 `runtimeDistributions.json` 的 `optionalAssets`，由现有安装器按大小和 SHA-256 校验、原子安装；本次没有发布新的 Javdex Runtime 发行。识别使用 `jaykwok/Qwen3-ASR-1.7B-JA-Anime-Galgame` 固定 revision `6db0efecd56d4a7e0003190a6bd4cac056d0f390` 的原始 BF16 Safetensors，连同五份配置／分词文件约 4.09 GB；对齐仍使用固定 revision 的 audio-cpp Q8_0 GGUF，约 1.13 GB。公开的 llama.cpp／CrispASR 格式 GGUF 不能直接代替此引擎的权重。两者均不与 Qwen 文本翻译权重共用，只有显式准备 ASR 环境才下载依赖。
+
+多文件识别模型作为一个精度管理：全部文件就绪后才可运行，每份下载／导入独立核验 SHA-256，修复复用完整文件并续传未完成成员；删除同时清理所有成员的续传文件，导出包含整组文件及来源声明。手动导入选择 `model.safetensors`，五份固定版本的 `config.json`、`generation_config.json`、`preprocessor_config.json`、`tokenizer.json`、`tokenizer_config.json` 须在同目录。微调权重许可标记为 `other`，不以基础 Qwen 的 Apache-2.0 代替作者模型卡与训练数据集条款。
 
 ForcedAligner 默认开启，开关位于 Qwen 模型内；立即保存，对新任务生效，运行租约期间禁止切换。关闭后不要求对齐权重、不计入显存预算，已有文件保留；关闭上下文提取，整段文字使用最长 30 秒任务区间，不能逐句跟随对白。切换开关、ASR／对齐权重和分句策略均隔离识别缓存。
 
@@ -24,7 +26,7 @@ ForcedAligner 默认开启，开关位于 Qwen 模型内；立即保存，对新
 
 Qwen 采用 audio.cpp 原生 Vulkan 枚举，允许具有原生证据的硬件核显，排除软件／虚拟适配器；仅在该引擎枚举到所选设备且内存预算足够时使用 GPU。独立 CPU 工具在明确 GPU 故障时以同权重重试一次，随后片段沿用 CPU，不切换 Kotoba。仅由 audio.cpp 发现的核显标记为该引擎专用，不能把其设备序号传给 Whisper／llama。
 
-本次移植仅进行类型检查、构建和定向回归；日语识别质量、整片时间轴、各显卡速度与可见界面由用户实测，不沿用历史短片结果作为本次实机验收。
+本次验证覆盖类型检查、桌面／文档构建、定向回归与真实浏览器的模块入口和布局；完整 BF16 六文件 SHA-256、实际模型管理导入导出，以及 Windows x64 独立 CPU／RTX 4080 Vulkan 的原生加载、合成音频推理与 ForcedAligner 对齐均已检查。合成输入仅验证执行链路，不代表日语识别质量、整片时间轴或其他显卡的性能验收，不沿用历史短片结果作为本次实机证据。
 
 ## 工具安装与设备
 

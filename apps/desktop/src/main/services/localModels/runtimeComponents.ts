@@ -1,5 +1,5 @@
 import { localModelGroup, type LocalAccelerationPolicy, type LocalGpuDevice, type LocalModelGroup, type LocalModelRef, type LocalPreparationPlan, type LocalRuntimeComponent } from '@shared/desktop/localModels'
-import { aiRuntimeAssets, type AiRuntimeAsset, type AiRuntimeTarget } from './runtimeManifest'
+import { aiRuntimeAssets, modelAssetBytes, type AiRuntimeAsset, type AiRuntimeTarget } from './runtimeManifest'
 import { runtimeSupportsMetal } from './runtimeDistributionAssets'
 import { gpuRuntimeAssets } from './gpuManifest'
 import { localModelVariant } from './modelCatalog'
@@ -61,9 +61,10 @@ export function preparationPlan(options: {
   for (const ref of options.refs ?? []) {
     const variant = localModelVariant(ref.model, ref.variant), installed = options.installed(variant.id), id = `model:${variant.id}`
     if (items.some(item => item.id === id)) continue
-    const downloadBytes = installed ? 0 : Math.max(0, variant.asset.bytes - (options.resumed?.(id) ?? 0))
+    const bytes = modelAssetBytes(variant.asset)
+    const downloadBytes = installed ? 0 : Math.max(0, bytes - (options.resumed?.(id) ?? 0))
     items.push({ id, name: `${variant.asset.label}`, group: localModelGroup(ref.model),
-      action: installed ? 'reuse' : downloadBytes ? 'download' : 'verify', bytes: variant.asset.bytes, downloadBytes, source: variant.asset.url })
+      action: installed ? 'reuse' : downloadBytes ? 'download' : 'verify', bytes, downloadBytes, source: variant.asset.url })
   }
   if (options.supported) for (const group of groups) {
     const gpu = runtimeBackend(group, policy, devices, components)

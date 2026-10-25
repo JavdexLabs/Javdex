@@ -314,7 +314,7 @@ export function registerSettingsHandlers(ctx: IpcContext, backend: CatalogBacken
       if (snapshot.supported && variant.readiness !== 'unsupported' && !variant.runtimeReady) throw new Error(`请先安装${localModelGroupLabel(localModelGroup(command.model))}模型的基础运行环境；GPU 加速支持可选`)
       const options = { title: `导入 ${model.name} · ${variant.precision} · ${variant.publisher}`,
         properties: ['openFile'] as Array<'openFile'>,
-        filters: [{ name: '模型文件', extensions: variant.format === 'GGUF' ? ['gguf'] : ['bin'] }, { name: '所有文件', extensions: ['*'] }] }
+        filters: [{ name: '模型文件', extensions: variant.format === 'GGUF' ? ['gguf'] : variant.format === 'Safetensors' ? ['safetensors'] : ['bin'] }, { name: '所有文件', extensions: ['*'] }] }
       const result = window ? await dialog.showOpenDialog(window, options) : await dialog.showOpenDialog(options)
       if (!result.canceled && result.filePaths[0]) await models.importModel(command.model, result.filePaths[0], variant.id)
     }

@@ -138,6 +138,7 @@ export const IPC_DISPOSITION = {
   DESKTOP_SESSION_GET: desktop('DesktopSession snapshot; no writer token or arbitrary URL secrets'),
   DESKTOP_SESSION_CHANGED: event('DesktopSession snapshot changed'),
   DESKTOP_RECONNECT: desktop('Bump generation, abort in-flight manage HTTP, reconnect'),
+  DESKTOP_POINTER_TIMING: desktop('Read local runtime pointer timing; no catalog or remote operation'),
   THIS_COMPUTER_GET: workflow('settings.thisComputer.get', undefined, [], 'Mode and remoteBaseUrl; restart-effective'),
   THIS_COMPUTER_UPDATE: workflow('settings.thisComputer.update', undefined, [], 'Persists this-computer.json; does not apply until restart'),
   THIS_COMPUTER_PROBE: desktop('Read-only handshake against the unsaved server URL'),

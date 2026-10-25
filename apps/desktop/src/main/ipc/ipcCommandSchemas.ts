@@ -708,6 +708,7 @@ export const appIpcSchemas = {
   [IPC.BACKUP_FILE]: z.tuple([desktopBackupFileSchema]),
   [IPC.DESKTOP_SESSION_GET]: noArgs,
   [IPC.DESKTOP_RECONNECT]: noArgs,
+  [IPC.DESKTOP_POINTER_TIMING]: noArgs,
   [IPC.THIS_COMPUTER_GET]: noArgs,
   [IPC.THIS_COMPUTER_UPDATE]: z.tuple([
     z

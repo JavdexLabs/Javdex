@@ -313,6 +313,7 @@ const api = {
     file: (input: import('@shared/protocol/backup').DesktopBackupFileRequest) => invokeApp(IPC.BACKUP_FILE, input)
   },
   desktop: {
+    pointerTiming: () => invokeApp(IPC.DESKTOP_POINTER_TIMING),
     getSession: () => invokeApp(IPC.DESKTOP_SESSION_GET),
     reconnect: () => invokeApp(IPC.DESKTOP_RECONNECT),
     claimWriter: (input: DesktopWriterClaimRequest) => invokeApp(IPC.WRITER_CLAIM, input),

@@ -54,6 +54,7 @@ export const IPC = {
   DESKTOP_SESSION_GET: 'desktop:sessionGet',
   DESKTOP_SESSION_CHANGED: 'desktop:sessionChanged',
   DESKTOP_RECONNECT: 'desktop:reconnect',
+  DESKTOP_POINTER_TIMING: 'desktop:pointerTiming',
   THIS_COMPUTER_GET: 'thisComputer:get',
   THIS_COMPUTER_UPDATE: 'thisComputer:update',
   THIS_COMPUTER_PROBE: 'thisComputer:probe',

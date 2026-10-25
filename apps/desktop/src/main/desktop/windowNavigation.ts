@@ -12,6 +12,10 @@ interface KeyInput {
 }
 export function historyKey(input: KeyInput, platform: NodeJS.Platform): Direction | null {
   if (input.type !== 'keyDown' || input.isComposing || input.isAutoRepeat || input.shift || input.control) return null
+  if (platform === 'linux' && !input.alt && !input.meta) {
+    if (input.key === 'BrowserBack') return 'back'
+    if (input.key === 'BrowserForward') return 'forward'
+  }
   if (platform !== 'darwin' && input.alt && !input.meta) {
     if (input.key === 'ArrowLeft') return 'back'
     if (input.key === 'ArrowRight') return 'forward'
@@ -39,9 +43,19 @@ export function bindWindowNavigation(window: BrowserWindow, platform = process.p
   window.webContents.on('before-input-event', (event, input) => {
     if (event.defaultPrevented) return
     const direction = historyKey(input, platform)
-    if (!direction) return
+    // Linux also emits app-command for unhandled BrowserBack/Forward keyUp and
+    // repeats. Consume those halves even when they must not start a traversal.
+    const linuxBrowserKey = platform === 'linux' && (input.key === 'BrowserBack' || input.key === 'BrowserForward')
+    if (!direction && !linuxBrowserKey) return
     event.preventDefault()
-    navigateWindowHistory(window, direction)
+    if (direction) navigateWindowHistory(window, direction)
+  })
+  if (platform === 'linux') window.webContents.on('before-mouse-event', (event, mouse) => {
+    // Linux emits app-command on press; Chromium can navigate again on release
+    // (notably under X11). Keep app-command as the sole history owner, including
+    // when canNavigate blocks it. Electron 43 returns these undocumented buttons.
+    const button: string | undefined = mouse.button
+    if (!event.defaultPrevented && (button === 'back' || button === 'forward')) event.preventDefault()
   })
   window.on('app-command', (event, command) => {
     if (event.defaultPrevented) return

@@ -13,6 +13,7 @@ import { interactionLayers } from '../interaction/interactionLayers'
 import { useOverlayHistory } from '../interaction/OverlayHistoryContext'
 import type { OverlayTraversalResult } from '../interaction/overlayHistory'
 import { createPlaybackHistory, type PlaybackViewState } from './playbackHistory'
+import { usePlaybackPointerGestures } from './usePlaybackPointerGestures'
 import { playbackTrackLabel } from './playbackTrackLabel'
 import styles from './PlaybackPanel.module.css'
 import AiSubtitleSettings from './AiSubtitleSettings'
@@ -61,17 +62,16 @@ export default function PlaybackPanel(): JSX.Element | null {
   stateRef.current = state
   const root = useRef<HTMLDivElement>(null)
   const video = useRef<HTMLButtonElement>(null)
-  const videoClickTimer = useRef<number | null>(null)
-  const cancelVideoClick = useCallback(() => {
-    if (videoClickTimer.current !== null) window.clearTimeout(videoClickTimer.current)
-    videoClickTimer.current = null
-  }, [])
+  const { cancel: cancelVideoClick, onMouseDown: videoMouseDown, click: videoClick } = usePlaybackPointerGestures(state)
   const header = useRef<HTMLElement>(null)
   const toolbar = useRef<HTMLDivElement>(null)
   const toast = useToast()
   const history = useOverlayHistory()
   const send = useRef((id: string, command: PlaybackControl): void => { void api.playback.control(id, command).catch(error => toast.show((error as Error).message, 'error')) })
-  send.current = (id, command) => { void api.playback.control(id, command).catch(error => toast.show((error as Error).message, 'error')) }
+  send.current = (id, command) => {
+    cancelVideoClick()
+    void api.playback.control(id, command).catch(error => toast.show((error as Error).message, 'error'))
+  }
   const viewingHistory = useRef<ReturnType<typeof createPlaybackHistory>>()
   if (!viewingHistory.current) viewingHistory.current = createPlaybackHistory(history, (id, command) => send.current(id, command), setOptions)
   const presentationHistory = viewingHistory.current
@@ -79,9 +79,14 @@ export default function PlaybackPanel(): JSX.Element | null {
     const id = stateRef.current?.sessionId
     if (id) void api.playback.control(id, command).catch(error => toast.show((error as Error).message, 'error'))
   }, [toast])
+  const transport = (command: Extract<PlaybackControl, { kind: 'pause' | 'restart' | 'resume' | 'stop' | 'presentation' }>): void => {
+    cancelVideoClick()
+    control(command)
+  }
   const openSubtitleModels = async (sessionId: string): Promise<void> => {
     // Docking unmounts the subtitle controls before IPC can acknowledge it.
     // Keep navigation in the stable panel and reject acknowledgements for old sessions.
+    cancelVideoClick()
     await api.playback.control(sessionId, { kind: 'presentation', value: 'docked' })
     if (stateRef.current?.sessionId !== sessionId) return
     presentationHistory.closeForNavigation()
@@ -95,9 +100,9 @@ export default function PlaybackPanel(): JSX.Element | null {
     enabled: Boolean(state && state.presentation !== 'docked'), rootRef: root, modal: true, restoring: view.activation?.restoring ?? true,
     restorationKey: history, activationKey: view.activation?.key,
     onDismiss: () => {
-      if (stateRef.current?.phase === 'error') control({ kind: 'stop' })
+      if (stateRef.current?.phase === 'error') transport({ kind: 'stop' })
       else if (options) presentationHistory.setOptions(false)
-      else control({ kind: 'presentation', value: stateRef.current?.presentation === 'fullscreen' ? 'expanded' : 'docked' })
+      else transport({ kind: 'presentation', value: stateRef.current?.presentation === 'fullscreen' ? 'expanded' : 'docked' })
     }
   })
   const locatePointer = useCallback((y: number): void => {
@@ -160,7 +165,6 @@ export default function PlaybackPanel(): JSX.Element | null {
     if (!sharedTextureSurface) return
     return api.playback.bindSharedTextureSurface(sharedTextureSurface)
   }, [sharedTextureSurface])
-  useEffect(() => cancelVideoClick, [sessionId, sharedTextureSurface, presentation, cancelVideoClick])
   const presentationRevision = state?.presentationRevision
   const rendererFullscreen = presentation === 'fullscreen'
   const [chromeActivity, setChromeActivity] = useState(0)
@@ -303,16 +307,16 @@ export default function PlaybackPanel(): JSX.Element | null {
         if ((event.target as HTMLElement).closest('input,select,textarea,[contenteditable="true"]')) return
         if (!docked && !layer.isTop()) return
         if (state.phase === 'error') return
-        if (event.key === ' ' && event.target === root.current) { event.preventDefault(); control(state.phase === 'ended' ? { kind: 'restart' } : { kind: 'pause', paused: !state.paused }) }
+        if (event.key === ' ' && event.target === root.current) { event.preventDefault(); transport(state.phase === 'ended' ? { kind: 'restart' } : { kind: 'pause', paused: !state.paused }) }
         else if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); control({ kind: 'seek', relative: true, seconds: (event.key === 'ArrowLeft' ? -1 : 1) * (event.shiftKey ? 30 : 5) }) }
         else if (event.key.toLowerCase() === 'm') { event.preventDefault(); control({ kind: 'mute', muted: !state.muted }) }
-        else if (event.key.toLowerCase() === 'f') { event.preventDefault(); control({ kind: 'presentation', value: fullscreen ? 'expanded' : 'fullscreen' }) }
+        else if (event.key.toLowerCase() === 'f') { event.preventDefault(); transport({ kind: 'presentation', value: fullscreen ? 'expanded' : 'fullscreen' }) }
       }}>
       {!docked && <header ref={header} className={styles.header} hidden={!headerShown && !rendererFullscreen}
         data-chrome-visible={headerShown} aria-hidden={rendererFullscreen && !headerShown || undefined} data-playback-overlay-surface={rendererFullscreen || undefined}>
         <div className={styles.heading}><span className={styles.title}>{state.title}</span><span className={styles.caption}>{state.source === 'remote' ? '远程原文件' : '本机文件'}</span></div>
-        <IconButton icon={<ChevronDown size={18} />} label="收起到底栏" disabled={state.phase === 'error'} onClick={() => control({ kind: 'presentation', value: 'docked' })} />
-        <IconButton icon={<X size={18} />} label="停止播放" onClick={() => control({ kind: 'stop' })} />
+        <IconButton icon={<ChevronDown size={18} />} label="收起到底栏" disabled={state.phase === 'error'} onClick={() => transport({ kind: 'presentation', value: 'docked' })} />
+        <IconButton icon={<X size={18} />} label="停止播放" onClick={() => transport({ kind: 'stop' })} />
       </header>}
       <div className={styles.middle}>
         {state.phase === 'error' ? <div className={styles.failure}>
@@ -321,29 +325,23 @@ export default function PlaybackPanel(): JSX.Element | null {
           <div className={styles.adjustment}>
             <Button size="sm" variant="primary" disabled={recoverySession === state.sessionId} onClick={() => void recover(false)}>重试所选资源</Button>
             <Button size="sm" disabled={recoverySession === state.sessionId} onClick={() => void recover(true)}>使用外部播放器打开</Button>
-            <Button size="sm" onClick={() => control({ kind: 'stop' })}>关闭播放器</Button>
+            <Button size="sm" onClick={() => transport({ kind: 'stop' })}>关闭播放器</Button>
           </div>
           <p className={styles.note}>重试会重新检查同一资源，不自动切换资源或播放器。</p>
         </div> : <button ref={video} className={styles.video} tabIndex={0}
           aria-label={docked ? '恢复展开播放器' : '视频画面，单击播放或暂停，双击全屏'}
+          onMouseDown={videoMouseDown}
           onClick={event => {
-            cancelVideoClick()
             const activate = (): void => {
-              videoClickTimer.current = null
               const current = stateRef.current
               if (!current || current.sessionId !== state.sessionId || current.presentation !== state.presentation || current.phase === 'error') return
               control(current.presentation === 'docked' ? { kind: 'presentation', value: 'expanded' }
                 : current.phase === 'ended' ? { kind: 'restart' } : { kind: 'pause', paused: !current.paused })
             }
-            // Native surfaces handle their own pointer gestures. The canvas uses
-            // the legacy Linux 300 ms window; keyboard activation stays immediate.
-            if (sharedTextureSurface && !docked && event?.detail > 0) {
-              if (event.detail === 1) videoClickTimer.current = window.setTimeout(activate, 300)
-            } else activate()
+            videoClick(event?.detail ?? 0, Boolean(sharedTextureSurface && !docked), activate)
           }}
           onDoubleClick={sharedTextureSurface && !docked ? () => {
-            cancelVideoClick()
-            control({ kind: 'presentation', value: fullscreen ? 'expanded' : 'fullscreen' })
+            transport({ kind: 'presentation', value: fullscreen ? 'expanded' : 'fullscreen' })
           } : undefined}>
           {sharedTextureSurface && <canvas key={sharedTextureSurface} className={styles.sharedTexture} data-playback-surface={sharedTextureSurface} aria-hidden="true" />}
         </button>}
@@ -424,8 +422,8 @@ export default function PlaybackPanel(): JSX.Element | null {
       {waitingResume && !fullscreen && <div className={styles.resume} role="group" aria-label="选择续播方式">
         <span>上次播放到 {playbackTime(state.resumePosition)}</span>
         <Button size="sm" variant="primary" disabled={disabled || !state.seekable || state.duration != null && state.duration - state.resumePosition! <= 30}
-          onClick={() => control({ kind: 'resume', choice: 'continue' })}>继续 {playbackTime(state.resumePosition)}</Button>
-        <Button size="sm" disabled={disabled} onClick={() => control({ kind: 'resume', choice: 'start' })}>从头播放</Button>
+          onClick={() => transport({ kind: 'resume', choice: 'continue' })}>继续 {playbackTime(state.resumePosition)}</Button>
+        <Button size="sm" disabled={disabled} onClick={() => transport({ kind: 'resume', choice: 'start' })}>从头播放</Button>
       </div>}
       {state.phase !== 'error' && <div ref={toolbar} className={styles.controls} hidden={!chromeShown && !rendererFullscreen}
         data-chrome-visible={chromeShown} aria-hidden={rendererFullscreen && !chromeShown || undefined} data-playback-overlay-surface={rendererFullscreen || undefined}>
@@ -457,7 +455,7 @@ export default function PlaybackPanel(): JSX.Element | null {
             title={dockedTitle} aria-label={`查看影片详情：${dockedTitle}`}>{dockedTitle}</Link>}
           <IconButton size="control" tone="accent" icon={state.phase === 'ended' ? <RotateCcw size={18} /> : state.paused ? <Play size={18} /> : <Pause size={18} />}
             label={state.phase === 'ended' ? '从头重播' : state.paused ? '播放' : '暂停'} disabled={disabled || waitingResume}
-            onClick={() => control(state.phase === 'ended' ? { kind: 'restart' } : { kind: 'pause', paused: !state.paused })} />
+            onClick={() => transport(state.phase === 'ended' ? { kind: 'restart' } : { kind: 'pause', paused: !state.paused })} />
           {!docked && <><Button size="sm" variant="ghost" className={styles.skip} aria-label="后退 5 秒" disabled={seekDisabled} onClick={() => control({ kind: 'seek', relative: true, seconds: -5 })}><RotateCcw size={16} />5</Button>
             <Button size="sm" variant="ghost" className={styles.skip} aria-label="前进 5 秒" disabled={seekDisabled} onClick={() => control({ kind: 'seek', relative: true, seconds: 5 })}><RotateCw size={16} />5</Button></>}
           <div className={styles.volumeGroup}>
@@ -478,8 +476,8 @@ export default function PlaybackPanel(): JSX.Element | null {
             <span className={styles.separator} /><IconButton size="control" icon={<SlidersHorizontal size={18} />} label="播放设置" aria-expanded={options} aria-controls={settingsId} aria-pressed={options} onClick={() => presentationHistory.setOptions(!options)} /></>}
           <IconButton size="control" icon={docked ? <PanelTop size={18} /> : fullscreen ? <Minimize size={18} /> : <Maximize size={18} />}
             label={docked ? '恢复展开' : fullscreen ? '退出全屏' : '全屏'} disabled={waitingResume && !docked}
-            onClick={() => control({ kind: 'presentation', value: docked || fullscreen ? 'expanded' : 'fullscreen' })} />
-          {docked && <IconButton size="control" icon={<X size={18} />} label="停止播放" onClick={() => control({ kind: 'stop' })} />}
+            onClick={() => transport({ kind: 'presentation', value: docked || fullscreen ? 'expanded' : 'fullscreen' })} />
+          {docked && <IconButton size="control" icon={<X size={18} />} label="停止播放" onClick={() => transport({ kind: 'stop' })} />}
           <span className={styles.status} role="status">{status}</span>
         </div>
       </div>}

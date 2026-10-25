@@ -56,11 +56,14 @@ npm run lint            # TypeScript 与 CSS 检查
 npm run check:encoding  # 检查可疑编码字符
 npm test                # 完整检查与测试
 npm run test:ui         # 小型真实浏览器交互回归（PR CI）
+npm run test:playback:pointer:native # GNOME/Mutter 原生多击计数；会临时移动指针并打开自有测试窗口
 npm run test:ui:matrix   # 完整主题/尺寸/页面矩阵（独立入口）
 npm run build           # 生产构建与运行时资源校验
 npm run measure:renderer # 已构建 renderer 的静态闭包体积与选择性加载检查
 npm start               # 预览生产构建
 ```
+
+原生点击检查要求 Linux GNOME/Mutter 和现有 Python `dbus` 模块，不自动安装依赖或改系统设置；缺失支持会失败。默认使用 Wayland，追加 `-- --x11` 检查 XWayland。浏览器用例人工提供 `clickCount`，原生入口则检查实际 Electron 收到的计数、无临时播放／暂停命令及第二次按住的情况。两者都模拟视频帧绑定与播放 RPC，不能作为视频画面或音画同步验收。若本地系统限制导致开发版 Electron 沙箱无法启动，可显式追加 `--no-sandbox`，仅用于该隔离测试窗口，不改变应用启动策略。
 
 `npm test` 会先运行架构边界、lint、CSS 架构和 UI 控件检查，再执行类型检查、打包运行时测试及 Electron 测试。Electron 测试自动发现 `apps/` 与 `packages/` 下的 `*.test.ts` / `*.test.tsx`，排除 `apps/server`。服务端测试单独运行 `npm run server:test`，发布元数据测试运行 `node --test scripts/release-metadata.test.mjs`；两者各有 CI 入口。测试具体入口见 [package.json](../package.json)。
 

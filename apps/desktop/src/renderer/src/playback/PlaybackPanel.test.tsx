@@ -60,6 +60,7 @@ const localModels = (): LocalModelSnapshot => ({
     textTranslation: { model: 'qwen3', variant: 'fixture', mode: 'app-default' } }
 })
 const fake = {
+  desktop: { pointerTiming: async () => ({ doubleClickMs: 500, source: 'chromium' }) },
   settings: { getLocalModels: async () => localModels(), onLocalModelsChanged: () => () => {} },
   playback: {
     bindSharedTextureSurface: (token: string) => { boundSurfaces.push(token); return () => { releasedSurfaces.push(token) } },
@@ -1036,9 +1037,9 @@ test('CPU recovery replaces the GPU canvas within the same playback session', as
 test('shared-texture pointer gestures distinguish single-click pause from double-click fullscreen and cancel stale clicks', async context => {
   let timerId = 0
   const timers = new Map<number, () => void>()
-  context.mock.method(window, 'setTimeout', (callback: () => void, milliseconds: number) => {
+  context.mock.method(window, 'setTimeout', (callback: () => void) => {
     const id = ++timerId
-    if (milliseconds === 300) timers.set(id, callback)
+    timers.set(id, callback)
     return id
   })
   context.mock.method(window, 'clearTimeout', (id: number) => { timers.delete(id) })
@@ -1068,3 +1069,101 @@ test('shared-texture pointer gestures distinguish single-click pause from double
   await act(async () => button('恢复展开播放器').props.onClick({ detail: 1 }))
   assert.deepEqual(controls, [{ id: 'replacement', command: { kind: 'presentation', value: 'expanded' } }], 'docked mouse activation remains immediate')
 })
+
+for (const surface of ['gpu-surface', 'cpu:software-surface']) {
+  for (const phase of ['playing', 'paused', 'ended'] as const) test(`${surface} slow double-click preserves ${phase} state, including a held second press`, async context => {
+    const paused = phase !== 'playing'
+    let now = 0, nextId = 0
+    const timers = new Map<number, { callback: () => void; due: number }>()
+    context.mock.method(window, 'setTimeout', (callback: () => void, milliseconds: number) => {
+      const id = ++nextId
+      timers.set(id, { callback, due: now + milliseconds })
+      return id
+    })
+    context.mock.method(window, 'clearTimeout', (id: number) => { timers.delete(id) })
+    const advance = (milliseconds: number) => act(async () => {
+      now += milliseconds
+      for (const [id, timer] of [...timers]) {
+        if (timer.due <= now) { timers.delete(id); timer.callback() }
+      }
+    })
+    await mount()
+    const current = { ...snapshot(), sharedTextureSurface: surface, paused, phase }
+    const singleCommand: PlaybackControl = phase === 'ended' ? { kind: 'restart' } : { kind: 'pause', paused: !paused }
+    await act(async () => changed({ ...current, presentation: 'docked' }))
+    await act(async () => changed(current))
+    const video = () => button('视频画面，单击播放或暂停，双击全屏')
+    for (const gap of [100, 350, 450, 490]) {
+      controls.length = 0
+      await act(async () => video().props.onClick({ detail: 1 }))
+      await advance(gap)
+      assert.deepEqual(controls, [], `${gap}ms must remain within the browser double-click window`)
+      await act(async () => video().props.onMouseDown({ button: 0, detail: 2 }))
+      await advance(800)
+      assert.deepEqual(controls, [], 'holding the second press past the deadline must not toggle playback')
+      await act(async () => { video().props.onClick({ detail: 2 }); video().props.onDoubleClick() })
+      assert.deepEqual(controls, [{ id: 'first', command: { kind: 'presentation', value: 'fullscreen' } }])
+    }
+    controls.length = 0
+    await act(async () => video().props.onClick({ detail: 1 }))
+    await advance(600)
+    assert.deepEqual(controls, [{ id: 'first', command: singleCommand }], 'an isolated click still activates exactly once')
+    await advance(1000)
+    assert.equal(controls.length, 1)
+    controls.length = 0
+    await act(async () => video().props.onClick({ detail: 1 }))
+    await advance(525)
+    await act(async () => video().props.onMouseDown({ button: 0, detail: 1 }))
+    assert.deepEqual(controls, [{ id: 'first', command: singleCommand }], 'an independent new press confirms the previous single click')
+    const afterSingle = { ...current, paused: phase === 'ended' ? false : !paused, phase: phase === 'playing' ? 'paused' as const : 'playing' as const }
+    await act(async () => changed(afterSingle))
+    await act(async () => video().props.onClick({ detail: 1 }))
+    await advance(600)
+    assert.deepEqual(controls, [{ id: 'first', command: singleCommand }, { id: 'first', command: { kind: 'pause', paused: !afterSingle.paused } }], 'two independent clicks must not be collapsed into one')
+    await act(async () => changed(current))
+    controls.length = 0
+    await act(async () => video().props.onClick({ detail: 1 }))
+    await act(async () => button(phase === 'ended' ? '从头重播' : paused ? '播放' : '暂停').props.onClick())
+    await advance(600)
+    assert.deepEqual(controls, [{ id: 'first', command: singleCommand }], 'a subsequent explicit control supersedes the pending video click')
+    controls.length = 0
+    await act(async () => video().props.onClick({ detail: 1 }))
+    await act(async () => history.go())
+    await advance(600)
+    assert.deepEqual(controls, [{ id: 'first', command: { kind: 'presentation', value: 'docked' } }], 'history docking cancels the pending video click before its acknowledgement')
+  })
+}
+
+for (const surface of ['gpu-surface', 'cpu:software-surface']) for (const paused of [false, true]) {
+  test(`${surface} keeps a pending ${paused ? 'play' : 'pause'} across unrelated controls`, async context => {
+    let nextId = 0
+    const timers = new Map<number, () => void>()
+    context.mock.method(window, 'setTimeout', (callback: () => void) => { const id = ++nextId; timers.set(id, callback); return id })
+    context.mock.method(window, 'clearTimeout', (id: number) => { timers.delete(id) })
+    await mount()
+    const current: PlaybackSnapshot = { ...snapshot(), sharedTextureSurface: surface, paused, phase: paused ? 'paused' : 'playing' }
+    const ensureOptions = async (): Promise<void> => { if (!button('播放设置').props['aria-expanded']) await options() }
+    const cases: Array<{ action(): Promise<void>; command: PlaybackControl }> = [
+      { action: () => act(async () => button('静音').props.onClick()), command: { kind: 'mute', muted: true } },
+      { action: () => act(async () => button('前进 5 秒').props.onClick()), command: { kind: 'seek', relative: true, seconds: 5 } },
+      { action: () => act(async () => renderer!.root.findByProps({ 'aria-label': '内置播放器' }).props.onKeyDown({ ...seekKey('m'), target: { closest: () => null } })), command: { kind: 'mute', muted: true } },
+      { action: async () => { await ensureOptions(); await act(async () => renderer!.root.findAllByType(Select).find(node => node.props['aria-label'] === '倍速')!.props.onChange({ target: { value: '1.5' } })) }, command: { kind: 'speed', value: 1.5 } },
+      { action: () => act(async () => renderer!.root.findAllByType('input').find(node => node.props['aria-label'] === '音量')!.props.onChange({ target: { value: '25' } })), command: { kind: 'volume', value: 25 } },
+      { action: async () => { await ensureOptions(); await act(async () => renderer!.root.findAllByType(Select).find(node => node.props['aria-label'] === '音轨')!.props.onChange({ target: { value: 'no' } })) }, command: { kind: 'track', type: 'audio', id: null } },
+      { action: async () => {
+        const slider = () => renderer!.root.findAllByType('input').find(node => node.props['aria-label'] === '播放进度')!
+        await act(async () => slider().props.onChange({ target: { value: '30' } }))
+        await act(async () => slider().props.onPointerUp())
+      }, command: { kind: 'seek', seconds: 30 } }
+    ]
+    for (const item of cases) {
+      await act(async () => changed(current))
+      controls.length = 0
+      await act(async () => button('视频画面，单击播放或暂停，双击全屏').props.onClick({ detail: 1 }))
+      await item.action()
+      assert.deepEqual(controls, [{ id: 'first', command: item.command }])
+      await act(async () => { for (const callback of [...timers.values()]) callback(); timers.clear() })
+      assert.deepEqual(controls, [{ id: 'first', command: item.command }, { id: 'first', command: { kind: 'pause', paused: !paused } }])
+    }
+  })
+}

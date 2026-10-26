@@ -63,6 +63,7 @@ const fake = {
   desktop: { pointerTiming: async () => ({ doubleClickMs: 500, source: 'chromium' }) },
   settings: { getLocalModels: async () => localModels(), onLocalModelsChanged: () => () => {} },
   playback: {
+    sharedTextureConsumer: 'canvas' as 'canvas' | 'video',
     bindSharedTextureSurface: (token: string) => { boundSurfaces.push(token); return () => { releasedSurfaces.push(token) } },
     aiSubtitleSnapshot: async () => aiState,
     onAiSubtitleChanged: (listener: typeof aiChanged) => { aiChanged = listener; return () => { aiChanged = () => {} } },
@@ -1167,3 +1168,26 @@ for (const surface of ['gpu-surface', 'cpu:software-surface']) for (const paused
     }
   })
 }
+
+
+test('Mac GPU and CPU recovery mount separate video consumers with the same controls', async () => {
+  fake.playback.sharedTextureConsumer = 'video'
+  try {
+    await mount()
+    await act(async () => changed({ ...snapshot(), sharedTextureSurface: 'mac-gpu' }))
+    const surface = renderer!.root.findByType('video')
+    assert.equal(surface.props['data-playback-surface'], 'mac-gpu')
+    assert.equal(surface.props.muted, true)
+    assert.equal(surface.props.playsInline, true)
+    assert.equal(surface.props.disablePictureInPicture, true)
+    assert.equal(surface.parent!.type, 'button')
+    assert.equal(renderer!.root.findAllByType('canvas').length, 0)
+    await act(async () => changed({ ...snapshot(), sharedTextureSurface: 'mac-gpu', paused: true }))
+    assert.equal(renderer!.root.findByType('video'), surface)
+    await act(async () => changed({ ...snapshot(), sharedTextureSurface: 'cpu:mac-recovery' }))
+    assert.equal(renderer!.root.findAllByType('canvas').length, 0)
+    assert.equal(renderer!.root.findByType('video').props['data-playback-surface'], 'cpu:mac-recovery')
+    assert.notEqual(renderer!.root.findByType('video'), surface)
+    assert.deepEqual(releasedSurfaces, ['mac-gpu'])
+  } finally { fake.playback.sharedTextureConsumer = 'canvas' }
+})

@@ -48,6 +48,10 @@
 
 ## macOS 播放正式化
 
+[CPU video 接入（2026-10-26）](macos-cpu-video-integration-2026-10-26.md)记录 Mac GPU／CPU 显示统一、缓冲区转移、不同资源归还条件，以及正常应用回归。
+
+[video 消费者接入（2026-10-26）](macos-video-consumer-integration-2026-10-26.md)记录 Electron 44.9.3、Mac GPU 显示通路替换、正常应用回归及临时钥匙串隔离的验证边界。
+
 [CPU 显示和自动回退（2026-10-24）](macos-cpu-fallback-2026-10-24.md)记录独立软件渲染、共用恢复调度，以及本机强制 CPU、禁用加速、图形故障、默认 GPU 和正常关闭检查。
 
 [Canvas2D 正式化](macos-canvas-default-2026-10-23.md)记录正常构建／默认入口迁移、旧显示及候选清理、可恢复归档、安全／性能取舍与本地验证范围。代码采用不等于公开安装包或全部平台已验收。

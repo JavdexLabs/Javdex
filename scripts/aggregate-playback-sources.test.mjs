@@ -238,10 +238,10 @@ test('opaque native blob is rejected even when all outer digests and receipts ag
   assert.ok(!fs.readdirSync(f.directory).some(name => name.startsWith('.playback-source-aggregate-')))
 })
 
-test('integrated Linux and three native targets share one public source archive with exact restoration', async t => {
+for (const compactAngle of [false, true]) test(`integrated Linux with ${compactAngle ? 'compact' : 'legacy'} ANGLE and three native targets round-trip in one public archive`, async t => {
   const f = await fixture(t), linuxRoot = path.join(f.root, 'integrated-linux')
   fs.mkdirSync(linuxRoot)
-  const linux = await linuxReleaseFixture(linuxRoot, version)
+  const linux = await linuxReleaseFixture(linuxRoot, version, { compactAngle })
   for (const suffix of ['', '.runtime.json', '.installers.json']) fs.unlinkSync(path.join(f.directory, f.inputs[3].archive + suffix))
   const name = linux.manifest.sourceBundle.fileName
   for (const suffix of ['', '.runtime.json']) fs.copyFileSync(path.join(linux.output, name + suffix), path.join(f.directory, name + suffix))

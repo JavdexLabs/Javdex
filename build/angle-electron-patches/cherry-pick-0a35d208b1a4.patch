@@ -23,16 +23,11 @@ Reviewed-on: https://chromium-review.googlesource.com/c/angle/angle/+/8308574
 Reviewed-by: Geoff Lang <geofflang@chromium.org>
 Commit-Queue: Tzarial <zork@chromium.org>
 
-Electron adaptation notes (43-x-y):
-ContextGL.h: context drift only (the branch declares
-applyRecreateFboWorkaroundIfNeeded next to the moved members); the
-protected/private reordering is applied verbatim.
-
 diff --git a/src/libANGLE/renderer/gl/ContextGL.cpp b/src/libANGLE/renderer/gl/ContextGL.cpp
-index a6082e340cbcfbc561db4a1477e5bfa62ff06723..0fb4314a0e9bb842dcb48d3c7d48f0157d2dcdc0 100644
+index 42e583c2c3e154668b0d4db16d92dcb1e4a1c408..31b5829e35654c353da1479f01ea6eee21688a83 100644
 --- a/src/libANGLE/renderer/gl/ContextGL.cpp
 +++ b/src/libANGLE/renderer/gl/ContextGL.cpp
-@@ -100,15 +100,20 @@ ContextGL::ContextGL(const gl::State &state,
+@@ -96,15 +96,20 @@ ContextGL::ContextGL(const gl::State &state,
                       const std::shared_ptr<RendererGL> &renderer,
                       RobustnessVideoMemoryPurgeStatus robustnessVideoMemoryPurgeStatus)
      : ContextImpl(state, errorSet),
@@ -57,7 +52,7 @@ index a6082e340cbcfbc561db4a1477e5bfa62ff06723..0fb4314a0e9bb842dcb48d3c7d48f015
  {
      return angle::Result::Continue;
 diff --git a/src/libANGLE/renderer/gl/ContextGL.h b/src/libANGLE/renderer/gl/ContextGL.h
-index cdfc3ab5845a77040320615e3aaf41bd06fb09a2..df3754be0d67629e46bdff19cb647d34f54c73b3 100644
+index 11aff7ef2c55cbd6ddf4ede70f9068e6c37b7efd..ce97f1013adcee4d8a4ac33a0da9a51826680916 100644
 --- a/src/libANGLE/renderer/gl/ContextGL.h
 +++ b/src/libANGLE/renderer/gl/ContextGL.h
 @@ -48,6 +48,8 @@ class ContextGL : public ContextImpl
@@ -69,9 +64,9 @@ index cdfc3ab5845a77040320615e3aaf41bd06fb09a2..df3754be0d67629e46bdff19cb647d34
      angle::Result initialize(const angle::ImageLoadContext &imageLoadContext) override;
  
      // Shader creation
-@@ -326,6 +328,12 @@ class ContextGL : public ContextImpl
- 
-     angle::Result applyRecreateFboWorkaroundIfNeeded(const gl::Context *context);
+@@ -319,6 +321,12 @@ class ContextGL : public ContextImpl
+     gl::AttributesMask updateAttributesForBaseInstance(GLuint baseInstance);
+     void resetUpdatedAttributes(gl::AttributesMask attribMask);
  
 +  protected:
 +    std::shared_ptr<RendererGL> mRenderer;
@@ -82,7 +77,7 @@ index cdfc3ab5845a77040320615e3aaf41bd06fb09a2..df3754be0d67629e46bdff19cb647d34
      struct PixelBufferGL
      {
          const FunctionsGL *functions = nullptr;
-@@ -347,11 +355,6 @@ class ContextGL : public ContextImpl
+@@ -340,11 +348,6 @@ class ContextGL : public ContextImpl
      // Keyed by the GLenum type passed to getDepthInitPBO (e.g. GL_UNSIGNED_INT_24_8,
      // GL_FLOAT_32_UNSIGNED_INT_24_8_REV).
      DepthInitPBOCache mDepthInitPBOs;
@@ -95,7 +90,7 @@ index cdfc3ab5845a77040320615e3aaf41bd06fb09a2..df3754be0d67629e46bdff19cb647d34
  
  }  // namespace rx
 diff --git a/src/tests/egl_tests/EGLContextASANTest.cpp b/src/tests/egl_tests/EGLContextASANTest.cpp
-index 8d98a27f1a661d34bf641b0bfc8286433c8468e1..5db2bf8592a31520f0e43aadd1003f537c5beaf6 100644
+index dbab1caced5ef5ecf0e81a5a65eab0a77ebc6020..ad6f30adb702ab3e4ad2d09eaff4cd88cc970d7b 100644
 --- a/src/tests/egl_tests/EGLContextASANTest.cpp
 +++ b/src/tests/egl_tests/EGLContextASANTest.cpp
 @@ -16,6 +16,7 @@

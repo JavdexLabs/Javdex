@@ -1,4 +1,4 @@
-// Real cross-platform Canvas output; never imported into the application.
+// Real cross-platform display output; never imported into the application.
 // Generate inputs with playback-color-fixtures.mjs; the color math is shared.
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -33,12 +33,12 @@ const nativeDirectory = process.platform === 'linux' ? resources
 const entry = process.platform === 'linux' ? mode === 'cpu' ? 'playback-software-helper' : 'playback-dmabuf-helper' : 'playback.node'
 const library = fs.readdirSync(nativeDirectory).find(name => /^libmpv.*\.(?:dll|dylib|so(?:\.\d+)*)$/.test(name))
 assert(library, 'missing libmpv identity for the tested host')
-const report = { passed: false, platform: process.platform, mode, pixelSource: 'srgb-canvas', checks: [],
+const report = { passed: false, platform: process.platform, mode, pixelSource: 'srgb-display-readback', checks: [],
   nativeSha256: createHash('sha256').update(fs.readFileSync(path.join(nativeDirectory, entry))).digest('hex'),
   libmpvSha256: createHash('sha256').update(fs.readFileSync(path.join(nativeDirectory, library))).digest('hex'),
   fixtureManifestSha256: createHash('sha256').update(fs.readFileSync(path.join(fixtureDirectory, 'manifest.json'))).digest('hex'),
-  limits: ['SDR Canvas bytes before display-profile conversion; no physical HDR output or display calibration',
-    'Bounded synthetic color readback can change Canvas acceleration; media/stress/load checks run separately without it',
+  limits: ['SDR display bytes before display-profile conversion; no physical HDR output or display calibration',
+    'Bounded synthetic color readback can change consumption; media/stress/load checks run separately without it',
     'GPU and CPU use the same static BT.2390 / 203 nit SDR reference'] }
 const comparisonFile = process.argv.find(v => v.startsWith('--compare='))?.slice('--compare='.length)
 const comparison = comparisonFile ? JSON.parse(fs.readFileSync(comparisonFile)) : undefined
@@ -61,7 +61,7 @@ try {
   })
   const capture = name => application.evaluate(async ({ BrowserWindow }, { output, name, sampler }) => {
     const window = BrowserWindow.getAllWindows()[0], image = await window.webContents.capturePage()
-    const rect = await window.webContents.executeJavaScript(`(() => { const r = document.querySelector('canvas[data-playback-surface]').getBoundingClientRect(); const c=document.querySelector('canvas[data-playback-surface]'); return {x:r.x,y:r.y,width:r.width,height:r.height,viewport:innerWidth,intrinsicWidth:c.width,intrinsicHeight:c.height} })()`)
+    const rect = await window.webContents.executeJavaScript(`(() => { const r = document.querySelector('[data-playback-surface]').getBoundingClientRect(); const c=document.querySelector('[data-playback-surface]'); return {x:r.x,y:r.y,width:r.width,height:r.height,viewport:innerWidth,intrinsicWidth:c.videoWidth??c.width,intrinsicHeight:c.videoHeight??c.height} })()`)
     const scale = image.getSize().width / rect.viewport
     const crop = image.crop({ x: Math.round(rect.x * scale), y: Math.round(rect.y * scale),
       width: Math.round(rect.width * scale), height: Math.round(rect.height * scale) })
@@ -70,10 +70,14 @@ try {
     const rows = sample(bytes, width, height, true)
     process.getBuiltinModule('fs').writeFileSync(process.getBuiltinModule('path').join(output, name + '.png'), crop.toPNG())
     // Window captures include monitor ICC/gamut conversion and its clipping or
-    // quantization. The application contract is sRGB Canvas bytes, so compare
+    // quantization. The application contract is sRGB output bytes, so compare
     // those while retaining the independently captured compositor evidence.
     const canvas = await window.webContents.executeJavaScript(`(() => {
-      const c=document.querySelector('canvas[data-playback-surface]'),context=c.getContext('2d');
+      const surface=document.querySelector('[data-playback-surface]');
+      const c=surface instanceof HTMLVideoElement?document.createElement('canvas'):surface;
+      if(surface instanceof HTMLVideoElement){c.width=surface.videoWidth;c.height=surface.videoHeight;}
+      const context=c.getContext('2d',{alpha:false,colorSpace:'srgb'});
+      if(surface instanceof HTMLVideoElement)context.drawImage(surface,0,0);
       if(context.getContextAttributes().colorSpace !== 'srgb') throw new Error('Expected sRGB Canvas');
       const rows=(${sampler})(context.getImageData(0,0,c.width,c.height).data,c.width,c.height);
       return {width:c.width,height:c.height,gray:rows[0],colors:rows[1],png:c.toDataURL('image/png').split(',')[1]};

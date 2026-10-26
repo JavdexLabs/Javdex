@@ -13,10 +13,10 @@ Auto-Submit: Kenneth Russell <kbr@chromium.org>
 Reviewed-by: Geoff Lang <geofflang@chromium.org>
 
 diff --git a/src/libANGLE/renderer/gl/renderergl_utils.cpp b/src/libANGLE/renderer/gl/renderergl_utils.cpp
-index 1b660db0504d8b011f784e1d7e57368b76b81bf8..37a19c5be9b22d861c46927003ee26a3abb370b6 100644
+index 4bc95e09a8db11e18262a200d95a4eb0585ac58d..df1d8684acaafa080b8cc0923dba127dac4c180b 100644
 --- a/src/libANGLE/renderer/gl/renderergl_utils.cpp
 +++ b/src/libANGLE/renderer/gl/renderergl_utils.cpp
-@@ -2526,7 +2526,8 @@ void InitializeFeatures(const FunctionsGL *functions, angle::FeaturesGL *feature
+@@ -2453,7 +2453,8 @@ void InitializeFeatures(const FunctionsGL *functions, angle::FeaturesGL *feature
                              IsPowerVR(vendor));
  
      ANGLE_FEATURE_CONDITION(features, adjustSrcDstRegionForBlitFramebuffer,

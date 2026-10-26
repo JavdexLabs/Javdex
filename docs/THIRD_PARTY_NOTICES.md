@@ -44,7 +44,7 @@ Windows 原生播放 addon 的 MSVC 构建复用已安装的 [node-gyp](https://
 
 ## Linux X11 ANGLE
 
-Linux x64 包使用与 Electron 版本匹配的 ANGLE 源码和 Electron 上游补丁序列，另应用本仓库 `build/patches/angle-x11-vulkan-visual.patch`。固定版本及摘要见 `build/angle-runtime.json`，构建参数见 `build/angle-args.gn`。ANGLE 使用 BSD 风格许可，包内保留 `ANGLE-LICENSE.txt`；完整依赖源码及其许可保留在独立的 `Javdex-ANGLE-Sources-*.tar.gz`，应随二进制交付。Vulkan loader 沿用 Electron 包，GPU 驱动仍由宿主提供。
+Linux x64 包使用与 Electron 版本匹配的 ANGLE 源码和 Electron 上游补丁序列，另应用本仓库 `build/patches/angle-x11-vulkan-visual.patch`。固定版本及摘要见 `build/angle-runtime.json`，构建参数见 `build/angle-args.gn`。ANGLE 使用 BSD 风格许可，包内保留 `ANGLE-LICENSE.txt`。新构建的 `Javdex-ANGLE-Rebuild-*.tar.gz` 只交付固定上游与 depot_tools 提交、DEPS、检出依赖的版权／许可声明、补丁和构建配方，不再附完整源码树；`rebuild.json` 逐文件绑定这些材料，重建时按固定版本联网获取源码。ANGLE 自身的 BSD 许可不要求随二进制附完整源码；其他播放依赖的对应源码交付要求保持有效。旧 `Javdex-ANGLE-Sources-*.tar.gz` 完整归档继续保留并可恢复。Vulkan loader 沿用 Electron 包，GPU 驱动仍由宿主提供。
 
 ## MetaTube
 

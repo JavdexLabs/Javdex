@@ -13,11 +13,8 @@ Auto-Submit: Kai Ninomiya <kainino@chromium.org>
 Commit-Queue: Geoff Lang <geofflang@chromium.org>
 Reviewed-by: Geoff Lang <geofflang@chromium.org>
 
-Electron adaptation notes (43-x-y):
-ANGLE at M150 has a single image-size validation site, ValidImageAllocationSize(); the later ValidateTexStorage() helper with the second computeImageSize() call does not exist, so only RoundImageAllocationExtentIfNeeded() and its use in ValidImageAllocationSize() were applied (TexStorage validation reaches that function on M150). Caps.h keeps M150's 1Gb maxTextureBytes comment and value.
-
 diff --git a/include/platform/autogen/FeaturesGL_autogen.h b/include/platform/autogen/FeaturesGL_autogen.h
-index 3924afd6913e0cb9f4dd270f7d8b468b2c68b406..7868d2b7a549e9347929901cc19f3b6f066fe843 100644
+index 53de31945963c43d18649f2d31615dd36d5ba16f..c05b4eb70dc80320f57c8797a4c1f39ef6e5df54 100644
 --- a/include/platform/autogen/FeaturesGL_autogen.h
 +++ b/include/platform/autogen/FeaturesGL_autogen.h
 @@ -290,6 +290,12 @@ struct FeaturesGL : FeatureSetBase
@@ -34,7 +31,7 @@ index 3924afd6913e0cb9f4dd270f7d8b468b2c68b406..7868d2b7a549e9347929901cc19f3b6f
          "adjustSrcDstRegionForBlitFramebuffer",
          FeatureCategory::OpenGLWorkarounds,
 diff --git a/include/platform/gl_features.json b/include/platform/gl_features.json
-index 3f7a6f311e999d2179f56d5a3a671ce935698cb4..d5b71d0a69f36b5a3f010b6caadd67a6bb7d038b 100644
+index 6bddd5ffe8060dd867f03994ca8b3ac14c53d25a..94bd8cedd84473ebe23972e1d4d55c481e881975 100644
 --- a/include/platform/gl_features.json
 +++ b/include/platform/gl_features.json
 @@ -361,6 +361,15 @@
@@ -54,13 +51,13 @@ index 3f7a6f311e999d2179f56d5a3a671ce935698cb4..d5b71d0a69f36b5a3f010b6caadd67a6
              "name": "adjust_src_dst_region_for_BlitFramebuffer",
              "category": "Workarounds",
 diff --git a/src/libANGLE/Caps.h b/src/libANGLE/Caps.h
-index b79a856182350a41be77e49e766b859ef311ef6b..1bfa827e240447a5db2f4f1ccf82b51f093fcbd0 100644
+index 27df7443a3dfc1dca65bbd7b773391e9e28ab865..5e6c8f4704999b4037ad0103d899d09d5aa5b105 100644
 --- a/src/libANGLE/Caps.h
 +++ b/src/libANGLE/Caps.h
-@@ -176,6 +176,9 @@ struct Limitations
-     // bytes-per-pixel. 1Gb is chosen as a conservative limit to allow for backends to expand
-     // textures formats up to 4x and still stay within 32-bit sizes.
-     size_t maxTextureBytes = 1 * 1024 * 1024 * 1024;
+@@ -161,6 +161,9 @@ struct Limitations
+     // bytes-per-pixel. 1.25Gb is chosen as a conservative limit to allow for backends to expand
+     // textures formats up to 3x and still stay within 32-bit sizes.
+     size_t maxTextureBytes = 1280 * 1024 * 1024;
 +
 +    // Workaround for PowerVR Rogue drivers that round up 3D texture dimensions to POT internally.
 +    bool roundUp3DTextureSizeToPOTForLimit = false;
@@ -68,10 +65,10 @@ index b79a856182350a41be77e49e766b859ef311ef6b..1bfa827e240447a5db2f4f1ccf82b51f
  
  struct TypePrecision
 diff --git a/src/libANGLE/renderer/gl/renderergl_utils.cpp b/src/libANGLE/renderer/gl/renderergl_utils.cpp
-index 8e5f09836bc1fa18fc20ad38d024ce9bffed8f01..ef79500456522e95ffd04652474391b9dd1d7abc 100644
+index 9147cd050289be9f5e643f12e89349a456f43069..4bc95e09a8db11e18262a200d95a4eb0585ac58d 100644
 --- a/src/libANGLE/renderer/gl/renderergl_utils.cpp
 +++ b/src/libANGLE/renderer/gl/renderergl_utils.cpp
-@@ -2275,6 +2275,11 @@ void GenerateCaps(const FunctionsGL *functions,
+@@ -2202,6 +2202,11 @@ void GenerateCaps(const FunctionsGL *functions,
      {
          limitations->maxBufferBytes = 1 << 30;
      }
@@ -83,7 +80,7 @@ index 8e5f09836bc1fa18fc20ad38d024ce9bffed8f01..ef79500456522e95ffd04652474391b9
  }
  
  bool GetSystemInfoVendorIDAndDeviceID(const FunctionsGL *functions,
-@@ -2489,6 +2494,8 @@ void InitializeFeatures(const FunctionsGL *functions, angle::FeaturesGL *feature
+@@ -2416,6 +2421,8 @@ void InitializeFeatures(const FunctionsGL *functions, angle::FeaturesGL *feature
      ANGLE_FEATURE_CONDITION(features, disableMSAASampleCount1, isHuaweiMaleoon);
      ANGLE_FEATURE_CONDITION(features, limitMax3dArrayTextureSizeTo1024,
                              isIntelLinuxLessThanKernelVersion5);
@@ -93,10 +90,10 @@ index 8e5f09836bc1fa18fc20ad38d024ce9bffed8f01..ef79500456522e95ffd04652474391b9
      ANGLE_FEATURE_CONDITION(features, allowClearForRobustResourceInit, IsApple());
  
 diff --git a/src/libANGLE/validationES.cpp b/src/libANGLE/validationES.cpp
-index 35be337ac14fd1b139ca5f5924654110af343501..ffd36fb04fb8efcc25409543c006898e5e36d3dd 100644
+index 831ffea35b01d63dac44feddbded10fd9c8df514..de8de400a475ae48143b7283f911f27cbd142ed4 100644
 --- a/src/libANGLE/validationES.cpp
 +++ b/src/libANGLE/validationES.cpp
-@@ -1428,6 +1428,20 @@ bool ValidImageDataSize(const Context *context,
+@@ -1280,6 +1280,20 @@ bool ValidImageDataSize(const Context *context,
      return true;
  }
  
@@ -117,7 +114,7 @@ index 35be337ac14fd1b139ca5f5924654110af343501..ffd36fb04fb8efcc25409543c006898e
  bool ValidImageAllocationSize(const Context *context,
                                angle::EntryPoint entryPoint,
                                GLsizei width,
-@@ -1438,7 +1452,8 @@ bool ValidImageAllocationSize(const Context *context,
+@@ -1290,7 +1304,8 @@ bool ValidImageAllocationSize(const Context *context,
  {
      const InternalFormat &formatInfo = GetSizedInternalFormatInfo(sizedInternalFormat);
      GLuint allocationSize            = 0;
@@ -127,11 +124,23 @@ index 35be337ac14fd1b139ca5f5924654110af343501..ffd36fb04fb8efcc25409543c006898e
          allocationSize > context->getLimitations().maxTextureBytes)
      {
          ANGLE_VALIDATION_ERROR(GL_INVALID_OPERATION, kTextureSizeLimitation);
+@@ -8196,8 +8211,9 @@ bool ValidateTexStorage(const Context *context,
+     // Make sure computeImageSize sets expectedImageSize.
+     GLuint expectedImageSize = std::numeric_limits<GLuint>::max();
+     {
+-        const bool isSizeValid = internalFormatInfo.computeImageSize(Extents(width, height, depth),
+-                                                                     0, &expectedImageSize);
++        Extents extents = RoundImageAllocationExtentIfNeeded(context, width, height, depth);
++        const bool isSizeValid =
++            internalFormatInfo.computeImageSize(extents, 0, &expectedImageSize);
+         if (ANGLE_UNLIKELY(!isSizeValid ||
+                            expectedImageSize > context->getLimitations().maxTextureBytes))
+         {
 diff --git a/src/tests/gl_tests/TextureTest.cpp b/src/tests/gl_tests/TextureTest.cpp
-index 59c2f4b36f96ef18993da6185de64fd6a7f9a5bf..84d89106021d953c56dbbfa553daf9f599b36cbc 100644
+index 44cde487aec683f0c13b4ed0e5e6f48bd4f12464..75be6b2f92804b14cfbc81ac46f870822109d782 100644
 --- a/src/tests/gl_tests/TextureTest.cpp
 +++ b/src/tests/gl_tests/TextureTest.cpp
-@@ -22496,6 +22496,64 @@ TEST_P(Texture2DTestES3, ClearMidRenderPassThenSample)
+@@ -23833,6 +23833,64 @@ TEST_P(Texture2DTestES3, ClearMidRenderPassThenSample)
      ASSERT_GL_NO_ERROR();
  }
  
@@ -196,7 +205,7 @@ index 59c2f4b36f96ef18993da6185de64fd6a7f9a5bf..84d89106021d953c56dbbfa553daf9f5
  class Texture2DTestES3_NonZeroBaseLevelGenMipmaps : public Texture2DTestES3
  {};
  
-@@ -23430,8 +23488,21 @@ ANGLE_INSTANTIATE_TEST(TextureSizeLimitTest,
+@@ -24588,8 +24646,21 @@ ANGLE_INSTANTIATE_TEST(TextureSizeLimitTest,
                         ES2_VULKAN().enable(Feature::LimitMaxTextureBytesTo1MB),
                         ES3_VULKAN().enable(Feature::LimitMaxTextureBytesTo1MB),
                         ES2_OPENGL().enable(Feature::LimitMaxTextureBytesTo1MB),
@@ -221,7 +230,7 @@ index 59c2f4b36f96ef18993da6185de64fd6a7f9a5bf..84d89106021d953c56dbbfa553daf9f5
  
  }  // anonymous namespace
 diff --git a/util/autogen/angle_features_autogen.cpp b/util/autogen/angle_features_autogen.cpp
-index f976090ae4d401bb8b355d3b05d61a19c8b1a794..4c89e200cb408f59adcb03c55fd30f86930df89f 100644
+index 19df1c695acb085d0d8458de0e53fcc65f79274e..97ffd038d748842708e3fe0b43698ec7e4a59214 100644
 --- a/util/autogen/angle_features_autogen.cpp
 +++ b/util/autogen/angle_features_autogen.cpp
 @@ -322,6 +322,7 @@ constexpr PackedEnumMap<Feature, const char *> kFeatureNames = {{
@@ -233,7 +242,7 @@ index f976090ae4d401bb8b355d3b05d61a19c8b1a794..4c89e200cb408f59adcb03c55fd30f86
      {Feature::ScalarizeVecAndMatConstructorArgs, "scalarizeVecAndMatConstructorArgs"},
      {Feature::SelectViewInGeometryShader, "selectViewInGeometryShader"},
 diff --git a/util/autogen/angle_features_autogen.h b/util/autogen/angle_features_autogen.h
-index 8ab3ac456b9a2d5f3fb7d1a685081889475a1287..ce97c74c0f29ac3baddbe3c74edb3045f67bdb5b 100644
+index 15296408e9fe63ebf8546d31d8175706269e264c..6c1775e0f2625dd314396c0a09bb2604b2f0a53f 100644
 --- a/util/autogen/angle_features_autogen.h
 +++ b/util/autogen/angle_features_autogen.h
 @@ -322,6 +322,7 @@ enum class Feature

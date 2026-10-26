@@ -11,7 +11,7 @@ Auto-Submit: Shahbaz Youssefi <syoussefi@chromium.org>
 Reviewed-by: Amirali Abdolrashidi <abdolrashidi@google.com>
 
 diff --git a/src/libANGLE/validationES2.cpp b/src/libANGLE/validationES2.cpp
-index 4766ba4e78ce0a9f9c819c5a484acbc89a1f2104..0ac58d7034ee4a4be2bc6fdc8e96a0789bc88bc8 100644
+index d0ba15e35c86519b1d93fd02d19aacaf445e0b8a..68939b0007412d42280e8e9dc645a3aee67d9907 100644
 --- a/src/libANGLE/validationES2.cpp
 +++ b/src/libANGLE/validationES2.cpp
 @@ -835,6 +835,113 @@ bool ValidateWebGLName(const Context *context, angle::EntryPoint entryPoint, con
@@ -128,7 +128,7 @@ index 4766ba4e78ce0a9f9c819c5a484acbc89a1f2104..0ac58d7034ee4a4be2bc6fdc8e96a078
  bool ValidateSrcBlendFunc(const PrivateState &state,
                            ErrorSet *errors,
                            angle::EntryPoint entryPoint,
-@@ -5400,108 +5507,15 @@ bool ValidateFramebufferTexture2D(const Context *context,
+@@ -5522,108 +5629,15 @@ bool ValidateFramebufferTexture2D(const Context *context,
          Texture *tex = context->getTexture(texture);
          ASSERT(tex);
  
@@ -244,7 +244,7 @@ index 4766ba4e78ce0a9f9c819c5a484acbc89a1f2104..0ac58d7034ee4a4be2bc6fdc8e96a078
          }
      }
  
-@@ -5986,19 +6000,28 @@ bool ValidateFramebufferTexture2DMultisampleEXT(const Context *context,
+@@ -6078,19 +6092,28 @@ bool ValidateFramebufferTexture2DMultisampleEXT(const Context *context,
          return false;
      }
  
@@ -283,10 +283,10 @@ index 4766ba4e78ce0a9f9c819c5a484acbc89a1f2104..0ac58d7034ee4a4be2bc6fdc8e96a078
  
      // Unless EXT_multisampled_render_to_texture2 is enabled, only color attachment 0 can be used.
 diff --git a/src/tests/gl_tests/MultisampledRenderToTextureTest.cpp b/src/tests/gl_tests/MultisampledRenderToTextureTest.cpp
-index 35859f201a7ddf9dfffb124e9785737bfdbcd2dd..84e2377229fdd6e0d827107ab5054738f5f415c8 100644
+index 9353a6816214ff42a1cdfbc2bc50f827e3aa702c..1a41debc3611925343e017d32cf3f9a946575b78 100644
 --- a/src/tests/gl_tests/MultisampledRenderToTextureTest.cpp
 +++ b/src/tests/gl_tests/MultisampledRenderToTextureTest.cpp
-@@ -332,6 +332,19 @@ TEST_P(MSRTTTest, Texture2DParameterCheck)
+@@ -329,6 +329,19 @@ TEST_P(MSRTTTest, Texture2DParameterCheck)
          assertErrorIfNotMSRTT2(GL_INVALID_ENUM);
      }
  
@@ -306,7 +306,7 @@ index 35859f201a7ddf9dfffb124e9785737bfdbcd2dd..84e2377229fdd6e0d827107ab5054738
      // Target not framebuffer
      glFramebufferTexture2DMultisampleEXT(GL_RENDERBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
                                           texture, 0, 4);
-@@ -427,6 +440,14 @@ TEST_P(MSRTTTest, TextureCubeMapParameterCheck)
+@@ -424,6 +437,14 @@ TEST_P(MSRTTTest, TextureCubeMapParameterCheck)
          // the next larger sample count supported by the implementation"
          EXPECT_GE(param, 4);
      }

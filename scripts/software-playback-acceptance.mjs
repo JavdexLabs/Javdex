@@ -96,10 +96,10 @@ try {
     return { alive: s.alive, backend: s.backend, width: s.pixelWidth ?? 0, height: s.pixelHeight ?? 0, frames: s.nativeFrames,
       position: s['time-pos'], audioPosition: s['audio-pts'], decoder: s['hwdec-current'], audio: s['current-ao'],
       volume: s.volume, muted: s.mute, speed: s.speed, sid: s.sid, aid: s.aid,
-      droppedFrames: s['frame-drop-count'], error: s.error, loaded: s.loadedFiles, canvasAlive: request.gpu.alive }
+      droppedFrames: s['frame-drop-count'], error: s.error, loaded: s.loadedFiles, gpuAlive: request.gpu.alive }
   })
   const capture = async name => {
-    const png = await page.locator('canvas[data-playback-surface]').screenshot()
+    const png = await page.locator('[data-playback-surface]').screenshot()
     fs.writeFileSync(path.join(output, `${mode}-${name}.png`), png)
     const { data, info } = await sharp(png).ensureAlpha().raw().toBuffer({ resolveWithObject: true })
     for (let i = 0; i < data.length; i += 4) { const r = data[i]; data[i] = data[i + 2]; data[i + 2] = r }
@@ -154,22 +154,24 @@ try {
     }
     assert.equal(state.info.playbackFallback, mode !== 'forced')
     if (mode === 'disabled') assert.equal(state.info.playbackDiagnostics.fallbackReason, 'GPU_DISABLED')
-    await waitForValue(() => application.evaluate((_electron, surface) => globalThis.cpuReceipts.get(surface) ?? 0, state.sharedTextureSurface), n => n >= (recoveringFault ? 1 : 3), 'actual CPU Canvas submissions')
+    await waitForValue(() => application.evaluate((_electron, surface) => globalThis.cpuReceipts.get(surface) ?? 0, state.sharedTextureSurface), n => n >= (recoveringFault ? 1 : 3), 'actual CPU display submissions')
     if (!recoveringFault) {
       await control({ kind: 'pause', paused: true }); await control({ kind: 'seek', seconds: pausedPosition })
       await waitForState(page, s => s?.paused && !s.seeking && Math.abs(s.position - pausedPosition) < .5, 'CPU paused seek')
       await waitForValue(native, n => n.loaded === 1 && Math.abs(n.position - pausedPosition) < .5, 'native CPU paused seek')
     }
+    check.displayTag = await page.locator('[data-playback-surface]').evaluate(element => element.tagName)
+    assert.equal(check.displayTag, process.platform === 'darwin' ? 'VIDEO' : 'CANVAS')
     check.native = await native(); assert(check.native.width <= 8192 && check.native.height <= 8192)
-    check.canvasSize = await page.locator('canvas[data-playback-surface]').evaluate(canvas => ({
-      width: canvas.width, height: canvas.height,
+    check.displaySize = await page.locator('[data-playback-surface]').evaluate(canvas => ({
+      width: canvas.videoWidth ?? canvas.width, height: canvas.videoHeight ?? canvas.height,
       expectedWidth: Math.round(canvas.getBoundingClientRect().width * devicePixelRatio),
       expectedHeight: Math.round(canvas.getBoundingClientRect().height * devicePixelRatio)
     }))
-    assert(Math.abs(check.native.width - check.canvasSize.expectedWidth) <= 1 && Math.abs(check.native.height - check.canvasSize.expectedHeight) <= 1,
+    assert(Math.abs(check.native.width - check.displaySize.expectedWidth) <= 1 && Math.abs(check.native.height - check.displaySize.expectedHeight) <= 1,
       'CPU renderer must match the physical viewport without downscaling')
     assert.equal(check.native.decoder, 'no'); assert.equal(check.native.error, '')
-    if (!recoveringFault) assert.equal(check.native.canvasAlive, false)
+    if (!recoveringFault) assert.equal(check.native.gpuAlive, false)
     const sub = state.tracks.find(t => t.type === 'sub')
     if (sub) {
       await control({ kind: 'track', type: 'sub', id: null })
@@ -178,7 +180,7 @@ try {
       const off = await capture(`${index}-sub-off`)
       await control({ kind: 'track', type: 'sub', id: sub.id })
       await waitForValue(native, n => n.sid === String(sub.id), 'native subtitle selection')
-      // Native commands and copied Canvas delivery are asynchronous. Observe
+      // Native commands and copied frame delivery are asynchronous. Observe
       // the unchanged pixel threshold instead of assuming a 200ms screenshot
       // has already consumed the newly selected ASS/PGS frame.
       let attempt = 0
@@ -199,14 +201,14 @@ try {
     await control({ kind: 'presentation', value: 'docked' }); await page.waitForTimeout(200)
     await control({ kind: 'presentation', value: 'expanded' })
     await control({ kind: 'presentation', value: 'fullscreen' }); await page.waitForTimeout(250)
-    check.fullscreenSize = await page.locator('canvas[data-playback-surface]').evaluate(canvas => ({
+    check.fullscreenSize = await page.locator('[data-playback-surface]').evaluate(canvas => ({
       width: Math.round(canvas.getBoundingClientRect().width * devicePixelRatio),
       height: Math.round(canvas.getBoundingClientRect().height * devicePixelRatio)
     }))
     check.fullscreenNative = await waitForValue(native, n => Math.abs(n.width - check.fullscreenSize.width) <= 1
       && Math.abs(n.height - check.fullscreenSize.height) <= 1, 'full-size CPU fullscreen output')
-    await waitForValue(() => page.locator('canvas[data-playback-surface]').evaluate(canvas => ({ width: canvas.width, height: canvas.height })),
-      size => size.width === check.fullscreenNative.width && size.height === check.fullscreenNative.height, 'full-size CPU Canvas backing')
+    await waitForValue(() => page.locator('[data-playback-surface]').evaluate(canvas => ({ width: canvas.videoWidth ?? canvas.width, height: canvas.videoHeight ?? canvas.height })),
+      size => size.width === check.fullscreenNative.width && size.height === check.fullscreenNative.height, 'full-size CPU display backing')
     await control({ kind: 'presentation', value: 'expanded' })
     await control({ kind: 'pause', paused: false })
     await page.evaluate(() => { const end = performance.now() + 650; while (performance.now() < end) { /* bounded slow CPU consumer */ } })

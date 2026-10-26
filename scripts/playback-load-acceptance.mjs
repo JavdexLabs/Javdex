@@ -55,7 +55,7 @@ try {
       report.productionQuality = checkLoadProduction(stage, mode, Number(sourceFps)); save()
     }
   }
-  report.canvas = await page.evaluate(() => {const c=document.querySelector('canvas[data-playback-surface]');return {width:c.width,height:c.height}})
+  report.canvas = await page.evaluate(() => {const c=document.querySelector('[data-playback-surface]');return {width:c.videoWidth??c.width,height:c.videoHeight??c.height}})
   await control({kind:'stop'}); await waitForState(page,s=>s===null,'load stopped')
   report.stopped = await waitForValue(inspect,s=>!s.hosts.gpu.alive&&!s.hosts.cpu.alive&&s.hosts.gpu.outstandingSurfaces===0,'load resources released')
   report.passed = true

@@ -304,7 +304,7 @@ export function registerSettingsHandlers(ctx: IpcContext, backend: CatalogBacken
     else if (command.action === 'prepare-runtime') await models.prepareRuntime(command.group, command.target)
     else if (command.action === 'delete-runtime') await models.removeRuntime(command.group, command.target)
     else if (command.action === 'prepare-acceleration') await models.prepareAcceleration(command.model, command.variant)
-    else if (command.action === 'copy-download-url') clipboard.writeText(await models.downloadUrl(command.model, command.variant))
+    else if (command.action === 'copy-download-url') await clipboard.writeText(await models.downloadUrl(command.model, command.variant))
     else if (command.action === 'import') {
       const snapshot = await models.snapshot()
       const model = snapshot.models.find(item => item.id === command.model)!

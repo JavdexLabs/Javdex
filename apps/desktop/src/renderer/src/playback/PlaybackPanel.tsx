@@ -343,7 +343,10 @@ export default function PlaybackPanel(): JSX.Element | null {
           onDoubleClick={sharedTextureSurface && !docked ? () => {
             transport({ kind: 'presentation', value: fullscreen ? 'expanded' : 'fullscreen' })
           } : undefined}>
-          {sharedTextureSurface && <canvas key={sharedTextureSurface} className={styles.sharedTexture} data-playback-surface={sharedTextureSurface} aria-hidden="true" />}
+          {sharedTextureSurface && (api.playback.sharedTextureConsumer === 'video'
+            ? <video key={sharedTextureSurface} className={styles.sharedTexture} data-playback-surface={sharedTextureSurface}
+              muted playsInline disablePictureInPicture disableRemotePlayback tabIndex={-1} aria-hidden="true" />
+            : <canvas key={sharedTextureSurface} className={styles.sharedTexture} data-playback-surface={sharedTextureSurface} aria-hidden="true" />)}
         </button>}
         {options && !docked && state.phase !== 'error' && <aside className={styles.options} aria-label="播放设置" id={settingsId} data-playback-overlay-surface={rendererFullscreen || undefined}>
           <div className={styles.optionsHeader}><span>播放设置</span><IconButton size="sm" icon={<X size={16} />} label="关闭播放设置" onClick={() => presentationHistory.setOptions(false)} /></div>

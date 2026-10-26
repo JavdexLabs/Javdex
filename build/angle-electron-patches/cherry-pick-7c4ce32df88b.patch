@@ -15,22 +15,11 @@ Reviewed-by: Shahbaz Youssefi <syoussefi@chromium.org>
 Commit-Queue: Ran Wang <wangra@google.com>
 Reviewed-by: Geoff Lang <geofflang@chromium.org>
 
-Electron adaptation notes (43-x-y):
-Adapted to the single gl::TexLevelMask releaseTexStorage() on M150: the
-CubeFaceArray overload is not added and releaseTexStorageIfMismatched()
-builds a plain TexLevelMask (all levels except `level`), which matches the
-branch's prior per-type redefineImage() behaviour. releaseTexStorage()'s
-loop keeps the branch's isImageComplete(index) guard. Because M150 ANGLE
-still builds the D3D9 backend on Windows, TextureStorage9 gained the four
-new pure-virtual TextureStorage getters (getLevelWidth/Height/Depth,
-getFormat) mirroring the D3D11 implementations (depth is always 1 on D3D9).
-angle_end2end_tests_expectations.txt kept as on the branch (test-only).
-
 diff --git a/src/libANGLE/renderer/d3d/TextureD3D.cpp b/src/libANGLE/renderer/d3d/TextureD3D.cpp
-index 6e454f741c7e4cba24ec43e399126e7b062b5e85..ab0f48f585cfee122af85cb8edb17a05da74588e 100644
+index 83d8b8def3285fe527db8a18c4dbbe13a12c9467..c70c4abb2ebcc9d1b26c277c220750ca2083f423 100644
 --- a/src/libANGLE/renderer/d3d/TextureD3D.cpp
 +++ b/src/libANGLE/renderer/d3d/TextureD3D.cpp
-@@ -343,6 +343,9 @@ bool TextureD3D::isImageSubresourceMatchingStorage(const gl::ImageIndex &index,
+@@ -340,6 +340,9 @@ bool TextureD3D::isImageSubresourceMatchingStorage(const gl::ImageIndex &index,
          return false;
      }
  
@@ -40,7 +29,7 @@ index 6e454f741c7e4cba24ec43e399126e7b062b5e85..ab0f48f585cfee122af85cb8edb17a05
      if (index.getLevelIndex() < 0 || index.getLevelIndex() >= static_cast<int>(storageLevels))
      {
          return false;
-@@ -363,6 +366,51 @@ bool TextureD3D::isImageSubresourceMatchingStorage(const gl::ImageIndex &index,
+@@ -360,6 +363,51 @@ bool TextureD3D::isImageSubresourceMatchingStorage(const gl::ImageIndex &index,
             image->getDepth() == storageDepth && image->getInternalFormat() == storageFormat;
  }
  
@@ -79,11 +68,11 @@ index 6e454f741c7e4cba24ec43e399126e7b062b5e85..ab0f48f585cfee122af85cb8edb17a05
 +    {
 +        markAllImagesDirty();
 +
-+        gl::TexLevelMask copyImageMask;
-+        copyImageMask.set();
-+        copyImageMask.set(level, false);
++        gl::CubeFaceArray<gl::TexLevelMask> copyImageMasks;
++        copyImageMasks.fill(gl::TexLevelMask().set());
++        copyImageMasks[faceIndex].set(level, false);
 +
-+        ANGLE_TRY(releaseTexStorage(context, copyImageMask));
++        ANGLE_TRY(releaseTexStorage(context, copyImageMasks));
 +    }
 +
 +    return angle::Result::Continue;
@@ -92,7 +81,7 @@ index 6e454f741c7e4cba24ec43e399126e7b062b5e85..ab0f48f585cfee122af85cb8edb17a05
  angle::Result TextureD3D::setImageImpl(const gl::Context *context,
                                         const gl::ImageIndex &index,
                                         GLenum type,
-@@ -854,28 +902,41 @@ angle::Result TextureD3D::getAttachmentRenderTarget(const gl::Context *context,
+@@ -837,28 +885,41 @@ angle::Result TextureD3D::getAttachmentRenderTarget(const gl::Context *context,
  
  angle::Result TextureD3D::setBaseLevel(const gl::Context *context, GLuint baseLevel)
  {
@@ -150,7 +139,7 @@ index 6e454f741c7e4cba24ec43e399126e7b062b5e85..ab0f48f585cfee122af85cb8edb17a05
          // We need to copy for both:
          // 1. Render targets: GPU rendering modified the storage directly.
          // 2. Fast-path uploads: TextureStorage11::setData wrote pixel data directly to the GPU
-@@ -896,9 +957,9 @@ angle::Result TextureD3D::setBaseLevel(const gl::Context *context, GLuint baseLe
+@@ -879,9 +940,9 @@ angle::Result TextureD3D::setBaseLevel(const gl::Context *context, GLuint baseLe
                  ANGLE_TRY(mTexStorage->findRenderTarget(context, index, &renderTarget));
              }
  
@@ -163,7 +152,7 @@ index 6e454f741c7e4cba24ec43e399126e7b062b5e85..ab0f48f585cfee122af85cb8edb17a05
  
              const bool hasNoStagingCopy =
                  image && !image->isDirty() &&
-@@ -947,7 +1008,10 @@ angle::Result TextureD3D::releaseTexStorage(const gl::Context *context,
+@@ -947,7 +1008,10 @@ angle::Result TextureD3D::releaseTexStorage(
  
      if (anyCopyMask)
      {
@@ -175,10 +164,10 @@ index 6e454f741c7e4cba24ec43e399126e7b062b5e85..ab0f48f585cfee122af85cb8edb17a05
          const size_t storageLevels = mTexStorage->getLevelCount();
  
          gl::ImageIndexIterator iterator = imageIterator();
-@@ -955,9 +1019,9 @@ angle::Result TextureD3D::releaseTexStorage(const gl::Context *context,
-         {
-             const gl::ImageIndex index = iterator.next();
-             ImageD3D *image            = getImage(index);
+@@ -966,9 +1030,9 @@ angle::Result TextureD3D::releaseTexStorage(
+                 copyImage = copyStorageToImagesMask[0][index.getLevelIndex()];
+             }
+ 
 -            const bool dimensionsMatch = isImageSubresourceMatchingStorage(
 -                index, image, getLevelZeroWidth(), getLevelZeroHeight(), getBaseLevelStorageDepth(),
 -                storageFormat, storageLevels);
@@ -186,9 +175,9 @@ index 6e454f741c7e4cba24ec43e399126e7b062b5e85..ab0f48f585cfee122af85cb8edb17a05
 +                isImageSubresourceMatchingStorage(index, image, storageWidth0, storageHeight0,
 +                                                  storageDepth0, storageFormat, storageLevels);
  
-             if (dimensionsMatch && isImageComplete(index) &&
-                 copyStorageToImagesMask[index.getLevelIndex()])
-@@ -1866,36 +1930,17 @@ angle::Result TextureD3D_2D::redefineImage(const gl::Context *context,
+             if (dimensionsMatch && copyImage)
+             {
+@@ -1833,36 +1897,17 @@ angle::Result TextureD3D_2D::redefineImage(const gl::Context *context,
  {
      ASSERT(size.depth == 1);
  
@@ -231,7 +220,7 @@ index 6e454f741c7e4cba24ec43e399126e7b062b5e85..ab0f48f585cfee122af85cb8edb17a05
      mImageArray[level]->redefine(gl::TextureType::_2D, internalformat, size, forceRelease);
      mDirtyImages = mDirtyImages || mImageArray[level]->isDirty();
  
-@@ -2615,28 +2660,8 @@ angle::Result TextureD3D_Cube::redefineImage(const gl::Context *context,
+@@ -2576,28 +2621,8 @@ angle::Result TextureD3D_Cube::redefineImage(const gl::Context *context,
                                               const gl::Extents &size,
                                               bool forceRelease)
  {
@@ -250,11 +239,11 @@ index 6e454f741c7e4cba24ec43e399126e7b062b5e85..ab0f48f585cfee122af85cb8edb17a05
 -        {
 -            markAllImagesDirty();
 -
--            gl::TexLevelMask copyImageMask;
--            copyImageMask.set();
--            copyImageMask.set(level, false);
+-            gl::CubeFaceArray<gl::TexLevelMask> copyImageMasks;
+-            copyImageMasks.fill(gl::TexLevelMask().set());
+-            copyImageMasks[faceIndex].set(level, false);
 -
--            ANGLE_TRY(releaseTexStorage(context, copyImageMask));
+-            ANGLE_TRY(releaseTexStorage(context, copyImageMasks));
 -        }
 -    }
 +    ANGLE_TRY(releaseTexStorageIfMismatched(context, faceIndex, level, internalformat, size,
@@ -262,7 +251,7 @@ index 6e454f741c7e4cba24ec43e399126e7b062b5e85..ab0f48f585cfee122af85cb8edb17a05
  
      mImageArray[faceIndex][level]->redefine(gl::TextureType::CubeMap, internalformat, size,
                                              forceRelease);
-@@ -3275,29 +3300,8 @@ angle::Result TextureD3D_3D::redefineImage(const gl::Context *context,
+@@ -3252,29 +3277,8 @@ angle::Result TextureD3D_3D::redefineImage(const gl::Context *context,
                                             const gl::Extents &size,
                                             bool forceRelease)
  {
@@ -294,7 +283,7 @@ index 6e454f741c7e4cba24ec43e399126e7b062b5e85..ab0f48f585cfee122af85cb8edb17a05
  
      mImageArray[level]->redefine(gl::TextureType::_3D, internalformat, size, forceRelease);
      mDirtyImages = mDirtyImages || mImageArray[level]->isDirty();
-@@ -4026,12 +4030,6 @@ angle::Result TextureD3D_2DArray::redefineImage(const gl::Context *context,
+@@ -4029,12 +4033,6 @@ angle::Result TextureD3D_2DArray::redefineImage(const gl::Context *context,
                                                  const gl::Extents &size,
                                                  bool forceRelease)
  {
@@ -305,9 +294,9 @@ index 6e454f741c7e4cba24ec43e399126e7b062b5e85..ab0f48f585cfee122af85cb8edb17a05
 -    const int storageDepth     = getBaseLevelStorageDepth();
 -
      // Only reallocate the layers if the size doesn't match
-     if (size.depth != mLayerCounts[level])
+     if (size.depth != ANGLE_UNSAFE_TODO(mLayerCounts[level]))
      {
-@@ -4052,23 +4050,8 @@ angle::Result TextureD3D_2DArray::redefineImage(const gl::Context *context,
+@@ -4057,23 +4055,8 @@ angle::Result TextureD3D_2DArray::redefineImage(const gl::Context *context,
          }
      }
  
@@ -334,13 +323,13 @@ index 6e454f741c7e4cba24ec43e399126e7b062b5e85..ab0f48f585cfee122af85cb8edb17a05
      if (size.depth > 0)
      {
 diff --git a/src/libANGLE/renderer/d3d/TextureD3D.h b/src/libANGLE/renderer/d3d/TextureD3D.h
-index 271d58a4e4f794f7c3973f6959db33c80fc9623d..7436f03e526c50231d5c54cbf107a06e6c5ff98a 100644
+index 7b211a6d54c9f455a95700633b8c5746c480988d..38af6b561de6387dec8551f416bddeb8494a4ee2 100644
 --- a/src/libANGLE/renderer/d3d/TextureD3D.h
 +++ b/src/libANGLE/renderer/d3d/TextureD3D.h
-@@ -208,6 +208,17 @@ class TextureD3D : public TextureImpl, public angle::ObserverInterface
- 
-     angle::Result releaseTexStorage(const gl::Context *context,
-                                     const gl::TexLevelMask &copyStorageToImagesMask);
+@@ -211,6 +211,17 @@ class TextureD3D : public TextureImpl, public angle::ObserverInterface
+     angle::Result releaseTexStorage(
+         const gl::Context *context,
+         const gl::CubeFaceArray<gl::TexLevelMask> &copyStorageToImagesMask);
 +    angle::Result releaseTexStorageIfMismatched(const gl::Context *context,
 +                                                GLint level,
 +                                                GLenum internalformat,
@@ -356,7 +345,7 @@ index 271d58a4e4f794f7c3973f6959db33c80fc9623d..7436f03e526c50231d5c54cbf107a06e
      GLuint getBaseLevel() const { return mBaseLevel; }
  
 diff --git a/src/libANGLE/renderer/d3d/TextureStorage.h b/src/libANGLE/renderer/d3d/TextureStorage.h
-index fdfc56b26c3d77d62fad906855c5573692618e08..e38b48272245781dbbb514c3c14f494a79edc239 100644
+index dee3d4c9875ce5a758b40f4eadfd658e13db1663..4ebc37b6ec61aedae37b5944567682d9e7200096 100644
 --- a/src/libANGLE/renderer/d3d/TextureStorage.h
 +++ b/src/libANGLE/renderer/d3d/TextureStorage.h
 @@ -51,6 +51,10 @@ class TextureStorage : public angle::Subject
@@ -371,7 +360,7 @@ index fdfc56b26c3d77d62fad906855c5573692618e08..e38b48272245781dbbb514c3c14f494a
      virtual bool isMultiplanar(const gl::Context *context) = 0;
  
 diff --git a/src/libANGLE/renderer/d3d/d3d11/TextureStorage11.h b/src/libANGLE/renderer/d3d/d3d11/TextureStorage11.h
-index 6ffae31f45f4689fed264860b39628719ba221f9..746b3b9f3aed813c2c6d3808ff58de173cf639d0 100644
+index b98e7f291b5f8d432cc2c90f12db7f9a4c76eb9c..e09e9f1b49d9a1aab64d486bb63d0dd5b9299366 100644
 --- a/src/libANGLE/renderer/d3d/d3d11/TextureStorage11.h
 +++ b/src/libANGLE/renderer/d3d/d3d11/TextureStorage11.h
 @@ -83,6 +83,10 @@ class TextureStorage11 : public TextureStorage
@@ -393,9 +382,9 @@ index 6ffae31f45f4689fed264860b39628719ba221f9..746b3b9f3aed813c2c6d3808ff58de17
 -    int getLevelHeight(int mipLevel) const;
 -    int getLevelDepth(int mipLevel) const;
  
-     // Some classes (e.g. TextureStorage11_2D) will override getMippedResource.
-     virtual angle::Result getMippedResource(const gl::Context *context,
-@@ -726,6 +727,7 @@ class TextureStorage11_2DArray : public TextureStorage11
+     virtual angle::Result getSwizzleTexture(const gl::Context *context,
+                                             const TextureHelper11 **outTexture)          = 0;
+@@ -685,6 +686,7 @@ class TextureStorage11_2DArray : public TextureStorage11
                                           const gl::ImageIndex &index,
                                           Image11 *incomingImage) override;
      void onLabelUpdate() override;
@@ -403,7 +392,7 @@ index 6ffae31f45f4689fed264860b39628719ba221f9..746b3b9f3aed813c2c6d3808ff58de17
  
      struct LevelLayerRangeKey
      {
-@@ -878,6 +880,7 @@ class TextureStorage11_2DMultisampleArray final : public TextureStorage11Immutab
+@@ -837,6 +839,7 @@ class TextureStorage11_2DMultisampleArray final : public TextureStorage11Immutab
  
      angle::Result copyToStorage(const gl::Context *context, TextureStorage *destStorage) override;
      void onLabelUpdate() override;
@@ -411,61 +400,11 @@ index 6ffae31f45f4689fed264860b39628719ba221f9..746b3b9f3aed813c2c6d3808ff58de17
  
    protected:
      angle::Result getSwizzleTexture(const gl::Context *context,
-diff --git a/src/libANGLE/renderer/d3d/d3d9/TextureStorage9.cpp b/src/libANGLE/renderer/d3d/d3d9/TextureStorage9.cpp
-index f87b8c3e8cb1af23bb9fac6464eb2592bc778b8e..6e564445503b8bef896639e1ddba2fca743b67bb 100644
---- a/src/libANGLE/renderer/d3d/d3d9/TextureStorage9.cpp
-+++ b/src/libANGLE/renderer/d3d/d3d9/TextureStorage9.cpp
-@@ -14,6 +14,8 @@
- 
- #include "libANGLE/renderer/d3d/d3d9/TextureStorage9.h"
- 
-+#include <algorithm>
-+
- #include "common/utilities.h"
- #include "libANGLE/Context.h"
- #include "libANGLE/Texture.h"
-@@ -96,6 +98,21 @@ int TextureStorage9::getLevelCount() const
-     return static_cast<int>(mMipLevels) - mTopLevel;
- }
- 
-+int TextureStorage9::getLevelWidth(int mipLevel) const
-+{
-+    return std::max(static_cast<int>(mTextureWidth) >> mipLevel, 1);
-+}
-+
-+int TextureStorage9::getLevelHeight(int mipLevel) const
-+{
-+    return std::max(static_cast<int>(mTextureHeight) >> mipLevel, 1);
-+}
-+
-+int TextureStorage9::getLevelDepth(int mipLevel) const
-+{
-+    return 1;
-+}
-+
- bool TextureStorage9::isMultiplanar(const gl::Context *context)
- {
-     // D3D9 does not support multiplanar formats yet.
-diff --git a/src/libANGLE/renderer/d3d/d3d9/TextureStorage9.h b/src/libANGLE/renderer/d3d/d3d9/TextureStorage9.h
-index 8e14af6e0eafecf051a1dc716a6fc166294883f1..bee9db129cb60e4dadfda6169787b20e75ce3a77 100644
---- a/src/libANGLE/renderer/d3d/d3d9/TextureStorage9.h
-+++ b/src/libANGLE/renderer/d3d/d3d9/TextureStorage9.h
-@@ -46,6 +46,10 @@ class TextureStorage9 : public TextureStorage
-     bool isManaged() const override;
-     bool supportsNativeMipmapFunction() const override;
-     int getLevelCount() const override;
-+    int getLevelWidth(int mipLevel) const override;
-+    int getLevelHeight(int mipLevel) const override;
-+    int getLevelDepth(int mipLevel) const override;
-+    GLenum getFormat() const override { return mInternalFormat; }
-     bool isMultiplanar(const gl::Context *context) override;
- 
-     angle::Result setData(const gl::Context *context,
 diff --git a/src/tests/gl_tests/TextureTest.cpp b/src/tests/gl_tests/TextureTest.cpp
-index dd9226b9087509ededaf82357dc406245256f96b..306225ecbbd99fc7dcc9d423677e0a6eb2dc130a 100644
+index c2024409ab3510cc26889a2bd23e75e691e7a9ed..da16d71f42e2837b94700d2ec66c004c56f72303 100644
 --- a/src/tests/gl_tests/TextureTest.cpp
 +++ b/src/tests/gl_tests/TextureTest.cpp
-@@ -1403,6 +1403,12 @@ class Texture3DTestES3 : public Texture3DTestES2
+@@ -1412,6 +1412,12 @@ class Texture3DTestES3 : public Texture3DTestES2
      }
  };
  
@@ -478,7 +417,7 @@ index dd9226b9087509ededaf82357dc406245256f96b..306225ecbbd99fc7dcc9d423677e0a6e
  class ShadowSamplerPlusSampler3DTestES3 : public TexCoordDrawTest
  {
    protected:
-@@ -9098,6 +9104,221 @@ TEST_P(Texture3DTestES3, RedefineLevelData)
+@@ -9652,6 +9658,221 @@ TEST_P(Texture3DTestES3, RedefineLevelData)
      EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::green);
  }
  
@@ -700,9 +639,9 @@ index dd9226b9087509ededaf82357dc406245256f96b..306225ecbbd99fc7dcc9d423677e0a6e
  class Texture3DIncreaseDepthTestES3 : public Texture3DTestES3
  {
    protected:
-@@ -23895,6 +24116,10 @@ ANGLE_INSTANTIATE_TEST_ES2(Texture3DTestES2);
- GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(Texture3DTestES3);
- ANGLE_INSTANTIATE_TEST_ES3(Texture3DTestES3);
+@@ -24711,6 +24932,10 @@ TEST_P(Texture2DTestES3RobustInit, InvalidateEmulatedAlphaThenInitViaEmptyUpload
+     ES3_OPENGL().enable(Feature::EmulateCopyTexImage2DFromRenderbuffers), \
+         ES3_OPENGLES().enable(Feature::EmulateCopyTexImage2DFromRenderbuffers)
  
 +GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(Texture3DTestES3RobustInit);
 +ANGLE_INSTANTIATE_TEST_ES3_AND(Texture3DTestES3RobustInit,

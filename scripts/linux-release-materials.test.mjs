@@ -13,10 +13,10 @@ import { verifyLinuxReleaseResources } from './check-linux-release-playback.mjs'
 import { copyPortableRecipe } from './linux-portable-runtime.mjs'
 import { spawnSync } from 'node:child_process'
 
-async function fixture(t) {
+async function fixture(t, options) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-linux-release-test-'))
   t.after(() => fs.rmSync(root, { recursive: true, force: true }))
-  return { root, ...await linuxReleaseFixture(root) }
+  return { root, ...await linuxReleaseFixture(root, undefined, options) }
 }
 async function repack(f, id) {
   await createTar({ cwd: f.inputs[id], file: f.archives[id], gzip: true }, ['.'])
@@ -139,6 +139,84 @@ else: raise AssertionError('symlink accepted')
 `
   const result = spawnSync(process.platform === 'win32' ? 'python' : 'python3', ['-c', program, root], { encoding: 'utf8' })
   assert.equal(result.status, 0, result.stderr)
+})
+
+test('ANGLE delivery keeps pinned rebuild inputs and licenses without the full checkout', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-angle-rebuild-'))
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }))
+  const program = String.raw`
+import ast, hashlib, io, json, os, pathlib, sys, tarfile
+project = pathlib.Path.cwd()
+work = pathlib.Path(sys.argv[1]); angle = work / 'angle'; angle.mkdir()
+source = ast.parse((project / 'scripts/build-linux-angle.py').read_text())
+functions = [n for n in source.body if isinstance(n, ast.FunctionDef) and n.name in {'source_filter', 'create_source_bundle'}]
+ns = dict(pathlib=pathlib, hashlib=hashlib, io=io, json=json, os=os, tarfile=tarfile, angle=angle)
+exec(compile(ast.Module(body=functions, type_ignores=[]), '<angle-delivery>', 'exec'), ns)
+files = {'LICENSE':'BSD fixture', 'DEPS':'pinned dependency revisions', 'include/EGL/egl.h':'EGL header',
+ 'src/libANGLE/renderer/vulkan/linux/xcb/DisplayVkXcb.cpp':'patched source',
+ 'third_party/dep/DEPS':'nested dependency revision', 'third_party/dep/LICENSE':'dependency license',
+ 'third_party/dep/COPYRIGHT':'dependency attribution',
+ 'third_party/dep/LICENSES/exception.txt':'license exception',
+ 'src/unneeded.cpp':os.urandom(1024 * 1024), 'third_party/dep/large.cpp':os.urandom(1024 * 1024),
+ 'out/Javdex/libEGL.so':b'ELF fixture', '.git/config':'not source delivery'}
+for name, content in files.items():
+ p = angle / name; p.parent.mkdir(parents=True, exist_ok=True)
+ p.write_bytes(content if isinstance(content, bytes) else content.encode())
+(work / '.gclient').write_text('pinned gclient config')
+lock = json.loads((project / 'build/angle-runtime.json').read_text())
+bundle = work / 'rebuild.tar.gz'
+ns['create_source_bundle'](bundle, angle, project, work, lock)
+with tarfile.open(bundle) as archive:
+ names = archive.getnames()
+ assert 'angle/src/unneeded.cpp' not in names and 'angle/third_party/dep/large.cpp' not in names
+ assert not any('/out/' in n or '/.git/' in n for n in names)
+ assert 'angle/third_party/dep/LICENSES/exception.txt' in names and 'angle/third_party/dep/DEPS' in names
+ assert 'angle/third_party/dep/COPYRIGHT' in names
+ reference = json.load(archive.extractfile('rebuild.json'))
+ assert reference['angle']['revision'] == lock['angleRevision']
+ assert reference['depotTools']['revision'] == lock['depotToolsRevision']
+ assert reference['angle']['url'] == 'https://chromium.googlesource.com/angle/angle.git'
+ for name, digest in reference['files'].items():
+  assert hashlib.sha256(archive.extractfile(name).read()).hexdigest() == digest
+ assert set(names) == set(reference['files']) | {'rebuild.json'}
+assert bundle.stat().st_size < 1024 * 1024
+`
+  const result = spawnSync(process.platform === 'win32' ? 'python' : 'python3', ['-c', program, root], { encoding: 'utf8' })
+  assert.equal(result.status, 0, result.stderr)
+})
+
+test('compact ANGLE rebuild materials pass the complete Linux source-binding gate', async t => {
+  const f = await fixture(t, { compactAngle: true })
+  await verifyLinuxSourceBundle(f.output, f.manifest)
+})
+
+for (const [name, mutate, expected] of [
+  ['missing reconstruction reference', input => fs.rmSync(path.join(input, 'rebuild.json')), /ENOENT/],
+  ['changed upstream revision', input => {
+    const file = path.join(input, 'rebuild.json'), reference = JSON.parse(fs.readFileSync(file))
+    reference.angle.revision = '0'.repeat(40); write(input, 'rebuild.json', reference)
+  }, /ANGLE rebuild upstream/],
+  ['changed dependency license', input => write(input, 'angle/third_party/fixture/LICENSE', 'changed license'), /ANGLE rebuild material/],
+  ['unlisted file', input => write(input, 'angle/third_party/fixture/unneeded.cpp', 'whole checkout file'), /ANGLE rebuild inventory/],
+  ['full source file disguised as a listed material', input => {
+    const name = 'angle/third_party/fixture/unneeded.cpp'; write(input, name, 'whole checkout file')
+    const reference = JSON.parse(fs.readFileSync(path.join(input, 'rebuild.json')))
+    reference.files[name] = hash(path.join(input, name)); write(input, 'rebuild.json', reference)
+  }, /Unexpected ANGLE rebuild source/],
+  ['missing dependency notices', input => {
+    fs.rmSync(path.join(input, 'angle/third_party'), { recursive: true })
+    const reference = JSON.parse(fs.readFileSync(path.join(input, 'rebuild.json')))
+    delete reference.files['angle/third_party/fixture/LICENSE']; write(input, 'rebuild.json', reference)
+  }, /ANGLE dependency licenses/]
+]) test(`compact ANGLE delivery rejects ${name} after outer hashes are refreshed`, async t => {
+  const f = await fixture(t, { compactAngle: true }); mutate(f.inputs.angle)
+  await assert.rejects(verifyLinuxSourceBundle(f.output, await repack(f, 'angle')), expected)
+})
+
+test('Linux source gate rejects unknown ANGLE formats rather than treating them as legacy', async t => {
+  const f = await fixture(t, { compactAngle: true })
+  f.inventories.angle.sourceBundle.format = 'unknown'
+  assert.throws(() => f.rebuild(), /Unsupported ANGLE source delivery/)
 })
 
 test('ANGLE archive budget stays bounded and never relaxes path or link checks', async t => {

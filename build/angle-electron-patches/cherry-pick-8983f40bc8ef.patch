@@ -18,8 +18,15 @@ Auto-Submit: Zhenyao Mo <zmo@chromium.org>
 Reviewed-by: Kenneth Russell <kbr@chromium.org>
 Reviewed-by: Geoff Lang <geofflang@chromium.org>
 
+Electron adaptation notes (44-x-y):
+Test-only: angle_end2end_tests_expectations.txt keeps only the new
+549916890 skip lines (unrelated expectation churn dropped), and
+TextureTest.cpp keeps only the new Texture3DIncreaseDepthTestES3
+instantiation (the surrounding block in the upstream hunk re-listed
+instantiations this branch already has).
+
 diff --git a/include/platform/autogen/FeaturesGL_autogen.h b/include/platform/autogen/FeaturesGL_autogen.h
-index 0d1a8ceb20a158d9fd259f6749ded09d02395efc..d400d0b06c229f4309b8efd0bd15b4bf01c0f63b 100644
+index e6e18579173c41b8a500d81c4503c9c3725e106c..85ddc2ed78857635318ea5794f212a2c6378b9d2 100644
 --- a/include/platform/autogen/FeaturesGL_autogen.h
 +++ b/include/platform/autogen/FeaturesGL_autogen.h
 @@ -272,6 +272,12 @@ struct FeaturesGL : FeatureSetBase
@@ -36,7 +43,7 @@ index 0d1a8ceb20a158d9fd259f6749ded09d02395efc..d400d0b06c229f4309b8efd0bd15b4bf
          "limitMax3dArrayTextureSizeTo1024",
          FeatureCategory::OpenGLWorkarounds,
 diff --git a/include/platform/gl_features.json b/include/platform/gl_features.json
-index 42c9dfeeaa0d85bb58bfc3ad655bb0e8efcbdd2c..5c3c3537fd09daf62478935c1d2719ff6a1bf8a8 100644
+index 574ae5bca20d4d2f10ca12f5d010765e1acbf988..1e585e925971e25157e37126c46ddb1ff59f4ef6 100644
 --- a/include/platform/gl_features.json
 +++ b/include/platform/gl_features.json
 @@ -335,6 +335,15 @@
@@ -56,7 +63,7 @@ index 42c9dfeeaa0d85bb58bfc3ad655bb0e8efcbdd2c..5c3c3537fd09daf62478935c1d2719ff
              "name": "limit_max_3d_array_texture_size_to_1024",
              "category": "Workarounds",
 diff --git a/src/libANGLE/renderer/gl/TextureGL.cpp b/src/libANGLE/renderer/gl/TextureGL.cpp
-index 434808fb785bb6a9f392eb8427e660fff45c8553..4cb3d717a24f86d09ba45d7d3868b70acd23d2d0 100644
+index 834675fc9d1dd3623c26de5ff303003c6ce1ed2e..4cce40423faf2bf66861f97093a0bc433ed6468b 100644
 --- a/src/libANGLE/renderer/gl/TextureGL.cpp
 +++ b/src/libANGLE/renderer/gl/TextureGL.cpp
 @@ -337,6 +337,13 @@ angle::Result TextureGL::setImageHelper(const gl::Context *context,
@@ -73,7 +80,7 @@ index 434808fb785bb6a9f392eb8427e660fff45c8553..4cb3d717a24f86d09ba45d7d3868b70a
      if (features.resetTexImage2DBaseLevel.enabled)
      {
          // setBaseLevel doesn't ever generate errors.
-@@ -3131,4 +3138,86 @@ GLint TextureGL::getRequiredExternalTextureImageUnits(const gl::Context *context
+@@ -3128,4 +3135,86 @@ GLint TextureGL::getRequiredExternalTextureImageUnits(const gl::Context *context
      return result;
  }
  
@@ -161,10 +168,10 @@ index 434808fb785bb6a9f392eb8427e660fff45c8553..4cb3d717a24f86d09ba45d7d3868b70a
 +
  }  // namespace rx
 diff --git a/src/libANGLE/renderer/gl/TextureGL.h b/src/libANGLE/renderer/gl/TextureGL.h
-index a177eceb03dbd21fd2cab1d7ee6ce2141b131336..df3cd0753eb611268c9a828d242cf0b84b3b8c19 100644
+index 31d921d56b5441afe1e9582088ac691a5258b6e9..60a4145dafd3e82fa0f67650b4c9a49d8faceb99 100644
 --- a/src/libANGLE/renderer/gl/TextureGL.h
 +++ b/src/libANGLE/renderer/gl/TextureGL.h
-@@ -243,6 +243,11 @@ class TextureGL : public TextureImpl
+@@ -231,6 +231,11 @@ class TextureGL : public TextureImpl
      angle::Result recreateNativeStoragePreservingLevels(const gl::Context *context);
      angle::Result useTempForNonZeroBaseLevelGenmipmap(const gl::Context *context);
  
@@ -177,10 +184,10 @@ index a177eceb03dbd21fd2cab1d7ee6ce2141b131336..df3cd0753eb611268c9a828d242cf0b8
                                   gl::TextureTarget target,
                                   size_t level,
 diff --git a/src/libANGLE/renderer/gl/renderergl_utils.cpp b/src/libANGLE/renderer/gl/renderergl_utils.cpp
-index 4ba333abfc232d0d54ee14bb55c5ec655701c8c4..1873bb27c8b8016dc8a392acbfacbc90e2031f69 100644
+index 4f8429a9bf27072a1b040af1f6e4cf644cd0f890..ca3bcc7ba3850d4a62d61ba6f5361773fba4469f 100644
 --- a/src/libANGLE/renderer/gl/renderergl_utils.cpp
 +++ b/src/libANGLE/renderer/gl/renderergl_utils.cpp
-@@ -2511,6 +2511,8 @@ void InitializeFeatures(const FunctionsGL *functions, angle::FeaturesGL *feature
+@@ -2438,6 +2438,8 @@ void InitializeFeatures(const FunctionsGL *functions, angle::FeaturesGL *feature
      ANGLE_FEATURE_CONDITION(features, resetBaseLevelForASTCSubImage, IsPowerVR(vendor));
      ANGLE_FEATURE_CONDITION(features, recreateImmutableTextureOnBaseLevelIncrease,
                              IsPowerVR(vendor));
@@ -189,11 +196,50 @@ index 4ba333abfc232d0d54ee14bb55c5ec655701c8c4..1873bb27c8b8016dc8a392acbfacbc90
  
      ANGLE_FEATURE_CONDITION(features, useTempForNonZeroBaseLevelGenMipmapUsingCopyImageSubData,
                              IsPowerVR(vendor));
+diff --git a/src/tests/angle_end2end_tests_expectations.txt b/src/tests/angle_end2end_tests_expectations.txt
+index 35064071f198e8bdfc0179d2a9be3f4bfe126f3c..15d7cd652408b870e9b3621eb8de64fa7047e5cf 100644
+--- a/src/tests/angle_end2end_tests_expectations.txt
++++ b/src/tests/angle_end2end_tests_expectations.txt
+@@ -366,6 +366,17 @@
+ 42265709 NVIDIA VULKAN : GLSLTest_ES31.TessellationControlShaderMatrixMultiplicationBug/* = SKIP
+ 537235696 NVIDIA OPENGL : ClipDistance*.ThreeClipDistancesRedeclaredAndPassedToFunction/* = SKIP
+ 540256225 NVIDIA VULKAN : ImageTestES3.SourceYUVTextureTargetExternalRGBSample/* = SKIP
++// Failing on NVidia OpenGL
++549916890 NVIDIA OPENGL : Texture3DIncreaseDepthTestES3.TexImage3DDepthIncreaseOutsideRangeDrawnVerifyByDraw/* = SKIP
++549916890 NVIDIA OPENGL : Texture3DIncreaseDepthTestES3.TexImage3DDepthIncreaseOutsideRangeDrawnVerifyByReadPixels/* = SKIP
++549916890 NVIDIA OPENGL : Texture3DIncreaseDepthTestES3.TexImage3DDepthIncreaseOutsideRangeStagedVerifyByDraw/* = SKIP
++549916890 NVIDIA OPENGL : Texture3DIncreaseDepthTestES3.TexImage3DDepthIncreaseOutsideRangeStagedVerifyByReadPixels/* = SKIP
++// Failing on NVidia GLES
++549916890 NVIDIA GLES : Texture3DIncreaseDepthTestES3.TexImage3DDepthIncreaseOutsideRangeDrawnVerifyByDraw/* = SKIP
++549916890 NVIDIA GLES : Texture3DIncreaseDepthTestES3.TexImage3DDepthIncreaseOutsideRangeDrawnVerifyByReadPixels/* = SKIP
++549916890 NVIDIA GLES : Texture3DIncreaseDepthTestES3.TexImage3DDepthIncreaseOutsideRangeStagedVerifyByDraw/* = SKIP
++549916890 NVIDIA GLES : Texture3DIncreaseDepthTestES3.TexImage3DDepthIncreaseOutsideRangeStagedVerifyByReadPixels/* = SKIP
++
+ 
+ // Intel Vulkan
+ 
+@@ -2862,6 +2873,16 @@
+ 548127218 WIN INTEL OPENGL : Texture2DTestES3_OversizedMipLevels.CompressedDXT/* = SKIP
+ 548127218 WIN INTEL OPENGL : Texture2DTestES3_OversizedMipLevels.CompressedETC/* = SKIP
+ 
++// Failing on Windows Intel OpenGL
++549916890 WIN INTEL OPENGL : Texture3DIncreaseDepthTestES3.TexImage3DDepthIncreaseInsideRangeDrawnVerifyByDraw/* = SKIP
++549916890 WIN INTEL OPENGL : Texture3DIncreaseDepthTestES3.TexImage3DDepthIncreaseInsideRangeDrawnVerifyByReadPixels/* = SKIP
++549916890 WIN INTEL OPENGL : Texture3DIncreaseDepthTestES3.TexImage3DDepthIncreaseInsideRangeStagedVerifyByDraw/* = SKIP
++549916890 WIN INTEL OPENGL : Texture3DIncreaseDepthTestES3.TexImage3DDepthIncreaseInsideRangeStagedVerifyByReadPixels/* = SKIP
++549916890 WIN INTEL OPENGL : Texture3DIncreaseDepthTestES3.TexImage3DDepthIncreaseOutsideRangeDrawnVerifyByDraw/* = SKIP
++549916890 WIN INTEL OPENGL : Texture3DIncreaseDepthTestES3.TexImage3DDepthIncreaseOutsideRangeDrawnVerifyByReadPixels/* = SKIP
++549916890 WIN INTEL OPENGL : Texture3DIncreaseDepthTestES3.TexImage3DDepthIncreaseOutsideRangeStagedVerifyByDraw/* = SKIP
++549916890 WIN INTEL OPENGL : Texture3DIncreaseDepthTestES3.TexImage3DDepthIncreaseOutsideRangeStagedVerifyByReadPixels/* = SKIP
++
+ // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+ // Slow tests, should appear last in this file
+ // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 diff --git a/src/tests/gl_tests/TextureTest.cpp b/src/tests/gl_tests/TextureTest.cpp
-index c5348d2943ba81343d89a55f5d2576afd1e373e2..d1618eaaec75e52f58c26c6fec0398384b6446dd 100644
+index 34fa77e48e1793af80621f3287f1bfd492fc631c..210e61af51540ff5d94ef27e903a747dbfcf6239 100644
 --- a/src/tests/gl_tests/TextureTest.cpp
 +++ b/src/tests/gl_tests/TextureTest.cpp
-@@ -1394,7 +1394,11 @@ class Texture3DTestES3 : public Texture3DTestES2
+@@ -1403,7 +1403,11 @@ class Texture3DTestES3 : public Texture3DTestES2
                 "out vec4 fragColor;\n"
                 "void main()\n"
                 "{\n"
@@ -206,7 +252,7 @@ index c5348d2943ba81343d89a55f5d2576afd1e373e2..d1618eaaec75e52f58c26c6fec039838
                 "}\n";
      }
  };
-@@ -8977,6 +8981,274 @@ TEST_P(Texture3DTestES3, RedefineLevelData)
+@@ -9531,6 +9535,274 @@ TEST_P(Texture3DTestES3, RedefineLevelData)
      EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::green);
  }
  
@@ -481,40 +527,41 @@ index c5348d2943ba81343d89a55f5d2576afd1e373e2..d1618eaaec75e52f58c26c6fec039838
  // Test that texture completeness is updated if texture max level changes.
  // GLES 3.0.4 section 3.8.13 Texture completeness
  TEST_P(Texture2DTestES3, TextureCompletenessChangesWithMaxLevel)
-@@ -22697,6 +22969,12 @@ ANGLE_INSTANTIATE_TEST_ES2(Texture3DTestES2);
- GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(Texture3DTestES3);
- ANGLE_INSTANTIATE_TEST_ES3(Texture3DTestES3);
- 
+@@ -23929,6 +24201,13 @@ TEST_P(Texture2DTestES3RobustInit, InvalidateEmulatedAlphaThenInitViaEmptyUpload
+ #define ES3_EMULATE_COPY_TEX_IMAGE()                                      \
+     ES3_OPENGL().enable(Feature::EmulateCopyTexImage2DFromRenderbuffers), \
+         ES3_OPENGLES().enable(Feature::EmulateCopyTexImage2DFromRenderbuffers)
++
 +GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(Texture3DIncreaseDepthTestES3);
 +ANGLE_INSTANTIATE_TEST_ES3_AND(
 +    Texture3DIncreaseDepthTestES3,
 +    ES3_OPENGL().enable(Feature::RecreateTextureOnTexImage3dDepthIncrease),
 +    ES3_OPENGLES().enable(Feature::RecreateTextureOnTexImage3dDepthIncrease));
 +
- GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(Texture2DIntegerAlpha1TestES3);
- ANGLE_INSTANTIATE_TEST_ES3(Texture2DIntegerAlpha1TestES3);
- 
+ GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(Texture2DArrayTestES3_ReattachTextureToFbo);
+ ANGLE_INSTANTIATE_TEST_ES3_AND(
+     Texture2DArrayTestES3_ReattachTextureToFbo,
 diff --git a/util/autogen/angle_features_autogen.cpp b/util/autogen/angle_features_autogen.cpp
-index 1afeab80631b2d2ab3c90c937b422a09fa78e64c..b47958ae83b3b020bada353a8c68a9260f6f39d5 100644
+index 347753da5944d324fc91741c44edb89c9fe10749..7d4c2a37c39dac2ba1f4a4c510a394dcd3bad86e 100644
 --- a/util/autogen/angle_features_autogen.cpp
 +++ b/util/autogen/angle_features_autogen.cpp
-@@ -303,6 +303,7 @@ constexpr PackedEnumMap<Feature, const char *> kFeatureNames = {{
-     {Feature::RecreateFboUponFlush, "recreateFboUponFlush"},
+@@ -304,6 +304,7 @@ constexpr PackedEnumMap<Feature, const char *> kFeatureNames = {{
+     {Feature::ReattachTextureToFboAfterLayerIncrease, "reattachTextureToFboAfterLayerIncrease"},
      {Feature::RecreateImmutableTextureOnBaseLevelIncrease, "recreateImmutableTextureOnBaseLevelIncrease"},
      {Feature::RecreateMipmapLevelsBeforeGenerate, "recreateMipmapLevelsBeforeGenerate"},
 +    {Feature::RecreateTextureOnTexImage3dDepthIncrease, "recreateTextureOnTexImage3dDepthIncrease"},
      {Feature::RecycleVkEvent, "recycleVkEvent"},
-     {Feature::RegenerateStructNames, "regenerateStructNames"},
      {Feature::RemoveDynamicIndexingOfSwizzledVector, "removeDynamicIndexingOfSwizzledVector"},
+     {Feature::RemoveInvariantAndCentroidForESSL3, "removeInvariantAndCentroidForESSL3"},
 diff --git a/util/autogen/angle_features_autogen.h b/util/autogen/angle_features_autogen.h
-index 45c4fb8ff09b2e503b50277cb0282c9de5bf857c..7126ed61b7fe25d2e172ecbe9b1e810e6effd58e 100644
+index 8f9f8211a7380b414be4839dca40cd9ad3d21578..1306c8200897454a52b2e89e1e867a6906483bb1 100644
 --- a/util/autogen/angle_features_autogen.h
 +++ b/util/autogen/angle_features_autogen.h
-@@ -303,6 +303,7 @@ enum class Feature
-     RecreateFboUponFlush,
+@@ -304,6 +304,7 @@ enum class Feature
+     ReattachTextureToFboAfterLayerIncrease,
      RecreateImmutableTextureOnBaseLevelIncrease,
      RecreateMipmapLevelsBeforeGenerate,
 +    RecreateTextureOnTexImage3dDepthIncrease,
      RecycleVkEvent,
-     RegenerateStructNames,
      RemoveDynamicIndexingOfSwizzledVector,
+     RemoveInvariantAndCentroidForESSL3,

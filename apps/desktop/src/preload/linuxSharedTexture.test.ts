@@ -7,6 +7,7 @@ import { ModuleKind, ScriptTarget, transpileModule } from 'typescript'
 const code = transpileModule(readFileSync(new URL('./sharedTextureReceiver.ts', import.meta.url), 'utf8'), {
   compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022 }
 }).outputText
+const videoCode = transpileModule(readFileSync(new URL('./sharedTextureVideo.ts', import.meta.url), 'utf8'), { compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022 } }).outputText
 const token = '11111111-1111-4111-8111-111111111111'
 test('pixel diagnostic distinguishes opaque black from colored and transparent samples with row padding', () => {
   const exports = {} as typeof import('./sharedTextureReceiver')
@@ -18,7 +19,7 @@ test('pixel diagnostic distinguishes opaque black from colored and transparent s
   assert.deepEqual(JSON.parse(JSON.stringify(exports.summarizePixels(data, 2, 2, 12))),
     { samples: 4, nonblack: 2, maximum: 255, opaque: 3 })
 })
-function fixture(options: { platform?: 'linux' | 'darwin' | 'win32'; mainFrame?: boolean; registerFails?: boolean; contextFails?: boolean; probePixels?: 'valid' | 'black' | 'throw'; clockShift?: number; clockDelays?: number[]; copyWait?: Promise<void> } = {}) {
+function fixture(options: { platform?: 'linux' | 'darwin' | 'win32'; mainFrame?: boolean; registerFails?: boolean; contextFails?: boolean; probePixels?: 'valid' | 'black' | 'throw'; clockShift?: number; clockDelays?: number[]; copyWait?: Promise<void>; videoCreateFails?: boolean; videoWriteWait?: Promise<void> } = {}) {
   let nextToken = 0, draws = 0, closes = 0, releases = 0, clears = 0, drawFails = false
   let gpuReleased: (() => void) | undefined
   const transferCalls: string[] = []
@@ -29,7 +30,7 @@ function fixture(options: { platform?: 'linux' | 'darwin' | 'win32'; mainFrame?:
   let cpuReceiver!: (_event: unknown, value: unknown) => void
   let cpuPixels: Uint8ClampedArray = new Uint8ClampedArray()
   let receiver!: (data: unknown, metadata: unknown) => Promise<void>
-  const messages: Array<{ channel: string; data: { surfaceToken: string; bindingToken: string; sequence?: number } }> = []
+  const messages: Array<{ channel: string; data: { surfaceToken: string; bindingToken: string; sequence?: number; samples?: number[] } }> = []
   const cpuReleases = new Map<string, () => void>()
   const cpuKey = (value: { bindingToken: string; sequence?: number }): string => `${value.bindingToken}:${value.sequence}`
   const canvas = { width: 0, height: 0, isConnected: true, dataset: { playbackSurface: token },
@@ -38,11 +39,43 @@ function fixture(options: { platform?: 'linux' | 'darwin' | 'win32'; mainFrame?:
       if (options.contextFails) throw new Error('Canvas context unavailable')
       return { set globalCompositeOperation(value: string) { compositeOperation = value }, getImageData: () => { if (options.probePixels === 'throw') throw Error('readback'); const data = new Uint8ClampedArray(640 * 360 * 4); if (options.probePixels === 'valid') for (let i = 0; i < data.length; i += 4) data.set([64, 191, 128, 255], i); return { data } }, createImageData: (w: number, h: number) => ({ data: new Uint8ClampedArray(w * h * 4) }), putImageData: (image: { data: Uint8ClampedArray }) => { cpuPixels = image.data; draws++ }, drawImage: () => { if (drawFails) throw new Error('draw failed'); draws++ }, clearRect: () => { clears++ } }
     } }
+  const cpuVideoFrames: Array<{ displayWidth: number; displayHeight: number; pixels: Uint8Array; init: {layout: Array<{offset: number; stride: number}>; timestamp: number}; closed: number }> = []
+  const callbacks = new Map<number, () => void>(); let callbackId = 0
+  const video = { isConnected: true, dataset: { playbackSurface: token }, style: { opacity: '' }, videoWidth: 0, videoHeight: 0, error: null,
+    muted: false, playsInline: false, srcObject: null as unknown, play: async () => {}, pause: () => {}, load: () => {},
+    addEventListener: () => {}, removeEventListener: () => {},
+    requestVideoFrameCallback: (callback: () => void) => { callbacks.set(++callbackId, callback); return callbackId },
+    cancelVideoFrameCallback: (id: number) => { callbacks.delete(id) } }
+  const document = { querySelectorAll: () => options.platform === 'darwin' ? [video, canvas] : [canvas],
+    createElement: () => ({ width: 0, height: 0, getContext: () => ({ drawImage: () => {},
+      getImageData: () => canvas.getContext('2d', {}).getImageData() }) }) }
+  const videoExports = {} as typeof import('./sharedTextureVideo')
+  runInNewContext(videoCode, { exports: videoExports, setTimeout, clearTimeout, Uint8ClampedArray, document,
+    VideoFrame: class {
+      displayWidth: number; displayHeight: number; pixels: Uint8Array; closed = 0
+      constructor(pixels: Uint8Array, public init: {codedWidth: number; codedHeight: number; layout: Array<{offset: number; stride: number}>; timestamp: number; transfer: ArrayBuffer[]}) {
+        this.displayWidth = init.codedWidth; this.displayHeight = init.codedHeight
+        this.pixels = structuredClone(pixels, {transfer: init.transfer}); cpuVideoFrames.push(this)
+      }
+      close() { this.closed++ }
+    },
+    MediaStream: class {}, MediaStreamTrackGenerator: class {
+      constructor() { if (options.videoCreateFails) throw new Error('video unavailable') }
+      stop() {}
+      writable = { getWriter: () => ({ closed: Promise.resolve(), abort: async () => {}, releaseLock: () => {},
+        write: async (frame: { displayWidth: number; displayHeight: number }) => {
+          if (drawFails) throw new Error('video write failed')
+          draws++; video.videoWidth = frame.displayWidth; video.videoHeight = frame.displayHeight
+          await options.videoWriteWait
+          queueMicrotask(() => { for (const [id, callback] of callbacks) { callbacks.delete(id); callback() } })
+        } }) }
+    } })
   const exports = {} as typeof import('./sharedTextureReceiver')
   runInNewContext(code, { exports, Uint8Array, performance, setTimeout, clearTimeout, process: { platform: options.platform ?? 'linux', isMainFrame: options.mainFrame ?? true },
     crypto: { randomUUID: () => `33333333-3333-4333-8333-${String(++nextToken).padStart(12, '0')}` },
-    document: { querySelectorAll: () => [canvas] },
+    document,
     require(id: string) {
+      if (id === './sharedTextureVideo') return videoExports
       assert.equal(id, 'electron')
       return { ipcRenderer: { on: (channel: string, callback: typeof cpuReceiver) => { listeners.set(channel, callback); if (channel === 'playback:cpu-frame') cpuReceiver = callback }, send: (channel: string, data: typeof messages[number]['data']) => {
           if (channel === 'playback:frame-clock') {
@@ -66,7 +99,7 @@ function fixture(options: { platform?: 'linux' | 'darwin' | 'win32'; mainFrame?:
   const packet = { importedSharedTexture: { getVideoFrame: () => ({ displayWidth: options.probePixels ? 640 : 320, displayHeight: options.probePixels ? 360 : 180, close: () => { closes++ },
     allocationSize: () => 640 * 360 * 4, copyTo: async () => { await options.copyWait; return [{ offset: 0, stride: 640 * 4 }] } }),
     release: () => { releases++ } } }
-  return { bind, messages, listeners, canvas, transferCalls, clockRequests: () => clockRequests, composite: () => compositeOperation, gpuRelease: () => gpuReleased?.(), cpu: (value: unknown) => {
+  return { bind, messages, listeners, canvas, video, cpuVideoFrames, transferCalls, clockRequests: () => clockRequests, composite: () => compositeOperation, gpuRelease: () => gpuReleased?.(), cpu: (value: unknown) => {
     const key = cpuKey(value as { bindingToken: string; sequence: number })
     const done = new Promise<void>(resolve => {
       if (messages.some(m => m.channel === 'playback:cpu-frame-released' && cpuKey(m.data) === key)) resolve()
@@ -117,7 +150,7 @@ test(`${platform} subtle transfer ACK waits for the consumer GPU release callbac
   const f = fixture({ platform }), unbind = f.bind(token)
   const binding = f.messages.find(m => m.channel.endsWith('ready'))!.data
   f.listeners.get(`playback:${channel}-texture-transfer`)!(null, { ...binding, sequence: 1, transfer: { transfer: 'opaque' } })
-  await Promise.resolve(); await Promise.resolve()
+  await new Promise<void>(resolve => setImmediate(resolve))
   assert.equal(f.counts().draws, 1)
   assert.deepEqual(f.transferCalls, ['acquired', 'frame'], 'both native transfers must verify acquisition before creating a VideoFrame')
   assert.equal(f.messages.filter(m => m.channel === `playback:${channel}-texture-released`).length, 0)
@@ -125,7 +158,7 @@ test(`${platform} subtle transfer ACK waits for the consumer GPU release callbac
   assert.equal(f.messages.filter(m => m.channel === `playback:${channel}-texture-released`).length, 1)
   unbind()
 })
-test('macOS uses the same Canvas submission and reference-release interface', async () => {
+test('macOS video uses the same submission and reference-release interface', async () => {
   const f = fixture({ platform: 'darwin' }); const stop = f.bind(token)
   await f.receive(1)
   assert.deepEqual(f.counts(), { draws: 1, closes: 1, releases: 1, clears: 0 })
@@ -215,20 +248,21 @@ test('CPU frames strip row padding, distinguish submission from release and reje
   assert.equal(f.messages.at(-2)?.channel, 'playback:shared-texture-failed')
 })
 
-for (const platform of ['linux', 'win32', 'darwin'] as const) test(`${platform}: CPU canvas remains usable without shared-texture receiver registration`, () => {
+for (const platform of ['linux', 'win32', 'darwin'] as const) test(`${platform}: CPU display remains usable without shared-texture receiver registration`, async () => {
   const f = fixture({ registerFails: true, platform }), cpuToken = 'cpu:' + token
-  f.canvas.dataset.playbackSurface = cpuToken
+  f.canvas.dataset.playbackSurface = f.video.dataset.playbackSurface = cpuToken
   f.bind(cpuToken)
-  assert.equal(f.contextOptions.at(-1)?.willReadFrequently, true)
+  if (platform === 'darwin') assert.equal(f.contextOptions.length, 0)
+  else assert.equal(f.contextOptions.at(-1)?.willReadFrequently, true)
   const binding = f.messages.at(-1)!.data
   assert.equal(f.messages.at(-1)?.channel, 'playback:shared-texture-ready')
-  f.cpu({ ...binding, sequence: 1, width: 1, height: 1, stride: 64, size: 64, pixels: new Uint8Array(64) })
+  await f.cpu({ ...binding, sequence: 1, width: 1, height: 1, stride: 64, size: 64, pixels: new Uint8Array(64) })
   assert.equal(f.counts().draws, 1)
 })
 
-for (const options of [{ mainFrame: false }, { contextFails: true }]) test(`Mac CPU binding still rejects unsafe or missing drawing targets (${JSON.stringify(options)})`, () => {
+for (const options of [{ mainFrame: false }, { videoCreateFails: true }]) test(`Mac CPU binding still rejects unsafe or missing drawing targets (${JSON.stringify(options)})`, () => {
   const f = fixture({ platform: 'darwin', registerFails: true, ...options }), cpuToken = 'cpu:' + token
-  f.canvas.dataset.playbackSurface = cpuToken
+  f.canvas.dataset.playbackSurface = f.video.dataset.playbackSurface = cpuToken
   f.bind(cpuToken)
   assert.equal(f.messages.at(-1)?.channel, 'playback:shared-texture-failed')
   assert.equal(f.counts().draws, 0)
@@ -367,4 +401,81 @@ for (const probePixels of ['valid', 'black', 'throw'] as const) test('fixed prob
   assert.equal(result.channel, 'playback:shared-texture-self-test')
   assert.deepEqual(Array.from(result.data.samples), probePixels === 'valid' ? Array(5).fill([64, 191, 128, 255]).flat() : probePixels === 'black' ? Array(20).fill(0) : [])
   assert.deepEqual(f.counts(), { draws: 1, closes: 1, releases: 1, clears: 1 })
+})
+
+
+test('Mac video self-test uses the mounted consumer and releases its import normally', async () => {
+  const f = fixture({ platform: 'darwin', probePixels: 'valid' }), stop = f.bind(token)
+  await f.receive(1, undefined, { selfTest: 'solid-v1', timeline: 0 })
+  const result = f.messages.find(m => m.channel === 'playback:shared-texture-self-test')
+  assert.ok(result)
+  assert.deepEqual(Array.from(result.data.samples as number[]), Array.from({ length: 20 }, (_, i) => [64, 191, 128, 255][i % 4]))
+  assert.equal(f.video.style.opacity, '')
+  assert.equal(f.counts().closes, 1)
+  assert.equal(f.counts().releases, 1)
+  stop()
+  assert.equal(f.video.srcObject, null)
+})
+
+
+test('Mac CPU uses the mounted video and preserves row padding without allocating a Canvas context', async () => {
+  const f = fixture({platform: 'darwin'}), cpuToken = 'cpu:' + token
+  f.video.dataset.playbackSurface = cpuToken; const stop = f.bind(cpuToken)
+  const binding = f.messages.find(m => m.channel.endsWith('ready'))!.data
+  const pixels = new Uint8Array(128); pixels.set([255, 0, 0, 255]); pixels.set([0, 255, 0, 255], 64)
+  await f.cpu({...binding, sequence: 1, timeline: 0, width: 1, height: 2, stride: 64, size: 128, pixels})
+  assert.equal(pixels.byteLength, 0)
+  assert.equal(f.contextOptions.length, 0)
+  assert.equal(f.cpuVideoFrames.length, 1)
+  assert.equal(f.cpuVideoFrames[0].init.layout[0].stride, 64)
+  assert.deepEqual(Array.from(f.cpuVideoFrames[0].pixels.slice(64, 68)), [0, 255, 0, 255])
+  assert.equal(f.cpuVideoFrames[0].closed, 1)
+  assert.equal(f.messages.filter(m => m.channel === 'playback:cpu-frame-released').length, 1)
+  assert.equal(f.messages.filter(m => m.channel === 'playback:shared-texture-submitted').length, 1)
+  stop()
+})
+for (const unbind of [false, true]) test(`Mac CPU video cancellation returns credit without stale failure/submission (unbind: ${unbind})`, async () => {
+  let reject!: (reason: Error) => void
+  const f = fixture({platform: 'darwin', videoWriteWait: new Promise<void>((_resolve, fail) => {reject = fail})}), cpuToken = 'cpu:' + token
+  f.video.dataset.playbackSurface = cpuToken; const stop = f.bind(cpuToken)
+  const binding = f.messages.find(m => m.channel.endsWith('ready'))!.data
+  const pending = f.cpu({...binding, sequence: 1, timeline: 0, width: 1, height: 1, stride: 64, size: 64, pixels: new Uint8Array(64)})
+  await new Promise<void>(resolve => setImmediate(resolve))
+  assert.equal(f.cpuVideoFrames.length, 1)
+  if (unbind) stop()
+  else f.listeners.get('playback:frame-flush')!(null, {...binding, timeline: 1})
+  reject(new Error('old stream cancelled')); await pending
+  assert.equal(f.cpuVideoFrames[0].closed, 1)
+  assert.equal(f.messages.filter(m => m.channel === 'playback:cpu-frame-released').length, 1)
+  assert.equal(f.messages.filter(m => m.channel === 'playback:shared-texture-submitted').length, 0)
+  assert.equal(f.messages.filter(m => m.channel === 'playback:shared-texture-failed').length, 0)
+  stop()
+})
+test('Mac CPU video validates incoming memory before transferring it', async () => {
+  const f = fixture({platform: 'darwin'}), cpuToken = 'cpu:' + token
+  f.video.dataset.playbackSurface = cpuToken; const stop = f.bind(cpuToken)
+  const binding = f.messages.find(m => m.channel.endsWith('ready'))!.data, pixels = new Uint8Array(64)
+  await f.cpu({...binding, sequence: 1, width: 8193, height: 1, stride: 64, size: 64, pixels})
+  assert.equal(pixels.byteLength, 64); assert.equal(f.cpuVideoFrames.length, 0)
+  assert.equal(f.messages.filter(m => m.channel === 'playback:shared-texture-failed').length, 1)
+  assert.equal(f.messages.filter(m => m.channel === 'playback:cpu-frame-released').length, 1)
+  stop()
+})
+test('Mac CPU video preserves the producer timestamp while calibrating only its delivery wait', async () => {
+  const f = fixture({platform: 'darwin', clockShift: -5000}), cpuToken = 'cpu:' + token
+  f.video.dataset.playbackSurface = cpuToken; const stop = f.bind(cpuToken)
+  const binding = f.messages.find(m => m.channel.endsWith('ready'))!.data, due = performance.now() + 30
+  await f.cpu({...binding, sequence: 1, targetTime: due + 5000, timeline: 0, width: 1, height: 1, stride: 64, size: 64, pixels: new Uint8Array(64)})
+  assert.ok(Math.abs(f.cpuVideoFrames[0].init.timestamp - (due + 5000) * 1000) < 1000)
+  assert.ok(performance.now() >= due - 1)
+  stop()
+})
+
+test('Mac paused CPU frame preserves its producer render timestamp without a timed deadline', async () => {
+  const f = fixture({platform: 'darwin'}), cpuToken = 'cpu:' + token
+  f.video.dataset.playbackSurface = cpuToken; const stop = f.bind(cpuToken)
+  const binding = f.messages.find(m => m.channel.endsWith('ready'))!.data
+  await f.cpu({...binding, sequence: 1, targetTime: 0, renderStartUs: 1234567, width: 1, height: 1, stride: 64, size: 64, pixels: new Uint8Array(64)})
+  assert.equal(f.cpuVideoFrames[0].init.timestamp, 1234567)
+  stop()
 })

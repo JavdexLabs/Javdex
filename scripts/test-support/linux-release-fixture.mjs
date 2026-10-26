@@ -8,7 +8,7 @@ export const write = (root, name, bytes) => {
   fs.mkdirSync(path.dirname(path.join(root, name)), { recursive: true })
   fs.writeFileSync(path.join(root, name), typeof bytes === 'object' && !Buffer.isBuffer(bytes) ? JSON.stringify(bytes) : bytes)
 }
-export async function linuxReleaseFixture(root, version = JSON.parse(fs.readFileSync('package.json')).version) {
+export async function linuxReleaseFixture(root, version = JSON.parse(fs.readFileSync('package.json')).version, { compactAngle = false } = {}) {
   const project = path.join(root, 'project'), app = path.join(root, 'app'), output = path.join(root, 'release')
   for (const name of linuxPackagingFiles(process.cwd())) write(project, name, fs.readFileSync(name))
   write(project, 'package.json', { ...JSON.parse(fs.readFileSync(path.join(project, 'package.json'))), version })
@@ -21,6 +21,8 @@ export async function linuxReleaseFixture(root, version = JSON.parse(fs.readFile
   })
   write(project, 'build/playback-sources.json', { sdk, sources })
   const angleLock = JSON.parse(fs.readFileSync(path.join(project, 'build/angle-runtime.json')))
+  angleLock.electronVersion = sdk.electronVersion
+  write(project, 'build/angle-runtime.json', angleLock)
   const inventories = {}, archives = {}, inputs = {}
   for (const id of ['gpu', 'cpu', 'angle']) {
     const input = path.join(root, 'input-' + id), directory = path.join(app, linuxReleaseComponents[id].directory)
@@ -29,6 +31,16 @@ export async function linuxReleaseFixture(root, version = JSON.parse(fs.readFile
       for (const name of ['build/angle-runtime.json', 'build/angle-args.gn', 'scripts/build-linux-angle.py', 'build/patches/angle-x11-vulkan-visual.patch',
         ...Object.keys(angleLock.electronPatches).map(n => 'build/angle-electron-patches/' + n)]) write(input, 'recipe/' + name, fs.readFileSync(path.join(project, name)))
       for (const name of ['angle/LICENSE', 'angle/DEPS', 'angle/include/EGL/egl.h', 'angle/src/libANGLE/renderer/vulkan/linux/xcb/DisplayVkXcb.cpp']) write(input, name, 'preferred ' + name)
+      if (compactAngle) {
+        write(input, 'angle/third_party/fixture/LICENSE', 'dependency copyright and license')
+        write(input, 'gclient-config', 'fixed gclient config'); write(input, 'README.txt', 'ANGLE reconstruction requires network access')
+        const list = directory => fs.readdirSync(directory, { withFileTypes: true }).flatMap(entry => entry.isDirectory()
+          ? list(path.join(directory, entry.name)) : [path.relative(input, path.join(directory, entry.name)).split(path.sep).join('/')])
+        write(input, 'rebuild.json', { schemaVersion: 1, kind: 'angle-rebuild', electronVersion: sdk.electronVersion,
+          angle: { url: 'https://chromium.googlesource.com/angle/angle.git', revision: angleLock.angleRevision },
+          depotTools: { url: 'https://chromium.googlesource.com/chromium/tools/depot_tools.git', revision: angleLock.depotToolsRevision },
+          files: Object.fromEntries(list(input).map(name => [name, hash(path.join(input, name))])) })
+      }
       write(directory, 'libEGL.so', 'EGL'); write(directory, 'libGLESv2.so', 'GLES'); write(directory, 'ANGLE-LICENSE.txt', fs.readFileSync(path.join(input, 'angle/LICENSE')))
       inventories[id] = { schemaVersion: 1, electronVersion: sdk.electronVersion, angleRevision: angleLock.angleRevision,
         patchSha256: hash(path.join(project, 'build/patches/angle-x11-vulkan-visual.patch')), argsSha256: hash(path.join(project, 'build/angle-args.gn')),
@@ -52,7 +64,7 @@ export async function linuxReleaseFixture(root, version = JSON.parse(fs.readFile
     const archive = path.join(root, id + '.tar.gz')
     await createTar({ cwd: input, file: archive, gzip: true }, ['.'])
     archives[id] = archive
-    inventories[id].sourceBundle = { filename: path.basename(archive), sha256: hash(archive) }
+    inventories[id].sourceBundle = { ...(id === 'angle' && compactAngle ? { format: 'angle-rebuild-v1' } : {}), filename: path.basename(archive), sha256: hash(archive) }
     write(directory, linuxReleaseComponents[id].manifest, inventories[id])
   }
   write(app, 'AppRun', 'launcher'); write(app, 'resources/appimage-runtime.json', { runtime: 'fixture' })

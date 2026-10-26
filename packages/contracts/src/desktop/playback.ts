@@ -47,7 +47,7 @@ export interface PlaybackSnapshot {
   presentation: PlaybackPresentation
   presentationRevision: number
   phase: 'opening' | 'playing' | 'paused' | 'buffering' | 'ended' | 'error'
-  /** Shared Canvas generation. Never a locator or platform GPU handle. */
+  /** Shared display generation. Never a locator or platform GPU handle. */
   sharedTextureSurface?: string
   paused: boolean
   seeking: boolean

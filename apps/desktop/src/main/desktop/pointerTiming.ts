@@ -15,7 +15,7 @@ async function queryMacInterval(): Promise<string> {
 }
 
 export async function readPointerTiming(platform = process.platform, query = queryMacInterval): Promise<PointerTiming> {
-  // Electron 43 / Chromium 150 Aura constructs ui::MouseEvent on both Windows
+  // Electron 44 / Chromium 152 Aura constructs ui::MouseEvent on both Windows
   // and Linux. GetRepeatCount uses kDoubleClickTimeMs=500, not the OS setting.
   if (platform === 'linux' || platform === 'win32') return { doubleClickMs: 500, source: 'chromium' }
   if (platform === 'darwin') {

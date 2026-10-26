@@ -16,14 +16,18 @@
 
 硬件、驱动和操作系统可影响性能、实际硬解及系统集成方式。应用自身的播放模式、恢复规则、显示目标、字幕默认样式和诊断语义由共用层决定。能力探测描述当前设备和运行库的实际状态。
 
-继续保留共用的资源授权、播放会话、续播、音量、轨道、字幕和 Canvas 界面。平台底层保留必要的 D3D11/WGL、IOSurface/CGL、EGL/GBM/DMA-BUF，以及内存、句柄、FD、窗口和进程桥接实现。
+继续保留共用的资源授权、播放会话、续播、音量、轨道、字幕和 HTML 界面。平台底层保留必要的 D3D11/WGL、IOSurface/CGL、EGL/GBM/DMA-BUF，以及内存、句柄、FD、窗口和进程桥接实现。
+
+2026-10-26 补充：按用户确认升级 Electron 44.9.3，Mac GPU 改用原始 VideoFrame → MediaStreamTrackGenerator → video，去除正常 Canvas 缓存复制。此变更只替换显示消费者；共用时序、三槽租约、色彩、控制和恢复语义不变。具体前置条件和本机证据见 [接入记录](../reviews/macos-video-consumer-integration-2026-10-26.md)。
+
+2026-10-26 后续：CPU Canvas／video 配对比较后，按用户确认将 Mac CPU 接到相同 video 消费者，使用不透明 RGBX 与私有 IPC 缓冲区转移；仍为软件解码／软件绘制，并保留禁用 GPU 和故障接管。GPU 租约与 CPU 复制信用额度保持不同归还条件，详见 [接入记录](../reviews/macos-cpu-video-integration-2026-10-26.md)。
 
 ## 能力与行为合同
 
 | 能力 | 记录时的差异 | 统一目标 |
 | --- | --- | --- |
 | 播放模式 | `linuxPlaybackMode` 仅对 Linux 生效；Windows 还有启动参数，macOS 无独立 CPU 路径 | 三平台同一“自动 / GPU / CPU”设置及生效时机；未发布功能直接采用通用字段，不保留旧字段迁移 |
-| CPU 播放 | Windows/Linux 已有，Mac 端正在开发 | 三平台独立软件解码与绘制，使用同一软件渲染核心与 Canvas 接收合同 |
+| CPU 播放 | Windows/Linux 已有，Mac 端正在开发 | 三平台独立软件解码与绘制，使用同一软件渲染核心与显示绑定／像素输入合同；Mac video，Windows/Linux Canvas |
 | 故障恢复 | Windows/Linux 有不同状态机与重试范围，macOS 尚未接入 | 共用恢复状态机，统一进度、暂停意图、音量、静音、倍速、选轨、外挂与 AI 字幕恢复 |
 | 画面通路检查 | Linux 有固定合成色块自检，其他路径主要依赖错误信号 | 三平台统一检查协议、状态和失败处理；不根据任意影片的黑色内容判定通路损坏 |
 | 色彩与 HDR | GPU/CPU 算法不同，Linux GPU 色彩合同仍未完全明确 | HDR/SDR 输入统一转换到 BT.709 primaries / sRGB transfer / RGB full range 的 SDR 目标，使用同一映射规则和视觉误差判据 |
@@ -58,7 +62,7 @@ flowchart TD
     Win --> Frames["统一帧调度、传输与生命周期"]
     Mac --> Frames
     Linux --> Frames
-    Frames --> Canvas["统一 Canvas 接收与显示"]
+    Frames --> Display["统一显示绑定；Mac video，Windows/Linux Canvas"]
 ```
 
 - **PlaybackSession**：保留资源身份、来源授权、播放语义与业务副作用，不处理原生图形资源。
@@ -66,8 +70,8 @@ flowchart TD
 - **PlaybackHost**：统一启动、命令、状态、心跳、停止与异常退出合同。共用软件渲染和色彩代码；平台负责隔离进程及系统资源交接。
 - **通用内核适配**：`libmpvPlayback.ts` 保留通用命令与状态转换；拆出宿主工厂和生成字幕的选择权/异步确认管理。`MpvCore.initialize` 改为具名配置，共用层传入解码、时序及色彩策略。
 - **FramePipeline**：统一画面绑定、单调时钟、时间线、过期帧丢弃、背压、检查与诊断，提供明确的资源生命周期接口。
-- **系统适配**：提供资源描述、创建/导入/释放及必要的进程桥接。GPU 资源完成与释放条件继续受实际平台 API 约束；不把 Canvas 提交当作 GPU 已释放，也不强制回收状态未知的资源。
-- **Renderer/preload**：保留唯一 Canvas 与 HTML 控件体系，原始句柄、FD、地址、来源授权及任意 mpv 命令不进入公共 Renderer API。
+- **系统适配**：提供资源描述、创建/导入/释放及必要的进程桥接。GPU 资源完成与释放条件继续受实际平台 API 约束；不把显示提交当作 GPU 已释放，也不强制回收状态未知的资源。
+- **Renderer/preload**：保留同一显示绑定与 HTML 控件体系；Mac GPU／CPU 使用 video，Windows/Linux 使用 Canvas，原始句柄、FD、地址、来源授权及任意 mpv 命令不进入公共 Renderer API。
 
 Windows/macOS 的隔离宿主先验证跨进程帧资源交接和释放，再推广到正式路径。平台 API 差异由适配层吸收，产品恢复语义保持一致。
 

@@ -28,7 +28,7 @@ function fixture() {
     exports, setTimeout, clearTimeout, Uint8ClampedArray,
     VideoFrame: class {
       displayWidth: number; displayHeight: number; pixels: Uint8Array; closed = 0
-      constructor(pixels: Uint8Array, public init: {format: string; codedWidth: number; codedHeight: number; layout: Array<{offset: number; stride: number}>; timestamp: number; colorSpace: unknown; transfer: ArrayBuffer[]}) {
+      constructor(pixels: Uint8Array, public init: {format: string; codedWidth: number; codedHeight: number; layout: Array<{offset: number; stride: number}>; timestamp: number; colorSpace: unknown; transfer?: ArrayBuffer[]}) {
         this.displayWidth = init.codedWidth; this.displayHeight = init.codedHeight
         this.pixels = structuredClone(pixels, {transfer: init.transfer}); cpuFrames.push(this)
       }
@@ -67,16 +67,21 @@ test('video consumes the original frame without Canvas readback or claiming leas
   f.sink.dispose(); f.sink.dispose()
   assert.equal(f.counts().stopped, 1)
 })
-test('timeline reset invalidates an in-flight video submission and stops the old track', async () => {
+test('timeline reset invalidates an in-flight submission while preserving the visible stream', async () => {
   const f = fixture()
   let resume!: () => void
   f.hold(new Promise<void>(resolve => { resume = resolve }))
   const pending = f.sink.submit(frame(), () => true)
   await Promise.resolve()
-  f.sink.flush(); resume()
+  const stream = f.video.srcObject
+  f.present()
+  for (let n = 0; n < 20; n++) f.sink.flush()
+  resume()
   assert.equal(await pending, false)
-  assert.equal(f.counts().stopped, 1)
-  assert.equal(f.counts().aborted, 1)
+  assert.equal(f.video.srcObject, stream)
+  assert.equal(f.video.videoWidth, 640)
+  assert.equal(f.counts().stopped, 0)
+  assert.equal(f.counts().aborted, 0)
   f.hold()
   assert.equal(await f.sink.submit(frame(), () => true), true)
   f.sink.dispose()
@@ -125,11 +130,11 @@ test('normal-size film pixels cannot enter the bounded video probe readback', ()
 })
 
 
-test('CPU video transfers the strided input view, keeps opaque sRGB metadata and closes only its owned frame', async () => {
+test('CPU video copies padded rows to avoid the transferred RGB compositor channel swap', async () => {
   const f = fixture(), pixels = new Uint8Array(new ArrayBuffer(160), 32, 128)
   pixels.set([255, 0, 0, 255]); pixels.set([0, 255, 0, 255], 64)
   assert.equal(await f.sink.submitCpu({pixels, width: 1, height: 2, stride: 64, timestamp: 123456}, () => true), true)
-  assert.equal(pixels.buffer.byteLength, 0)
+  assert.equal(pixels.buffer.byteLength, 160)
   const owned = f.cpuFrames[0]
   assert.notEqual(f.writes[0], owned)
   assert.equal(owned.init.format, 'RGBX')
@@ -142,16 +147,16 @@ test('CPU video transfers the strided input view, keeps opaque sRGB metadata and
   f.sink.dispose()
 })
 test('stale CPU video work preserves its input ownership without allocating a frame', async () => {
-  const f = fixture(), pixels = new Uint8Array(64)
-  assert.equal(await f.sink.submitCpu({pixels, width: 1, height: 1, stride: 64, timestamp: 1}, () => false), false)
-  assert.equal(pixels.byteLength, 64); assert.equal(f.cpuFrames.length, 0)
+  const f = fixture(), pixels = new Uint8Array(4)
+  assert.equal(await f.sink.submitCpu({pixels, width: 1, height: 1, stride: 4, timestamp: 1}, () => false), false)
+  assert.equal(pixels.byteLength, 4); assert.equal(f.cpuFrames.length, 0)
   f.sink.dispose()
 })
 test('reset while a CPU video write is pending invalidates submission and closes the transferred frame', async () => {
   const f = fixture(); let resume!: () => void
   f.hold(new Promise<void>(resolve => { resume = resolve }))
-  const pixels = new Uint8Array(64)
-  const work = f.sink.submitCpu({pixels, width: 1, height: 1, stride: 64, timestamp: 1}, () => true)
+  const pixels = new Uint8Array(4)
+  const work = f.sink.submitCpu({pixels, width: 1, height: 1, stride: 4, timestamp: 1}, () => true)
   await new Promise<void>(resolve => setImmediate(resolve))
   assert.equal(f.cpuFrames.length, 1)
   f.sink.flush(); resume()
@@ -162,7 +167,7 @@ test('reset while a CPU video write is pending invalidates submission and closes
 test('CPU video write rejection still closes its transferred frame', async () => {
   const f = fixture(); let reject!: (reason: Error) => void
   f.hold(new Promise<void>((_resolve, fail) => { reject = fail }))
-  const work = f.sink.submitCpu({pixels: new Uint8Array(64), width: 1, height: 1, stride: 64, timestamp: 1}, () => true)
+  const work = f.sink.submitCpu({pixels: new Uint8Array(4), width: 1, height: 1, stride: 4, timestamp: 1}, () => true)
   const rejected = assert.rejects(work, /write failed/)
   await new Promise<void>(resolve => setImmediate(resolve)); reject(new Error('write failed'))
   await rejected
@@ -172,11 +177,11 @@ test('CPU video write rejection still closes its transferred frame', async () =>
 
 test('CPU video keeps one frame pending at the compositor and transfers the next buffer only after its callback', async () => {
   const f = fixture(); f.automatic(false)
-  const a = new Uint8Array(64), b = new Uint8Array(64)
-  const first = f.sink.submitCpu({pixels: a, width: 1, height: 1, stride: 64, timestamp: 1}, () => true)
-  const second = f.sink.submitCpu({pixels: b, width: 1, height: 1, stride: 64, timestamp: 2}, () => true)
+  const a = new Uint8Array(4), b = new Uint8Array(4)
+  const first = f.sink.submitCpu({pixels: a, width: 1, height: 1, stride: 4, timestamp: 1}, () => true)
+  const second = f.sink.submitCpu({pixels: b, width: 1, height: 1, stride: 4, timestamp: 2}, () => true)
   await new Promise<void>(resolve => setImmediate(resolve))
-  assert.equal(f.writes.length, 1); assert.equal(a.byteLength, 0); assert.equal(b.byteLength, 64)
+  assert.equal(f.writes.length, 1); assert.equal(a.byteLength, 0); assert.equal(b.byteLength, 4)
   f.present(1, 1); assert.equal(await first, true)
   await new Promise<void>(resolve => setImmediate(resolve))
   assert.equal(f.writes.length, 2); assert.equal(b.byteLength, 0)
@@ -189,7 +194,7 @@ test('CPU compositor backpressure tolerates a short stall within the existing co
   t.mock.timers.enable({apis: ['setTimeout']})
   const f = fixture(); f.automatic(false)
   let result = 'pending'
-  const work = f.sink.submitCpu({pixels: new Uint8Array(64), width: 1, height: 1, stride: 64, timestamp: 1}, () => true)
+  const work = f.sink.submitCpu({pixels: new Uint8Array(4), width: 1, height: 1, stride: 4, timestamp: 1}, () => true)
   void work.then(() => { result = 'submitted' }, () => { result = 'failed' })
   await new Promise<void>(resolve => setImmediate(resolve))
   assert.equal(f.writes.length, 1)

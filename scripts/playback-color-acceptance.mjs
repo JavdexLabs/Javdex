@@ -144,9 +144,14 @@ try {
       }
       check.maxPhaseDrift = Math.max(check.maxPhaseDrift ?? 0, drift)
       assert(drift <= 3, 'pause/seek/viewport changed the HDR brightness')
-      for (let primary = 0; primary < (fixture.shape === 'uniform' ? 0 : 3); primary++) {
-        const rgb = sample.colors[primary]
-        assert(rgb[primary] > 70 && rgb[primary] > Math.max(...rgb.filter((_, c) => c !== primary)) + 50, 'primary hue lost')
+      for (const source of [sample, sample.compositor]) {
+        // ICC conversion can move byte values, but cannot legitimately exchange
+        // red and blue. Canvas-only checks miss Chromium's padded RGB upload bug.
+        for (let primary = 0; primary < (fixture.shape === 'uniform' ? 0 : 3); primary++) {
+          const rgb = source.colors[primary]
+          assert(rgb[primary] > 70 && rgb[primary] > Math.max(...rgb.filter((_, c) => c !== primary)) + 50,
+            source === sample ? 'Canvas primary hue lost' : 'Compositor primary hue lost')
+        }
       }
     }
     if (mode === 'recovery') {

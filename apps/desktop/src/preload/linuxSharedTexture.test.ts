@@ -420,22 +420,25 @@ for (const platform of ['darwin', 'linux'] as const) test(`${platform} video sel
 })
 
 
-test('Mac CPU uses the mounted video and preserves row padding without allocating a Canvas context', async () => {
-  const f = fixture({platform: 'darwin'}), cpuToken = 'cpu:' + token
-  f.video.dataset.playbackSurface = cpuToken; const stop = f.bind(cpuToken)
-  const binding = f.messages.find(m => m.channel.endsWith('ready'))!.data
-  const pixels = new Uint8Array(128); pixels.set([255, 0, 0, 255]); pixels.set([0, 255, 0, 255], 64)
-  await f.cpu({...binding, sequence: 1, timeline: 0, width: 1, height: 2, stride: 64, size: 128, pixels})
-  assert.equal(pixels.byteLength, 0)
-  assert.equal(f.contextOptions.length, 0)
-  assert.equal(f.cpuVideoFrames.length, 1)
-  assert.equal(f.cpuVideoFrames[0].init.layout[0].stride, 64)
-  assert.deepEqual(Array.from(f.cpuVideoFrames[0].pixels.slice(64, 68)), [0, 255, 0, 255])
-  assert.equal(f.cpuVideoFrames[0].closed, 1)
-  assert.equal(f.messages.filter(m => m.channel === 'playback:cpu-frame-released').length, 1)
-  assert.equal(f.messages.filter(m => m.channel === 'playback:shared-texture-submitted').length, 1)
-  stop()
-})
+for (const platform of ['darwin', 'linux'] as const) for (const stride of [4, 64])
+  test(`${platform} CPU video preserves pixels and credit with stride ${stride} without a Canvas context`, async () => {
+    const f = fixture({platform}), cpuToken = 'cpu:' + token
+    f.video.dataset.playbackSurface = cpuToken; const stop = f.bind(cpuToken)
+    const binding = f.messages.find(m => m.channel.endsWith('ready'))!.data
+    const size = stride * 2, pixels = new Uint8Array(size)
+    pixels.set([255, 0, 0, 255]); pixels.set([0, 255, 0, 255], stride)
+    await f.cpu({...binding, sequence: 1, timeline: 0, width: 1, height: 2, stride, size, pixels})
+    assert.equal(pixels.byteLength, stride === 4 ? 0 : size, 'only tightly packed IPC buffers transfer ownership')
+    assert.equal(f.contextOptions.length, 0)
+    assert.equal(f.cpuVideoFrames.length, 1)
+    assert.equal(f.cpuVideoFrames[0].init.layout[0].stride, stride)
+    assert.deepEqual(Array.from(f.cpuVideoFrames[0].pixels.slice(0, 4)), [255, 0, 0, 255])
+    assert.deepEqual(Array.from(f.cpuVideoFrames[0].pixels.slice(stride, stride + 4)), [0, 255, 0, 255])
+    assert.equal(f.cpuVideoFrames[0].closed, 1)
+    assert.equal(f.messages.filter(m => m.channel === 'playback:cpu-frame-released').length, 1)
+    assert.equal(f.messages.filter(m => m.channel === 'playback:shared-texture-submitted').length, 1)
+    stop()
+  })
 for (const unbind of [false, true]) test(`Mac CPU video cancellation returns credit without stale failure/submission (unbind: ${unbind})`, async () => {
   let reject!: (reason: Error) => void
   const f = fixture({platform: 'darwin', videoWriteWait: new Promise<void>((_resolve, fail) => {reject = fail})}), cpuToken = 'cpu:' + token

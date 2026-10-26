@@ -5,7 +5,7 @@ declare const VideoFrame: new (pixels: Uint8Array, options: {
   format: 'RGBX'; codedWidth: number; codedHeight: number
   layout: Array<{ offset: number; stride: number }>; timestamp: number
   colorSpace: { primaries: 'bt709'; transfer: 'iec61966-2-1'; matrix: 'rgb'; fullRange: true }
-  transfer: ArrayBuffer[]
+  transfer?: ArrayBuffer[]
 }) => VideoFrameSource & { close(): void }
 interface TrackWriter {
   write(frame: VideoFrameSource): Promise<void>
@@ -50,10 +50,13 @@ export function createSharedTextureVideo(video: SharedVideoSurface, fail: () => 
   let cpuReady: Promise<void> = Promise.resolve()
   const observations = new Set<() => void>()
   const opacity = video.style.opacity
-  const clear = (): void => {
-    generation++; started = false
+  const invalidate = (): void => {
+    generation++
     for (const cancel of observations) cancel()
     observations.clear()
+  }
+  const clear = (): void => {
+    invalidate(); started = false
     const previous = writer
     writer = undefined
     // Aborting a queued write is cancellation, not a GPU release signal.
@@ -161,13 +164,15 @@ export function createSharedTextureVideo(video: SharedVideoSurface, fail: () => 
         await probe
         if (!active || !current()) return false
         const epoch = generation
-        // Main already copied these pixels. Transfer only this private IPC buffer,
-        // never the producer's pool or a shared GPU allocation. CPU output is opaque.
+        // Chromium's transferred, padded RGBX path displays red/blue swapped
+        // although Canvas readback is correct. Let VideoFrame normalize padded
+        // rows by copying; tightly packed private IPC buffers remain transferable.
+        // Never transfer the producer's pool or a shared GPU allocation.
         const frame = new VideoFrame(source.pixels, {
           format: 'RGBX', codedWidth: source.width, codedHeight: source.height,
           layout: [{ offset: 0, stride: source.stride }], timestamp: source.timestamp,
           colorSpace: { primaries: 'bt709', transfer: 'iec61966-2-1', matrix: 'rgb', fullRange: true },
-          transfer: [source.pixels.buffer as ArrayBuffer]
+          ...(source.stride === source.width * 4 ? { transfer: [source.pixels.buffer as ArrayBuffer] } : {})
         })
         try {
           await writeObserved(frame, () => active && generation === epoch && current(), 5000)
@@ -197,7 +202,13 @@ export function createSharedTextureVideo(video: SharedVideoSurface, fail: () => 
       finally { if (probe === barrier) probe = undefined }
     },
     pixels,
-    flush(): void { if (active) reset() },
+    flush(): void {
+      if (!active) return
+      // A timeline change cancels stale work, but keeps the last film frame on
+      // screen until its replacement arrives. Recreating srcObject flashes black.
+      // A synthetic probe is hidden and must still be removed completely.
+      if (probe) reset(); else invalidate()
+    },
     dispose(): void {
       if (!active) return
       active = false; video.removeEventListener('error', error); clear()

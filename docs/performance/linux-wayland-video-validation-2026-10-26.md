@@ -73,3 +73,28 @@
 性能重现入口为 `scripts/linux-playback-profile.mjs`，video 设置 `JAVDEX_PROFILE_VIDEO=1`；完整命令、环境、逐秒采样、截图和失败记录见证据目录中的 `run-matrix.py`、`run-followup.py` 及各 report。色彩最终命令使用 `scripts/playback-color-acceptance.mjs color-fixtures-r2 gpu --javdex-wayland [--javdex-linux-video]`，并通过 `JAVDEX_PLAYBACK_ACCEPTANCE_EXECUTABLE` 指向包内 AppRun、`JAVDEX_PLAYBACK_ACCEPTANCE_OUTPUT` 指向新的绝对输出目录。
 
 仍未验证：真实物理扫描时刻、耳听／口型同步、原生 HDR、其它 Linux 机器、原生 Xorg、AMD／Intel 直接 video 消费及 macOS 原生运行。既有 Intel 直接硬解失败、CPU 4K 性能和更长时间压力测试不由这次首帧修复宣告解决。
+
+## 2026-10-27：连续跳转闪黑与 CPU 红蓝互换回归
+
+用户截图确认 CPU 肤色及木色桌面变蓝，GPU 正常。补充窗口输出断言后发现此前 Canvas 色彩数值通过不能证明 video 合成色彩正确。
+
+- 跳转：旧 `flush()` 每次停止轨道、清空 `srcObject` 并 `load()`，使连续跳转反复暴露空画面。现在只推进 generation 并取消旧观察任务，保留流和最后画面；隐藏自检、解绑和停止仍完全清理。租约释放条件不变。
+- 色彩：本机 Electron 44.9.3 / Chromium 152 最小 RGBX/RGBA 对照中，1920×1080 紧密排列正常；2070×1060、stride 8320 的填充布局在 `transfer` 时窗口输出红蓝互换，而 Canvas 读回仍正确。同一填充布局关闭 transfer 即正常。CPU 仅对填充行采用 VideoFrame 自身复制规范化，紧密排列继续转移私有 IPC 缓冲区；不交换源通道，不改变 GPU 输出。
+- 回归入口：`playback-color-acceptance.mjs` 除精确 sRGB Canvas 数值外，也验证窗口截图三原色的主通道；新增 `playback-seek-continuity-acceptance.mjs` 在播放及暂停时连续跳转，直接采样窗口，不经过 Canvas 读回。
+
+证据目录：`out/linux-seek-color-20261027/`。旧包为 `dist/linux-intel-fd-fix-20261027/`，新包为 `dist/linux-seek-color-fix-20261027/`，均保留。
+
+| 检查 | 结果 |
+|---|---|
+| 旧包 CPU 连续跳转 | 122 次截图中 61 次黑帧；初版脚本直接在播放中退出触发强制结束，不能算完整通过 |
+| 新包 Wayland CPU / GPU 连续跳转 | 各 122 次截图，均 0 黑帧，恢复播放并停止后正常退出 |
+| 新包 XWayland CPU / GPU 连续跳转 | 各 122 次截图，均 0 黑帧，恢复播放并停止后正常退出 |
+| 新包 Wayland CPU、XWayland CPU、Wayland GPU 色彩 | 每组 5 种 SDR/HDR 样片 × 8 种状态，共 120 个检查点；Canvas 数值及窗口三原色均通过 |
+| 单元与静态检查 | 60 项播放测试通过，类型检查、修改文件 ESLint、像素数学测试及桌面架构检查通过 |
+| 包校验 | FD 桥、私有通道拒绝、GPU/CPU 两份 libmpv PCM EOF 及运行库/源码材料校验通过 |
+
+新 AppImage SHA256：`35479a83752b96120f0d134407a36c43ab1a335217725099819943a9390196cf`。本次未更改原生 helper 或 libmpv。截图是合成输出证据，不是物理扫描输出；抽样不能排除比采样间隔更短的闪烁。用户截图对应的远程原片未由自动化重放，Windows/macOS 和其它显卡/桌面环境未在本轮实测。
+
+最终 AppImage 直接启动后的 CPU 持续播放复验见 `profile-cpu-appimage-r2/measurement/report.json`：1080p60 合成源、3840×2160 实际输出，60 秒时钟前进 60.117 秒，窗口截图确认有颜色及运动，停止后租约清空、正常退出。吞吐约 23.70 帧/秒、libmpv 丢帧计数增加 426；这不是 4K60 流畅通过，仍属于已接受的 CPU 高分辨率性能边界。首轮虽播放满 60 秒，但截图目标在测试输出根之外被脚本拒绝，且退出被强制终止，保留为失败记录，不替代上述重跑结果。主进程和 preload 的打包内容与本次 `out/` 构建逐字节相同。
+
+提交前审查补齐 Mac/Linux × 紧密/填充布局的接收方集成测试，验证像素、转移所有权和 CPU 信用额度；修正一条仍要求填充缓冲区必须转移的旧测试断言。全仓库 `npm test` 的边界、Lint、类型、打包/播放构建等检查通过；首轮 Electron 测试仅该旧断言失败，更新后完整重跑 4619 项：4592 通过、27 跳过、0 失败。测试文件改动后 Node 类型与 ESLint 复检通过。日志分别为 `final-review-npm-test.log`、`final-review-electron-r2.log`、`final-review-typecheck-r2.log`、`final-review-test-lint.log`；本轮审查未再改变应用运行代码，已验收安装包仍有效。

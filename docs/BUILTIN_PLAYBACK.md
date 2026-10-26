@@ -37,7 +37,7 @@ Linux 默认复用 video 消费者，移除 Canvas 消费入口与 `--javdex-lin
 
 三平台采用同一“自动 / GPU / CPU 兼容”设置，在重新打开影片时应用。自动模式优先 GPU，图形初始化、自检或可检测运行故障最多触发一次 CPU 恢复；GPU 模式失败直接报告错误；CPU 模式使用软件解码和 libmpv 软件绘制，显示合成由 Chromium 执行。显式选择 GPU 后重开可重新探测。`--javdex-cpu` 可强制使用 CPU（`--` 后不生效）。未发布设置直接使用 `playbackRenderMode`，不读取或迁移旧平台专属字段。
 
-CPU 使用 `hwdec=no`、libmpv SW Render API 和 opaque RGBA，preload 在 Mac/Linux 将私有 IPC 像素缓冲区按真实 stride 转移给 opaque `RGBX VideoFrame`，使用同一 video 消费者；Windows 继续通过新建的软件 Canvas 的 `putImageData` 绘制。不创建播放端 GL context 或 D3D 设备；Mac video 在禁用 Chromium GPU 时仍可使用软件合成。三平台共用实际物理尺寸 `round(逻辑尺寸 × 缩放)`，不额外降至 1080p；保留缩放不超过 8、单边 8192、单帧 256MiB 的安全边界。Windows/macOS 复制帧最多两帧在途，复制信用额度跨宿主和接收方共同约束；Linux 沿用三个槽位的有界 memfd／ACK 传输池。
+CPU 使用 `hwdec=no`、libmpv SW Render API 和 opaque RGBA，preload 在 Mac/Linux 将私有 IPC 像素缓冲区按真实 stride 包装为 opaque `RGBX VideoFrame`；紧密排列时转移私有缓冲区，存在行尾填充时由 VideoFrame 复制规范化，避开 Chromium 转移带填充 RGB 帧时窗口输出红蓝互换的问题，使用同一 video 消费者；Windows 继续通过新建的软件 Canvas 的 `putImageData` 绘制。不创建播放端 GL context 或 D3D 设备；Mac video 在禁用 Chromium GPU 时仍可使用软件合成。三平台共用实际物理尺寸 `round(逻辑尺寸 × 缩放)`，不额外降至 1080p；保留缩放不超过 8、单边 8192、单帧 256MiB 的安全边界。Windows/macOS 复制帧最多两帧在途，复制信用额度跨宿主和接收方共同约束；Linux 沿用三个槽位的有界 memfd／ACK 传输池。
 
 `PlaybackEngine` 复用当前已授权来源，恢复位置、暂停意图、音量、静音、倍速、音轨、外挂字幕和 AI 时间轴；恢复中的新控制意图优先，停止或换片取消旧恢复。媒体、授权、音频和页面错误不触发图形回退；软件解码与 CPU 画面输出分别报告。未知 GPU 租约不强行回收，迟到回调继续归属原宿主与资源代。
 
@@ -51,7 +51,7 @@ Windows/macOS 的 libmpv、GL 和软件生产者运行在独立 utility process�
 
 GPU/CPU 均以 BT.709 primaries、sRGB transfer、RGB full-range 的 8-bit SDR 为显示目标，参考白为 203nit，HDR 采用固定元数据和 BT.2390，不启用动态峰值统计。CPU 在解码后、字幕合成前进行色彩转换，避免改变字幕颜色；不依赖 GL 或额外色彩运行库。缺失 PQ 亮度元数据按共同默认值处理。共同色彩验收入口为 `scripts/playback-color-fixtures.mjs` 与 `scripts/playback-color-acceptance.mjs`，GPU/CPU 输出允许最多 4 个字节值差异；截图不证明物理 HDR 输出或显示器校准。
 
-普通 BT.709 SDR 不需要色域或色调映射时，CPU 采用 16-bit 平面 RGB 每通道查表，避免在最终软件缩放及输出前重复量化；查表线程不超过可用逻辑核的一半且最多四个，给解码、缩放和界面留出资源。HDR 和其他色域继续使用 RGB16/四面体三维转换。软件画面按同一 bilinear 策略配置 swscale 与可用的 zimg，保留实际物理视口及帧内存上界。色彩数值验收读取显示器色彩转换前的 sRGB Canvas，窗口截图另行留存；两种取像来源不能混作同一比较基准。最终输出为 8-bit，低于一个字节值的参考灰阶允许量化为同一值；仍检查灰阶顺序、可分辨层次及原像素误差门槛。
+普通 BT.709 SDR 不需要色域或色调映射时，CPU 采用 16-bit 平面 RGB 每通道查表，避免在最终软件缩放及输出前重复量化；查表线程不超过可用逻辑核的一半且最多四个，给解码、缩放和界面留出资源。HDR 和其他色域继续使用 RGB16/四面体三维转换。软件画面按同一 bilinear 策略配置 swscale 与可用的 zimg，保留实际物理视口及帧内存上界。色彩数值验收读取显示器色彩转换前的 sRGB Canvas，窗口截图同时断言三原色主通道，防止 Canvas 正常而合成输出红蓝互换；两种取像来源不能混作同一比较基准。最终输出为 8-bit，低于一个字节值的参考灰阶允许量化为同一值；仍检查灰阶顺序、可分辨层次及原像素误差门槛。
 
 帧绑定与时钟交换由 `frameEndpoint.ts` 统一认证主 frame；预算和已知色块自检由共用模块处理。自检通过真实纹理及实际显示通道采样固定 640×360 色块（Mac GPU 为 video，其余为 Canvas），不检查任意影片的黑色内容。异步复制中的帧保留独立时间信息，切换时间轴不能清零待发送帧的时间戳。应用生成字幕采用系统默认字体（`sans-serif`）；外挂 ASS 和内嵌字体保留片源样式。
 
@@ -70,7 +70,7 @@ Windows 私有诊断包括生产端 DXGI 名称／vendor／device／LUID、选�
 
 macOS 正常构建和启动默认使用共享纹理 video 消费者，无需试验参数；旧 NSOpenGLView 显示后端及其原生全屏控件已移除。GPU 路径的 `playback.node` 在隔离宿主以 CGL/OpenGL 把 libmpv 输出写入三槽 IOSurface，`hwdec=auto` 保持原策略；独立 `software` 导出提供 CPU 回退，不使用 Linux DMA-BUF 或原生子窗口。资源互操作模块先接收 Mach right 并获取本进程 IOSurfaceRef，Electron 再在主进程导入，随后用公开的 `SharedTextureImportedSubtle` 转移对象交给隔离 preload；原始指针不进入应用 JSON、页面或共用播放合同。video、全屏、键盘、滑杆与焦点使用现有 HTML 面板。
 
-Mac CPU 的 `VideoFrame` 构造只转移 main 已复制到 preload 的私有 ArrayBuffer，原生帧池不进入 video。消费或丢弃后归还 CPU 复制信用额度；帧本身由消费端关闭，其转移内存随浏览器引用释放。跳转或解绑取消旧写入，迟到完成不能提交旧时间轴，也不能误报新显示失败。GPU 的租约仍等待真实 GPU 完成及 `allReferencesReleased`，不能与 CPU 信用额度混用。接入与本机边界见 [CPU video 记录](reviews/macos-cpu-video-integration-2026-10-26.md)。
+Mac CPU 的 `VideoFrame` 构造在紧密排列时只转移 main 已复制到 preload 的私有 ArrayBuffer，带填充行采用复制，原生帧池不进入 video。消费或丢弃后归还 CPU 复制信用额度；帧本身由消费端关闭，其转移内存随浏览器引用释放。跳转或解绑取消旧写入，迟到完成不能提交旧时间轴，也不能误报新显示失败。GPU 的租约仍等待真实 GPU 完成及 `allReferencesReleased`，不能与 CPU 信用额度混用。接入与本机边界见 [CPU video 记录](reviews/macos-cpu-video-integration-2026-10-26.md)。
 
 Mac CPU video 保留生产者的单调时间戳，只有交付等待转换到页面时钟；提交按实际视频帧回调串行背压，避免本地 MediaStream 突发写入覆盖尚未呈现的帧。CPU 消费等待沿用复制通道的五秒预算，GPU 固定色块自检仍为 1.5 秒。视频帧回调仅用于 CPU 消费背压，不代表物理扫描输出或 GPU 资源最终释放。
 
@@ -78,7 +78,7 @@ Mac video 的固定色块自检仍通过实际挂载的显示元素：暂时隐�
 
 该 addon 只允许宿主的 Node 主线程初始化。mpv 的帧通知与非视频事件经长度为一的非阻塞队列合并唤醒该线程，几何、可见性、时间线变化及租约归还也能唤醒；mpv 回调不执行 JS 或 GL。250ms 兜底继续处理故障、背压及事件，正常 200ms 状态观察保留，但不再为这个自驱动后端另设 16ms 渲染检查。兜底不是视频帧率上限，字幕、暂停 seek 和隐藏时的 skip 仍由正常内核处理。
 
-GPU 生产端必须确认实际完成后交付：Windows／macOS／Linux 均使用 `glFinish` 确认渲染完成。Windows 的 Canvas2D 使用 `copy` 覆盖，解绑清理 backing store；Mac/Linux GPU／CPU 在 preload 将 VideoFrame 写入 MediaStreamTrackGenerator，GPU 使用原始导入帧，CPU 使用转移后的像素帧，video 使用独立视频合成通路，不经过正常 Canvas 缓存绘制。暂停仍显示最后一帧；换时间轴、解绑和停止重置流并停止旧轨道。消费端关闭 VideoFrame 后，从 `subtle.release` 的 GPU 完成回调确认释放；main 再释放源引用，最后在 `allReferencesReleased` 中归还原生租约。提交回执、`drawImage`、writer.write 或视频呈现回调、转移消息已发送都不能提前复用槽位。窗口正常停止仍接收迟到释放；交付结果不明时隔离最多三张未确认表面，最终由应用退出清理。可检测图形故障可在保留原 GPU 租约的同时切换独立 CPU 输出；renderer 页面关闭不触发回退，不能靠软件模式恢复已经消失的页面。
+GPU 生产端必须确认实际完成后交付：Windows／macOS／Linux 均使用 `glFinish` 确认渲染完成。Windows 的 Canvas2D 使用 `copy` 覆盖，解绑清理 backing store；Mac/Linux GPU／CPU 在 preload 将 VideoFrame 写入 MediaStreamTrackGenerator，GPU 使用原始导入帧，CPU 使用私有像素帧，video 使用独立视频合成通路，不经过正常 Canvas 缓存绘制。暂停仍显示最后一帧；换时间轴取消旧观察及待提交任务，保留同一流和最后画面等待新帧，避免连续跳转闪黑；仍在自检时重置隐藏测试流。解绑和停止重置流并停止旧轨道。消费端关闭 VideoFrame 后，从 `subtle.release` 的 GPU 完成回调确认释放；main 再释放源引用，最后在 `allReferencesReleased` 中归还原生租约。提交回执、`drawImage`、writer.write 或视频呈现回调、转移消息已发送都不能提前复用槽位。窗口正常停止仍接收迟到释放；交付结果不明时隔离最多三张未确认表面，最终由应用退出清理。可检测图形故障可在保留原 GPU 租约的同时切换独立 CPU 输出；renderer 页面关闭不触发回退，不能靠软件模式恢复已经消失的页面。
 
 macOS 输出固定为 8-bit BGRA、opaque、BT.709 primaries／sRGB transfer／RGB full range，并将相同标记交给 Electron。CPU 的 RGBA 字节按不透明 `RGBX` 包装，明确设置 BT.709 primaries／sRGB transfer／RGB full range；GPU video 保留导入帧的相同标记。HDR 由 libmpv 映射到该 SDR 目标，不提供 HDR 直通或广色域保证。原生生产者仍是 OpenGL；Chromium 的 ANGLE Metal 消费后端不代表 IOSurface 本身是 Metal，也不证明全链路零拷贝或物理扫描输出。旧 Canvas 与原生视图的对照保留在 [历史正式化记录](reviews/macos-canvas-default-2026-10-23.md)。当前 video 接入、Electron 44.9.3 前置条件和实际验证边界见 [接入记录](reviews/macos-video-consumer-integration-2026-10-26.md)，构建与验证入口见[开发指南](DEVELOPMENT.md#内置播放运行库)。
 

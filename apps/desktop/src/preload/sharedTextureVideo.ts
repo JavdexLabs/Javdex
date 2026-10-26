@@ -1,5 +1,5 @@
 // Structural DOM types keep the sandbox preload independent of the full DOM lib.
-export interface VideoFrameSource { displayWidth: number; displayHeight: number }
+export interface VideoFrameSource { displayWidth: number; displayHeight: number; clone(): VideoFrameSource; close(): void }
 export interface CpuVideoSource { pixels: Uint8Array; width: number; height: number; stride: number; timestamp: number }
 declare const VideoFrame: new (pixels: Uint8Array, options: {
   format: 'RGBX'; codedWidth: number; codedHeight: number
@@ -44,14 +44,14 @@ declare const document: { createElement(name: 'canvas'): {
  * its frames and releases Electron imports; neither write nor presentation
  * completion returns a native GPU texture lease. */
 export function createSharedTextureVideo(video: SharedVideoSurface, fail: () => void) {
-  let active = true, generation = 0
+  let active = true, generation = 0, started = false
   let track: VideoTrack | undefined, writer: TrackWriter | undefined
   let probe: Promise<void> | undefined
   let cpuReady: Promise<void> = Promise.resolve()
   const observations = new Set<() => void>()
   const opacity = video.style.opacity
   const clear = (): void => {
-    generation++
+    generation++; started = false
     for (const cancel of observations) cancel()
     observations.clear()
     const previous = writer
@@ -93,6 +93,37 @@ export function createSharedTextureVideo(video: SharedVideoSurface, fail: () => 
     })
     return { promise, cancel }
   }
+  // TrackGenerator.write consumes its JS frame, but does not wait for the
+  // asynchronously connected video sink. A lone startup/paused frame can be
+  // discarded before that sink exists. Retry references to the same pixels only
+  // until the first compositor observation, within the existing deadline.
+  // Clones retain the import: this is not permission to reuse its native slot.
+  const writeObserved = async (frame: VideoFrameSource, current: () => boolean, timeoutMs: number): Promise<void> => {
+    const epoch = generation, owner = writer!, retry = !started
+    const observed = observe(timeoutMs)
+    let presented = false
+    const completion = observed.promise.then(() => { presented = true })
+    // Attach immediately: cancellation may occur while a writer is pending.
+    void completion.catch(() => {})
+    try {
+      do {
+        if (!active || generation !== epoch || !current()) throw new Error('Video frame observation cancelled')
+        const reference = frame.clone()
+        try {
+          const written = owner.write(reference)
+          await Promise.race([written, completion.then(() => written)])
+        }
+        finally { reference.close() }
+        if (!retry) break
+        let timer: ReturnType<typeof setTimeout> | undefined
+        try {
+          await Promise.race([completion, new Promise<void>(resolve => { timer = setTimeout(resolve, 32) })])
+        } finally { clearTimeout(timer) }
+      } while (!presented)
+      await completion
+      if (active && generation === epoch && current()) started = true
+    } finally { observed.cancel() }
+  }
   const pixels = (width: number, height: number): Uint8ClampedArray => {
     if (width !== 640 || height !== 360 || video.videoWidth !== width || video.videoHeight !== height)
       throw new Error('Invalid video diagnostic dimensions')
@@ -111,7 +142,12 @@ export function createSharedTextureVideo(video: SharedVideoSurface, fail: () => 
     await probe
     if (!active || !current()) return false
     const epoch = generation, owner = writer!
-    await owner.write(frame)
+    try {
+      await owner.write(frame)
+    } catch (reason) {
+      if (!active || generation !== epoch || !current()) return false
+      throw reason
+    }
     return active && generation === epoch && current()
   }
   return {
@@ -133,19 +169,13 @@ export function createSharedTextureVideo(video: SharedVideoSurface, fail: () => 
           colorSpace: { primaries: 'bt709', transfer: 'iec61966-2-1', matrix: 'rgb', fullRange: true },
           transfer: [source.pixels.buffer as ArrayBuffer]
         })
-        let observed: ReturnType<typeof observe> | undefined
         try {
-          // Local MediaStreams replace their current frame immediately. Bound
-          // CPU writes to one compositor callback so a burst cannot overwrite
-          // an unseen frame. This is backpressure, not GPU lease completion.
-          // Match the copied-frame transport's five-second consumer budget.
-          observed = observe(5000)
-          const [accepted] = await Promise.all([submit(frame, current), observed.promise])
-          return accepted && active && generation === epoch && current()
+          await writeObserved(frame, () => active && generation === epoch && current(), 5000)
+          return active && generation === epoch && current()
         } catch (reason) {
           if (!active || generation !== epoch || !current()) return false
           throw reason
-        } finally { observed?.cancel(); frame.close() }
+        } finally { frame.close() }
       } finally { release() }
     },
     async selfTest(frame: VideoFrameSource, current: () => boolean): Promise<number[]> {
@@ -154,10 +184,7 @@ export function createSharedTextureVideo(video: SharedVideoSurface, fail: () => 
       // Exercise the mounted video route without flashing the synthetic frame.
       video.style.opacity = '0'
       const operation = (async () => {
-        const observed = observe()
-        // Attach the cancellation handler before a write can reject.
-        try { await Promise.all([writer!.write(frame), observed.promise]) }
-        finally { observed.cancel() }
+        await writeObserved(frame, current, 1500)
         if (!active || generation !== epoch || !current()) return []
         const data = pixels(640, 360), samples: number[] = []
         for (const [x, y] of [[80, 45], [559, 45], [320, 180], [80, 314], [559, 314]])

@@ -133,7 +133,7 @@ export function playbackSourcePlan({ platform, arch, source, build, prefix, tool
       win32: ['-Dwin32-threads=enabled', '-Dgl-win32=enabled', '-Dwasapi=enabled', '-Dd3d-hwaccel=enabled', '-Dd3d9-hwaccel=enabled', '-Degl-angle=enabled', '-Degl-angle-lib=disabled', '-Degl-angle-win32=disabled'],
       linux: linuxProfile === 'software'
         ? ['-Dcuda-hwaccel=disabled', '-Dcuda-interop=disabled', '-Dpulse=enabled', '-Dalsa=disabled', '-Dx11=disabled', '-Dgl-x11=disabled', '-Dvaapi=disabled', '-Dvaapi-x11=disabled', '-Dvaapi-drm=disabled']
-        : ['-Dcuda-hwaccel=enabled', '-Dcuda-interop=enabled', '-Dpulse=enabled', '-Dalsa=disabled', '-Dx11=disabled', '-Dgl-x11=disabled', '-Dvaapi=enabled', '-Dvaapi-x11=disabled', '-Dvaapi-drm=enabled'] }[platform])], 'shared')
+        : ['-Degl=enabled', '-Dcuda-hwaccel=enabled', '-Dcuda-interop=enabled', '-Dpulse=enabled', '-Dalsa=disabled', '-Dx11=disabled', '-Dgl-x11=disabled', '-Dvaapi=enabled', '-Dvaapi-x11=disabled', '-Dvaapi-drm=enabled'] }[platform])], 'shared')
   return steps
 }
 
@@ -173,6 +173,15 @@ export function playbackLinuxVaapiRenderDependency(text) {
   return text.replace(before, "get_option('vaapi-drm').require(libva.found())")
 }
 
+// EGL DMA-BUF mapping needs DRM format headers, not the KMS output backend.
+// With auto_features=disabled, the upstream drm dependency is skipped entirely.
+export function playbackLinuxDmabufGlDependency(text) {
+  const before = "features += {'dmabuf-interop-gl': features['egl'] and drm.found()}\nif features['dmabuf-interop-gl']\n    dependencies += drm.partial_dependency(includes: true, compile_args: true)"
+  assert.equal(text.split(before).length, 2, 'Pinned DMA-BUF GL recipe drift')
+  return text.replace(before, "dmabuf_drm = dependency('libdrm', version: '>= 2.4.105', required: get_option('egl'))\n"
+    + before.replaceAll('drm.found()', 'dmabuf_drm.found()').replace('drm.partial_dependency', 'dmabuf_drm.partial_dependency'))
+}
+
 // Backport mpv f74adc4243bd9e1a8ee96d187c939e6232510650 (#17217).
 // Render API clients have no native swap_buffers callback to retire this queue.
 export function playbackMpvRenderFenceFix(source) {
@@ -189,10 +198,11 @@ export function playbackMpvHwdownloadTiming(text) {
   assert.ok(!text.includes('javdex_download_count'), 'Pinned mpv decoder timing patch already applied')
   assert.equal(text.split(field).length, 2, 'Pinned mpv decoder fields drifted')
   assert.equal(text.split(download).length, 2, 'Pinned mpv copy-back call drifted')
-  return text.replace('#include <float.h>', '#include <float.h>\n#include "osdep/timer.h"\n#include <libavutil/hwcontext_d3d11va.h>\n#include <dxgi.h>')
+  return text.replace('#include <float.h>', '#include <float.h>\n#include "osdep/timer.h"\n#ifdef _WIN32\n#include <libavutil/hwcontext_d3d11va.h>\n#include <dxgi.h>\n#endif')
     .replace(field, field + '\n    uint64_t javdex_download_count;\n    int64_t javdex_download_total, javdex_download_max;')
     .replace(download, `        const char *diagnostics = getenv("JAVDEX_PLAYBACK_DIAGNOSTICS");
         const bool measure = diagnostics && strcmp(diagnostics, "1") == 0;
+#ifdef _WIN32
         if (measure && !ctx->javdex_download_count) {
             const AVHWFramesContext *frames = (const AVHWFramesContext *)res->hwctx->data;
             if (frames && frames->device_ctx && frames->device_ctx->type == AV_HWDEVICE_TYPE_D3D11VA) {
@@ -207,6 +217,7 @@ export function playbackMpvHwdownloadTiming(text) {
                 if (dxgi) IDXGIDevice_Release(dxgi);
             }
         }
+#endif
         const int64_t started = measure ? mp_time_ns() : 0;
 ${download}
         if (measure && sw) {

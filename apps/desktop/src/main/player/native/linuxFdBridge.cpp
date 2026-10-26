@@ -3,6 +3,7 @@
 #endif
 
 #include <node_api.h>
+#include <uv.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -15,6 +16,7 @@
 #include <cstdint>
 #include <cstring>
 #include <new>
+#include <map>
 #include <set>
 #include <string>
 
@@ -23,14 +25,51 @@
 namespace {
 using namespace javdex_transport;
 
+struct Watch;
 struct State {
   std::set<int> owned;
   std::set<int> parents;
+  std::map<int, Watch*> watchers;
+  std::set<Watch*> allocated;
 };
+struct Watch {
+  uv_poll_t poll{};
+  State* owner = nullptr;
+  napi_env env = nullptr;
+  napi_ref callback = nullptr;
+  napi_async_context context = nullptr;
+  bool closing = false;
+};
+
+void ReleaseWatchReferences(Watch* watch) {
+  if (watch->callback) { napi_delete_reference(watch->env, watch->callback); watch->callback = nullptr; }
+  if (watch->context) { napi_async_destroy(watch->env, watch->context); watch->context = nullptr; }
+}
+void CloseWatch(Watch* watch) {
+  if (watch->closing) return;
+  watch->closing = true;
+  uv_poll_stop(&watch->poll);
+  uv_close(reinterpret_cast<uv_handle_t*>(&watch->poll), [](uv_handle_t* handle) {
+    auto* watch = static_cast<Watch*>(handle->data);
+    ReleaseWatchReferences(watch);
+    if (watch->owner) watch->owner->allocated.erase(watch);
+    delete watch;
+  });
+}
+void StopWatch(State* state, int fd) {
+  const auto found = state->watchers.find(fd);
+  if (found == state->watchers.end()) return;
+  auto* watch = found->second;
+  state->watchers.erase(found);
+  CloseWatch(watch);
+}
 
 // On Linux, never retry close(2) after EINTR: the descriptor may already have
 // been released and reused. Ownership leaves the addon before close is called.
 void CloseOwned(State* state, int fd) {
+  // libuv never owns the descriptor. Stop before close/reuse, including when
+  // JS forgets to unwatch or closes a channel from inside its own callback.
+  StopWatch(state, fd);
   state->parents.erase(fd);
   state->owned.erase(fd);
   ::close(fd);
@@ -38,6 +77,15 @@ void CloseOwned(State* state, int fd) {
 
 void Cleanup(void* data) {
   auto* state = static_cast<State*>(data);
+  state->watchers.clear();
+  while (!state->allocated.empty()) {
+    auto* watch = *state->allocated.begin(); state->allocated.erase(state->allocated.begin());
+    watch->owner = nullptr;
+    CloseWatch(watch);
+    // This includes already-closing handles: their uv_close callback may run
+    // after the N-API environment is gone, and must then only delete memory.
+    ReleaseWatchReferences(watch); watch->env = nullptr;
+  }
   for (int fd : state->owned) ::close(fd);
   delete state;
 }
@@ -118,6 +166,82 @@ napi_value Boolean(napi_env env, bool value) {
   napi_value result;
   if (!Check(env, napi_get_boolean(env, value, &result))) return nullptr;
   return result;
+}
+
+bool GetEvents(napi_env env, napi_value value, int* events) {
+  double number = -1; napi_valuetype type;
+  if (napi_typeof(env, value, &type) != napi_ok || type != napi_number
+      || napi_get_value_double(env, value, &number) != napi_ok || !std::isfinite(number)
+      || std::floor(number) != number || number < 0 || number > (UV_READABLE | UV_WRITABLE)) {
+    napi_throw_type_error(env, "ERR_FD_BRIDGE_WATCH", "events must be a readable/writable bit mask (0..3)");
+    return false;
+  }
+  *events = static_cast<int>(number); return true;
+}
+void PollReady(uv_poll_t* handle, int status, int events) {
+  auto* watch = static_cast<Watch*>(handle->data);
+  if (watch->closing || !watch->env) return;
+  const auto env = watch->env;
+  napi_handle_scope scope;
+  if (napi_open_handle_scope(env, &scope) != napi_ok) return;
+  napi_value callback, receiver, args[2], result;
+  if (napi_get_reference_value(env, watch->callback, &callback) == napi_ok
+      && napi_get_global(env, &receiver) == napi_ok
+      && napi_create_int32(env, status, &args[0]) == napi_ok
+      && napi_create_int32(env, events, &args[1]) == napi_ok) {
+    // JS can stop/close/reuse the FD in this call. Watch memory/context is
+    // retained until uv_close, after this callback has returned.
+    if (napi_make_callback(env, watch->context, receiver, callback, 2, args, &result) == napi_pending_exception) {
+      napi_value error; napi_get_and_clear_last_exception(env, &error); napi_fatal_exception(env, error);
+    }
+  }
+  napi_close_handle_scope(env, scope);
+}
+int SetWatchEvents(Watch* watch, int events) {
+  return events ? uv_poll_start(&watch->poll, events, PollReady) : uv_poll_stop(&watch->poll);
+}
+napi_value WatchChannel(napi_env env, napi_callback_info info) {
+  napi_value args[3]; State* state; int fd, events; napi_valuetype type;
+  if (!Args(env, info, 3, args, &state) || !ParentFd(env, state, args[0], &fd) || !GetEvents(env, args[1], &events)) return nullptr;
+  if (!Check(env, napi_typeof(env, args[2], &type))) return nullptr;
+  if (type != napi_function) { napi_throw_type_error(env, "ERR_FD_BRIDGE_WATCH", "callback must be a function"); return nullptr; }
+  if (state->watchers.count(fd)) return Error(env, "ERR_FD_BRIDGE_WATCH", "A channel can have only one readiness watcher");
+  auto* watch = new (std::nothrow) Watch();
+  if (!watch) return Error(env, "ERR_FD_BRIDGE_MEMORY", "Cannot allocate readiness watcher");
+  watch->env = env; watch->owner = state;
+  uv_loop_t* loop = nullptr; napi_value resource, name;
+  if (!Check(env, napi_get_uv_event_loop(env, &loop))
+      || !Check(env, napi_create_reference(env, args[2], 1, &watch->callback))
+      || !Check(env, napi_create_object(env, &resource))
+      || !Check(env, napi_create_string_utf8(env, "JavdexFDReadiness", NAPI_AUTO_LENGTH, &name))
+      || !Check(env, napi_async_init(env, resource, name, &watch->context))) {
+    ReleaseWatchReferences(watch); delete watch; return nullptr;
+  }
+  const int initialized = uv_poll_init(loop, &watch->poll, fd);
+  if (initialized < 0) {
+    ReleaseWatchReferences(watch); delete watch;
+    return Error(env, "ERR_FD_BRIDGE_WATCH", uv_strerror(initialized));
+  }
+  watch->poll.data = watch;
+  state->allocated.insert(watch); state->watchers.emplace(fd, watch);
+  uv_unref(reinterpret_cast<uv_handle_t*>(&watch->poll));
+  const int started = SetWatchEvents(watch, events);
+  if (started < 0) { StopWatch(state, fd); return Error(env, "ERR_FD_BRIDGE_WATCH", uv_strerror(started)); }
+  return Boolean(env, true);
+}
+napi_value UpdateWatch(napi_env env, napi_callback_info info) {
+  napi_value args[2]; State* state; int fd, events;
+  if (!Args(env, info, 2, args, &state) || !ParentFd(env, state, args[0], &fd) || !GetEvents(env, args[1], &events)) return nullptr;
+  const auto found = state->watchers.find(fd);
+  if (found == state->watchers.end()) return Error(env, "ERR_FD_BRIDGE_WATCH", "Channel has no readiness watcher");
+  const int result = SetWatchEvents(found->second, events);
+  return result < 0 ? Error(env, "ERR_FD_BRIDGE_WATCH", uv_strerror(result)) : Boolean(env, true);
+}
+napi_value Unwatch(napi_env env, napi_callback_info info) {
+  napi_value args[1]; State* state; int fd;
+  if (!Args(env, info, 1, args, &state) || !GetFd(env, args[0], &fd)) return nullptr;
+  const bool present = state->watchers.count(fd) != 0;
+  StopWatch(state, fd); return Boolean(env, present);
 }
 
 napi_value CreateChannel(napi_env env, napi_callback_info info) {
@@ -286,8 +410,11 @@ napi_value Init(napi_env env, napi_value exports) {
     {"sendAck", nullptr, SendAck, nullptr, nullptr, nullptr, napi_default, state},
     {"close", nullptr, Close, nullptr, nullptr, nullptr, napi_default, state},
       {"readPixels", nullptr, ReadPixels, nullptr, nullptr, nullptr, napi_default, state},
+    {"watch", nullptr, WatchChannel, nullptr, nullptr, nullptr, napi_default, state},
+    {"updateWatch", nullptr, UpdateWatch, nullptr, nullptr, nullptr, napi_default, state},
+    {"unwatch", nullptr, Unwatch, nullptr, nullptr, nullptr, napi_default, state},
   };
-  if (!Check(env, napi_define_properties(env, exports, 5, properties))) return nullptr;
+  if (!Check(env, napi_define_properties(env, exports, sizeof(properties) / sizeof(properties[0]), properties))) return nullptr;
   return exports;
 }
 }  // namespace

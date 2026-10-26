@@ -46,9 +46,14 @@ if (comparison) assert(comparison.passed && comparison.pixelSource === report.pi
 const save = () => fs.writeFileSync(path.join(output, `color-${mode}.json`), JSON.stringify(report, null, 2) + '\n')
 let application
 try {
-  application = await launchAcceptance(directory, 'hdr-application.log', mode === 'cpu' ? ['--javdex-cpu'] : [])
+  const displayArgs = ['--javdex-wayland', '--javdex-x11'].filter(flag => process.argv.includes(flag))
+  assert(displayArgs.length <= 1, 'Select one display backend')
+  application = await launchAcceptance(directory, 'hdr-application.log', [
+    ...(mode === 'cpu' ? ['--javdex-cpu'] : []), ...displayArgs])
   const page = await application.firstWindow()
   await page.waitForFunction(() => window.api?.playback && document.querySelector('nav'))
+  report.consumer = await page.evaluate(() => window.api.playback.sharedTextureConsumer)
+  assert.equal(report.consumer, process.platform === 'win32' ? 'canvas' : 'video')
   await prepareNonRecordingPlayback(page)
   await page.evaluate(mode => window.api.thisComputer.update({ playbackRenderMode: mode === 'recovery' ? 'auto' : mode }), mode)
   report.environment = await application.evaluate(async ({ app, screen }) => ({

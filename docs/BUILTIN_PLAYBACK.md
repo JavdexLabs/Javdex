@@ -31,11 +31,13 @@
 
 ## 原生与远程边界
 
-共用核心拥有 mpv 生命周期、异步命令、状态、事件和字幕叠加层；macOS 使用 IOSurface 共享纹理到主窗口 video，Windows 默认使用 D3D11 共享纹理到主窗口 Canvas，并提供 CPU 内存帧到 Canvas 的兜底；旧 HWND 显示和原生工具栏已移除；Linux 的 X11／XWayland 和原生 Wayland 共用共享纹理／CPU 内存帧到 Canvas 的显示方式。正常关闭由实际接受的窗口关闭与退出生命周期释放内核，不在可能被否决的 `close` 回调提前拆除活跃视图。
+共用核心拥有 mpv 生命周期、异步命令、状态、事件和字幕叠加层；macOS 使用 IOSurface 共享纹理到主窗口 video，Windows 默认使用 D3D11 共享纹理到主窗口 Canvas，并提供 CPU 内存帧到 Canvas 的兜底；旧 HWND 显示和原生工具栏已移除；Linux 的 X11／XWayland 和原生 Wayland 共用共享纹理／CPU 内存帧到 video 的显示方式。正常关闭由实际接受的窗口关闭与退出生命周期释放内核，不在可能被否决的 `close` 回调提前拆除活跃视图。
+
+Linux 默认复用 video 消费者，移除 Canvas 消费入口与 `--javdex-linux-video` 实验开关。CPU 4K60 的已测吞吐下降为用户接受的取舍，不承诺实时 4K60。共享 video 自检在新流首帧被观察前有界重送同一像素的引用，处理显示端异步连接竞态；普通 GPU 帧不等待 video 回调，引用重送不提前释放原生纹理。验收与性能边界见 [Wayland video 修复记录](performance/linux-wayland-video-validation-2026-10-26.md)。
 
 三平台采用同一“自动 / GPU / CPU 兼容”设置，在重新打开影片时应用。自动模式优先 GPU，图形初始化、自检或可检测运行故障最多触发一次 CPU 恢复；GPU 模式失败直接报告错误；CPU 模式使用软件解码和 libmpv 软件绘制，显示合成由 Chromium 执行。显式选择 GPU 后重开可重新探测。`--javdex-cpu` 可强制使用 CPU（`--` 后不生效）。未发布设置直接使用 `playbackRenderMode`，不读取或迁移旧平台专属字段。
 
-CPU 使用 `hwdec=no`、libmpv SW Render API 和 opaque RGBA，preload 在 Mac 将私有 IPC 像素缓冲区按真实 stride 转移给 opaque `RGBX VideoFrame`，使用同一 video 消费者；Windows/Linux 继续通过新建的软件 Canvas 的 `putImageData` 绘制。不创建播放端 GL context 或 D3D 设备；Mac video 在禁用 Chromium GPU 时仍可使用软件合成。三平台共用实际物理尺寸 `round(逻辑尺寸 × 缩放)`，不额外降至 1080p；保留缩放不超过 8、单边 8192、单帧 256MiB 的安全边界。Windows/macOS 复制帧最多两帧在途，复制信用额度跨宿主和接收方共同约束；Linux 沿用三个槽位的有界 memfd／ACK 传输池。
+CPU 使用 `hwdec=no`、libmpv SW Render API 和 opaque RGBA，preload 在 Mac/Linux 将私有 IPC 像素缓冲区按真实 stride 转移给 opaque `RGBX VideoFrame`，使用同一 video 消费者；Windows 继续通过新建的软件 Canvas 的 `putImageData` 绘制。不创建播放端 GL context 或 D3D 设备；Mac video 在禁用 Chromium GPU 时仍可使用软件合成。三平台共用实际物理尺寸 `round(逻辑尺寸 × 缩放)`，不额外降至 1080p；保留缩放不超过 8、单边 8192、单帧 256MiB 的安全边界。Windows/macOS 复制帧最多两帧在途，复制信用额度跨宿主和接收方共同约束；Linux 沿用三个槽位的有界 memfd／ACK 传输池。
 
 `PlaybackEngine` 复用当前已授权来源，恢复位置、暂停意图、音量、静音、倍速、音轨、外挂字幕和 AI 时间轴；恢复中的新控制意图优先，停止或换片取消旧恢复。媒体、授权、音频和页面错误不触发图形回退；软件解码与 CPU 画面输出分别报告。未知 GPU 租约不强行回收，迟到回调继续归属原宿主与资源代。
 
@@ -76,11 +78,13 @@ Mac video 的固定色块自检仍通过实际挂载的显示元素：暂时隐�
 
 该 addon 只允许宿主的 Node 主线程初始化。mpv 的帧通知与非视频事件经长度为一的非阻塞队列合并唤醒该线程，几何、可见性、时间线变化及租约归还也能唤醒；mpv 回调不执行 JS 或 GL。250ms 兜底继续处理故障、背压及事件，正常 200ms 状态观察保留，但不再为这个自驱动后端另设 16ms 渲染检查。兜底不是视频帧率上限，字幕、暂停 seek 和隐藏时的 skip 仍由正常内核处理。
 
-GPU 生产端必须确认实际完成后交付：Windows／macOS／Linux 均使用 `glFinish` 确认渲染完成。Windows/Linux 的 Canvas2D 使用 `copy` 覆盖，解绑清理 backing store；Mac GPU／CPU 在 preload 将 VideoFrame 写入 MediaStreamTrackGenerator，GPU 使用原始导入帧，CPU 使用转移后的像素帧，video 使用独立视频合成通路，不经过正常 Canvas 缓存绘制。暂停仍显示最后一帧；换时间轴、解绑和停止重置流并停止旧轨道。消费端关闭 VideoFrame 后，从 `subtle.release` 的 GPU 完成回调确认释放；main 再释放源引用，最后在 `allReferencesReleased` 中归还原生租约。提交回执、`drawImage`、writer.write 或视频呈现回调、转移消息已发送都不能提前复用槽位。窗口正常停止仍接收迟到释放；交付结果不明时隔离最多三张未确认表面，最终由应用退出清理。可检测图形故障可在保留原 GPU 租约的同时切换独立 CPU 输出；renderer 页面关闭不触发回退，不能靠软件模式恢复已经消失的页面。
+GPU 生产端必须确认实际完成后交付：Windows／macOS／Linux 均使用 `glFinish` 确认渲染完成。Windows 的 Canvas2D 使用 `copy` 覆盖，解绑清理 backing store；Mac/Linux GPU／CPU 在 preload 将 VideoFrame 写入 MediaStreamTrackGenerator，GPU 使用原始导入帧，CPU 使用转移后的像素帧，video 使用独立视频合成通路，不经过正常 Canvas 缓存绘制。暂停仍显示最后一帧；换时间轴、解绑和停止重置流并停止旧轨道。消费端关闭 VideoFrame 后，从 `subtle.release` 的 GPU 完成回调确认释放；main 再释放源引用，最后在 `allReferencesReleased` 中归还原生租约。提交回执、`drawImage`、writer.write 或视频呈现回调、转移消息已发送都不能提前复用槽位。窗口正常停止仍接收迟到释放；交付结果不明时隔离最多三张未确认表面，最终由应用退出清理。可检测图形故障可在保留原 GPU 租约的同时切换独立 CPU 输出；renderer 页面关闭不触发回退，不能靠软件模式恢复已经消失的页面。
 
 macOS 输出固定为 8-bit BGRA、opaque、BT.709 primaries／sRGB transfer／RGB full range，并将相同标记交给 Electron。CPU 的 RGBA 字节按不透明 `RGBX` 包装，明确设置 BT.709 primaries／sRGB transfer／RGB full range；GPU video 保留导入帧的相同标记。HDR 由 libmpv 映射到该 SDR 目标，不提供 HDR 直通或广色域保证。原生生产者仍是 OpenGL；Chromium 的 ANGLE Metal 消费后端不代表 IOSurface 本身是 Metal，也不证明全链路零拷贝或物理扫描输出。旧 Canvas 与原生视图的对照保留在 [历史正式化记录](reviews/macos-canvas-default-2026-10-23.md)。当前 video 接入、Electron 44.9.3 前置条件和实际验证边界见 [接入记录](reviews/macos-video-consumer-integration-2026-10-26.md)，构建与验证入口见[开发指南](DEVELOPMENT.md#内置播放运行库)。
 
-Linux GPU 模式在 X11 和 Wayland 下均使用隔离 helper 导出 DMA-BUF，由 Electron 导入并绘制到主窗口 Canvas。主进程按 Chromium 活动 GPU 的 PCI vendor/device 匹配 DRM render node，无法唯一匹配时停止创建播放内核；不按 renderD128 的编号推断消费设备。显式 `JAVDEX_DRM_RENDER_NODE` 或 Chromium `--render-node-override` 仍用于本机对照，不能据此推定跨 GPU 导入可用。helper 优先分配线性缓冲；设备不支持时，在具备显式 modifier 导入能力的前提下分配原生布局，核对单平面 BGRA、实际大小并传递真实 modifier。生产端 `glFinish`、三槽租约及消费端引用释放后的 ACK 仍共同约束复用。`--javdex-x11` 仅选择窗口系统，不再启用 X11 原生子窗口；CPU 回退仍使用同一 Canvas。
+Linux GPU 模式在 X11 和 Wayland 下均使用隔离 helper 导出 DMA-BUF，由 Electron 导入并提交到主窗口 video。主进程按 Chromium 报告的活动 GPU PCI vendor/device 唯一匹配候选 DRM render node，无法唯一匹配时停止创建播放内核；不按 renderD128 的编号推断消费设备。显式 `JAVDEX_DRM_RENDER_NODE` 或 Chromium `--render-node-override` 仍用于本机对照，不能据此推定跨 GPU 导入可用。helper 优先分配线性缓冲；设备不支持时，在具备显式 modifier 导入能力的前提下分配原生布局，核对单平面 BGRA、实际大小并传递真实 modifier。生产端 `glFinish`、三槽租约及消费端引用释放后的 ACK 仍共同约束复用。`--javdex-x11` 仅选择窗口系统，不再启用 X11 原生子窗口；CPU 回退仍使用同一 video 消费者。
+
+默认不强制更换 Chromium 所选 GPU。应用内部目标是同卡解码／绘制与纹理消费；Chromium 窗口到桌面／显示器的呈现由系统与驱动负责。活动设备枚举是选卡依据，不是同卡互通的独立证明：helper 验证实际 EGL render node（扩展可用时），启动自检验证导入像素，验收另记录 Chromium renderer 与 producer 身份。显式环境变量可能使枚举和实际 renderer 不一致，不能用候选匹配代替实测。强制 Intel 向 NVIDIA 桌面呈现的失败归入系统兼容性边界，不阻塞已验证的 NVIDIA 同卡默认路径；纯 Intel／AMD 完整链路仍待实机验证。播放器 CPU 回退不保证救回窗口创建阶段的主进程崩溃。
 
 X11 的固定 Vulkan 消费路径在冷启动时可能短暂报告软件合成。首次打开影片前最多等待两秒，随后仍由原来的严格设备检查决定是否可用；软件启动和手动 CPU 不等待。等待期间停止或换片不能创建旧会话或申请旧媒体授权。Linux GPU 预算结合处理成本与持续上游丢帧学习会话下限，保留原有上下界，且同一 helper 跳转时保留下限。详细计时、重置和安全边界见 [Linux 兼容播放](LINUX_COMPATIBLE_PLAYBACK.md)；这些统计不等于物理呈现反馈。
 

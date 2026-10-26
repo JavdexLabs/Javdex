@@ -19,7 +19,7 @@ test('pixel diagnostic distinguishes opaque black from colored and transparent s
   assert.deepEqual(JSON.parse(JSON.stringify(exports.summarizePixels(data, 2, 2, 12))),
     { samples: 4, nonblack: 2, maximum: 255, opaque: 3 })
 })
-function fixture(options: { platform?: 'linux' | 'darwin' | 'win32'; mainFrame?: boolean; registerFails?: boolean; contextFails?: boolean; probePixels?: 'valid' | 'black' | 'throw'; clockShift?: number; clockDelays?: number[]; copyWait?: Promise<void>; videoCreateFails?: boolean; videoWriteWait?: Promise<void> } = {}) {
+function fixture(options: { platform?: 'linux' | 'darwin' | 'win32'; videoConsumer?: boolean; canvasOnly?: boolean; mainFrame?: boolean; registerFails?: boolean; contextFails?: boolean; probePixels?: 'valid' | 'black' | 'throw'; clockShift?: number; clockDelays?: number[]; copyWait?: Promise<void>; videoCreateFails?: boolean; videoWriteWait?: Promise<void> } = {}) {
   let nextToken = 0, draws = 0, closes = 0, releases = 0, clears = 0, drawFails = false
   let gpuReleased: (() => void) | undefined
   const transferCalls: string[] = []
@@ -46,7 +46,7 @@ function fixture(options: { platform?: 'linux' | 'darwin' | 'win32'; mainFrame?:
     addEventListener: () => {}, removeEventListener: () => {},
     requestVideoFrameCallback: (callback: () => void) => { callbacks.set(++callbackId, callback); return callbackId },
     cancelVideoFrameCallback: (id: number) => { callbacks.delete(id) } }
-  const document = { querySelectorAll: () => options.platform === 'darwin' ? [video, canvas] : [canvas],
+  const document = { querySelectorAll: () => options.canvasOnly ? [canvas] : ['darwin', 'linux'].includes(options.platform ?? 'win32') || options.videoConsumer ? [video, canvas] : [canvas],
     createElement: () => ({ width: 0, height: 0, getContext: () => ({ drawImage: () => {},
       getImageData: () => canvas.getContext('2d', {}).getImageData() }) }) }
   const videoExports = {} as typeof import('./sharedTextureVideo')
@@ -57,6 +57,7 @@ function fixture(options: { platform?: 'linux' | 'darwin' | 'win32'; mainFrame?:
         this.displayWidth = init.codedWidth; this.displayHeight = init.codedHeight
         this.pixels = structuredClone(pixels, {transfer: init.transfer}); cpuVideoFrames.push(this)
       }
+      clone() { return { displayWidth: this.displayWidth, displayHeight: this.displayHeight, close() {} } }
       close() { this.closed++ }
     },
     MediaStream: class {}, MediaStreamTrackGenerator: class {
@@ -71,7 +72,7 @@ function fixture(options: { platform?: 'linux' | 'darwin' | 'win32'; mainFrame?:
         } }) }
     } })
   const exports = {} as typeof import('./sharedTextureReceiver')
-  runInNewContext(code, { exports, Uint8Array, performance, setTimeout, clearTimeout, process: { platform: options.platform ?? 'linux', isMainFrame: options.mainFrame ?? true },
+  runInNewContext(code, { exports, Uint8Array, performance, setTimeout, clearTimeout, process: { platform: options.platform ?? 'win32', isMainFrame: options.mainFrame ?? true },
     crypto: { randomUUID: () => `33333333-3333-4333-8333-${String(++nextToken).padStart(12, '0')}` },
     document,
     require(id: string) {
@@ -97,6 +98,7 @@ function fixture(options: { platform?: 'linux' | 'darwin' | 'win32'; mainFrame?:
   )
   const bind = exports.installSharedTextureReceiver()
   const packet = { importedSharedTexture: { getVideoFrame: () => ({ displayWidth: options.probePixels ? 640 : 320, displayHeight: options.probePixels ? 360 : 180, close: () => { closes++ },
+    clone: () => ({ displayWidth: options.probePixels ? 640 : 320, displayHeight: options.probePixels ? 360 : 180, close() {} }),
     allocationSize: () => 640 * 360 * 4, copyTo: async () => { await options.copyWait; return [{ offset: 0, stride: 640 * 4 }] } }),
     release: () => { releases++ } } }
   return { bind, messages, listeners, canvas, video, cpuVideoFrames, transferCalls, clockRequests: () => clockRequests, composite: () => compositeOperation, gpuRelease: () => gpuReleased?.(), cpu: (value: unknown) => {
@@ -145,7 +147,7 @@ test('draws on the mounted canvas and releases VideoFrame and imported texture i
   assert.equal(f.canvas.height, 0)
   assert.equal(f.messages.at(-1)?.channel, 'playback:shared-texture-removed')
 })
-for (const [platform, channel] of [['darwin', 'mac'], ['win32', 'windows']] as const)
+for (const [platform, channel] of [['darwin', 'mac'], ['win32', 'windows'], ['linux', 'linux']] as const)
 test(`${platform} subtle transfer ACK waits for the consumer GPU release callback, not drawImage`, async () => {
   const f = fixture({ platform }), unbind = f.bind(token)
   const binding = f.messages.find(m => m.channel.endsWith('ready'))!.data
@@ -252,7 +254,7 @@ for (const platform of ['linux', 'win32', 'darwin'] as const) test(`${platform}:
   const f = fixture({ registerFails: true, platform }), cpuToken = 'cpu:' + token
   f.canvas.dataset.playbackSurface = f.video.dataset.playbackSurface = cpuToken
   f.bind(cpuToken)
-  if (platform === 'darwin') assert.equal(f.contextOptions.length, 0)
+  if (platform !== 'win32') assert.equal(f.contextOptions.length, 0)
   else assert.equal(f.contextOptions.at(-1)?.willReadFrequently, true)
   const binding = f.messages.at(-1)!.data
   assert.equal(f.messages.at(-1)?.channel, 'playback:shared-texture-ready')
@@ -404,8 +406,8 @@ for (const probePixels of ['valid', 'black', 'throw'] as const) test('fixed prob
 })
 
 
-test('Mac video self-test uses the mounted consumer and releases its import normally', async () => {
-  const f = fixture({ platform: 'darwin', probePixels: 'valid' }), stop = f.bind(token)
+for (const platform of ['darwin', 'linux'] as const) test(`${platform} video self-test uses the mounted consumer and releases its import normally`, async () => {
+  const f = fixture({ platform, videoConsumer: true, probePixels: 'valid' }), stop = f.bind(token)
   await f.receive(1, undefined, { selfTest: 'solid-v1', timeline: 0 })
   const result = f.messages.find(m => m.channel === 'playback:shared-texture-self-test')
   assert.ok(result)
@@ -478,4 +480,14 @@ test('Mac paused CPU frame preserves its producer render timestamp without a tim
   await f.cpu({...binding, sequence: 1, targetTime: 0, renderStartUs: 1234567, width: 1, height: 1, stride: 64, size: 64, pixels: new Uint8Array(64)})
   assert.equal(f.cpuVideoFrames[0].init.timestamp, 1234567)
   stop()
+})
+
+
+for (const cpu of [false, true]) test(`Linux rejects the removed Canvas consumer (CPU: ${cpu})`, () => {
+  const f = fixture({ platform: 'linux', canvasOnly: true })
+  const surfaceToken = cpu ? 'cpu:' + token : token
+  f.canvas.dataset.playbackSurface = surfaceToken
+  f.bind(surfaceToken)
+  assert.equal(f.contextOptions.length, 0)
+  assert.equal(f.messages.at(-1)?.channel, 'playback:shared-texture-failed')
 })

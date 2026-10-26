@@ -84,6 +84,19 @@ bool WaitAck(std::uint64_t expected) {
 int main(int argc, char** argv) {
   const std::string mode = argc > 1 ? argv[1] : "valid";
   if (mode == "eof") return 0;
+  if (mode == "drain-acks") {
+    // The parent fills the nonblocking send queue before spawning this reader.
+    // Drain until its final marker, making writable readiness observable.
+    for (;;) {
+      pollfd wait{kChannelFd, POLLIN, 0};
+      if (::poll(&wait, 1, 5000) <= 0) return 1;
+      std::array<std::uint8_t, kAckBytes> packet{};
+      const auto size = ::recv(kChannelFd, packet.data(), packet.size(), 0);
+      std::uint64_t sequence = 0;
+      if (size <= 0 || !DecodeAck(packet.data(), static_cast<std::size_t>(size), &sequence)) return 1;
+      if (sequence == 1) return 0;
+    }
+  }
   if (mode == "valid" || mode == "send-only") {
     const std::string metadata = R"({"type":"transport-fixture","sequence":"18446744073709551615","isDmaBuf":false})";
     if (!Send(metadata, 1)) return 1;

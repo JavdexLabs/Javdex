@@ -158,6 +158,7 @@ class MpvCore {
     unsigned diagnosticLines = 0;
     uint64_t hwdownloadSamples = 0;
     double hwdownloadTotalUs = 0, hwdownloadMaxUs = 0;
+    bool hwdownloadDiagnostics = false;
     uint64_t frames = 0, presentedFrames = 0, loadedFiles = 0, restarts = 0, commandErrors = 0, subtitleCommandErrors = 0, subtitleCommandsPending = 0, subtitleCommandReplies = 0;
     uint64_t generatedSubtitleCommandErrors = 0, generatedSubtitleCommandsPending = 0, generatedSubtitleCommandReplies = 0;
     GeneratedTimeline generatedTimeline;
@@ -239,6 +240,8 @@ public:
         observed.clear(); lastError.clear(); lastErrorCode = 0;
         pauseRequested = true;
         cpuRendering = config.cpu; colorReady = colorPending = colorConfigured = false;
+        const char *diagnostics = std::getenv("JAVDEX_PLAYBACK_DIAGNOSTICS");
+        hwdownloadDiagnostics = !config.cpu && diagnostics && std::string(diagnostics) == "1";
         sourceColorKnown = false; colorFileEpoch = 0;
         frames = presentedFrames = loadedFiles = restarts = commandErrors = subtitleCommandErrors = subtitleCommandsPending = subtitleCommandReplies = 0; requested.store(false);
         generatedSubtitleCommandErrors = generatedSubtitleCommandsPending = generatedSubtitleCommandReplies = 0;
@@ -284,14 +287,18 @@ public:
             if (scaler < 0 && scaler != MPV_ERROR_OPTION_NOT_FOUND) throw std::runtime_error(mpv_error_string(scaler));
         }
 #ifdef _WIN32
-        const auto diagnostics = std::getenv("JAVDEX_PLAYBACK_DIAGNOSTICS");
         if (diagnostics && std::string(diagnostics) == "1") mpv_request_log_messages(handle, "v");
+#elif defined(__linux__)
+        if (hwdownloadDiagnostics) mpv_request_log_messages(handle, "info");
 #endif
         int error = mpv_initialize(handle);
         if (error < 0) throw std::runtime_error(mpv_error_string(error));
         mpv_opengl_init_params gl = {config.getProc, config.glContext};
+        mpv_opengl_drm_params_v2 drm = {-1, 0, 0, nullptr, config.drmRenderFd};
         mpv_render_param params[] = {{MPV_RENDER_PARAM_API_TYPE, (void *)MPV_RENDER_API_TYPE_OPENGL},
-            {MPV_RENDER_PARAM_OPENGL_INIT_PARAMS, &gl}, {MPV_RENDER_PARAM_INVALID, nullptr}};
+            {MPV_RENDER_PARAM_OPENGL_INIT_PARAMS, &gl},
+            {config.drmRenderFd >= 0 ? MPV_RENDER_PARAM_DRM_DISPLAY_V2 : MPV_RENDER_PARAM_INVALID,
+                config.drmRenderFd >= 0 ? &drm : nullptr}, {MPV_RENDER_PARAM_INVALID, nullptr}};
         mpv_render_param software[] = {{MPV_RENDER_PARAM_API_TYPE, (void *)MPV_RENDER_API_TYPE_SW}, {MPV_RENDER_PARAM_INVALID, nullptr}};
         error = mpv_render_context_create(&renderer, handle, config.cpu ? software : params);
         if (error < 0) throw std::runtime_error(std::string(config.cpu ? "CPU render context: " : "OpenGL render context: ") + mpv_error_string(error));
@@ -472,10 +479,12 @@ public:
         if (event.event_id == MPV_EVENT_LOG_MESSAGE && event.data) {
             const auto *message = static_cast<const mpv_event_log_message *>(event.data);
             const std::string text = message->text ? message->text : "";
+#ifdef _WIN32
             if (diagnosticLines < 160 && (text.find("d3d11") != std::string::npos || text.find("D3D11") != std::string::npos
                 || text.find("ANGLE") != std::string::npos || text.find("hwdec") != std::string::npos || std::string(message->prefix ? message->prefix : "").find("vd") == 0)) {
                 ++diagnosticLines; std::fprintf(stderr, "[mpv-gpu] %.1000s", text.c_str());
             }
+#endif
             const std::string devicePrefix = "javdex-decoder-device ";
             if (text.rfind(devicePrefix, 0) == 0 && text.size() < 160) {
                 double vendor = 0, device = 0, low = 0, high = 0;
@@ -577,6 +586,13 @@ public:
             if (value.format == MPV_FORMAT_STRING || value.format == MPV_FORMAT_NODE) result += ',' + jsonString(key.c_str()) + ':' + jsonString(value.text.c_str());
         }
         number("nativeFrames", frames); number("presentedFrames", presentedFrames); number("loadedFiles", loadedFiles);
+        if (hwdownloadDiagnostics) {
+            number("hwdownloadSamples", hwdownloadSamples); number("hwdownloadTotalUs", hwdownloadTotalUs);
+            if (hwdownloadSamples) {
+                number("hwdownloadMeanMs", hwdownloadTotalUs / hwdownloadSamples / 1000);
+                number("hwdownloadMaxMs", hwdownloadMaxUs / 1000);
+            }
+        }
         result += ",\"colorOutput\":\"bt709-srgb-rgb-full\"";
         if (cpuRendering) {
             result += ",\"colorInputTransfer\":" + jsonString(appliedColor.transfer.c_str());

@@ -32,6 +32,7 @@ function fixture() {
         this.displayWidth = init.codedWidth; this.displayHeight = init.codedHeight
         this.pixels = structuredClone(pixels, {transfer: init.transfer}); cpuFrames.push(this)
       }
+      clone() { return { displayWidth: this.displayWidth, displayHeight: this.displayHeight, clone: () => this.clone(), close() {} } }
       close() { this.closed++ }
     },
     MediaStream: class { constructor(public tracks: unknown[]) {} },
@@ -53,7 +54,9 @@ function fixture() {
   return { video, sink, writes, cpuFrames, present, hold: (value?: Promise<void>) => { pendingWrite = value },
     automatic: (value: boolean) => { autoPresent = value }, counts: () => ({ stopped, aborted, sampled, failed }) }
 }
-const frame = () => ({ displayWidth: 640, displayHeight: 360, close: () => { throw Error('caller owns VideoFrame close') } })
+const frame = () => ({ displayWidth: 640, displayHeight: 360,
+  clone: () => ({ displayWidth: 640, displayHeight: 360, clone: frame, close() {} }),
+  close: () => { throw Error('caller owns VideoFrame close') } })
 
 test('video consumes the original frame without Canvas readback or claiming lease completion', async () => {
   const f = fixture(), source = frame()
@@ -96,6 +99,8 @@ test('self-test samples the mounted video after its callback and gates film writ
   assert.equal(f.counts().sampled, 0)
   f.present()
   assert.deepEqual(Array.from(await probe), Array.from({ length: 20 }, (_, n) => [64, 191, 128, 255][n % 4]))
+  await new Promise<void>(resolve => setImmediate(resolve))
+  f.present()
   assert.equal(await film, true)
   assert.equal(f.writes.length, 2)
   assert.equal(f.counts().sampled, 1)
@@ -126,7 +131,7 @@ test('CPU video transfers the strided input view, keeps opaque sRGB metadata and
   assert.equal(await f.sink.submitCpu({pixels, width: 1, height: 2, stride: 64, timestamp: 123456}, () => true), true)
   assert.equal(pixels.buffer.byteLength, 0)
   const owned = f.cpuFrames[0]
-  assert.equal(f.writes[0], owned)
+  assert.notEqual(f.writes[0], owned)
   assert.equal(owned.init.format, 'RGBX')
   assert.deepEqual(Array.from(owned.init.layout, row => ({...row})), [{offset: 0, stride: 64}])
   assert.equal(owned.init.timestamp, 123456)
@@ -194,5 +199,42 @@ test('CPU compositor backpressure tolerates a short stall within the existing co
   f.present(1, 1)
   assert.equal(await work, true)
   assert.equal(f.cpuFrames[0].closed, 1)
+  f.sink.dispose()
+})
+
+
+test('startup retries the same GPU pixels until the asynchronous video sink observes a frame', async t => {
+  t.mock.timers.enable({apis: ['setTimeout']})
+  const f = fixture(); f.automatic(false)
+  let referencesClosed = 0
+  const source = { ...frame(), clone: () => ({ ...frame(), close() { referencesClosed++ } }) }
+  const work = f.sink.selfTest(source, () => true)
+  await new Promise<void>(resolve => setImmediate(resolve))
+  assert.equal(f.writes.length, 1)
+  t.mock.timers.tick(32)
+  await new Promise<void>(resolve => setImmediate(resolve))
+  assert.equal(f.writes.length, 2)
+  assert.equal(referencesClosed, 2, 'each clone is closed without closing the caller-owned source')
+  assert.equal(f.counts().sampled, 0)
+  f.present()
+  assert.equal((await work).length, 20)
+  const count = f.writes.length
+  t.mock.timers.tick(1000)
+  await new Promise<void>(resolve => setImmediate(resolve))
+  assert.equal(f.writes.length, count)
+  f.sink.dispose()
+})
+test('startup without a video sink times out and stops retries without sampling fake pixels', async t => {
+  t.mock.timers.enable({apis: ['setTimeout']})
+  const f = fixture(); f.automatic(false)
+  const rejected = assert.rejects(f.sink.selfTest(frame(), () => true), /timed out/)
+  await new Promise<void>(resolve => setImmediate(resolve))
+  t.mock.timers.tick(1500)
+  await rejected
+  const count = f.writes.length
+  t.mock.timers.tick(5000)
+  await new Promise<void>(resolve => setImmediate(resolve))
+  assert.equal(f.writes.length, count)
+  assert.equal(f.counts().sampled, 0)
   f.sink.dispose()
 })

@@ -22,12 +22,14 @@
 
 2026-10-26 后续：CPU Canvas／video 配对比较后，按用户确认将 Mac CPU 接到相同 video 消费者，使用不透明 RGBX 与私有 IPC 缓冲区转移；仍为软件解码／软件绘制，并保留禁用 GPU 和故障接管。GPU 租约与 CPU 复制信用额度保持不同归还条件，详见 [接入记录](../reviews/macos-cpu-video-integration-2026-10-26.md)。
 
+2026-10-27 后续：按用户选择，Linux GPU/CPU 共用 video 消费者并移除旧 Canvas 入口；保留 CPU 自动接管与硬解失败后的 copy/software 解码。默认优先当前输出 GPU 对应的直接硬解。Intel VAAPI 的 DRM FD 隔离修复通过 producer 检查，强制 Intel 消费、NVIDIA 桌面呈现归入非阻塞的系统兼容性边界，不能作为纯 Intel 全链路证明；详见 [Intel 调查记录](../performance/linux-intel-direct-investigation-2026-10-27.md)。CPU 4K60 性能下降为已接受取舍。
+
 ## 能力与行为合同
 
 | 能力 | 记录时的差异 | 统一目标 |
 | --- | --- | --- |
 | 播放模式 | `linuxPlaybackMode` 仅对 Linux 生效；Windows 还有启动参数，macOS 无独立 CPU 路径 | 三平台同一“自动 / GPU / CPU”设置及生效时机；未发布功能直接采用通用字段，不保留旧字段迁移 |
-| CPU 播放 | Windows/Linux 已有，Mac 端正在开发 | 三平台独立软件解码与绘制，使用同一软件渲染核心与显示绑定／像素输入合同；Mac video，Windows/Linux Canvas |
+| CPU 播放 | Windows/Linux 已有，Mac 端正在开发 | 三平台独立软件解码与绘制，使用同一软件渲染核心与显示绑定／像素输入合同；Mac/Linux video，Windows Canvas |
 | 故障恢复 | Windows/Linux 有不同状态机与重试范围，macOS 尚未接入 | 共用恢复状态机，统一进度、暂停意图、音量、静音、倍速、选轨、外挂与 AI 字幕恢复 |
 | 画面通路检查 | Linux 有固定合成色块自检，其他路径主要依赖错误信号 | 三平台统一检查协议、状态和失败处理；不根据任意影片的黑色内容判定通路损坏 |
 | 色彩与 HDR | GPU/CPU 算法不同，Linux GPU 色彩合同仍未完全明确 | HDR/SDR 输入统一转换到 BT.709 primaries / sRGB transfer / RGB full range 的 SDR 目标，使用同一映射规则和视觉误差判据 |
@@ -62,7 +64,7 @@ flowchart TD
     Win --> Frames["统一帧调度、传输与生命周期"]
     Mac --> Frames
     Linux --> Frames
-    Frames --> Display["统一显示绑定；Mac video，Windows/Linux Canvas"]
+    Frames --> Display["统一显示绑定；Mac/Linux video，Windows Canvas"]
 ```
 
 - **PlaybackSession**：保留资源身份、来源授权、播放语义与业务副作用，不处理原生图形资源。

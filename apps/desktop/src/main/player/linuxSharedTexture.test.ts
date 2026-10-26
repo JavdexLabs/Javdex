@@ -17,16 +17,22 @@ const READY = 'playback:shared-texture-ready'
 const REMOVED = 'playback:shared-texture-removed'
 const FAILED = 'playback:shared-texture-failed'
 const DRAWN = 'playback:shared-texture-submitted'
+const TRANSFER = 'playback:linux-texture-transfer'
+const RELEASED = 'playback:linux-texture-released'
 const frame = (sequence = 1, slot = 0, extra: Record<string, unknown> = {}) => ({ protocol: 'javdex-dmabuf-v1',
   sequence, slot, width: 320, height: 180, pixelFormat: 'bgra', stride: 1280, offset: 0, size: 230400,
   modifier: '0', producerComplete: true, ...extra })
 function fixture(diagnostics = false, software = false) {
   let nextFd = 100
   let now = 0, receiveCalls = 0, ackWritable = true, importFailure = false, sendFailure = false, flushFailure = false
-  let tick: () => void = () => {}
+  const timers = new Set<() => void>()
+  let frameDestroyed = false, interest = 0
+  let readiness: ((status: number, events: number) => void) | undefined
+  let lifecycleReport: ((request: { owners: unknown[] }) => void) | undefined
   const app = new EventEmitter(), ipc = new EventEmitter()
-  const mainFrame = {}
+  const mainFrame = { isDestroyed: () => frameDestroyed }
   const contents = Object.assign(new EventEmitter(), { mainFrame, send: (channel: string, metadata: unknown) => {
+    if (sendFailure && channel === TRANSFER) throw new Error('transfer delivery unknown')
     if (flushFailure && channel === 'playback:frame-flush') throw new Error('disposed renderer frame')
     sent.push({ frame: mainFrame, metadata: metadata as typeof sent[number]['metadata'] })
   }, isDestroyed: () => false })
@@ -38,6 +44,9 @@ function fixture(diagnostics = false, software = false) {
   const sent: Array<{ frame: unknown; metadata: { surfaceToken: string; bindingToken: string; sequence: number } }> = []
   const transport = {
     readPixels: (_fd: number, size: number) => Buffer.alloc(size, 255),
+    watch: (_fd: number, events: number, callback: typeof readiness) => { interest = events; readiness = callback; return true },
+    updateWatch: (_fd: number, events: number) => { interest = events; return true },
+    unwatch: () => { readiness = undefined; interest = 0; return true },
     createChannel: () => ({ parentFd: 10, childFd: 11 }),
     close: (fd: number) => { assert.ok(!closed.includes(fd), `FD ${fd} must close exactly once`); closed.push(fd) },
     receive: () => { receiveCalls++; return incoming.shift() ?? null },
@@ -46,19 +55,24 @@ function fixture(diagnostics = false, software = false) {
   const exports = {} as typeof import('./linuxSharedTexture')
   runInNewContext(code, { exports, Buffer, process: { hrtime: { bigint: () => BigInt(now * 1000000) }, env: { JAVDEX_TEXTURE_PIXEL_DIAGNOSTICS: diagnostics ? '1' : '' } },
     console: { info: (tag: string, data: string) => { if (tag === '[playback-texture-pixels]') diagnosticLogs.push(data) } }, Date: { now: () => now },
-    setInterval: (callback: () => void) => { tick = callback; return { unref() {} } }, clearInterval: () => { tick = () => {} },
+    setInterval: (callback: () => void) => { timers.add(callback); return { unref() {}, callback } },
+    clearInterval: (timer?: { callback: () => void }) => { if (timer) timers.delete(timer.callback) },
     require(id: string): unknown {
       if (id === './frameEndpoint') return { createFrameEndpoint, isFrameBinding }
 
       if (id === './frameHealthProbe') return { FrameHealthProbe }
       if (id === './frameBudget') return { FrameBudget }
+      if (id === 'node:diagnostics_channel') return { channel: () => ({
+        subscribe: (callback: typeof lifecycleReport) => { lifecycleReport = callback },
+        unsubscribe: () => { lifecycleReport = undefined }
+      }) }
       if (id === 'node:crypto') return { randomUUID: () => '11111111-1111-4111-8111-111111111111' }
       if (id === 'node:module') return { createRequire: () => () => transport }
       if (id === 'electron') return { app, ipcMain: ipc, sharedTexture: {
         importSharedTexture(options: ImportSharedTextureOptions) {
           if (importFailure) throw new Error('import failed')
           const value = { options, releases: 0 }; imports.push(value)
-          return { release: () => { value.releases++ } }
+          return { release: () => { value.releases++ }, subtle: { startTransferSharedTexture: () => ({ id: imports.length }) } }
         },
         async sendSharedTexture(options: { frame: unknown }, metadata: typeof sent[number]['metadata']) {
           sent.push({ frame: options.frame, metadata })
@@ -74,8 +88,13 @@ function fixture(diagnostics = false, software = false) {
   return { manager, imports, closed, sent, errors, acknowledgements, contents, ipc, app, exports, event, binding, diagnosticLogs,
     ready: () => ipc.emit(READY, event, binding),
     packet: (sequence = 1, slot = 0, extra = {}) => incoming.push({ fd: ++nextFd, metadata: Buffer.from(JSON.stringify(frame(sequence, slot, extra))) }),
-    tick: async (advance = 0) => { now += advance; tick(); await Promise.resolve(); await Promise.resolve() },
+    tick: async (advance = 0) => { now += advance;
+      if (readiness && ((interest & 1) && incoming.length || (interest & 2) && ackWritable)) readiness(0, interest)
+      for (const tick of [...timers]) tick(); await Promise.resolve(); await Promise.resolve() },
+    readiness: () => readiness, interest: () => interest,
+    destroyFrame: () => { frameDestroyed = true },
     receiveCalls: () => receiveCalls,
+    owners: () => { const request = { owners: [] }; lifecycleReport?.(request); return request.owners },
     blockedAck: () => { ackWritable = false },
     failImport: () => { importFailure = true }, failSend: () => { sendFailure = true }, failFlush: () => { flushFailure = true },
     release: (index = 0) => imports[index].options.allReferencesReleased!()
@@ -171,7 +190,12 @@ test('requires a current, main-frame receiver and never ACKs merely completed se
   await f.tick(); assert.equal(f.receiveCalls(), 0)
   f.ready(); await f.tick()
   assert.equal(f.imports.length, 1)
-  assert.equal(f.imports[0].releases, 1, 'main reference releases in transfer finally')
+  assert.equal(f.imports[0].releases, 0, 'transfer delivery must retain the main reference')
+  f.ipc.emit(RELEASED, { ...f.event, senderFrame: {} }, { ...f.binding, sequence: 1 })
+  assert.equal(f.imports[0].releases, 0)
+  f.ipc.emit(RELEASED, f.event, { ...f.binding, sequence: 1 })
+  f.ipc.emit(RELEASED, f.event, { ...f.binding, sequence: 1 })
+  assert.equal(f.imports[0].releases, 1, 'only authenticated consumer GPU completion releases the main reference')
   assert.equal(f.sent[0].frame, f.contents.mainFrame)
   assert.equal(f.sent[0].metadata.surfaceToken, f.manager.surfaceToken)
   assert.deepEqual(f.acknowledgements, [])
@@ -235,7 +259,12 @@ for (const failure of ['metadata', 'import', 'transfer'] as const) test(`${failu
   assert.equal(f.errors.length, 1)
   assert.equal(f.closed.includes(101), true)
   assert.deepEqual(f.acknowledgements, [])
-  if (failure === 'transfer') { assert.equal(f.imports[0].releases, 1); f.release() }
+  if (failure === 'transfer') {
+    assert.equal(f.imports[0].releases, 0, 'unknown delivery is quarantined')
+    f.ipc.emit(RELEASED, f.event, { ...f.binding, sequence: 1 })
+    assert.equal(f.imports[0].releases, 1, 'late completion still drops its original main reference')
+    f.release()
+  }
 })
 test('mount replacement removes only its exact binding, and hidden surfaces keep draining releases', async t => {
   const f = fixture(); t.after(f.manager.destroy)
@@ -485,4 +514,66 @@ test('CPU transport never waits for the GPU display probe', async t => {
   f.ready(); f.manager.setVisible(true); await f.tick(); await f.tick(60000)
   assert.equal(f.manager.displayProbe(), 'not-applicable')
   assert.equal(f.errors.length, 0)
+})
+
+// A transport receipt, JS close, submission, or one-second delay is not a GPU fence.
+test('Linux low-level transfer preserves producer timestamp and a delayed consumer lease across stop', async () => {
+  const f = fixture(); f.ready(); f.manager.setVisible(true)
+  f.packet(1, 0, { timeline: 0, renderStartUs: 2000000, targetTimeUs: 2020000 }); await f.tick(2000)
+  assert.equal(f.imports[0].options.textureInfo.timestamp, 2020000)
+  await f.tick(1500)
+  assert.equal(f.errors.length, 0); assert.equal(f.imports[0].releases, 0)
+  assert.deepEqual(f.acknowledgements, [])
+  f.manager.destroy()
+  assert.equal(f.owners().length, 1, 'quarantined ownership stays observable after producer teardown')
+  f.ipc.emit(RELEASED, f.event, { ...f.binding, bindingToken: '44444444-4444-4444-8444-444444444444', sequence: 1 })
+  assert.equal(f.imports[0].releases, 0)
+  f.ipc.emit(RELEASED, f.event, { ...f.binding, sequence: 1 })
+  assert.equal(f.imports[0].releases, 1)
+  f.release(); assert.deepEqual(f.acknowledgements, [])
+  assert.equal(f.ipc.listenerCount(RELEASED), 0)
+  assert.equal(f.owners().length, 0, 'final GPU release removes lifecycle diagnostics')
+})
+
+test('a destroyed page drops retired main references without granting the terminated producer reuse', async () => {
+  const f = fixture(); f.ready(); f.manager.setVisible(true); f.packet(); await f.tick()
+  f.manager.destroy(); assert.equal(f.imports[0].releases, 0)
+  f.destroyFrame(); await f.tick(1000)
+  assert.equal(f.imports[0].releases, 1)
+  f.release(); await f.tick(1000)
+  assert.deepEqual(f.acknowledgements, [])
+  assert.equal(f.owners().length, 0)
+})
+
+test('reload reusing a live frame retires old transfers only after a new document is ready', async () => {
+  const f = fixture(); f.ready(); f.manager.setVisible(true); f.packet(); await f.tick()
+  f.manager.destroy()
+  f.contents.emit('dom-ready'); assert.equal(f.imports[0].releases, 0)
+  f.contents.emit('did-start-navigation', {}, 'app://same#hash', true, true)
+  f.contents.emit('dom-ready'); assert.equal(f.imports[0].releases, 0)
+  f.contents.emit('did-start-navigation', {}, 'app://reload', false, true)
+  assert.equal(f.imports[0].releases, 0, 'navigation start alone cannot release a transfer')
+  f.contents.emit('dom-ready'); assert.equal(f.imports[0].releases, 1)
+  f.release(); assert.deepEqual(f.acknowledgements, [])
+  assert.equal(f.contents.listenerCount('dom-ready'), 0)
+})
+
+test('readiness drains a bounded GPU burst and leaves idle watchdogs free of socket polling', async () => {
+  const f = fixture(); f.ready(); f.manager.setVisible(true)
+  for (let n = 0; n < 20; n++) await f.tick(100)
+  assert.equal(f.receiveCalls(), 0, 'health deadlines must not poll an idle socket')
+  for (let n = 1; n <= 4; n++) f.packet(n, (n - 1) % 3)
+  await f.tick()
+  assert.equal(f.imports.length, 3); assert.equal(f.interest(), 0, 'full pool disables readable interest')
+  f.release(); assert.equal(f.interest(), 2, 'only an outstanding ACK enables writable interest')
+  await f.tick(); assert.deepEqual(f.acknowledgements, [1]); assert.equal(f.imports.length, 4)
+  const stale = f.readiness()!; f.manager.destroy()
+  const received = f.receiveCalls(); stale(0, 1); assert.equal(f.receiveCalls(), received)
+  for (let n = 1; n < 4; n++) f.release(n)
+})
+test('readiness errors stop before descriptor cleanup and notify only once', () => {
+  const f = fixture(), ready = f.readiness()!
+  ready(-9, 0); ready(-9, 0)
+  assert.equal(f.errors.length, 1); assert.equal(f.readiness(), undefined)
+  assert.deepEqual(f.closed.slice().sort((a, b) => a - b), [10, 11])
 })

@@ -23,13 +23,17 @@ export interface NativePlaybackState {
   producerGLVendor?: string
   producerGLRenderer?: string
   producerGLVersion?: string
-  producerTimings?: Record<string, { samples: number; meanMs: number; maxMs: number; lastMs: number }>
+  producerRenderMajor?: number
+  producerRenderMinor?: number
+  producerEglRenderNodeVerified?: boolean
+  producerTimings?: Record<string, { samples: number; totalMs?: number; meanMs: number; maxMs: number; lastMs: number }>
   decoderDeviceIdentitySource?: 'angle-shared-device' | 'decoded-frame'
   decoderVendorId?: number
   decoderDeviceId?: number
   decoderAdapterLuidLow?: number
   decoderAdapterLuidHigh?: number
   hwdownloadSamples?: number
+  hwdownloadTotalUs?: number
   hwdownloadMeanMs?: number
   hwdownloadMaxMs?: number
   nativeFrames?: number

@@ -10,7 +10,7 @@ import { createRequire } from 'node:module'
 import { availableParallelism } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { playbackBuildFingerprint, playbackMpvRenderFenceFix, playbackMpvHwdownloadTiming, playbackMpvAngleDeviceQueryFix, playbackLinuxAssDependency, playbackLinuxVaapiRenderDependency, playbackPkgConfigEnvironment, playbackSourceNativePlan, playbackSourcePlan, playbackWindowsExportNames, playbackWindowsSourceEnvironment, stageWindowsStaticZlib, staticPlaybackDependencies, verifyPlaybackSource } from './playback-source-build.mjs'
+import { playbackBuildFingerprint, playbackMpvRenderFenceFix, playbackMpvHwdownloadTiming, playbackMpvAngleDeviceQueryFix, playbackLinuxAssDependency, playbackLinuxVaapiRenderDependency, playbackLinuxDmabufGlDependency, playbackPkgConfigEnvironment, playbackSourceNativePlan, playbackSourcePlan, playbackWindowsExportNames, playbackWindowsSourceEnvironment, stageWindowsStaticZlib, staticPlaybackDependencies, verifyPlaybackSource } from './playback-source-build.mjs'
 import { playbackFileSha256, validatePlaybackRuntime } from './playback-runtime.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'), require = createRequire(import.meta.url)
@@ -157,6 +157,11 @@ if (platform === 'win32') {
   patches.push({ id: 'mpv', operation: 'Accept EXT_device_query in ANGLE client extensions; validate functions and actual device as upstream' })
   patches.push({ id: 'mpv', operation: 'Opt-in batched hardware copy-back wall timing; EGL ANGLE direct D3D11 interop' })
 }
+if (platform === 'linux' && !software) {
+  const file = path.join(sourceRoot, 'mpv/video/decode/vd_lavc.c')
+  writeFileSync(file, playbackMpvHwdownloadTiming(readFileSync(file, 'utf8')))
+  patches.push({ id: 'mpv', operation: 'Opt-in batched Linux hardware copy-back wall timing' })
+}
 // Keep upstream's native swapchain fences; libmpv render API owns no swapchain.
 if (!software) {
   const file = path.join(sourceRoot, 'mpv/video/out/opengl/context.c')
@@ -179,6 +184,8 @@ if (platform === 'linux') {
 }
 if (portable) {
   mpvRecipeText = playbackLinuxVaapiRenderDependency(mpvRecipeText)
+  mpvRecipeText = playbackLinuxDmabufGlDependency(mpvRecipeText)
+  patches.push({ id: 'mpv', operation: 'EGL DMA-BUF mapper DRM headers independent of KMS output' })
   patches.push({ id: 'mpv', operation: 'VAAPI render-node display without native KMS window output' })
 }
 for (const [before, after] of [["dependency('sdl2', required: false)", "dependency('sdl2', required: get_option('sdl2-audio'))"],

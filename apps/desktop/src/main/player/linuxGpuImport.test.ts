@@ -17,6 +17,7 @@ test('fixed X11 runtime selects ANGLE Vulkan with Ganesh GLES and preserves unre
   h.switches.set('disable-features', 'Example,Another')
   configureLinuxGpuImport(h, true)
   assert.equal(h.switches.get('use-angle'), 'vulkan')
+  assert.equal(h.switches.get('use-dynamic-angle'), '')
   assert.equal(h.switches.get('disable-features'), 'Example,Another,Vulkan')
   configureLinuxGpuImport(h, true)
   assert.equal(h.switches.get('disable-features'), 'Example,Another,Vulkan')

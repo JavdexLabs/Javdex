@@ -865,7 +865,7 @@ const api = {
     end: (token: string) => invokeScrape(IPC.AVATAR_AUTO_CROP_BATCH_END, token)
   },
   playback: {
-    sharedTextureConsumer: process.platform === 'darwin' ? 'video' as const : 'canvas' as const,
+    sharedTextureConsumer: ['darwin', 'linux'].includes(process.platform) ? 'video' as const : 'canvas' as const,
     bindSharedTextureSurface,
     availability: () => invokeApp(IPC.PLAYBACK_AVAILABILITY),
     open: (target: import('@shared/desktop/playback').PlaybackTarget) => invokeApp(IPC.PLAYBACK_OPEN, target),

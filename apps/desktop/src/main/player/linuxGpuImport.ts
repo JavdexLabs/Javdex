@@ -21,6 +21,10 @@ export function configureLinuxGpuImport(host: StartupHost, available = hasX11Gpu
   if (host.isReady()) throw new Error('GPU 导入后端必须在应用启动时配置')
   const angle = host.commandLine.getSwitchValue('use-angle')
   if (angle && angle !== 'vulkan') return
+  // Chromium 152 can use its statically linked ANGLE even when matching shared
+  // libraries are beside Electron. Select our version-verified patched pair;
+  // the embedded Xcb backend does not carry the requested-visual fix.
+  host.commandLine.appendSwitch('use-dynamic-angle', '')
   host.commandLine.appendSwitch('use-angle', 'vulkan')
   // Keep Skia on GLES through ANGLE. Chromium's separate Ganesh/Vulkan import
   // path has different external-image ownership/layout behavior.

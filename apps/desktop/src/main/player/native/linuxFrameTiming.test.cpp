@@ -1,4 +1,5 @@
 #include "frameTiming.h"
+#include "linuxStageTimings.h"
 #include <cassert>
 
 int main() {
@@ -18,4 +19,11 @@ int main() {
     rejected = false;
     try { timing.sample(100, -101); } catch (...) { rejected = true; }
     assert(rejected);
+    javdex::LinuxStageTiming cost;
+    assert(javdex::linuxTimingsJson({{"render", &cost}}) == "{}");
+    cost.record(-1); assert(cost.samples == 0); // Invalid clock deltas are absent.
+    cost.record(0); assert(cost.samples == 1); // A measured sub-microsecond delta is a real sample.
+    cost.record(1000); cost.record(3000);
+    assert(cost.totalMs == 4 && cost.maxMs == 3 && cost.lastMs == 3);
+    assert(javdex::linuxTimingsJson({{"render", &cost}}).find("\"samples\":3") != std::string::npos);
 }

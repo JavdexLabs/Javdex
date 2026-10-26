@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
-import { playbackMpvRenderFenceFix, playbackMpvHwdownloadTiming, playbackMpvAngleDeviceQueryFix, playbackBuildFingerprint, playbackLinuxAssDependency, playbackLinuxVaapiRenderDependency, playbackPkgConfigEnvironment, playbackSourceNativePlan, playbackSourcePlan, playbackWindowsExportNames, playbackWindowsSourceEnvironment, stageWindowsStaticZlib, staticPlaybackDependencies, verifyPlaybackSource } from './playback-source-build.mjs'
+import { playbackMpvRenderFenceFix, playbackMpvHwdownloadTiming, playbackMpvAngleDeviceQueryFix, playbackBuildFingerprint, playbackLinuxAssDependency, playbackLinuxVaapiRenderDependency, playbackLinuxDmabufGlDependency, playbackPkgConfigEnvironment, playbackSourceNativePlan, playbackSourcePlan, playbackWindowsExportNames, playbackWindowsSourceEnvironment, stageWindowsStaticZlib, staticPlaybackDependencies, verifyPlaybackSource } from './playback-source-build.mjs'
 import { mergeTargets } from './dist.mjs'
 import packagingConfig from '../electron-builder.config.mjs'
 
@@ -251,7 +251,7 @@ test('Debian package declares native OS prerequisites without replacing Electron
 test('Dedicated Linux DMA-BUF profile excludes window-system outputs and uses Pulse protocol', () => {
   const plan = playbackSourcePlan({ ...input, platform: 'linux', linuxProfile: 'dmabuf' })
   const mpv = plan.find(s => s.args[0] === 'setup' && s.args.includes(path.join('/sources', 'mpv')))
-  for (const flag of ['-Dplain-gl=enabled', '-Dpulse=enabled', '-Dalsa=disabled', '-Dx11=disabled', '-Dgl-x11=disabled', '-Dvaapi=enabled', '-Dvaapi-x11=disabled', '-Dvaapi-drm=enabled']) assert.ok(mpv.args.includes(flag), flag)
+  for (const flag of ['-Dplain-gl=enabled', '-Degl=enabled', '-Dpulse=enabled', '-Dalsa=disabled', '-Dx11=disabled', '-Dgl-x11=disabled', '-Dvaapi=enabled', '-Dvaapi-x11=disabled', '-Dvaapi-drm=enabled']) assert.ok(mpv.args.includes(flag), flag)
   const defaults = playbackSourcePlan({ ...input, platform: 'linux' }).find(s => s.args[0] === 'setup' && s.args.includes(path.join('/sources', 'mpv')))
   assert.ok(defaults.args.includes('-Dx11=disabled'))
   assert.throws(() => playbackSourcePlan({ ...input, platform: 'linux', linuxProfile: 'x11' }), /Unsupported Linux playback profile/)
@@ -313,4 +313,14 @@ test('Windows ANGLE candidate uses dynamic Electron EGL and source-guarded copy-
   assert.match(fixed, /eglQueryString\(EGL_NO_DISPLAY, EGL_EXTENSIONS\)/)
   assert.match(fixed, /client_exts && gl_check_extension/)
   assert.throws(() => playbackMpvAngleDeviceQueryFix(interop + interop), /drifted/)
+})
+
+
+test('EGL DMA-BUF mapper probes DRM headers without enabling KMS or libdisplay-info', () => {
+  const before = "features += {'dmabuf-interop-gl': features['egl'] and drm.found()}\nif features['dmabuf-interop-gl']\n    dependencies += drm.partial_dependency(includes: true, compile_args: true)"
+  const patched = playbackLinuxDmabufGlDependency(before)
+  assert.match(patched, /required: get_option\('egl'\)/)
+  assert.match(patched, /dmabuf_drm\.partial_dependency/)
+  assert(!patched.includes('libdisplay-info'))
+  assert.throws(() => playbackLinuxDmabufGlDependency('changed upstream recipe'), /recipe drift/)
 })

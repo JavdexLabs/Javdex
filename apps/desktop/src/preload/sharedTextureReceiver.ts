@@ -6,7 +6,7 @@ interface FrameMetadata extends SurfaceBinding { sequence: number; targetTime?: 
 // The node preload compilation intentionally excludes the full DOM library.
 // Keep this isolated-world display seam narrow instead of adding DOM globals.
 interface ReceivedVideoFrame {
-  displayWidth: number; displayHeight: number; close(): void
+  displayWidth: number; displayHeight: number; close(): void; clone(): ReceivedVideoFrame
   allocationSize(options: { format: 'RGBA' }): number
   copyTo(data: Uint8Array, options: { format: 'RGBA' }): Promise<Array<{ offset: number; stride: number }>>
 }
@@ -159,6 +159,7 @@ export function installSharedTextureReceiver(): (surfaceToken: string) => () => 
         // Exercise the actual mounted consumer. Video probes gate film writes
         // and reset the stream; Canvas probes clear synchronously before paint.
         let samples: number[] = []
+        let probeFailure: string | undefined
         try {
           if (frame.displayWidth !== 640 || frame.displayHeight !== 360) throw new Error('Invalid self-test dimensions')
           if (target.video) samples = await target.video.selfTest(frame, () => mounted === target && target.timeline === epoch && target.element.isConnected)
@@ -169,12 +170,18 @@ export function installSharedTextureReceiver(): (surfaceToken: string) => () => 
             for (const [x, y] of [[80, 45], [559, 45], [320, 180], [80, 314], [559, 314]])
               samples.push(...pixels.slice((y * 640 + x) * 4, (y * 640 + x) * 4 + 4))
           }
-        } catch { samples = [] }
+        } catch (error) {
+          samples = []
+          const message = error instanceof Error ? error.message : ''
+          probeFailure = message === 'Video frame observation timed out' ? 'timeout'
+            : message === 'Invalid video diagnostic dimensions' ? 'dimensions'
+              : message === 'Video frame observation cancelled' ? 'cancelled' : 'consumer'
+        }
         finally { if (!target.video) target.context?.clearRect(0, 0, 640, 360) }
         if (mounted !== target || target.timeline !== epoch) return
         target.sequence = Math.max(target.sequence, metadata.sequence)
         ipcRenderer.send('playback:shared-texture-self-test', { surfaceToken: target.surfaceToken,
-          bindingToken: target.bindingToken, sequence: metadata.sequence, samples })
+          bindingToken: target.bindingToken, sequence: metadata.sequence, samples, ...(probeFailure ? { probeFailure } : {}) })
         return
       }
       const arrivedAt = performance.now()
@@ -285,7 +292,7 @@ export function installSharedTextureReceiver(): (surfaceToken: string) => () => 
     }
   }
   ipcRenderer.on('playback:cpu-frame', (_event, value: unknown) => { void receiveCpu(value) })
-  const nativeTransfer = process.platform === 'darwin' ? 'mac' : process.platform === 'win32' ? 'windows' : null
+  const nativeTransfer = process.platform === 'darwin' ? 'mac' : process.platform === 'win32' ? 'windows' : process.platform === 'linux' ? 'linux' : null
   if (nativeTransfer && process.isMainFrame) ipcRenderer.on(`playback:${nativeTransfer}-texture-transfer`, (_event, value: unknown) => {
     const metadata = value as FrameMetadata & { transfer: Electron.SharedTextureTransfer }
     if (!metadata || typeof metadata.surfaceToken !== 'string' || typeof metadata.bindingToken !== 'string'
@@ -295,6 +302,14 @@ export function installSharedTextureReceiver(): (surfaceToken: string) => () => 
     const acknowledge = (): void => ipcRenderer.send(`playback:${nativeTransfer}-texture-released`, {
       surfaceToken: metadata.surfaceToken, bindingToken: metadata.bindingToken, sequence: metadata.sequence
     })
+    // A new Linux document must not acquire queued transfers from an old
+    // binding. Discard before import; no consumer GPU reference exists here.
+    // This also lets main safely retire a stopped producer after page reload,
+    // including reloads that reuse the same RenderFrameHost.
+    if (nativeTransfer === 'linux' && (!mounted || metadata.surfaceToken !== mounted.surfaceToken
+      || metadata.bindingToken !== mounted.bindingToken || !mounted.element.isConnected)) {
+      acknowledge(); return
+    }
     try {
       imported = sharedTexture.subtle.finishTransferSharedTexture(metadata.transfer)
       const source = imported
@@ -333,11 +348,11 @@ export function installSharedTextureReceiver(): (surfaceToken: string) => () => 
       const surface = [...document.querySelectorAll('[data-playback-surface]')]
         .find(element => element.dataset.playbackSurface === surfaceToken)
       element = surface
-      if (process.platform === 'darwin' && process.isMainFrame && (supported || surfaceToken.startsWith('cpu:')) && surface && 'videoWidth' in surface) {
+      if (['darwin', 'linux'].includes(process.platform) && process.isMainFrame && (supported || surfaceToken.startsWith('cpu:')) && surface && 'videoWidth' in surface) {
         video = createSharedTextureVideo(surface, () => {
           if (mounted?.bindingToken === binding.bindingToken) ipcRenderer.send('playback:shared-texture-failed', binding)
         })
-      } else if (surface && 'getContext' in surface && process.platform !== 'darwin') {
+      } else if (surface && 'getContext' in surface && process.platform === 'win32') {
         canvas = surface
         // Make the browser default explicit; this does not convert untagged
         // producer bytes from BT.709 transfer or certify GPU color management.

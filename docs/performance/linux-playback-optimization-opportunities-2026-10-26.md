@@ -4,6 +4,8 @@
 
 [package.json](../../package.json)／[playback-sources.json](../../build/playback-sources.json)固定 Electron **44.9.3**、libmpv **0.41.0**、FFmpeg **9.0.2**、libplacebo **7.351.0**、nv-codec-headers **12.1.14.0**。Electron 的固定 [DEPS](https://github.com/electron/electron/blob/v44.9.3/DEPS)对应 Chromium **152.0.7977.167**、Node **24.22.0**；本记录不套用 latest 文档推定其他版本能力。
 
+Linux 实机执行进展与测量结果见 [2026-10-26 验证记录](linux-playback-optimization-validation-2026-10-26.md)。以下研究基线和历史判断保留，不能替代新包验收。
+
 ## Linux 设备接续入口
 
 用户于 2026-10-26 明确将实际优化留待 Linux 设备执行；当前只保存核查与接续要求。上述 SHA 和版本是研究基线，接续时先拉取并整合最新 `dev`，保留本地工作与远程新增，重新核对实现差异；不回退到旧 SHA，也不把 Windows／Mac 或旧 Linux 包的结果当作新实现通过。
@@ -12,12 +14,12 @@
 
 执行顺序及完成条件：
 
-- [ ] **先保存 Linux 当前基线。** 使用合成素材，对同一编解码、帧率、物理输出尺寸和设置做对照；覆盖 1080p 24／30／60fps 及实际 4K 输出，性能采样每项至少 60 秒。预热和采样时长一致、交替执行基线／候选，截图与像素读回放到计时后；不与构建或其它播放验收并行。
-- [ ] **先完成传输与生命周期回归，再做 GPU／CPU video 原型。** 处理下文的时间戳、高层发送超时、迟到导入／释放、自检取消和旧流清理；GPU 使用原始导入帧，CPU 仅转移私有复制缓冲区。分别对照现有 Canvas；追踪 Chromium 是否额外转 NV12，不预先认定 video 更快。
-- [ ] **按实际设备验证直接硬解。** 先检查现有运行库，再接通同一 DRM／GL 设备上的 VA-API 或 NVDEC；与 auto-copy 单独配对，不与消费者变更混作一次实验。保留 copy／软件解码退路，区分解码器回退和 GPU 显示故障触发的 CPU 恢复。
-- [ ] **再调整 FD 调度。** 用 readiness、有界收包和 ACK 处理替代 5ms 空轮询，保留低频超时检查；验证暂停／隐藏、socket 压力、停止、页面退出和 FD 复用，不把 helper 的 16ms 等待当作帧率上限。
-- [ ] **有数据支持后再处理 CPU 剩余成本。** RGBX 端到端合同成立后评估 alpha 补写；单独测量同步 `pread` 对 main 的影响，再决定是否异步化。线程迁移和直接映射不能代替复制次数及所有权核查。
-- [ ] **收敛后复验正常应用。** 运行与改动相关的回归、类型／lint、原生与桌面构建检查；在可用的原生 Wayland、XWayland／Xorg 和实际 GPU 上验证色彩、ASS／PGS、暂停／跳转、缩放／全屏、停止重开、禁用 GPU 与故障接管。缺少设备的矩阵项保留待验；声音／口型、物理 HDR 只按实际执行报告。
+- [x] **先保存 Linux 当前基线。** 使用合成素材，对同一编解码、帧率、物理输出尺寸和设置做对照；覆盖 1080p 24／30／60fps 及实际 4K 输出，性能采样每项至少 60 秒。预热和采样时长一致、交替执行基线／候选，截图与像素读回放到计时后；不与构建或其它播放验收并行。
+- [x] **先完成传输与生命周期回归，再做 GPU／CPU video 原型。** 处理下文的时间戳、高层发送超时、迟到导入／释放、自检取消和旧流清理；GPU 使用原始导入帧，CPU 仅转移私有复制缓冲区。分别对照现有 Canvas；追踪 Chromium 是否额外转 NV12，不预先认定 video 更快。
+- [x] **按实际设备验证直接硬解。** 先检查现有运行库，再接通同一 DRM／GL 设备上的 VA-API 或 NVDEC；与 auto-copy 单独配对，不与消费者变更混作一次实验。保留 copy／软件解码退路，区分解码器回退和 GPU 显示故障触发的 CPU 恢复。
+- [x] **再调整 FD 调度。** 用 readiness、有界收包和 ACK 处理替代 5ms 空轮询，保留低频超时检查；验证暂停／隐藏、socket 压力、停止、页面退出和 FD 复用，不把 helper 的 16ms 等待当作帧率上限。
+- [ ] **有数据支持后再处理 CPU 剩余成本。** 已完成分段测量；现有 Canvas 必须保留 alpha，异步读取的有界队列和取消合同尚未实施。 RGBX 端到端合同成立后评估 alpha 补写；单独测量同步 `pread` 对 main 的影响，再决定是否异步化。线程迁移和直接映射不能代替复制次数及所有权核查。
+- [x] **收敛后复验正常应用。** 运行与改动相关的回归、类型／lint、原生与桌面构建检查；在可用的原生 Wayland、XWayland／Xorg 和实际 GPU 上验证色彩、ASS／PGS、暂停／跳转、缩放／全屏、停止重开、禁用 GPU 与故障接管。缺少设备的矩阵项保留待验；声音／口型、物理 HDR 只按实际执行报告。
 
 每轮保留原始样本和失败记录，至少记录应用整个进程树的 CPU、RSS、mpv 丢帧、生产／提交／video 帧率、各阶段耗时与停止后的帧池／FD 释放。**进程 CPU 合计的 100% 表示一个逻辑核**；若另报整机归一化占用，记录逻辑核数与换算，不混用两种口径。缺少计时样本不能记成零耗时，视频时间推进也不能代替源帧率或物理呈现证明。
 
@@ -67,3 +69,7 @@ Linux 使用 [RenderConfig 默认 auto-copy](../../apps/desktop/src/main/player/
 所有候选继续区分 producer 完成、跨进程 acquisition、消费端 GPU 完成和最终引用释放。**保留 glFinish，直到有完整的显式 producer fence 交接／等待协议。** Electron 当前 nativePixmap import 没有外部 acquire-fence FD 参数，creation SyncToken 不能自动覆盖独立 helper 的 GL 工作。writer.write、JS close、rVFC、IPC 成功均不能归还 GPU 租约；最终 release／ACK、三槽限制、时间线隔离及交付不明时的有界留存仍必须成立。CPU 私有复制缓冲信用额度与 GPU 租约保持不同条件。
 
 量级算术而非测量：真正 `3840×2160×4 = 33,177,600 B = 31.64 MiB/帧`；60fps 每次完整复制载荷 **1.990656 GB/s**，读＋写约 **3.981312 GB/s**，不代表实际复制次数或可获得收益。现有 [色彩 LUT／线程控制](../../apps/desktop/src/main/player/native/colorPipeline.h#L161)、[GPU 预算学习](../../apps/desktop/src/main/player/frameBudget.ts#L14)已经实现；[当前 Linux 导入](../../apps/desktop/src/main/player/linuxSharedTexture.ts#L303)已有色彩标记，不沿用旧 Linux 文档的未标记色彩结论。逐段成本与最终性能优先级留给后续 Linux 实机测量。
+
+### Wayland video 后续验收
+
+首帧失败的因果对照、引用重送修复和新包实测见 [Wayland GPU video 验收](linux-wayland-video-validation-2026-10-26.md)。成功写入 generator 不等于显示 sink 已连接；不再将该失败笼统归因于 Wayland DMA-BUF 或 eager conversion。该阶段保留实验开关；后续用户已选择 Linux 默认直接硬解＋video、接受 CPU 4K60 性能下降，并移除 Linux Canvas 入口。最终范围与兼容性边界见 [收敛记录](linux-intel-direct-investigation-2026-10-27.md#收敛决定与审查2026-10-27)，上文候选分析保留为当时的设计背景。

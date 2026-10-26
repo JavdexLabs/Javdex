@@ -4,6 +4,7 @@
 
 ## 桌面播放
 
+- [Linux 播放优化核查与设备接续清单](linux-playback-optimization-opportunities-2026-10-26.md)：对照 Windows 直接硬解和 Mac video 消费者，核对 DMA-BUF、CPU 复制及轮询成本；已记录 Linux 设备上的执行顺序、采样口径与验证要求，实际优化待执行。
 - [macOS CPU Canvas 与 video 对照](macos-cpu-video-comparison-2026-10-26.md)：真实软件宿主的配对采样、内存转移、禁用 GPU 与故障接管检查；总体 CPU 接近；后续正式接入见 [Mac CPU video 记录](../reviews/macos-cpu-video-integration-2026-10-26.md)。
 - [macOS video 消费者接入](../reviews/macos-video-consumer-integration-2026-10-26.md)：Electron 44.9.3、Mac GPU video／CPU Canvas、正常应用测试与钥匙串隔离边界。
 - [macOS 视频合成消费原型验证](macos-video-consumer-prototype-2026-10-26.md)：接入前的独立 Electron 44.9.3 原型、43.8.1 崩溃前置条件及短时 CPU 配对；这些测量不冒充正常应用性能对照。

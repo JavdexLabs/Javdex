@@ -35,7 +35,9 @@ const report = { status: 'running', media, mediaSha256: await hash(media), displ
   warmupSeconds: 5, requestedResolution: resolution, outputPixels: { width: Number(resolution) * 16 / 9, height: Number(resolution) }, samples: [],
   logicalCpus: os.availableParallelism(), rssAccounting: 'Sum of per-process RSS; shared pages may be counted more than once', clockTicks: Number(execFileSync('getconf', ['CLK_TCK'], { encoding: 'utf8' })),
   limits: ['One machine; composited screenshots are not physical scanout or audible synchronization evidence',
-    'Source/native/submitted counts are distinct from unique displayed frames; missing stage timings stay absent'] }
+    'Source/native/submitted counts are distinct from unique displayed frames; missing stage timings stay absent',
+    'cpuPercentOneCore sums the process tree and mainCpuPercentOneCore is the Electron main pid; 100% is one logical core',
+    'Producer and consumer stage means overlap and must not be added into one frame period'] }
 const save = () => fs.writeFileSync(path.join(output, 'report.json'), JSON.stringify(report, null, 2) + '\n')
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 function processes(root) {
@@ -50,6 +52,15 @@ function processes(root) {
   const tree = new Set([root]); let changed = true
   while (changed) { changed = false; for (const p of all) if (tree.has(p.parent) && !tree.has(p.pid)) { tree.add(p.pid); changed = true } }
   return all.filter(p => tree.has(p.pid))
+}
+function accumulatedTicks(samples, include) {
+  let ticks = 0
+  for (let i = 1; i < samples.length; i++) for (const process of samples[i].processes) {
+    if (!include(process)) continue
+    const previous = samples[i - 1].processes.find(candidate => candidate.pid === process.pid && candidate.startTicks === process.startTicks)
+    if (previous && include(previous)) ticks += Math.max(0, process.ticks - previous.ticks)
+  }
+  return ticks
 }
 let application
 try {
@@ -152,6 +163,12 @@ try {
     const q = video?.getVideoPlaybackQuality()
     return { snapshot, videoQuality: q ? { totalFrames: q.totalVideoFrames, droppedFrames: q.droppedVideoFrames } : null }
   }), hosts: await inspect(), processes: processes(report.environment.pid) })
+  await application.evaluate(() => {
+    const { monitorEventLoopDelay } = process.getBuiltinModule('perf_hooks')
+    const histogram = monitorEventLoopDelay({ resolution: 10 })
+    histogram.enable()
+    globalThis.__javdexProfileEventLoop = histogram
+  })
   const started = performance.now()
   report.samples.push(await sample(0))
   for (let i = 1; i <= seconds; i++) {
@@ -165,20 +182,38 @@ try {
     save()
   }
   report.geometry = await geometry()
+  report.eventLoopDelay = await application.evaluate(() => {
+    const histogram = globalThis.__javdexProfileEventLoop
+    if (!histogram || typeof histogram.disable !== 'function') return { available: false }
+    histogram.disable()
+    const milliseconds = value => Number.isFinite(value) ? value / 1e6 : null
+    return { available: histogram.count > 0, samples: histogram.count, resolutionMs: 10,
+      meanMs: milliseconds(histogram.mean), minMs: milliseconds(histogram.min),
+      p50Ms: milliseconds(histogram.percentile(50)), p99Ms: milliseconds(histogram.percentile(99)),
+      maxMs: milliseconds(histogram.max) }
+  })
   const first = report.samples[0], last = report.samples.at(-1), elapsed = (last.elapsedMs - first.elapsedMs) / 1000
-  let ticks = 0
-  for (let i = 1; i < report.samples.length; i++) for (const p of report.samples[i].processes) {
-    const old = report.samples[i - 1].processes.find(q => q.pid === p.pid && q.startTicks === p.startTicks)
-    if (old) ticks += Math.max(0, p.ticks - old.ticks)
-  }
-  report.summary = { cpuPercentOneCore: ticks / report.clockTicks / elapsed * 100,
+  const percent = value => value / report.clockTicks / elapsed * 100
+  const ticks = accumulatedTicks(report.samples, () => true)
+  const mainTicks = accumulatedTicks(report.samples, process => process.pid === report.environment.pid)
+  const helperTicks = accumulatedTicks(report.samples, process => process.name.startsWith('playback-'))
+  const pixelWidth = last.hosts[mode].pixelWidth, pixelHeight = last.hosts[mode].pixelHeight
+  report.summary = { cpuPercentOneCore: percent(ticks), mainCpuPercentOneCore: percent(mainTicks),
+    helperCpuPercentOneCore: percent(helperTicks),
     rssMeanMiB: report.samples.reduce((n, s) => n + s.processes.reduce((a, p) => a + p.rssKiB, 0), 0) / report.samples.length / 1024,
+    mainRssMeanMiB: report.samples.reduce((n, s) => n + (s.processes.find(p => p.pid === report.environment.pid)?.rssKiB ?? 0), 0) / report.samples.length / 1024,
+    eventLoopDelayMs: report.eventLoopDelay,
     nativeFps: (last.hosts[mode].nativeFrames - first.hosts[mode].nativeFrames) / elapsed,
     ...(Number.isFinite(last.hosts[mode].submittedFrames) && Number.isFinite(first.hosts[mode].submittedFrames)
       ? { submittedFps: (last.hosts[mode].submittedFrames - first.hosts[mode].submittedFrames) / elapsed }
       : { submittedFpsUnavailable: true }),
     droppedFrames: last.snapshot.info.droppedFrames - first.snapshot.info.droppedFrames,
     positionAdvance: last.snapshot.position - first.snapshot.position }
+  if (Number.isInteger(pixelWidth) && pixelWidth > 0 && Number.isInteger(pixelHeight) && pixelHeight > 0) {
+    const stride = (pixelWidth * 4 + 63) & ~63
+    report.summary.frameLayout = { pixelWidth, pixelHeight, stride, rowPadding: stride - pixelWidth * 4,
+      tightlyPacked: stride === pixelWidth * 4 }
+  }
   if (first.videoQuality && last.videoQuality) report.summary.videoQuality = {
     countedFps: (last.videoQuality.totalFrames - first.videoQuality.totalFrames) / elapsed,
     droppedFrames: last.videoQuality.droppedFrames - first.videoQuality.droppedFrames }

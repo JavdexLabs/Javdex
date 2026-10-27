@@ -41,6 +41,22 @@ const report = { status: 'running', media, mediaSha256: await hash(media), displ
     'Source/native/submitted counts are distinct from unique displayed frames; missing stage timings stay absent',
     'cpuPercentOneCore sums the process tree and mainCpuPercentOneCore is the Electron main pid; 100% is one logical core',
     'Producer and consumer stage means overlap and must not be added into one frame period'] }
+const pixelOverride = process.env.JAVDEX_PROFILE_PIXELS
+if (pixelOverride) {
+  const match = /^([1-9]\d*)x([1-9]\d*)$/.exec(pixelOverride)
+  assert(match, 'JAVDEX_PROFILE_PIXELS must be WIDTHxHEIGHT')
+  const width = Number(match[1]), height = Number(match[2])
+  assert(width <= 8192 && height <= 8192 && width * height * 4 <= 256 * 1024 * 1024, 'profile pixels exceed the frame limit')
+  report.outputPixels = { width, height }
+  report.requestedResolution = `${resolution}+pixels`
+}
+if (process.env.JAVDEX_PROFILE_LABEL) report.label = process.env.JAVDEX_PROFILE_LABEL
+const developmentRuntime = path.resolve('out/linux-software-runtime/linux-x64')
+report.developmentRuntime = {}
+for (const name of ['playback-software-helper', 'playback-fd.node']) {
+  const file = path.join(developmentRuntime, name)
+  if (fs.existsSync(file)) report.developmentRuntime[name] = await hash(file)
+}
 const save = () => fs.writeFileSync(path.join(output, 'report.json'), JSON.stringify(report, null, 2) + '\n')
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 function processes(root) {

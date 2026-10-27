@@ -37,7 +37,7 @@ Linux 默认复用 video 消费者，移除 Canvas 消费入口与 `--javdex-lin
 
 三平台采用同一“自动 / GPU / CPU 兼容”设置，在重新打开影片时应用。自动模式优先 GPU，图形初始化、自检或可检测运行故障最多触发一次 CPU 恢复；GPU 模式失败直接报告错误；CPU 模式使用软件解码和 libmpv 软件绘制，显示合成由 Chromium 执行。显式选择 GPU 后重开可重新探测。`--javdex-cpu` 可强制使用 CPU（`--` 后不生效）。未发布设置直接使用 `playbackRenderMode`，不读取或迁移旧平台专属字段。
 
-CPU 使用 `hwdec=no` 和 libmpv SW Render API。Linux 的线格式是不透明 `rgbx`，不再逐像素补写 alpha；Mac/Linux preload 将私有像素缓冲区按真实 stride 包装为 opaque `RGBX VideoFrame`，使用同一 video 消费者。Mac 的私有 MessagePort 直接连接隔离宿主与 preload，VideoFrame 复制输入；Linux 紧密排列时转移私有缓冲区，存在行尾填充时由 VideoFrame 复制规范化，避开 Chromium 转移带填充 RGB 帧时窗口输出红蓝互换的问题。Windows 继续通过新建的软件 Canvas 的 `putImageData` 绘制。不创建播放端 GL context 或 D3D 设备；Mac video 在禁用 Chromium GPU 时仍可使用软件合成。三平台共用实际物理尺寸 `round(逻辑尺寸 × 缩放)`，不额外降至 1080p；保留缩放不超过 8、单边 8192、单帧 256MiB 的安全边界。Windows/macOS 复制帧最多两帧在途，复制信用额度跨宿主和接收方共同约束；Linux 沿用三个槽位的有界 memfd／ACK 传输池。
+CPU 使用 `hwdec=no`、libmpv SW Render API 和 opaque RGBA，preload 在 Mac/Linux 将私有像素缓冲区按真实 stride 包装为 opaque `RGBX VideoFrame`，使用同一 video 消费者。Mac 的私有 MessagePort 直接连接隔离宿主与 preload，VideoFrame 复制输入；Linux 紧密排列时转移私有缓冲区，存在行尾填充时由 VideoFrame 复制规范化，避开 Chromium 转移带填充 RGB 帧时窗口输出红蓝互换的问题。Windows 继续通过新建的软件 Canvas 的 `putImageData` 绘制。不创建播放端 GL context 或 D3D 设备；Mac video 在禁用 Chromium GPU 时仍可使用软件合成。三平台共用实际物理尺寸 `round(逻辑尺寸 × 缩放)`，不额外降至 1080p；保留缩放不超过 8、单边 8192、单帧 256MiB 的安全边界。Windows/macOS 复制帧最多两帧在途，复制信用额度跨宿主和接收方共同约束；Linux 沿用三个槽位的有界 memfd／ACK 传输池。
 
 `PlaybackEngine` 复用当前已授权来源，恢复位置、暂停意图、音量、静音、倍速、音轨、外挂字幕和 AI 时间轴；恢复中的新控制意图优先，停止或换片取消旧恢复。媒体、授权、音频和页面错误不触发图形回退；软件解码与 CPU 画面输出分别报告。未知 GPU 租约不强行回收，迟到回调继续归属原宿主与资源代。
 

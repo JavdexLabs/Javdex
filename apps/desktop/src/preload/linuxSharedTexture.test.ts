@@ -104,8 +104,6 @@ function fixture(options: { platform?: 'linux' | 'darwin' | 'win32'; videoConsum
     allocationSize: () => 640 * 360 * 4, copyTo: async () => { await options.copyWait; return [{ offset: 0, stride: 640 * 4 }] } }),
     release: () => { releases++ } } }
   return { bind, messages, listeners, canvas, video, cpuVideoFrames, transferCalls, clockRequests: () => clockRequests, composite: () => compositeOperation, gpuRelease: () => gpuReleased?.(), cpu: (value: unknown) => {
-    if ((options.platform ?? 'win32') === 'linux' && value && typeof value === 'object' && !Object.prototype.hasOwnProperty.call(value, 'pixelFormat'))
-      (value as { pixelFormat?: string }).pixelFormat = 'rgbx'
     const key = cpuKey(value as { bindingToken: string; sequence: number })
     const done = new Promise<void>(resolve => {
       if (messages.some(m => m.channel === 'playback:cpu-frame-released' && cpuKey(m.data) === key)) resolve()
@@ -238,17 +236,6 @@ for (const options of [{ registerFails: true }, { contextFails: true }]) test(`u
   assert.doesNotThrow(() => f.bind(token)())
   assert.equal(f.messages.at(-1)?.channel, 'playback:shared-texture-failed')
   assert.deepEqual(f.counts(), { draws: 0, closes: 0, releases: 0, clears: 0 })
-})
-
-test('linux CPU video rejects rgba wire bytes before drawing', async () => {
-  const f = fixture({ platform: 'linux' }), cpuToken = 'cpu:' + token
-  f.canvas.dataset.playbackSurface = f.video.dataset.playbackSurface = cpuToken
-  f.bind(cpuToken)
-  const binding = f.messages.find(message => message.channel.endsWith('ready'))!.data
-  await f.cpu({ ...binding, sequence: 1, width: 1, height: 1, stride: 64, size: 64, pixels: new Uint8Array(64), pixelFormat: 'rgba' })
-  assert.equal(f.counts().draws, 0)
-  assert.equal(f.cpuVideoFrames.length, 0)
-  assert.ok(f.messages.some(message => message.channel === 'playback:shared-texture-failed'))
 })
 
 test('CPU frames strip row padding, distinguish submission from release and reject stale/oversized input', () => {

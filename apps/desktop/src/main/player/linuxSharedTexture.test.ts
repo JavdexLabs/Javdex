@@ -356,7 +356,7 @@ test('hidden full GPU pools do not time out and resume with a fresh bounded inte
 test('CPU channel validates layout, copies only owned memory and keeps IPC bounded until authenticated release', async t => {
   const f = fixture(false, true); t.after(f.manager.destroy)
   f.ready(); f.manager.setVisible(true)
-  const cpu = { protocol: 'javdex-cpu-v1', pixelFormat: 'rgbx' }
+  const cpu = { protocol: 'javdex-cpu-v1', pixelFormat: 'rgba' }
   f.packet(1, 0, cpu); await f.tick()
   assert.equal(f.imports.length, 0); assert.equal(f.sent.length, 1)
   assert(f.closed.includes(101)); assert.deepEqual(f.acknowledgements, [])
@@ -381,10 +381,10 @@ test('CPU timing reset rejects old epochs, releases stale packets and forwards c
   const f = fixture(false, true); t.after(f.manager.destroy)
   f.ready(); f.manager.setVisible(true)
   assert.equal(f.manager.resetTiming(), 1)
-  f.packet(1, 0, { protocol: 'javdex-cpu-v1', pixelFormat: 'rgbx', timeline: 0, renderStartUs: 1, targetTimeUs: 20000 })
+  f.packet(1, 0, { protocol: 'javdex-cpu-v1', pixelFormat: 'rgba', timeline: 0, renderStartUs: 1, targetTimeUs: 20000 })
   await f.tick(); await f.tick()
   assert.deepEqual(f.acknowledgements, [1]); assert.equal(f.manager.submittedFrames(), 0)
-  f.packet(2, 0, { protocol: 'javdex-cpu-v1', pixelFormat: 'rgbx', timeline: 1, renderStartUs: 1, targetTimeUs: 20000 })
+  f.packet(2, 0, { protocol: 'javdex-cpu-v1', pixelFormat: 'rgba', timeline: 1, renderStartUs: 1, targetTimeUs: 20000 })
   await f.tick()
   assert.equal((f.sent.at(-1)!.metadata as unknown as { targetTime: number }).targetTime, 20)
   f.ipc.emit('playback:cpu-frame-released', f.event, { ...f.binding, sequence: 2 }); await f.tick()
@@ -393,7 +393,7 @@ test('CPU timing reset rejects old epochs, releases stale packets and forwards c
 test('a hidden CPU submission is not counted but still releases its copied frame', async t => {
   const f = fixture(false, true); t.after(f.manager.destroy)
   f.ready(); f.manager.setVisible(true)
-  f.packet(1, 0, { protocol: 'javdex-cpu-v1', pixelFormat: 'rgbx' }); await f.tick()
+  f.packet(1, 0, { protocol: 'javdex-cpu-v1', pixelFormat: 'rgba' }); await f.tick()
   f.manager.setVisible(false)
   f.ipc.emit(DRAWN, f.event, { ...f.binding, sequence: 1 })
   assert.equal(f.manager.submittedFrames(), 0)
@@ -403,7 +403,7 @@ test('a hidden CPU submission is not counted but still releases its copied frame
 test('CPU slow consumers retain the three-slot bound through blocked release ACKs and destruction', async t => {
   const f = fixture(false, true); t.after(f.manager.destroy)
   f.ready(); f.manager.setVisible(true)
-  for (let i=1;i<=4;i++) f.packet(i,(i-1)%3,{protocol:'javdex-cpu-v1',pixelFormat:'rgbx'})
+  for (let i=1;i<=4;i++) f.packet(i,(i-1)%3,{protocol:'javdex-cpu-v1',pixelFormat:'rgba'})
   for (let i=0;i<4;i++) await f.tick()
   assert.equal(f.sent.length,3)
   f.blockedAck(); f.ipc.emit('playback:cpu-frame-released',f.event,{...f.binding,sequence:1}); await f.tick()
@@ -419,10 +419,9 @@ test('frame timing and producer color contracts reject partial, invalid and misl
   const f=fixture(); t.after(f.manager.destroy)
   for(const invalid of [{timeline:-1},{targetTimeUs:1},{renderStartUs:0},{timeline:1,targetTimeUs:1.5,renderStartUs:1},
     {colorContract:'srgb-calibrated'}]) {
-    assert.throws(()=>f.exports.decodeCpuFrame(Buffer.from(JSON.stringify({...frame(),protocol:'javdex-cpu-v1',pixelFormat:'rgbx',...invalid}))))
+    assert.throws(()=>f.exports.decodeCpuFrame(Buffer.from(JSON.stringify({...frame(),protocol:'javdex-cpu-v1',pixelFormat:'rgba',...invalid}))))
     assert.throws(()=>f.exports.decodeDmaBufFrame(Buffer.from(JSON.stringify(frame(1,0,invalid)))))
   }
-  assert.throws(()=>f.exports.decodeCpuFrame(Buffer.from(JSON.stringify({...frame(),protocol:'javdex-cpu-v1',pixelFormat:'rgba'}))))
 })
 
 test('adaptive budget bounds cost spikes and adjustment rate, resets to 20ms', () => {

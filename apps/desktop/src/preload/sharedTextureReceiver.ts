@@ -245,7 +245,7 @@ export function installSharedTextureReceiver(): (surfaceToken: string) => () => 
   const receiveCpu = async (value: unknown): Promise<void> => {
     const target = mounted
     const epoch = target?.timeline
-    const v = value as FrameMetadata & { width: number; height: number; stride: number; size: number; pixels: Uint8Array; pixelFormat?: unknown; renderStartUs?: number }
+    const v = value as FrameMetadata & { width: number; height: number; stride: number; size: number; pixels: Uint8Array; renderStartUs?: number }
     if (!target || !v || v.surfaceToken !== target.surfaceToken || v.bindingToken !== target.bindingToken
       || !Number.isSafeInteger(v.sequence) || v.sequence <= target.sequence) return
     try {
@@ -257,8 +257,7 @@ export function installSharedTextureReceiver(): (surfaceToken: string) => () => 
       if (![v.width, v.height, v.stride, v.size].every(Number.isSafeInteger)
         || v.width < 1 || v.width > 8192 || v.height < 1 || v.height > 8192
         || v.stride < v.width * 4 || v.stride > 32768 || v.size !== v.stride * v.height
-        || v.size > 256 * 1024 * 1024 || !(v.pixels instanceof Uint8Array) || v.pixels.byteLength !== v.size
-        || process.platform === 'linux' && v.pixelFormat !== 'rgbx')
+        || v.size > 256 * 1024 * 1024 || !(v.pixels instanceof Uint8Array) || v.pixels.byteLength !== v.size)
         throw new Error('Invalid CPU pixels')
       let submissionStarted: number
       if (target.video) {

@@ -1,6 +1,6 @@
 // Structural DOM types keep the sandbox preload independent of the full DOM lib.
 export interface VideoFrameSource { displayWidth: number; displayHeight: number; clone(): VideoFrameSource; close(): void }
-export interface CpuVideoSource { pixels: Uint8Array; width: number; height: number; stride: number; timestamp: number }
+export interface CpuVideoSource { pixels: Uint8Array; width: number; height: number; stride: number; timestamp: number; copyInput?: boolean }
 declare const VideoFrame: new (pixels: Uint8Array, options: {
   format: 'RGBX'; codedWidth: number; codedHeight: number
   layout: Array<{ offset: number; stride: number }>; timestamp: number
@@ -167,12 +167,14 @@ export function createSharedTextureVideo(video: SharedVideoSurface, fail: () => 
         // Chromium's transferred, padded RGBX path displays red/blue swapped
         // although Canvas readback is correct. Let VideoFrame normalize padded
         // rows by copying; tightly packed private IPC buffers remain transferable.
+        // Mac private-port input uses a copied VideoFrame: external backing
+        // transfer increased the live video path's working set in paired runs.
         // Never transfer the producer's pool or a shared GPU allocation.
         const frame = new VideoFrame(source.pixels, {
           format: 'RGBX', codedWidth: source.width, codedHeight: source.height,
           layout: [{ offset: 0, stride: source.stride }], timestamp: source.timestamp,
           colorSpace: { primaries: 'bt709', transfer: 'iec61966-2-1', matrix: 'rgb', fullRange: true },
-          ...(source.stride === source.width * 4 ? { transfer: [source.pixels.buffer as ArrayBuffer] } : {})
+          ...(source.copyInput !== true && source.stride === source.width * 4 ? { transfer: [source.pixels.buffer as ArrayBuffer] } : {})
         })
         try {
           await writeObserved(frame, () => active && generation === epoch && current(), 5000)

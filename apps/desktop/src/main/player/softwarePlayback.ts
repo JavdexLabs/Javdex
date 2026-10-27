@@ -1,14 +1,18 @@
 import { createFrameEndpoint } from './frameEndpoint'
 import { FrameBudget } from './frameBudget'
-import { ipcMain, type BrowserWindow, type IpcMainEvent } from 'electron'
+import { ipcMain, type BrowserWindow, type IpcMainEvent, type WebContents } from 'electron'
+import type { CpuFrameBinding } from './playbackHostProtocol'
 import { randomUUID } from 'node:crypto'
 import type { NativePlaybackState } from './nativePlayback'
 
 interface Bounds { width: number; height: number; scale?: number }
 interface Binding { surfaceToken: string; bindingToken: string }
-interface CpuFrame { sequence: number; width: number; height: number; stride: number; size: number; delayUs: number; pixels: Buffer
+interface CpuFrame { sequence: number; width: number; height: number; stride: number; size: number; delayUs: number; pixels?: Buffer; cpuChannelId?: string
   timeline?: number; renderStartUs?: number; targetTimeUs?: number }
 export interface SoftwareProducer {
+  readonly directCpuFrames?: boolean
+  connectCpuFramePort?(contents: WebContents, binding: CpuFrameBinding): void
+  disconnectCpuFramePort?(): void
   create(bounds: Bounds): void
   setBounds(bounds: Bounds): void
   setVisible(value: boolean): void
@@ -53,12 +57,13 @@ export function createSoftwarePlaybackBridge(native: SoftwareProducer, window: B
     if (stopped || !matches(event, value)) return
     if (binding?.bindingToken !== value.bindingToken) clearPending()
     binding = { surfaceToken, bindingToken: value.bindingToken }
+    if (platform === 'darwin' && native.directCpuFrames) native.connectCpuFramePort?.(contents, binding)
     flush(); visibility()
   }
   const removed = (event: IpcMainEvent, value: unknown): void => {
     if (!matches(event, value) || binding?.bindingToken !== value.bindingToken) return
     // Pixels have already been copied; no native memory is leased to renderer.
-    binding = null; clearPending(); visibility()
+    binding = null; clearPending(); visibility(); native.disconnectCpuFramePort?.()
   }
   const released = (event: IpcMainEvent, value: unknown): void => {
     if (stopped || !matches(event, value)) return
@@ -116,13 +121,15 @@ export function createSoftwarePlaybackBridge(native: SoftwareProducer, window: B
         throw new Error('CPU 视频帧消费超时')
       const start = monotonicMs()
       const frame = native.nextFrame(shown && pending.size < 2)
+      const direct = platform === 'darwin' && native.directCpuFrames === true
       if (!frame || !shown || !binding) return
       if (!Number.isSafeInteger(frame.sequence) || frame.sequence <= lastSequence
         || ![frame.width, frame.height, frame.stride, frame.size].every(Number.isSafeInteger)
         || frame.width < 1 || frame.width > 8192 || frame.height < 1 || frame.height > 8192
         || frame.stride < frame.width * 4 || frame.stride > 32768 || frame.stride % 64 !== 0
         || frame.size > 256 * 1024 * 1024 || frame.size !== frame.stride * frame.height
-        || !Buffer.isBuffer(frame.pixels) || frame.pixels.length !== frame.size || !Number.isFinite(frame.delayUs))
+        || (direct ? typeof frame.cpuChannelId !== 'string' || frame.pixels !== undefined
+          : frame.cpuChannelId !== undefined || !Buffer.isBuffer(frame.pixels) || frame.pixels.length !== frame.size) || !Number.isFinite(frame.delayUs))
         throw new Error(`Invalid ${label} CPU frame`)
       lastSequence = frame.sequence
       if (frame.timeline !== undefined && frame.timeline !== timeline) { native.releaseFrame?.(frame.sequence); return }

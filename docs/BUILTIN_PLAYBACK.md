@@ -37,7 +37,7 @@ Linux 默认复用 video 消费者，移除 Canvas 消费入口与 `--javdex-lin
 
 三平台采用同一“自动 / GPU / CPU 兼容”设置，在重新打开影片时应用。自动模式优先 GPU，图形初始化、自检或可检测运行故障最多触发一次 CPU 恢复；GPU 模式失败直接报告错误；CPU 模式使用软件解码和 libmpv 软件绘制，显示合成由 Chromium 执行。显式选择 GPU 后重开可重新探测。`--javdex-cpu` 可强制使用 CPU（`--` 后不生效）。未发布设置直接使用 `playbackRenderMode`，不读取或迁移旧平台专属字段。
 
-CPU 使用 `hwdec=no`、libmpv SW Render API 和 opaque RGBA，preload 在 Mac/Linux 将私有 IPC 像素缓冲区按真实 stride 包装为 opaque `RGBX VideoFrame`；紧密排列时转移私有缓冲区，存在行尾填充时由 VideoFrame 复制规范化，避开 Chromium 转移带填充 RGB 帧时窗口输出红蓝互换的问题，使用同一 video 消费者；Windows 继续通过新建的软件 Canvas 的 `putImageData` 绘制。不创建播放端 GL context 或 D3D 设备；Mac video 在禁用 Chromium GPU 时仍可使用软件合成。三平台共用实际物理尺寸 `round(逻辑尺寸 × 缩放)`，不额外降至 1080p；保留缩放不超过 8、单边 8192、单帧 256MiB 的安全边界。Windows/macOS 复制帧最多两帧在途，复制信用额度跨宿主和接收方共同约束；Linux 沿用三个槽位的有界 memfd／ACK 传输池。
+CPU 使用 `hwdec=no`、libmpv SW Render API 和 opaque RGBA，preload 在 Mac/Linux 将私有像素缓冲区按真实 stride 包装为 opaque `RGBX VideoFrame`，使用同一 video 消费者。Mac 的私有 MessagePort 直接连接隔离宿主与 preload，VideoFrame 复制输入；Linux 紧密排列时转移私有缓冲区，存在行尾填充时由 VideoFrame 复制规范化，避开 Chromium 转移带填充 RGB 帧时窗口输出红蓝互换的问题。Windows 继续通过新建的软件 Canvas 的 `putImageData` 绘制。不创建播放端 GL context 或 D3D 设备；Mac video 在禁用 Chromium GPU 时仍可使用软件合成。三平台共用实际物理尺寸 `round(逻辑尺寸 × 缩放)`，不额外降至 1080p；保留缩放不超过 8、单边 8192、单帧 256MiB 的安全边界。Windows/macOS 复制帧最多两帧在途，复制信用额度跨宿主和接收方共同约束；Linux 沿用三个槽位的有界 memfd／ACK 传输池。
 
 `PlaybackEngine` 复用当前已授权来源，恢复位置、暂停意图、音量、静音、倍速、音轨、外挂字幕和 AI 时间轴；恢复中的新控制意图优先，停止或换片取消旧恢复。媒体、授权、音频和页面错误不触发图形回退；软件解码与 CPU 画面输出分别报告。未知 GPU 租约不强行回收，迟到回调继续归属原宿主与资源代。
 
@@ -70,7 +70,9 @@ Windows 私有诊断包括生产端 DXGI 名称／vendor／device／LUID、选�
 
 macOS 正常构建和启动默认使用共享纹理 video 消费者，无需试验参数；旧 NSOpenGLView 显示后端及其原生全屏控件已移除。GPU 路径的 `playback.node` 在隔离宿主以 CGL/OpenGL 把 libmpv 输出写入三槽 IOSurface，`hwdec=auto` 保持原策略；独立 `software` 导出提供 CPU 回退，不使用 Linux DMA-BUF 或原生子窗口。资源互操作模块先接收 Mach right 并获取本进程 IOSurfaceRef，Electron 再在主进程导入，随后用公开的 `SharedTextureImportedSubtle` 转移对象交给隔离 preload；原始指针不进入应用 JSON、页面或共用播放合同。video、全屏、键盘、滑杆与焦点使用现有 HTML 面板。
 
-Mac CPU 的 `VideoFrame` 构造在紧密排列时只转移 main 已复制到 preload 的私有 ArrayBuffer，带填充行采用复制，原生帧池不进入 video。消费或丢弃后归还 CPU 复制信用额度；帧本身由消费端关闭，其转移内存随浏览器引用释放。跳转或解绑取消旧写入，迟到完成不能提交旧时间轴，也不能误报新显示失败。GPU 的租约仍等待真实 GPU 完成及 `allReferencesReleased`，不能与 CPU 信用额度混用。接入与本机边界见 [CPU video 记录](reviews/macos-cpu-video-integration-2026-10-26.md)。
+Mac CPU 的正式实现保留原生 64 字节行对齐、复用 scratch 和输出缓冲区复制；像素通过私有 MessagePort 从隔离宿主直达 preload，主进程只传递经过校验的尺寸、时间线及调度信息。此路径同时用于手动 CPU 兼容和自动回退，无需实验开关。端口绑定由主 frame 认证的 surface／binding 和独立通道代共同限定，不向公共 Renderer API 暴露。preload 有界配对两路消息，跳转保留尚未到达控制通道的新时间线像素；丢弃、解绑和换代清理旧消息。回收标记与像素走同一有序端口，生产端先发送标记再复用信用额度，避免旧像素尚未清理时新帧抢先到达；连带丢弃的较早待配对帧也须归还额度。意外关闭仍在使用的端口按五秒预算进入受控失败，正常解绑不触发故障。
+
+Mac CPU 的 `VideoFrame` 复制私有端口输入，以降低外部缓冲区转移方案的工作集；原生帧池不进入 video。消费或丢弃后归还 CPU 复制信用额度；帧本身由消费端关闭。跳转或解绑取消旧写入，迟到完成不能提交旧时间轴，也不能误报新显示失败。GPU 的租约仍等待真实 GPU 完成及 `allReferencesReleased`，不能与 CPU 信用额度混用。初次接入见 [CPU video 记录](reviews/macos-cpu-video-integration-2026-10-26.md)，本次私有通道、CPU 收益和 4K 工作集代价见 [配对实测](performance/macos-cpu-private-frame-channel-2026-10-27.md)。
 
 Mac CPU video 保留生产者的单调时间戳，只有交付等待转换到页面时钟；提交按实际视频帧回调串行背压，避免本地 MediaStream 突发写入覆盖尚未呈现的帧。CPU 消费等待沿用复制通道的五秒预算，GPU 固定色块自检仍为 1.5 秒。视频帧回调仅用于 CPU 消费背压，不代表物理扫描输出或 GPU 资源最终释放。
 

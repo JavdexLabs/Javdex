@@ -22,6 +22,8 @@
 
 2026-10-26 后续：CPU Canvas／video 配对比较后，按用户确认将 Mac CPU 接到相同 video 消费者，使用不透明 RGBX 与私有 IPC 缓冲区转移；仍为软件解码／软件绘制，并保留禁用 GPU 和故障接管。GPU 租约与 CPU 复制信用额度保持不同归还条件，详见 [接入记录](../reviews/macos-cpu-video-integration-2026-10-26.md)。
 
+2026-10-27 Mac CPU 后续：配对实测后按用户确认正式采用私有帧通道，保留原生对齐 scratch 和输出复制，由隔离宿主通过私有 MessagePort 直接交付像素，主进程继续认证绑定、校验元数据、调度和管理两帧信用额度。Mac CPU 的 VideoFrame 改为复制输入，取代上段的紧密缓冲区转移方式；CPU 兼容及自动回退进入 CPU 时均使用此实现，无需实验开关。默认 GPU、Linux 和 Windows 的显示与内存路径保持。最初 M4 配对的 1080p60／4K24 CPU 成本分别下降约 23%／18%，4K 工作集增加约 195MiB，按本次取舍采用；提交前再修复两项帧回收时序问题，最终源码的复核结果另记，范围与恢复检查见 [实测记录](../performance/macos-cpu-private-frame-channel-2026-10-27.md)。
+
 2026-10-27 后续：按用户选择，Linux GPU/CPU 共用 video 消费者并移除旧 Canvas 入口；保留 CPU 自动接管与硬解失败后的 copy/software 解码。默认优先当前输出 GPU 对应的直接硬解。Intel VAAPI 的 DRM FD 隔离修复通过 producer 检查，强制 Intel 消费、NVIDIA 桌面呈现归入非阻塞的系统兼容性边界，不能作为纯 Intel 全链路证明；详见 [Intel 调查记录](../performance/linux-intel-direct-investigation-2026-10-27.md)。CPU 4K60 性能下降为已接受取舍。
 
 ## 能力与行为合同
@@ -73,7 +75,7 @@ flowchart TD
 - **通用内核适配**：`libmpvPlayback.ts` 保留通用命令与状态转换；拆出宿主工厂和生成字幕的选择权/异步确认管理。`MpvCore.initialize` 改为具名配置，共用层传入解码、时序及色彩策略。
 - **FramePipeline**：统一画面绑定、单调时钟、时间线、过期帧丢弃、背压、检查与诊断，提供明确的资源生命周期接口。
 - **系统适配**：提供资源描述、创建/导入/释放及必要的进程桥接。GPU 资源完成与释放条件继续受实际平台 API 约束；不把显示提交当作 GPU 已释放，也不强制回收状态未知的资源。
-- **Renderer/preload**：保留同一显示绑定与 HTML 控件体系；Mac GPU／CPU 使用 video，Windows/Linux 使用 Canvas，原始句柄、FD、地址、来源授权及任意 mpv 命令不进入公共 Renderer API。
+- **Renderer/preload**：保留同一显示绑定与 HTML 控件体系；Mac/Linux GPU／CPU 使用 video，Windows 使用 Canvas，原始句柄、FD、地址、来源授权及任意 mpv 命令不进入公共 Renderer API。
 
 Windows/macOS 的隔离宿主先验证跨进程帧资源交接和释放，再推广到正式路径。平台 API 差异由适配层吸收，产品恢复语义保持一致。
 

@@ -1,8 +1,9 @@
 import { ipcRenderer, sharedTexture, type ReceivedSharedTextureData } from 'electron'
+import { createCpuFramePortReceiver, type CpuPixelsPort } from './cpuFramePort'
 import { createSharedTextureVideo, type SharedVideoSurface } from './sharedTextureVideo'
 
 interface SurfaceBinding { surfaceToken: string; bindingToken: string }
-interface FrameMetadata extends SurfaceBinding { sequence: number; targetTime?: number; timeline?: number; diagnosePixels?: boolean; selfTest?: 'solid-v1' }
+interface FrameMetadata extends SurfaceBinding { cpuChannelId?: string; sequence: number; targetTime?: number; timeline?: number; diagnosePixels?: boolean; selfTest?: 'solid-v1' }
 // The node preload compilation intentionally excludes the full DOM library.
 // Keep this isolated-world display seam narrow instead of adding DOM globals.
 interface ReceivedVideoFrame {
@@ -92,6 +93,7 @@ export function installSharedTextureReceiver(): (surfaceToken: string) => () => 
   const retire = (target: MountedSurface): void => {
     cancel(target)
     try {
+      cpuFrames.dispose(target)
       target.video?.dispose()
       if (target.canvas) target.context?.clearRect(0, 0, target.canvas.width, target.canvas.height)
     }
@@ -116,7 +118,7 @@ export function installSharedTextureReceiver(): (surfaceToken: string) => () => 
     if (!target || !v || v.surfaceToken !== target.surfaceToken || v.bindingToken !== target.bindingToken
       || !Number.isSafeInteger(v.timeline) || v.timeline <= target.timeline) return
     target.timeline = v.timeline; cancel(target)
-    try { target.video?.flush() }
+    try { target.video?.flush(); cpuFrames.flush() }
     catch { ipcRenderer.send('playback:shared-texture-failed', { surfaceToken: target.surfaceToken, bindingToken: target.bindingToken }) }
   })
   const current = (target: MountedSurface, metadata: FrameMetadata): boolean => mounted === target
@@ -265,7 +267,7 @@ export function installSharedTextureReceiver(): (surfaceToken: string) => () => 
         // Only the delivery wait maps that epoch to renderer performance.now().
         const timestamp = Math.round(v.targetTime ? v.targetTime * 1000
           : v.renderStartUs ?? (submissionStarted - (target.clockOffset ?? 0)) * 1000)
-        if (!await target.video.submitCpu({ pixels: v.pixels, width: v.width, height: v.height, stride: v.stride, timestamp },
+        if (!await target.video.submitCpu({ pixels: v.pixels, width: v.width, height: v.height, stride: v.stride, timestamp, copyInput: process.platform === 'darwin' && !!v.cpuChannelId },
           () => current(target, v))) return
       } else {
         if (target.canvas!.width !== v.width) { target.canvas!.width = v.width; target.image = undefined }
@@ -291,7 +293,16 @@ export function installSharedTextureReceiver(): (surfaceToken: string) => () => 
       ipcRenderer.send('playback:cpu-frame-released', { surfaceToken: target.surfaceToken, bindingToken: target.bindingToken, sequence: v.sequence })
     }
   }
-  ipcRenderer.on('playback:cpu-frame', (_event, value: unknown) => { void receiveCpu(value) })
+  const cpuFrames = createCpuFramePortReceiver({
+    current: () => mounted,
+    consume: receiveCpu,
+    release: (binding, sequence) => ipcRenderer.send('playback:cpu-frame-released', { ...binding, sequence }),
+    fail: binding => ipcRenderer.send('playback:shared-texture-failed', binding)
+  })
+  if (process.platform === 'darwin' && process.isMainFrame) {
+    ipcRenderer.on('playback:cpu-frame-port', (event, value: unknown) => cpuFrames.attach(value, event.ports?.[0] as unknown as CpuPixelsPort))
+  }
+  ipcRenderer.on('playback:cpu-frame', (_event, value: unknown) => { if (!cpuFrames.frame(value)) void receiveCpu(value) })
   const nativeTransfer = process.platform === 'darwin' ? 'mac' : process.platform === 'win32' ? 'windows' : process.platform === 'linux' ? 'linux' : null
   if (nativeTransfer && process.isMainFrame) ipcRenderer.on(`playback:${nativeTransfer}-texture-transfer`, (_event, value: unknown) => {
     const metadata = value as FrameMetadata & { transfer: Electron.SharedTextureTransfer }

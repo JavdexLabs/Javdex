@@ -11,7 +11,7 @@ function fixture() {
   const callbacks = new Map<number, () => void>(), writes: unknown[] = []
   let id = 0, stopped = 0, aborted = 0, sampled = 0, failed = 0, autoPresent = true
   let pendingWrite: Promise<void> | undefined
-  const cpuFrames: Array<{ displayWidth: number; displayHeight: number; pixels: Uint8Array; init: {format: string; layout: Array<{offset: number; stride: number}>; timestamp: number; colorSpace: unknown}; closed: number }> = []
+  const cpuFrames: Array<{ displayWidth: number; displayHeight: number; pixels: Uint8Array; init: {format: string; layout: Array<{offset: number; stride: number}>; timestamp: number; colorSpace: unknown; transfer?: ArrayBuffer[]}; closed: number }> = []
   const video = {
     muted: false, playsInline: false, srcObject: null as unknown, videoWidth: 0, videoHeight: 0, error: null,
     style: { opacity: '' }, play: async () => {}, pause: () => {}, load: () => { video.videoWidth = video.videoHeight = 0 },
@@ -241,5 +241,17 @@ test('startup without a video sink times out and stops retries without sampling 
   await new Promise<void>(resolve => setImmediate(resolve))
   assert.equal(f.writes.length, count)
   assert.equal(f.counts().sampled, 0)
+  f.sink.dispose()
+})
+
+
+test('private CPU port frames can keep the input owned while VideoFrame copies it', async () => {
+  const f = fixture(), pixels = new Uint8Array([255, 0, 0, 255])
+  const source = { pixels, width: 1, height: 1, stride: 4, timestamp: 123456, copyInput: true }
+  assert.equal(await f.sink.submitCpu(source, () => true), true)
+  assert.equal(pixels.byteLength, 4, 'copy-backed private port input must remain attached')
+  assert.equal(f.cpuFrames[0].init.transfer, undefined)
+  assert.deepEqual(Array.from(f.cpuFrames[0].pixels), [255, 0, 0, 255])
+  assert.equal(f.cpuFrames[0].closed, 1)
   f.sink.dispose()
 })

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { createCpuFramePortReceiver, type CpuPixelsPort } from './cpuFramePort'
 import { test } from 'node:test'
 import { runInNewContext } from 'node:vm'
 import { ModuleKind, ScriptTarget, transpileModule } from 'typescript'
@@ -77,6 +78,7 @@ function fixture(options: { platform?: 'linux' | 'darwin' | 'win32'; videoConsum
     document,
     require(id: string) {
       if (id === './sharedTextureVideo') return videoExports
+      if (id === './cpuFramePort') return { createCpuFramePortReceiver }
       assert.equal(id, 'electron')
       return { ipcRenderer: { on: (channel: string, callback: typeof cpuReceiver) => { listeners.set(channel, callback); if (channel === 'playback:cpu-frame') cpuReceiver = callback }, send: (channel: string, data: typeof messages[number]['data']) => {
           if (channel === 'playback:frame-clock') {
@@ -493,4 +495,23 @@ for (const cpu of [false, true]) test(`Linux rejects the removed Canvas consumer
   f.bind(surfaceToken)
   assert.equal(f.contextOptions.length, 0)
   assert.equal(f.messages.at(-1)?.channel, 'playback:shared-texture-failed')
+})
+
+
+test('Mac private port uses copied VideoFrame input and sends no raw pixels through the main envelope', async () => {
+  const f = fixture({ platform: 'darwin' }), cpuToken = 'cpu:' + token
+  f.video.dataset.playbackSurface = cpuToken; const stop = f.bind(cpuToken)
+  const binding = f.messages.find(m => m.channel.endsWith('ready'))!.data
+  const cpuChannelId = '55555555-5555-4555-8555-555555555555'
+  let closed = 0
+  const port: CpuPixelsPort = { onmessage: null, onmessageerror: null, start() {}, close() { closed++ } }
+  f.listeners.get('playback:cpu-frame-port')!({ ports: [port] }, { ...binding, cpuChannelId })
+  const pixels = new Uint8Array([255, 0, 0, 255])
+  const pending = f.cpu({ ...binding, cpuChannelId, sequence: 1, timeline: 0, width: 1, height: 1, stride: 4, size: 4 })
+  port.onmessage!({ data: { cpuChannelId, sequence: 1, timeline: 0, pixels } })
+  await pending
+  assert.equal(f.cpuVideoFrames.length, 1); assert.equal(pixels.byteLength, 4)
+  assert.deepEqual(Array.from(f.cpuVideoFrames[0].pixels), [255, 0, 0, 255]); assert.equal(f.cpuVideoFrames[0].closed, 1)
+  assert.equal(f.messages.filter(m => m.channel === 'playback:shared-texture-failed').length, 0)
+  stop(); assert.equal(closed, 1)
 })

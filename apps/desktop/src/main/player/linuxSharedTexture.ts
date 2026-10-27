@@ -27,6 +27,7 @@ interface FdBridge {
   receive(fd: number): FramePacket | null
   sendAck(fd: number, sequence: number): boolean
   readPixels(fd: number, size: number): Buffer
+  readPixelsAsync(fd: number, size: number): Promise<Buffer>
   watch(fd: number, events: number, callback: (status: number, events: number) => void): boolean
   updateWatch(fd: number, events: number): boolean
   unwatch(fd: number): boolean
@@ -51,7 +52,7 @@ interface DmaBufFrame {
   colorContract?: 'bt709-srgb-rgb-full'
 }
 interface SurfaceBinding { surfaceToken: string; bindingToken: string }
-interface PendingFrame { slot: number; fd: number | null; since: number; released: boolean }
+interface PendingFrame { slot: number; fd: number | null; since: number; released: boolean; reading?: boolean; releaseWhenRead?: boolean }
 const integer = (value: unknown, min: number, max: number): value is number =>
   typeof value === 'number' && Number.isSafeInteger(value) && value >= min && value <= max
 function validTiming(value: { timeline?: unknown; targetTimeUs?: unknown; renderStartUs?: unknown }): boolean {
@@ -104,7 +105,8 @@ export function createLinuxSharedTexture(window: BrowserWindow, addonPath: strin
     throw new Error('当前 Electron 不支持共享视频纹理')
   }
   const transport = createRequire(addonPath)(addonPath) as FdBridge
-  if (typeof transport.watch !== 'function' || typeof transport.updateWatch !== 'function' || typeof transport.unwatch !== 'function')
+  if (typeof transport.watch !== 'function' || typeof transport.updateWatch !== 'function' || typeof transport.unwatch !== 'function'
+      || software && typeof transport.readPixelsAsync !== 'function')
     throw new Error('Linux 帧传输运行库需更新，请重新构建播放运行库')
   const channel = transport.createChannel()
   const surfaceToken = (software ? 'cpu:' : '') + randomUUID()
@@ -247,6 +249,7 @@ export function createLinuxSharedTexture(window: BrowserWindow, addonPath: strin
   const removed = (event: IpcMainEvent, value: unknown): void => {
     if (!trusted(event) || !validBinding(value) || value.surfaceToken !== surfaceToken || value.bindingToken !== binding?.bindingToken) return
     if (software) for (const [sequence, entry] of pending) {
+      if (entry.reading) { entry.releaseWhenRead = true; continue }
       if (!entry.released) { entry.released = true; entry.since = Date.now(); queueAck(sequence) }
     }
     binding = null; waitingSince = visible ? Date.now() : null
@@ -367,10 +370,30 @@ export function createLinuxSharedTexture(window: BrowserWindow, addonPath: strin
         }
         recordTiming(frame, target)
         const readStarted = monoMs()
-        const pixels = transport.readPixels(packet.fd, frame.size)
-        observeStage('cpuRead', monoMs() - readStarted)
-        closeFrame(entry)
-        contents.send('playback:cpu-frame', { ...target, ...frame, timeline, targetTime: (frame.targetTimeUs ?? 0) / 1000, pixels })
+        const sequence = frame.sequence
+        const readTimeline = timeline
+        const targetSnapshot = target
+        entry.reading = true
+        // The read keeps this slot in `pending` until it finishes. A seek, detach
+        // or stop discards the pixels afterward; it does not free the slot early.
+        // pump returns before the read so it never holds `pumping` across the copy.
+        void transport.readPixelsAsync(packet.fd, frame.size).then((pixels) => {
+          entry.reading = false
+          observeStage('cpuRead', monoMs() - readStarted)
+          closeFrame(entry)
+          if (stopped || !pending.has(sequence)) return
+          if (entry.releaseWhenRead || readTimeline !== timeline || !binding || binding.bindingToken !== targetSnapshot.bindingToken) {
+            if (!entry.released) { entry.released = true; entry.since = Date.now(); queueAck(sequence) }
+            return
+          }
+          try {
+            contents.send('playback:cpu-frame', { ...targetSnapshot, ...frame, timeline: readTimeline, targetTime: (frame.targetTimeUs ?? 0) / 1000, pixels })
+          } catch { if (!stopped) fail('CPU 视频帧读取或传输失败，请停止后重试') }
+        }, () => {
+          entry.reading = false
+          closeFrame(entry)
+          if (!stopped) fail('CPU 视频帧读取或传输失败，请停止后重试')
+        })
         return
       }
       const frame = decodeDmaBufFrame(packet.metadata)

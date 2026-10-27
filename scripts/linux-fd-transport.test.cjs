@@ -186,6 +186,31 @@ async function main() {
   await assertChild(eof.done);
   bridge.close(eof.parentFd);
 
+  // Bounded async copies. A started read is not cancelled: close waits until the
+  // worker finishes, and a fourth read is rejected while three are still queued.
+  const sealedJobs = [start('sealed'), start('sealed'), start('sealed'), start('sealed')];
+  const sealedFrames = [];
+  for (const job of sealedJobs) sealedFrames.push(await receiveReady(job.parentFd));
+  const reads = sealedFrames.slice(0, 3).map((frame) => bridge.readPixelsAsync(frame.fd, 4096));
+  assert.throws(() => bridge.readPixels(sealedFrames[0].fd, 4096), { code: 'ERR_CPU_FRAME' });
+  assert.throws(() => bridge.readPixelsAsync(sealedFrames[3].fd, 4096), { code: 'ERR_CPU_FRAME' });
+  assert.equal(bridge.close(sealedFrames[0].fd), true);
+  assert.doesNotThrow(() => fs.fstatSync(sealedFrames[0].fd));
+  const copied = await Promise.all(reads);
+  for (const pixels of copied) {
+    assert.equal(pixels.length, 4096);
+    assert.ok(pixels.every((byte) => byte === 0xA5));
+  }
+  assert.throws(() => fs.fstatSync(sealedFrames[0].fd), { code: 'EBADF' });
+  assert.equal(bridge.readPixels(sealedFrames[3].fd, 4096)[0], 0xA5);
+  for (const frame of sealedFrames.slice(1)) assert.equal(bridge.close(frame.fd), true);
+  for (const job of sealedJobs) {
+    assert.equal(bridge.sendAck(job.parentFd, 1), true);
+    await assertChild(job.done);
+    bridge.close(job.parentFd);
+  }
+  assert.equal(fdCount(), before, 'No descriptor leak after bounded async reads');
+
   // A worker's environment teardown must release addon-owned descriptors even
   // when its JS deliberately omits close(). Workers share the process FD table.
   const { Worker } = require('node:worker_threads');

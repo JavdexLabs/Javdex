@@ -186,7 +186,7 @@ Windows 的播放、全屏、滑块与键盘输入均由现有 HTML 面板处理
 
 Linux X11／XWayland 和原生 Wayland 共用 DMA-BUF／CPU 内存帧链路，原生子窗口代码及构建目标已移除。`--javdex-x11` 和 `--javdex-wayland` 只选择显示后端，冲突参数仍拒绝启动。原生开发构建需要 CMake、C++17、pkg-config、EGL/GBM/DRM 开发库及 libmpv，设置 JAVDEX_MPV_PREFIX 后运行 npm run playback:native:build，构建 GPU helper、CPU helper 和 FD addon。完整隔离双运行库构建见 LINUX_COMPATIBLE_PLAYBACK.md；旧包的验证合同仅用于历史回归。
 
-Linux 的 playback-dmabuf-helper／playback-software-helper 在独立进程链接各自 libmpv，使用私有控制管道和 FD 3 帧通道，不接收 Electron 原生窗口句柄、不创建 X11 child 或 GLX context。主进程只持有 FD 桥，renderer 使用同一个 Canvas 显示。当前 Linux 源构建默认使用 dmabuf profile，不再构建 x11 profile。
+Linux 的 playback-dmabuf-helper／playback-software-helper 在独立进程链接各自 libmpv，使用私有控制管道和 FD 3 帧通道，不接收 Electron 原生窗口句柄、不创建 X11 child 或 GLX context。主进程只持有 FD 桥，renderer 使用 video 消费者显示。当前 Linux 源构建默认使用 dmabuf profile，不再构建 x11 profile。
 
 Linux GPU 模式要求可用的硬件 EGL 设备；可检测故障按自动模式策略切换至 CPU 兼容模式。CPU 视频链路使用软件 render API，不依赖 GLX 或 X11 原生窗口。
 

@@ -265,8 +265,8 @@ export function createLinuxSharedTexture(window: BrowserWindow, addonPath: strin
     const sequence = (value as SurfaceBinding & { sequence?: unknown }).sequence
     if (!integer(sequence, lastDrawnSequence + 1, lastSequence)) return
     lastDrawnSequence = sequence
-    // Canvas draw submission is evidence of renderer delivery, not screen
-    // scanout. Neither helper export nor sendSharedTexture resolution counts.
+    // A renderer submission receipt is delivery to the page, not screen scanout.
+    // Neither helper export nor sendSharedTexture resolution counts.
     drawnFrames++
     const timing = timings.get(sequence)
     timings.delete(sequence)

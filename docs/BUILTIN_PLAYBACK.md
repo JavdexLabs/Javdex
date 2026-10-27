@@ -90,7 +90,7 @@ Linux GPU 模式在 X11 和 Wayland 下均使用隔离 helper 导出 DMA-BUF，�
 
 X11 的固定 Vulkan 消费路径在冷启动时可能短暂报告软件合成。首次打开影片前最多等待两秒，随后仍由原来的严格设备检查决定是否可用；软件启动和手动 CPU 不等待。等待期间停止或换片不能创建旧会话或申请旧媒体授权。Linux GPU 预算结合处理成本与持续上游丢帧学习会话下限，保留原有上下界，且同一 helper 跳转时保留下限。详细计时、重置和安全边界见 [Linux 兼容播放](LINUX_COMPATIBLE_PLAYBACK.md)；这些统计不等于物理呈现反馈。
 
-实验黑屏诊断须区分 producer、导入的 VideoFrame、Canvas 与最终屏幕。Linux 的 `submittedFrames` 只计 Canvas 提交回执，不是画面验收证据；不再填充 `presentedFrames`。`JAVDEX_TEXTURE_PIXEL_DIAGNOSTICS=1` 默认关闭，只对输出纹理为 640×360 的前三个指定间隔帧读取有界像素摘要；媒体自身的宽高不能证明 viewport 纹理符合采样条件。触发按符合尺寸的帧数计算，避免初始化 viewport 提前耗尽绝对帧号。读回可能改变同步或 Canvas 后端，修复验收应关闭该开关，并检查真实窗口画面、持续播放、暂停恢复、跳转、字幕、缩放及重开。
+实验黑屏诊断须区分 producer、导入的 VideoFrame、Canvas 与最终屏幕。Linux 的 `submittedFrames` 计渲染端提交回执（video 路径同样发送），不是画面验收证据；不再填充 `presentedFrames`。`JAVDEX_TEXTURE_PIXEL_DIAGNOSTICS=1` 默认关闭，只对输出纹理为 640×360 的前三个指定间隔帧读取有界像素摘要；媒体自身的宽高不能证明 viewport 纹理符合采样条件。触发按符合尺寸的帧数计算，避免初始化 viewport 提前耗尽绝对帧号。读回可能改变同步或 Canvas 后端，修复验收应关闭该开关，并检查真实窗口画面、持续播放、暂停恢复、跳转、字幕、缩放及重开。
 
 远程播放的会话 URL、授权续期、内外两类代理池及回收规则集中维护在[服务端合同](SERVER_MODE_CONTRACT_INVENTORY.md#保留的边界与限制)。AI 音频读取复用播放会话 URL；切换、停止、失败和断开时取消旧读取，迟到回调不能恢复已释放地址。
 

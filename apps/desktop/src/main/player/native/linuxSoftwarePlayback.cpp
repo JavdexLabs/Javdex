@@ -77,7 +77,7 @@ public:
         b.data = static_cast<unsigned char *>(mapped); return b;
     }
     void finish(Buffer &b) {
-        // mpv's rgb0 has undefined alpha. Canvas requires opaque RGBA.
+        // mpv's rgb0 leaves alpha undefined. This display path still reads that byte.
         for (int y = 0; y < b.height; y++)
             for (int x = 0; x < b.width; x++) b.data[y * b.stride + x * 4 + 3] = 255;
     }

@@ -7,7 +7,7 @@ import { spawnSync } from 'node:child_process'
 import { playbackFileSha256 } from './playback-runtime.mjs'
 import { playbackPackagingFiles, playbackPackagingDigest } from './playback-source-materials.mjs'
 import { safePath } from './restore-playback-sources.mjs'
-import { unpackPlaybackSources, angleSourceLimits } from './playback-source-archive.mjs'
+import { unpackPlaybackSources, angleSourceLimits, angleRebuildLimits } from './playback-source-archive.mjs'
 
 export const linuxReleaseInventory = 'linux-playback-release.json'
 export const linuxReleaseComponents = {
@@ -28,7 +28,7 @@ export function linuxPackagingFiles(root) {
     'build/playback-sources.json', 'build/angle-runtime.json', 'build/angle-args.gn',
     'build/patches/angle-x11-vulkan-visual.patch',
     ...Object.keys(lock.electronPatches).map(name => 'build/angle-electron-patches/' + safePath(name)),
-    ...['mpvCore.h', 'generatedSubtitles.h', 'linuxDmaBuf.h', 'linuxDmaBuf.test.cpp', 'frameTiming.h', 'renderConfig.h', 'colorPipeline.h', 'linuxFrameTiming.test.cpp', 'linuxVulkanModifiers.h', 'linuxFdTransport.h', 'linuxFdBridge.cpp',
+    ...['mpvCore.h', 'generatedSubtitles.h', 'linuxDmaBuf.h', 'linuxDmaBuf.test.cpp', 'frameTiming.h', 'linuxStageTimings.h', 'renderConfig.h', 'colorPipeline.h', 'linuxFrameTiming.test.cpp', 'linuxVulkanModifiers.h', 'linuxFdTransport.h', 'linuxFdBridge.cpp',
       'linuxDmaBufPlayback.cpp', 'linuxSoftwarePlayback.cpp', 'runtimeDecode.test.cpp'].map(name => 'apps/desktop/src/main/player/native/' + name)
   ])]
 }
@@ -49,6 +49,8 @@ export function validateLinuxInventory(manifest) {
   assert.deepEqual(Object.keys(manifest.inventories).sort(), Object.keys(linuxReleaseComponents).sort())
   for (const [id, component] of Object.entries(linuxReleaseComponents)) {
     const inventory = manifest.inventories[id]
+    if (id === 'angle' && inventory.sourceBundle.format !== undefined)
+      assert.equal(inventory.sourceBundle.format, 'angle-rebuild-v1', 'Unsupported ANGLE source delivery format')
     assert.equal(inventory.electronVersion, manifest.electronVersion)
     assert.equal(manifest.sources[id].sha256, inventory.sourceBundle.sha256, 'Linux component source binding mismatch')
     if (component.profile) assert.equal(inventory.profile, component.profile)
@@ -100,7 +102,7 @@ export function createLinuxSourceBundle(app, output, root, inventories, sources,
     const fileName = `Javdex-Playback-Sources-${version}-linux-x64-${inputInventorySha256.slice(0, 12)}-${tools.slice(0, 8)}.tar.gz`
     for (const [id, file] of Object.entries(sources)) write('reviewed-runtime/' + manifest.sources[id].file, fs.readFileSync(file))
     for (const name of names) write('packaging-tools/' + name, fs.readFileSync(path.join(root, name)))
-    write('README.txt', 'Linux integrated playback corresponding sources\n\nreviewed-runtime/runtime.json binds both helper runtimes and the ANGLE pair. sources/gpu.tar.gz and cpu.tar.gz retain pinned upstream archives, exact Ubuntu source packages, the application recipe and Electron SDK headers. angle.tar.gz retains the ANGLE/dependency checkout and pinned patches. Restore the component archives to separate new directories; use their recipes on Ubuntu 22.04. Build both playback profiles and ANGLE before packaging. These materials do not establish GPU or GUI acceptance.\n')
+    write('README.txt', 'Linux integrated playback corresponding sources\n\nreviewed-runtime/runtime.json binds both helper runtimes and the ANGLE pair. sources/gpu.tar.gz and cpu.tar.gz retain pinned upstream archives, exact Ubuntu source packages, the application recipe and Electron SDK headers. New angle-rebuild-v1 archives retain upstream revisions, DEPS, licenses and patches instead of the complete ANGLE/dependency tree; see their README.txt and rebuild.json. Rebuilding ANGLE requires network access to fetch the pinned sources. Legacy ANGLE archives retain their original full checkout. Restore the component archives to separate new directories; use their recipes on Ubuntu 22.04. Build both playback profiles and ANGLE before packaging. These materials do not establish GPU or GUI acceptance.\n')
     const archive = path.join(output, fileName)
     if (fs.existsSync(archive)) {
       const previous = JSON.parse(fs.readFileSync(archive + '.json'))
@@ -122,6 +124,34 @@ export function createLinuxSourceBundle(app, output, root, inventories, sources,
   } finally { fs.rmSync(temporary, { recursive: true, force: true }) }
 }
 
+function verifyAngleRebuildMaterials(directory, lock) {
+  const reference = JSON.parse(fs.readFileSync(path.join(directory, 'rebuild.json')))
+  assert.equal(reference.schemaVersion, 1)
+  assert.equal(reference.kind, 'angle-rebuild')
+  assert.equal(reference.electronVersion, lock.electronVersion, 'ANGLE rebuild Electron version mismatch')
+  assert.deepEqual(reference.angle, { url: 'https://chromium.googlesource.com/angle/angle.git', revision: lock.angleRevision }, 'ANGLE rebuild upstream mismatch')
+  assert.deepEqual(reference.depotTools, { url: 'https://chromium.googlesource.com/chromium/tools/depot_tools.git', revision: lock.depotToolsRevision }, 'ANGLE rebuild toolchain mismatch')
+  assert.ok(reference.files && typeof reference.files === 'object' && !Array.isArray(reference.files))
+  const list = (root, prefix = '') => fs.readdirSync(root, { withFileTypes: true }).flatMap(entry =>
+    entry.isDirectory() ? list(path.join(root, entry.name), prefix + entry.name + '/') : [prefix + entry.name])
+  assert.deepEqual(list(directory).sort(), [...Object.keys(reference.files), 'rebuild.json'].sort(), 'ANGLE rebuild inventory mismatch')
+  const notice = name => name.split('/').some(part => ['licenses', 'licences'].includes(part.toLowerCase()))
+    || /^(license|licence|copying|copyright|notice|patents|authors)/i.test(path.posix.basename(name))
+  const preferred = new Set(['angle/include/EGL/egl.h', 'angle/src/libANGLE/renderer/vulkan/linux/xcb/DisplayVkXcb.cpp',
+    'angle/src/libANGLE/renderer/vulkan/linux/xcb/DisplayVkXcb.h', 'angle/build/linux/sysroot_scripts/install-sysroot.py'])
+  const recipes = new Set(['scripts/build-linux-angle.py', 'build/angle-runtime.json', 'build/angle-args.gn',
+    'build/patches/angle-x11-vulkan-visual.patch', ...Object.keys(lock.electronPatches).map(name => 'build/angle-electron-patches/' + name)]
+    .map(name => 'recipe/' + name))
+  for (const [name, hash] of Object.entries(reference.files)) {
+    safePath(name); assert.match(hash, /^[a-f0-9]{64}$/)
+    assert.ok(recipes.has(name) || ['README.txt', 'gclient-config'].includes(name)
+      || name.startsWith('angle/') && (notice(name) || path.posix.basename(name) === 'DEPS' || preferred.has(name)), 'Unexpected ANGLE rebuild source file: ' + name)
+    assert.equal(playbackFileSha256(path.join(directory, name)), hash, 'ANGLE rebuild material digest mismatch: ' + name)
+  }
+  for (const name of ['README.txt', 'gclient-config']) assert.ok(reference.files[name], 'Missing ANGLE rebuild instructions/configuration')
+  assert.ok(Object.keys(reference.files).some(name => name.startsWith('angle/third_party/') && notice(name)), 'Missing ANGLE dependency licenses')
+}
+
 // Executed again by the Linux packaging job and by the source aggregator. Outer
 // archive hashes alone cannot prove that native code/SDK/upstream pins are present.
 export async function verifyLinuxSourceMaterials(input, manifest, temporary) {
@@ -134,9 +164,12 @@ export async function verifyLinuxSourceMaterials(input, manifest, temporary) {
     const archive = path.join(input, 'reviewed-runtime', source.file)
     assert.equal(playbackFileSha256(archive), source.sha256, 'Linux source material digest mismatch')
     const extracted = path.join(temporary, id)
-    await unpackPlaybackSources(archive, extracted, id === 'angle' ? angleSourceLimits : undefined)
+    const compactAngle = id === 'angle' && manifest.inventories.angle.sourceBundle.format === 'angle-rebuild-v1'
+    const limits = id === 'angle' ? (compactAngle ? angleRebuildLimits : angleSourceLimits) : undefined
+    await unpackPlaybackSources(archive, extracted, limits)
     if (id === 'angle') {
       const angleLock = JSON.parse(fs.readFileSync(path.join(tools, 'build/angle-runtime.json')))
+      if (compactAngle) verifyAngleRebuildMaterials(extracted, angleLock)
       assert.equal(manifest.inventories.angle.angleRevision, angleLock.angleRevision)
       for (const [field, file] of [['patchSha256', 'build/patches/angle-x11-vulkan-visual.patch'], ['argsSha256', 'build/angle-args.gn'], ['provenanceSha256', 'build/angle-runtime.json']])
         assert.equal(manifest.inventories.angle[field], playbackFileSha256(path.join(tools, file)), 'ANGLE source pin mismatch')

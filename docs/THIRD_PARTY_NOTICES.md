@@ -44,7 +44,7 @@ Windows 原生播放 addon 的 MSVC 构建复用已安装的 [node-gyp](https://
 
 ## Linux X11 ANGLE
 
-Linux x64 包使用与 Electron 版本匹配的 ANGLE 源码和 Electron 上游补丁序列，另应用本仓库 `build/patches/angle-x11-vulkan-visual.patch`。固定版本及摘要见 `build/angle-runtime.json`，构建参数见 `build/angle-args.gn`。ANGLE 使用 BSD 风格许可，包内保留 `ANGLE-LICENSE.txt`；完整依赖源码及其许可保留在独立的 `Javdex-ANGLE-Sources-*.tar.gz`，应随二进制交付。Vulkan loader 沿用 Electron 包，GPU 驱动仍由宿主提供。
+Linux x64 包使用与 Electron 版本匹配的 ANGLE 源码和 Electron 上游补丁序列，另应用本仓库 `build/patches/angle-x11-vulkan-visual.patch`。固定版本及摘要见 `build/angle-runtime.json`，构建参数见 `build/angle-args.gn`。ANGLE 使用 BSD 风格许可，包内保留 `ANGLE-LICENSE.txt`。新构建的 `Javdex-ANGLE-Rebuild-*.tar.gz` 只交付固定上游与 depot_tools 提交、DEPS、检出依赖的版权／许可声明、补丁和构建配方，不再附完整源码树；`rebuild.json` 逐文件绑定这些材料，重建时按固定版本联网获取源码。ANGLE 自身的 BSD 许可不要求随二进制附完整源码；其他播放依赖的对应源码交付要求保持有效。旧 `Javdex-ANGLE-Sources-*.tar.gz` 完整归档继续保留并可恢复。Vulkan loader 沿用 Electron 包，GPU 驱动仍由宿主提供。
 
 ## MetaTube
 
@@ -63,3 +63,7 @@ Javdex 中的 MetaTube 适配代码为本项目实现；上述说明用于标明
 Sharp 0.35.5 使用 Apache-2.0；Linux Electron 采用官方 `@img/sharp-wasm32` 0.35.5（Apache-2.0、LGPL-3.0-or-later、MIT），包含 libvips 及图片编解码库，版本清单随包保留。后端选择补丁见 `scripts/patch-sharp-electron.mjs`。上游源码和构建入口见 [Sharp v0.35.5](https://github.com/lovell/sharp/tree/v0.35.5) 和 [sharp-libvips](https://github.com/lovell/sharp-libvips)；上游 [Electron/Linux 兼容性说明](https://sharp.pixelplumbing.com/install/#electron-and-linux) 记录 GLib 符号冲突。
 
 Linux x64 文本 GPU 新增固定 llama.cpp b11435 官方发行及 CUDA 12.8 运行依赖，遵守 [CUDA 12.8.1 EULA](https://docs.nvidia.com/cuda/archive/12.8.1/eula/index.html)。Whisper Linux GPU r1 保留 MIT、Vulkan Headers 与 NVIDIA 许可；驱动 `libcuda.so.1`、Vulkan ICD 由宿主提供，不随包覆盖。实际发行及验证范围见 [Linux AI GPU 验收](reviews/linux-local-ai-gpu-20261023.md)。
+
+## Windows ANGLE 播放接入
+
+Electron 44 不再分发 EGL／GLES DLL。Windows 播放宿主从私有播放目录按绝对路径加载独立固定的 ANGLE：来源为官方 Electron 43.8.1 的两个 DLL，不运行旧 Electron。`build/windows-angle-runtime.json` 记录官方供应 ZIP、SHA-256、ANGLE 修订和上游／供应方源码摘要；完整上游及第三方许可保留在运行库的 `ANGLE-LICENSE.txt`。消费端仍使用 Electron 44.9.3 内置 ANGLE，双方通过 D3D11 原生纹理互通。编译所需 EGL／KHR ABI 头文件固定于 `c5bf49e78850a5335a8fa2a7bfb53b559fbfc927`；每个文件保留上游版权／SPDX，包含 ANGLE BSD 和 Khronos Apache-2.0 声明。来源、逐文件摘要及完整许可证位于 `apps/desktop/src/main/player/native/vendor/angle/`，并进入 Windows 构建指纹和对应源码归档。固定 libmpv 额外保留 client 扩展查询兼容补丁及可选回读计时补丁，不修改其许可。

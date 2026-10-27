@@ -6,6 +6,7 @@ import path from 'node:path'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import { playbackNativeBuild, stageWindowsDevelopmentLibraries } from './playback-native-build.mjs'
+import { stageWindowsAngleRuntime } from './windows-angle-runtime.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const require = createRequire(import.meta.url)
@@ -39,6 +40,7 @@ for (const step of playbackNativeBuild({ platform, arch, root, prefix, include, 
   if (result.status !== 0) throw new Error('Native build or regression command failed: ' + step.command + ' (exit ' + result.status + ')')
 }
 if (platform === 'win32') {
+  await stageWindowsAngleRuntime(output, arch)
   const files = stageWindowsDevelopmentLibraries({ output, libraryDirectory: path.join(prefix, 'bin'), arch })
   console.log(`Staged ${files.length} development playback DLLs beside playback.node`)
 }

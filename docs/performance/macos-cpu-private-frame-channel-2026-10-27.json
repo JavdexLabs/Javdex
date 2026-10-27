@@ -1,0 +1,1425 @@
+{
+  "recordedAt": "2026-10-27T02:37:09.896322+00:00",
+  "sourceBase": "9e73fe7187afad87a5e6b51902fa884e994e56f1",
+  "candidateIdentity": "Historical benchmark candidate before review fixes; archived source/build hashes retained; final reviewed source is identified by postReview.sourceHashes.",
+  "platform": {
+    "chip": "Apple M4",
+    "logicalCpus": 10,
+    "memoryBytes": 17179869184,
+    "electron": "44.9.3",
+    "chromium": "152.0.7977.167"
+  },
+  "units": {
+    "cpuPercent": "100%=one logical core; sum of application process CPU",
+    "memoryMiB": "sum of process working sets; shared pages may be counted more than once"
+  },
+  "implementation": {
+    "nativeOutput": "original aligned scratch and copied output retained",
+    "pixels": "Mac CPU utility process directly to isolated preload through private MessagePort",
+    "main": "authenticated binding, checked metadata, timing and two-copy credit budget",
+    "videoFrameInput": "copy; no transferred ArrayBuffer for Mac private input",
+    "gpuDefault": true,
+    "windowsAndLinuxPaths": "unchanged"
+  },
+  "paired": [
+    {
+      "case": "padded60",
+      "samplesPerMode": 2,
+      "secondsPerSample": 20,
+      "modes": {
+        "source-baseline": {
+          "cpuPercent": 264.82446006119307,
+          "memoryMiB": 1061.865625,
+          "nativeFps": 59.96745506519363,
+          "videoFps": 59.992443301441334,
+          "drops": [
+            {
+              "mpv": 0,
+              "video": 0
+            },
+            {
+              "mpv": 0,
+              "video": 0
+            }
+          ]
+        },
+        "source": {
+          "cpuPercent": 203.12269518317754,
+          "memoryMiB": 1063.240234375,
+          "nativeFps": 60.02563006911404,
+          "videoFps": 60.000637395502125,
+          "drops": [
+            {
+              "mpv": 0,
+              "video": 0
+            },
+            {
+              "mpv": 0,
+              "video": 0
+            }
+          ]
+        }
+      },
+      "cpuRelativeReductionPercent": 23.299118542055396,
+      "workingSetIncreaseMiB": 1.374609375000091
+    },
+    {
+      "case": "fourk24",
+      "samplesPerMode": 2,
+      "secondsPerSample": 20,
+      "modes": {
+        "source-baseline": {
+          "cpuPercent": 311.60299421671647,
+          "memoryMiB": 1618.851953125,
+          "nativeFps": 24.009404912356086,
+          "videoFps": 24.009407002608725,
+          "drops": [
+            {
+              "mpv": 0,
+              "video": 0
+            },
+            {
+              "mpv": 0,
+              "video": 0
+            }
+          ]
+        },
+        "source": {
+          "cpuPercent": 254.82127267087762,
+          "memoryMiB": 1813.946484375,
+          "nativeFps": 24.007649403092202,
+          "videoFps": 24.032627551072782,
+          "drops": [
+            {
+              "mpv": 0,
+              "video": 0
+            },
+            {
+              "mpv": 0,
+              "video": 0
+            }
+          ]
+        }
+      },
+      "cpuRelativeReductionPercent": 18.22245697239603,
+      "workingSetIncreaseMiB": 195.09453125000005
+    }
+  ],
+  "sourceValidation": [
+    {
+      "name": "padded60",
+      "mode": "source-baseline",
+      "seconds": 20,
+      "label": "source-pair-1",
+      "passed": true,
+      "realtime": true,
+      "measurement": {
+        "duration": 20.010648208000003,
+        "cpuPercent": 265.6671510458448,
+        "cpuByType": {
+          "Browser": 39.98615595471368,
+          "GPU": 6.937781253107919,
+          "Utility": 178.80503733854854,
+          "Tab": 39.938176499474636
+        },
+        "memoryMiB": 1047.98984375,
+        "nativeFps": 59.8181521936633,
+        "consumerFps": 60.0180457682453,
+        "videoFps": 60.0180457682453,
+        "mpvDrops": 0,
+        "videoDrops": 0,
+        "constructMsPerFrame": 1.1183180677999962,
+        "transferredFrames": 0,
+        "stride": 8320,
+        "advance": 20.033333,
+        "renderMsPerFrame": null,
+        "normalizeMsPerFrame": null,
+        "copyMsPerFrame": null,
+        "allocateMsPerFrame": null
+      }
+    },
+    {
+      "name": "padded60",
+      "mode": "source",
+      "seconds": 20,
+      "label": "source-pair-1",
+      "passed": true,
+      "realtime": true,
+      "measurement": {
+        "duration": 20.008572208,
+        "cpuPercent": 203.16114801908307,
+        "cpuByType": {
+          "Browser": 2.8434262779256474,
+          "GPU": 6.0691087168852125,
+          "Utility": 157.24280909669594,
+          "Tab": 37.005803927576274
+        },
+        "memoryMiB": 1064.159375,
+        "nativeFps": 59.92431581502879,
+        "consumerFps": 60.02427297235161,
+        "videoFps": 60.02427297235161,
+        "mpvDrops": 0,
+        "videoDrops": 0,
+        "constructMsPerFrame": 0.5953372253367148,
+        "transferredFrames": 0,
+        "stride": 8320,
+        "advance": 19.883333,
+        "renderMsPerFrame": null,
+        "normalizeMsPerFrame": null,
+        "copyMsPerFrame": null,
+        "allocateMsPerFrame": null
+      }
+    },
+    {
+      "name": "padded60",
+      "mode": "source",
+      "seconds": 20,
+      "label": "source-pair-2",
+      "passed": true,
+      "realtime": true,
+      "measurement": {
+        "duration": 20.007668999999996,
+        "cpuPercent": 203.08424234727198,
+        "cpuByType": {
+          "Browser": 2.8941052553398396,
+          "GPU": 6.0806283830465215,
+          "Utility": 157.17883477580526,
+          "Tab": 36.930673933080364
+        },
+        "memoryMiB": 1062.32109375,
+        "nativeFps": 60.12694432319928,
+        "consumerFps": 59.977001818652646,
+        "videoFps": 59.977001818652646,
+        "mpvDrops": 0,
+        "videoDrops": 0,
+        "constructMsPerFrame": 0.5884166669845581,
+        "transferredFrames": 0,
+        "stride": 8320,
+        "advance": 19.95,
+        "renderMsPerFrame": null,
+        "normalizeMsPerFrame": null,
+        "copyMsPerFrame": null,
+        "allocateMsPerFrame": null
+      }
+    },
+    {
+      "name": "padded60",
+      "mode": "source-baseline",
+      "seconds": 20,
+      "label": "source-pair-2",
+      "passed": true,
+      "realtime": true,
+      "measurement": {
+        "duration": 20.011059167,
+        "cpuPercent": 263.98176907654135,
+        "cpuByType": {
+          "Browser": 40.29401908569151,
+          "GPU": 7.050171548773173,
+          "Utility": 177.2183356415339,
+          "Tab": 39.41924280054276
+        },
+        "memoryMiB": 1075.74140625,
+        "nativeFps": 60.116757936723964,
+        "consumerFps": 60.01681320199957,
+        "videoFps": 59.96684083463737,
+        "mpvDrops": 0,
+        "videoDrops": 0,
+        "constructMsPerFrame": 1.1647793700752607,
+        "transferredFrames": 0,
+        "stride": 8320,
+        "advance": 19.966666999999998,
+        "renderMsPerFrame": null,
+        "normalizeMsPerFrame": null,
+        "copyMsPerFrame": null,
+        "allocateMsPerFrame": null
+      }
+    },
+    {
+      "name": "fourk24",
+      "mode": "source-baseline",
+      "seconds": 20,
+      "label": "source-pair-1",
+      "passed": true,
+      "realtime": true,
+      "measurement": {
+        "duration": 20.012152792000002,
+        "cpuPercent": 309.7525620770804,
+        "cpuByType": {
+          "Browser": 46.80405999970339,
+          "GPU": 4.3061434167367105,
+          "Utility": 225.8592389823684,
+          "Tab": 32.78311967827194
+        },
+        "memoryMiB": 1592.43203125,
+        "nativeFps": 23.98542550563992,
+        "consumerFps": 23.98542550563992,
+        "videoFps": 24.035395142110005,
+        "mpvDrops": 0,
+        "videoDrops": 0,
+        "constructMsPerFrame": 0.02562501629193624,
+        "transferredFrames": 481,
+        "stride": 15360,
+        "advance": 19.916667,
+        "renderMsPerFrame": null,
+        "normalizeMsPerFrame": null,
+        "copyMsPerFrame": null,
+        "allocateMsPerFrame": null
+      }
+    },
+    {
+      "name": "fourk24",
+      "mode": "source",
+      "seconds": 20,
+      "label": "source-pair-1",
+      "passed": true,
+      "realtime": true,
+      "measurement": {
+        "duration": 20.013444417,
+        "cpuPercent": 254.44224861535986,
+        "cpuByType": {
+          "Browser": 2.0455749218872707,
+          "GPU": 3.7802388446306594,
+          "Utility": 201.83563187997734,
+          "Tab": 46.780802968864585
+        },
+        "memoryMiB": 1823.30390625,
+        "nativeFps": 24.083810360528208,
+        "consumerFps": 23.983877537455477,
+        "videoFps": 24.033843948991844,
+        "mpvDrops": 0,
+        "videoDrops": 0,
+        "constructMsPerFrame": 1.957708344856898,
+        "transferredFrames": 0,
+        "stride": 15360,
+        "advance": 20.083333,
+        "renderMsPerFrame": null,
+        "normalizeMsPerFrame": null,
+        "copyMsPerFrame": null,
+        "allocateMsPerFrame": null
+      }
+    },
+    {
+      "name": "fourk24",
+      "mode": "source",
+      "seconds": 20,
+      "label": "source-pair-2",
+      "passed": true,
+      "realtime": true,
+      "measurement": {
+        "duration": 20.015470458,
+        "cpuPercent": 255.20029672639538,
+        "cpuByType": {
+          "Browser": 2.0231950123267994,
+          "GPU": 3.7471564886461493,
+          "Utility": 201.74105367511223,
+          "Tab": 47.68889155031022
+        },
+        "memoryMiB": 1804.5890625,
+        "nativeFps": 23.9314884456562,
+        "consumerFps": 23.98144979940496,
+        "videoFps": 24.03141115315372,
+        "mpvDrops": 0,
+        "videoDrops": 0,
+        "constructMsPerFrame": 2.0652083456516266,
+        "transferredFrames": 0,
+        "stride": 15360,
+        "advance": 20.083333,
+        "renderMsPerFrame": null,
+        "normalizeMsPerFrame": null,
+        "copyMsPerFrame": null,
+        "allocateMsPerFrame": null
+      }
+    },
+    {
+      "name": "fourk24",
+      "mode": "source-baseline",
+      "seconds": 20,
+      "label": "source-pair-2",
+      "passed": true,
+      "realtime": true,
+      "measurement": {
+        "duration": 20.013827167,
+        "cpuPercent": 313.4534263563525,
+        "cpuByType": {
+          "Browser": 47.57434907652014,
+          "GPU": 4.370618336518385,
+          "Utility": 227.49137194045605,
+          "Tab": 34.0170870028579
+        },
+        "memoryMiB": 1645.271875,
+        "nativeFps": 24.03338431907225,
+        "consumerFps": 24.03338431907225,
+        "videoFps": 23.983418863107445,
+        "mpvDrops": 0,
+        "videoDrops": 0,
+        "constructMsPerFrame": 0.026611236921219222,
+        "transferredFrames": 480,
+        "stride": 15360,
+        "advance": 20.041666,
+        "renderMsPerFrame": null,
+        "normalizeMsPerFrame": null,
+        "copyMsPerFrame": null,
+        "allocateMsPerFrame": null
+      }
+    },
+    {
+      "name": "padded60",
+      "mode": "source",
+      "seconds": 120,
+      "label": "source-long60",
+      "passed": true,
+      "realtime": true,
+      "measurement": {
+        "duration": 120.007765833,
+        "cpuPercent": 210.19537881492298,
+        "cpuByType": {
+          "Browser": 3.016422291401896,
+          "GPU": 6.969569795707373,
+          "Utility": 160.1280072719742,
+          "Tab": 40.081379455839475
+        },
+        "memoryMiB": 1074.1533854166667,
+        "nativeFps": 60.004450128842024,
+        "consumerFps": 59.987784540693475,
+        "videoFps": 59.987784540693475,
+        "mpvDrops": 0,
+        "videoDrops": 0,
+        "constructMsPerFrame": 0.805056255084638,
+        "transferredFrames": 0,
+        "stride": 8320,
+        "advance": 119.89999999999999,
+        "renderMsPerFrame": null,
+        "normalizeMsPerFrame": null,
+        "copyMsPerFrame": null,
+        "allocateMsPerFrame": null
+      }
+    },
+    {
+      "name": "padded24",
+      "mode": "source",
+      "seconds": 2,
+      "label": "source-lifecycle",
+      "script": "lifecycle.mjs",
+      "passed": true,
+      "realtime": true,
+      "measurement": {
+        "duration": 2.0083724999999997,
+        "cpuPercent": 112.32069748017364,
+        "cpuByType": {
+          "Browser": 2.3036563187356944,
+          "GPU": 4.444195486644037,
+          "Utility": 79.60116960374634,
+          "Tab": 25.971676071047572
+        },
+        "memoryMiB": 1085.171875,
+        "nativeFps": 24.895780040804187,
+        "consumerFps": 24.397864439988105,
+        "videoFps": 24.397864439988105,
+        "mpvDrops": 0,
+        "videoDrops": 0,
+        "constructMsPerFrame": 0.7714285947838608,
+        "transferredFrames": 0,
+        "stride": 8320,
+        "advance": 1.9583329999999997,
+        "renderMsPerFrame": null,
+        "normalizeMsPerFrame": null,
+        "copyMsPerFrame": null,
+        "allocateMsPerFrame": null
+      },
+      "lifecycleCount": 20
+    },
+    {
+      "name": "padded24",
+      "mode": "source",
+      "seconds": 4,
+      "label": "source-disabled-gpu",
+      "disabled": true,
+      "passed": true,
+      "realtime": false,
+      "measurement": {
+        "duration": 4.009079166999999,
+        "cpuPercent": 100.8106558051414,
+        "cpuByType": {
+          "Browser": 2.304868428655803,
+          "GPU": 17.5504142146066,
+          "Utility": 65.57363650085286,
+          "Tab": 15.38173666102613
+        },
+        "memoryMiB": 1145.9375,
+        "nativeFps": 23.945648364892968,
+        "consumerFps": 23.945648364892968,
+        "videoFps": 23.945648364892968,
+        "mpvDrops": 0,
+        "videoDrops": 0,
+        "constructMsPerFrame": 0.583333303531011,
+        "transferredFrames": 0,
+        "stride": 8320,
+        "advance": 3.75,
+        "renderMsPerFrame": null,
+        "normalizeMsPerFrame": null,
+        "copyMsPerFrame": null,
+        "allocateMsPerFrame": null
+      }
+    }
+  ],
+  "contractTests": {
+    "pass": 131,
+    "fail": 0,
+    "skip": 0
+  },
+  "portFailure": {
+    "passed": true,
+    "closeToErrorMs": 5470,
+    "hosts": {
+      "cpu": {
+        "alive": false
+      },
+      "gpu": {
+        "alive": false
+      }
+    },
+    "firstHarnessAssertionFailed": "visible message did not contain CPU; controlled FRAME_CHANNEL_FAILED had occurred; original report retained"
+  },
+  "gpuDefault": {
+    "passed": true,
+    "mode": "gpu",
+    "decoder": "videotoolbox",
+    "cadenceFps": 23.965464168038682
+  },
+  "gpuToCpuRecovery": {
+    "passed": true,
+    "injected": "isolated native host terminated",
+    "before": {
+      "videoCodec": "H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10",
+      "audioCodec": null,
+      "width": 1920,
+      "height": 1080,
+      "hardwareDecoder": "videotoolbox",
+      "playbackMode": "gpu",
+      "playbackFallback": false,
+      "playbackDiagnostics": {
+        "decoding": "hardware",
+        "decoderFallback": false,
+        "displayProbe": "passed",
+        "fallbackReason": null
+      },
+      "audioOutput": null,
+      "droppedFrames": 0
+    },
+    "after": {
+      "videoCodec": "H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10",
+      "audioCodec": null,
+      "width": 1920,
+      "height": 1080,
+      "hardwareDecoder": "no",
+      "playbackMode": "cpu",
+      "playbackFallback": true,
+      "playbackDiagnostics": {
+        "decoding": "software",
+        "decoderFallback": false,
+        "displayProbe": "not-applicable",
+        "fallbackReason": "PLAYBACK_HOST_EXITED"
+      },
+      "audioOutput": null,
+      "droppedFrames": 0
+    },
+    "stopped": {
+      "alive": false,
+      "width": 0,
+      "height": 0,
+      "gpuAlive": false
+    },
+    "cleanup": {
+      "forced": false,
+      "code": 0,
+      "signal": null
+    }
+  },
+  "limits": [
+    "one M4 development build",
+    "synthetic H264 SDR",
+    "disabled Chromium GPU check functional but realtime=false",
+    "earlier prototype and baseline each recorded an isolated mpv drop; no universal drop fix claimed",
+    "no packaged/Intel Mac/Windows/Linux GUI, physical HDR or human listening acceptance",
+    "no independent public software artifact acceptance"
+  ],
+  "sourceHashes": [
+    {
+      "path": "apps/desktop/src/main/player/isolatedPlaybackHost.test.ts",
+      "bytes": 14602,
+      "sha256": "b6522c12ec8cc9e0455b3002525685ff8c4feaf605577a6789bae669c5b1baa3",
+      "archivePath": "out/playback-acceptance/mac-cpu-review-ea_qv7zz/benchmark-source/apps/desktop/src/main/player/isolatedPlaybackHost.test.ts"
+    },
+    {
+      "path": "apps/desktop/src/main/player/isolatedPlaybackHost.ts",
+      "bytes": 15745,
+      "sha256": "820fccf00a21b801564e8a04cebec515d1444b1dcc17ff72877320e98ab93e45",
+      "archivePath": "out/playback-acceptance/mac-cpu-review-ea_qv7zz/benchmark-source/apps/desktop/src/main/player/isolatedPlaybackHost.ts"
+    },
+    {
+      "path": "apps/desktop/src/main/player/playbackHost.test.ts",
+      "bytes": 4304,
+      "sha256": "8487ffbdfdcb9ad6ac2f798b2597f13db75d79be31eeb7fa81960bc869cde8d9",
+      "archivePath": "out/playback-acceptance/mac-cpu-review-ea_qv7zz/benchmark-source/apps/desktop/src/main/player/playbackHost.test.ts"
+    },
+    {
+      "path": "apps/desktop/src/main/player/playbackHost.ts",
+      "bytes": 5410,
+      "sha256": "e04d7deb3c41c622a1cd618bdbf5c4796eced54189ea60ded4172c6671e19620",
+      "archivePath": "out/playback-acceptance/mac-cpu-review-ea_qv7zz/benchmark-source/apps/desktop/src/main/player/playbackHost.ts"
+    },
+    {
+      "path": "apps/desktop/src/main/player/playbackHostProtocol.ts",
+      "bytes": 2298,
+      "sha256": "72593abfc6b126988b2f43d780a0f3b8305673280f398d8b9904dd66e9409f01",
+      "archivePath": "out/playback-acceptance/mac-cpu-review-ea_qv7zz/benchmark-source/apps/desktop/src/main/player/playbackHostProtocol.ts"
+    },
+    {
+      "path": "apps/desktop/src/main/player/softwarePlayback.test.ts",
+      "bytes": 10151,
+      "sha256": "e2c9094c3afe616b8f3b7ded3b9008f94d5ab02a7005274d4d09c67482711315",
+      "archivePath": "out/playback-acceptance/mac-cpu-review-ea_qv7zz/benchmark-source/apps/desktop/src/main/player/softwarePlayback.test.ts"
+    },
+    {
+      "path": "apps/desktop/src/main/player/softwarePlayback.ts",
+      "bytes": 10490,
+      "sha256": "e28831f3f8383a511964aa4870a44bbf117aeff3dc567efc83133117e19fac25",
+      "archivePath": "out/playback-acceptance/mac-cpu-review-ea_qv7zz/benchmark-source/apps/desktop/src/main/player/softwarePlayback.ts"
+    },
+    {
+      "path": "apps/desktop/src/preload/cpuFramePort.test.ts",
+      "bytes": 8458,
+      "sha256": "750871e5cddd4bdd71fc592399f9366ca0ebf345f8c0e8da170bf13bc0b33a22",
+      "archivePath": "out/playback-acceptance/mac-cpu-review-ea_qv7zz/benchmark-source/apps/desktop/src/preload/cpuFramePort.test.ts"
+    },
+    {
+      "path": "apps/desktop/src/preload/cpuFramePort.ts",
+      "bytes": 6236,
+      "sha256": "1577122693ac3a14d95cdfc1ac3eaec7a0b9159f5d7f4fc2c7f65b862c6fdf08",
+      "archivePath": "out/playback-acceptance/mac-cpu-review-ea_qv7zz/benchmark-source/apps/desktop/src/preload/cpuFramePort.ts"
+    },
+    {
+      "path": "apps/desktop/src/preload/linuxSharedTexture.test.ts",
+      "bytes": 32521,
+      "sha256": "40363f28b5766e82e7172835dd9d6da2b80535a3719498ed00061c29a9ff0f5a",
+      "archivePath": "out/playback-acceptance/mac-cpu-review-ea_qv7zz/benchmark-source/apps/desktop/src/preload/linuxSharedTexture.test.ts"
+    },
+    {
+      "path": "apps/desktop/src/preload/sharedTextureReceiver.ts",
+      "bytes": 23761,
+      "sha256": "918612c2363dcad96cfe1f38d01eb64176f5864c4bafe9a83af294f351eb318d",
+      "archivePath": "out/playback-acceptance/mac-cpu-review-ea_qv7zz/benchmark-source/apps/desktop/src/preload/sharedTextureReceiver.ts"
+    },
+    {
+      "path": "apps/desktop/src/preload/sharedTextureVideo.test.ts",
+      "bytes": 13074,
+      "sha256": "e0ebf8f712317507f701c64ae18865a7fefc626bbc224929cb8d3714e3fc45de",
+      "archivePath": "out/playback-acceptance/mac-cpu-review-ea_qv7zz/benchmark-source/apps/desktop/src/preload/sharedTextureVideo.test.ts"
+    },
+    {
+      "path": "apps/desktop/src/preload/sharedTextureVideo.ts",
+      "bytes": 10263,
+      "sha256": "8fff4d624713af5c4e1f6058a3c509fb45867ddf244f909acb9cafde5447c391",
+      "archivePath": "out/playback-acceptance/mac-cpu-review-ea_qv7zz/benchmark-source/apps/desktop/src/preload/sharedTextureVideo.ts"
+    }
+  ],
+  "unchangedNativeSource": [
+    {
+      "path": "apps/desktop/src/main/player/native/softwarePlayback.h",
+      "bytes": 10546,
+      "sha256": "31022feb7df71ab33d3e49b8dd02eef99a6f229db7551220ad6ee17ef71b651d"
+    },
+    {
+      "path": "apps/desktop/src/main/player/native/renderConfig.h",
+      "bytes": 1580,
+      "sha256": "89b41c57dfbe334f6dbc709183ac137e3a0b872bbea928a45894e225e5b17216"
+    }
+  ],
+  "compiledHashes": [
+    {
+      "path": "out/main/index.js",
+      "bytes": 16156,
+      "sha256": "d3f3fa73a4fcd10864f9cdaa3a9fa620deb9598adc5acfe7ae2654b9342c7a72",
+      "archivePath": "out/playback-acceptance/mac-cpu-review-ea_qv7zz/benchmark-compiled/main/index.js"
+    },
+    {
+      "path": "out/main/playbackHost.js",
+      "bytes": 4823,
+      "sha256": "92a1b360398868f35c987d8dfcd99c30e45a8ba792ea30826ceffc4a7f059f22",
+      "archivePath": "out/playback-acceptance/mac-cpu-review-ea_qv7zz/benchmark-compiled/main/playbackHost.js"
+    },
+    {
+      "path": "out/preload/index.js",
+      "bytes": 78414,
+      "sha256": "a7448c45d4f4deee20341247cdc5936a516eb5a77b41a213e5b826e8ae58c1b8",
+      "archivePath": "out/playback-acceptance/mac-cpu-review-ea_qv7zz/benchmark-compiled/preload/index.js"
+    },
+    {
+      "path": "out/native-playback/playback.node",
+      "bytes": 415600,
+      "sha256": "6c970dd5f0005350265b88ac7f8ed57d311f2c6b3a63e05c6023728770d0d7fc",
+      "archivePath": "out/playback-acceptance/mac-cpu-review-ea_qv7zz/benchmark-compiled/native-playback/playback.node"
+    },
+    {
+      "path": "out/playback-acceptance/mac-cpu-direct-refinement-k1p7gtby/apps/source/out/main/index.js",
+      "bytes": 16156,
+      "sha256": "d3f3fa73a4fcd10864f9cdaa3a9fa620deb9598adc5acfe7ae2654b9342c7a72"
+    },
+    {
+      "path": "out/playback-acceptance/mac-cpu-direct-refinement-k1p7gtby/apps/source/out/main/playbackHost.js",
+      "bytes": 4823,
+      "sha256": "92a1b360398868f35c987d8dfcd99c30e45a8ba792ea30826ceffc4a7f059f22"
+    },
+    {
+      "path": "out/playback-acceptance/mac-cpu-direct-refinement-k1p7gtby/apps/source/out/preload/index.js",
+      "bytes": 78970,
+      "sha256": "ae99751a1a5b2641d156b97e5680cdc8dd1b5dc5829dcc248b023732dbc6dc04"
+    },
+    {
+      "path": "out/playback-acceptance/mac-cpu-direct-refinement-k1p7gtby/apps/source/out/native-playback/playback.node",
+      "bytes": 415600,
+      "sha256": "6c970dd5f0005350265b88ac7f8ed57d311f2c6b3a63e05c6023728770d0d7fc"
+    },
+    {
+      "path": "out/playback-acceptance/mac-cpu-direct-refinement-k1p7gtby/apps/source-baseline/out/main/index.js",
+      "bytes": 16156,
+      "sha256": "ef47c147b8ae19a2bf29e7f9f5f8084483930fb1c1232f7c3e05af41c6e406ba"
+    },
+    {
+      "path": "out/playback-acceptance/mac-cpu-direct-refinement-k1p7gtby/apps/source-baseline/out/main/playbackHost.js",
+      "bytes": 3411,
+      "sha256": "0388ad2527eb87c99a8b406e2c42e6beb8c428a2653a0ca537f86c71ffc34045"
+    },
+    {
+      "path": "out/playback-acceptance/mac-cpu-direct-refinement-k1p7gtby/apps/source-baseline/out/preload/index.js",
+      "bytes": 72865,
+      "sha256": "44643a4f18a8c536241bef7356eadb6dbd9e4300f8f3f3007918496d8113c58c"
+    },
+    {
+      "path": "out/playback-acceptance/mac-cpu-direct-refinement-k1p7gtby/apps/source-baseline/out/native-playback/playback.node",
+      "bytes": 415600,
+      "sha256": "6c970dd5f0005350265b88ac7f8ed57d311f2c6b3a63e05c6023728770d0d7fc"
+    }
+  ],
+  "reports": [
+    {
+      "path": "out/playback-acceptance/mac-cpu-direct-refinement-k1p7gtby/runs/source-pair-1-source-baseline-padded60/report.json",
+      "bytes": 145703,
+      "sha256": "e74ca159af84069190a193ea42d681a9fbdd3a9ce39c6c4f2a937b081ae02435"
+    },
+    {
+      "path": "out/playback-acceptance/mac-cpu-direct-refinement-k1p7gtby/runs/source-pair-1-source-padded60/report.json",
+      "bytes": 145690,
+      "sha256": "a59813010939f90dd4aef874232a55f3fccc03a3bdbe50b3fecbeb2a5532afcf"
+    },
+    {
+      "path": "out/playback-acceptance/mac-cpu-direct-refinement-k1p7gtby/runs/source-pair-2-source-padded60/report.json",
+      "bytes": 145288,
+      "sha256": "be2fbc6bb61a0053d2d3df85c99c19018f4cb81635d99ed3f4e9fb6d6b04029f"
+    },
+    {
+      "path": "out/playback-acceptance/mac-cpu-direct-refinement-k1p7gtby/runs/source-pair-2-source-baseline-padded60/report.json",
+      "bytes": 145195,
+      "sha256": "938dcc80010320f5ac97da8a04f6f872c602164bad6fc35fda9b8769cc3e1a34"
+    },
+    {
+      "path": "out/playback-acceptance/mac-cpu-direct-refinement-k1p7gtby/runs/source-pair-1-source-baseline-fourk24/report.json",
+      "bytes": 145237,
+      "sha256": "e348bdff2c524b01a8aa1b376f79cdb34aeec8e7c8ab0fe28b793b0e37b58631"
+    },
+    {
+      "path": "out/playback-acceptance/mac-cpu-direct-refinement-k1p7gtby/runs/source-pair-1-source-fourk24/report.json",
+      "bytes": 145190,
+      "sha256": "a6e0c193a898bd36c1c15b75cb8d2112179f625ce5dc69e5ae4c1d25b484c08c"
+    },
+    {
+      "path": "out/playback-acceptance/mac-cpu-direct-refinement-k1p7gtby/runs/source-pair-2-source-fourk24/report.json",
+      "bytes": 145271,
+      "sha256": "cfe9d013b8cf8a973c73f437fd2fe6a190615875adb574507694b82945690f57"
+    },
+    {
+      "path": "out/playback-acceptance/mac-cpu-direct-refinement-k1p7gtby/runs/source-pair-2-source-baseline-fourk24/report.json",
+      "bytes": 145229,
+      "sha256": "7203232101e42679e09459b3013e9c44eb155254a8d0fea177ebbab7934e101a"
+    },
+    {
+      "path": "out/playback-acceptance/mac-cpu-direct-refinement-k1p7gtby/runs/source-long60-source-padded60/report.json",
+      "bytes": 755741,
+      "sha256": "f4e72a76124b229f1bb10f0338576d26a39a0e4e84684a0486b2c41c39d7c002"
+    },
+    {
+      "path": "out/playback-acceptance/mac-cpu-direct-refinement-k1p7gtby/runs/source-lifecycle-source-padded24/report.json",
+      "bytes": 128878,
+      "sha256": "b01b920829ebe7a52bd101eef7057034966718322fea461034a7a3ee17130022"
+    },
+    {
+      "path": "out/playback-acceptance/mac-cpu-direct-refinement-k1p7gtby/runs/source-disabled-gpu-source-padded24/report.json",
+      "bytes": 47635,
+      "sha256": "10fece63d45896f08541dfe5a91001f69fed2dfdd5ba5f9a3ad39e5457981fa8"
+    },
+    {
+      "path": "out/playback-acceptance/mac-cpu-direct-refinement-k1p7gtby/runs/source-port-failure-source-padded24/report.json",
+      "bytes": 40407,
+      "sha256": "e07cf092520bd2620871b4573e29707a613ac30a950ae834ac60ccf337703b08"
+    },
+    {
+      "path": "out/playback-acceptance/mac-cpu-direct-refinement-k1p7gtby/runs/source-port-failure-cause-source-padded24/report.json",
+      "bytes": 42262,
+      "sha256": "76164ca5dbdeeb822229220ad51809a0a8e85bfe4074a74b9a909a8bd4d077a9"
+    },
+    {
+      "path": "out/playback-acceptance/mac-cpu-direct-refinement-k1p7gtby/gpu-default-report.json",
+      "bytes": 216417,
+      "sha256": "0f1593a8b96f2bf2df45e286b18a76bb42c99f763532584713c570f8cf7bbdc1"
+    },
+    {
+      "path": "out/playback-acceptance/mac-cpu-direct-refinement-k1p7gtby/gpu-cpu-recovery/macos-cpu-producer-fault.json",
+      "bytes": 6761,
+      "sha256": "1858ca624c368480df8c2eb879ad8644eb0db915dd74b7907aeb43b7641f08b9"
+    }
+  ],
+  "checkLogs": [
+    {
+      "path": "out/playback-acceptance/mac-cpu-direct-refinement-k1p7gtby/contracts-final.log",
+      "bytes": 32657,
+      "sha256": "23e45218c86b1d4a8e409eacedb3471321192d99103c75a9ffb49e0a973c4acc"
+    },
+    {
+      "path": "out/playback-acceptance/mac-cpu-direct-refinement-k1p7gtby/typecheck-node-final.log",
+      "bytes": 87,
+      "sha256": "4d68714986ffa45da5676bedf006f231a19b3c57e31994b0be8eafc9989450bf"
+    },
+    {
+      "path": "out/playback-acceptance/mac-cpu-direct-refinement-k1p7gtby/lint-final.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "out/playback-acceptance/mac-cpu-direct-refinement-k1p7gtby/desktop-build-final.log",
+      "bytes": 8424,
+      "sha256": "d9370f652f601f29baa7698a808ce84b5b46f124781a132a006d9fc738640a3e"
+    },
+    {
+      "path": "out/playback-acceptance/mac-cpu-direct-refinement-k1p7gtby/copy-input-red.log",
+      "bytes": 4617,
+      "sha256": "62ac958acd542af3baba30e0923283293fe148305a0a1f2bdff03e5692760fe1"
+    }
+  ],
+  "adoption": {
+    "status": "adopted",
+    "confirmedAt": "2026-10-27T03:02:47.619317+00:00",
+    "authorization": "user: 正式采用这个优化",
+    "scope": "macOS CPU compatibility mode and automatic GPU-to-CPU recovery",
+    "experimentalSwitchRequired": false,
+    "gpuRemainsDefault": true,
+    "memoryTradeoff": "Additional working-set cost accepted: initial pre-review 4K24 pair mean +195.1MiB; final one-pair check +104.7MiB. Neither is a fixed memory guarantee or a leak-fix claim.",
+    "windowsAndLinuxPaths": "unchanged"
+  },
+  "postReview": {
+    "verifiedAt": "2026-10-27T04:17:48.947009+00:00",
+    "findings": [
+      {
+        "axis": "Standards",
+        "priority": "P2",
+        "issue": "retirement watermark discarded earlier unmatched envelope credit",
+        "resolution": "return credit for earlier queued envelopes and late below-watermark metadata",
+        "status": "fixed"
+      },
+      {
+        "axis": "Spec",
+        "priority": "P2",
+        "issue": "main retirement IPC could lag credit-funded replacement pixels and overflow bounded receiver queue",
+        "resolution": "private FIFO retirement marker before recycling utility credit; remove redundant main retirement IPC",
+        "status": "fixed"
+      }
+    ],
+    "followUpSpecReview": "actual fix inspected; no remaining concrete gap",
+    "contractTests": {
+      "pass": 134,
+      "fail": 0,
+      "skip": 0
+    },
+    "checks": {
+      "nodeTypecheck": "passed",
+      "changedFilesLint": "passed",
+      "desktopBuild": "passed",
+      "desktopArchitecture": "passed"
+    },
+    "sourceHashes": [
+      {
+        "path": "apps/desktop/src/main/player/isolatedPlaybackHost.test.ts",
+        "bytes": 14603,
+        "sha256": "3c8769ed84ee7b868c597f81c8784fc6c2a5c8cbff4f5e627cd6bc70a9e2ff22"
+      },
+      {
+        "path": "apps/desktop/src/main/player/isolatedPlaybackHost.ts",
+        "bytes": 15546,
+        "sha256": "6dd84cb287a6be23354c257a56bc55bc22f9d948dff41e18c7346c20cc46ffc0"
+      },
+      {
+        "path": "apps/desktop/src/main/player/playbackHost.ts",
+        "bytes": 5948,
+        "sha256": "f69a9ff96858a512155461ec4328ae815d6d4f53c9c7e95f862eedf0cb76b755"
+      },
+      {
+        "path": "apps/desktop/src/main/player/playbackHostProtocol.ts",
+        "bytes": 2464,
+        "sha256": "0146b7481df24db8b9e7a350760dc0386473cd724b974e8905d57af74405ab44"
+      },
+      {
+        "path": "apps/desktop/src/main/player/softwarePlayback.test.ts",
+        "bytes": 10151,
+        "sha256": "e2c9094c3afe616b8f3b7ded3b9008f94d5ab02a7005274d4d09c67482711315"
+      },
+      {
+        "path": "apps/desktop/src/main/player/softwarePlayback.ts",
+        "bytes": 10490,
+        "sha256": "e28831f3f8383a511964aa4870a44bbf117aeff3dc567efc83133117e19fac25"
+      },
+      {
+        "path": "apps/desktop/src/preload/linuxSharedTexture.test.ts",
+        "bytes": 32521,
+        "sha256": "40363f28b5766e82e7172835dd9d6da2b80535a3719498ed00061c29a9ff0f5a"
+      },
+      {
+        "path": "apps/desktop/src/preload/sharedTextureReceiver.ts",
+        "bytes": 23659,
+        "sha256": "e8c4713f86fa57f976e44daf51a8906a9e05d535070c85d0e59309659d531ebc"
+      },
+      {
+        "path": "apps/desktop/src/preload/sharedTextureVideo.test.ts",
+        "bytes": 13074,
+        "sha256": "e0ebf8f712317507f701c64ae18865a7fefc626bbc224929cb8d3714e3fc45de"
+      },
+      {
+        "path": "apps/desktop/src/preload/sharedTextureVideo.ts",
+        "bytes": 10263,
+        "sha256": "8fff4d624713af5c4e1f6058a3c509fb45867ddf244f909acb9cafde5447c391"
+      },
+      {
+        "path": "apps/desktop/src/main/player/playbackHost.test.ts",
+        "bytes": 6392,
+        "sha256": "c4c47d1bdd02e18a142f1667679c58ee38d3242e551944b9fe93cec14b9d5aec"
+      },
+      {
+        "path": "apps/desktop/src/preload/cpuFramePort.test.ts",
+        "bytes": 9234,
+        "sha256": "7107718885ca5f4d80a884aab13efe00ab599fd1a8ea4b0d5a485f4e2ad4b44f"
+      },
+      {
+        "path": "apps/desktop/src/preload/cpuFramePort.ts",
+        "bytes": 6713,
+        "sha256": "bc21fcd5d8294367ff794994081b749efac11d90700d429a2fd5023d4783a422"
+      }
+    ],
+    "compiledHashes": [
+      {
+        "path": "out/main/index.js",
+        "bytes": 16156,
+        "sha256": "0935a334fa7e39ee4a5c32cd90a27d8fd4a479ab8e567c0b43d356dfc1fa358e"
+      },
+      {
+        "path": "out/main/playbackHost.js",
+        "bytes": 5112,
+        "sha256": "61ffe446a97819c88e7c1a5dc586af5b293bdafed4e6655efaf266e49126ce58"
+      },
+      {
+        "path": "out/preload/index.js",
+        "bytes": 78707,
+        "sha256": "70e213abccde0f3e0a12fc2d5980627d7ccc3b8fd96496caaf9e1bdb98e3d207"
+      },
+      {
+        "path": "out/native-playback/playback.node",
+        "bytes": 415600,
+        "sha256": "6c970dd5f0005350265b88ac7f8ed57d311f2c6b3a63e05c6023728770d0d7fc"
+      },
+      {
+        "path": "out/playback-acceptance/mac-cpu-direct-refinement-k1p7gtby/apps/reviewed/out/preload/index.js",
+        "bytes": 79212,
+        "sha256": "ee5b5b4432ee2653e3b37782e55521ba88034bf070526108b237653a4954a81a"
+      }
+    ],
+    "paired": [
+      {
+        "case": "padded60",
+        "samplesPerMode": 1,
+        "seconds": 20,
+        "baseline": {
+          "duration": 20.0093545,
+          "cpuPercent": 257.15589675818876,
+          "cpuByType": {
+            "Browser": 39.402685378981104,
+            "GPU": 7.214295693546736,
+            "Utility": 171.94421739092084,
+            "Tab": 38.59469829474009
+          },
+          "memoryMiB": 1061.134375,
+          "nativeFps": 60.02192624454727,
+          "consumerFps": 60.02192624454727,
+          "videoFps": 60.02192624454727,
+          "mpvDrops": 0,
+          "videoDrops": 0,
+          "constructMsPerFrame": 1.084512907499874,
+          "transferredFrames": 0,
+          "stride": 8320,
+          "advance": 19.916666999999997,
+          "renderMsPerFrame": null,
+          "normalizeMsPerFrame": null,
+          "copyMsPerFrame": null,
+          "allocateMsPerFrame": null
+        },
+        "final": {
+          "duration": 20.0125465,
+          "cpuPercent": 225.03580941086136,
+          "cpuByType": {
+            "Browser": 3.023778108398149,
+            "GPU": 6.8275369154045435,
+            "Utility": 170.89665725448785,
+            "Tab": 44.28783713257081
+          },
+          "memoryMiB": 1093.24296875,
+          "nativeFps": 60.062321404225095,
+          "consumerFps": 59.962384097396104,
+          "videoFps": 60.0123527508106,
+          "mpvDrops": 0,
+          "videoDrops": 0,
+          "constructMsPerFrame": 1.0495000052452088,
+          "transferredFrames": 0,
+          "stride": 8320,
+          "advance": 19.833333999999997,
+          "renderMsPerFrame": null,
+          "normalizeMsPerFrame": null,
+          "copyMsPerFrame": null,
+          "allocateMsPerFrame": null
+        },
+        "cpuRelativeReductionPercent": 12.490511690475003,
+        "workingSetIncreaseMiB": 32.108593749999955
+      },
+      {
+        "case": "fourk24",
+        "samplesPerMode": 1,
+        "seconds": 20,
+        "baseline": {
+          "duration": 20.016630666,
+          "cpuPercent": 308.91111012519093,
+          "cpuByType": {
+            "Browser": 46.04059571151404,
+            "GPU": 4.358520744861906,
+            "Utility": 225.67699206605326,
+            "Tab": 32.83500160276175
+          },
+          "memoryMiB": 1654.3640625,
+          "nativeFps": 23.98005978175548,
+          "consumerFps": 24.030018239634135,
+          "videoFps": 24.030018239634135,
+          "mpvDrops": 0,
+          "videoDrops": 0,
+          "constructMsPerFrame": 0.027650718133811397,
+          "transferredFrames": 481,
+          "stride": 15360,
+          "advance": 20.208333,
+          "renderMsPerFrame": null,
+          "normalizeMsPerFrame": null,
+          "copyMsPerFrame": null,
+          "allocateMsPerFrame": null
+        },
+        "final": {
+          "duration": 20.007437957999997,
+          "cpuPercent": 253.6583549904616,
+          "cpuByType": {
+            "Browser": 2.040781037817676,
+            "GPU": 3.744322494327437,
+            "Utility": 201.1734140297865,
+            "Tab": 46.69983742852999
+          },
+          "memoryMiB": 1759.0265625,
+          "nativeFps": 24.041059180576973,
+          "consumerFps": 23.99107776855914,
+          "videoFps": 23.99107776855914,
+          "mpvDrops": 0,
+          "videoDrops": 0,
+          "constructMsPerFrame": 2.093333355585734,
+          "transferredFrames": 0,
+          "stride": 15360,
+          "advance": 20,
+          "renderMsPerFrame": null,
+          "normalizeMsPerFrame": null,
+          "copyMsPerFrame": null,
+          "allocateMsPerFrame": null
+        },
+        "cpuRelativeReductionPercent": 17.88629587078863,
+        "workingSetIncreaseMiB": 104.66249999999991
+      }
+    ],
+    "sourceValidation": [
+      {
+        "step": {
+          "mode": "source-baseline",
+          "case": "padded60",
+          "seconds": 20,
+          "label": "review-pair"
+        },
+        "passed": true,
+        "realtime": true,
+        "measurement": {
+          "duration": 20.0093545,
+          "cpuPercent": 257.15589675818876,
+          "cpuByType": {
+            "Browser": 39.402685378981104,
+            "GPU": 7.214295693546736,
+            "Utility": 171.94421739092084,
+            "Tab": 38.59469829474009
+          },
+          "memoryMiB": 1061.134375,
+          "nativeFps": 60.02192624454727,
+          "consumerFps": 60.02192624454727,
+          "videoFps": 60.02192624454727,
+          "mpvDrops": 0,
+          "videoDrops": 0,
+          "constructMsPerFrame": 1.084512907499874,
+          "transferredFrames": 0,
+          "stride": 8320,
+          "advance": 19.916666999999997,
+          "renderMsPerFrame": null,
+          "normalizeMsPerFrame": null,
+          "copyMsPerFrame": null,
+          "allocateMsPerFrame": null
+        },
+        "file": "/Users/nut/Project/JavdexLabs/Javdex/out/playback-acceptance/mac-cpu-direct-refinement-k1p7gtby/runs/review-pair-source-baseline-padded60/report.json"
+      },
+      {
+        "step": {
+          "mode": "source",
+          "case": "padded60",
+          "seconds": 20,
+          "label": "review-pair"
+        },
+        "passed": true,
+        "realtime": true,
+        "measurement": {
+          "duration": 20.0125465,
+          "cpuPercent": 225.03580941086136,
+          "cpuByType": {
+            "Browser": 3.023778108398149,
+            "GPU": 6.8275369154045435,
+            "Utility": 170.89665725448785,
+            "Tab": 44.28783713257081
+          },
+          "memoryMiB": 1093.24296875,
+          "nativeFps": 60.062321404225095,
+          "consumerFps": 59.962384097396104,
+          "videoFps": 60.0123527508106,
+          "mpvDrops": 0,
+          "videoDrops": 0,
+          "constructMsPerFrame": 1.0495000052452088,
+          "transferredFrames": 0,
+          "stride": 8320,
+          "advance": 19.833333999999997,
+          "renderMsPerFrame": null,
+          "normalizeMsPerFrame": null,
+          "copyMsPerFrame": null,
+          "allocateMsPerFrame": null
+        },
+        "file": "/Users/nut/Project/JavdexLabs/Javdex/out/playback-acceptance/mac-cpu-direct-refinement-k1p7gtby/runs/review-pair-source-padded60/report.json"
+      },
+      {
+        "step": {
+          "mode": "source-baseline",
+          "case": "fourk24",
+          "seconds": 20,
+          "label": "review-pair"
+        },
+        "passed": true,
+        "realtime": true,
+        "measurement": {
+          "duration": 20.016630666,
+          "cpuPercent": 308.91111012519093,
+          "cpuByType": {
+            "Browser": 46.04059571151404,
+            "GPU": 4.358520744861906,
+            "Utility": 225.67699206605326,
+            "Tab": 32.83500160276175
+          },
+          "memoryMiB": 1654.3640625,
+          "nativeFps": 23.98005978175548,
+          "consumerFps": 24.030018239634135,
+          "videoFps": 24.030018239634135,
+          "mpvDrops": 0,
+          "videoDrops": 0,
+          "constructMsPerFrame": 0.027650718133811397,
+          "transferredFrames": 481,
+          "stride": 15360,
+          "advance": 20.208333,
+          "renderMsPerFrame": null,
+          "normalizeMsPerFrame": null,
+          "copyMsPerFrame": null,
+          "allocateMsPerFrame": null
+        },
+        "file": "/Users/nut/Project/JavdexLabs/Javdex/out/playback-acceptance/mac-cpu-direct-refinement-k1p7gtby/runs/review-pair-source-baseline-fourk24/report.json"
+      },
+      {
+        "step": {
+          "mode": "source",
+          "case": "fourk24",
+          "seconds": 20,
+          "label": "review-pair"
+        },
+        "passed": true,
+        "realtime": true,
+        "measurement": {
+          "duration": 20.007437957999997,
+          "cpuPercent": 253.6583549904616,
+          "cpuByType": {
+            "Browser": 2.040781037817676,
+            "GPU": 3.744322494327437,
+            "Utility": 201.1734140297865,
+            "Tab": 46.69983742852999
+          },
+          "memoryMiB": 1759.0265625,
+          "nativeFps": 24.041059180576973,
+          "consumerFps": 23.99107776855914,
+          "videoFps": 23.99107776855914,
+          "mpvDrops": 0,
+          "videoDrops": 0,
+          "constructMsPerFrame": 2.093333355585734,
+          "transferredFrames": 0,
+          "stride": 15360,
+          "advance": 20,
+          "renderMsPerFrame": null,
+          "normalizeMsPerFrame": null,
+          "copyMsPerFrame": null,
+          "allocateMsPerFrame": null
+        },
+        "file": "/Users/nut/Project/JavdexLabs/Javdex/out/playback-acceptance/mac-cpu-direct-refinement-k1p7gtby/runs/review-pair-source-fourk24/report.json"
+      },
+      {
+        "step": {
+          "mode": "source",
+          "case": "fourk24",
+          "seconds": 60,
+          "label": "review-4k-long"
+        },
+        "passed": true,
+        "realtime": true,
+        "measurement": {
+          "duration": 60.01025675,
+          "cpuPercent": 251.76469854047073,
+          "cpuByType": {
+            "Browser": 2.055346980330991,
+            "GPU": 3.750583853317708,
+            "Utility": 200.606460494772,
+            "Tab": 45.35230721205005
+          },
+          "memoryMiB": 1746.6450520833334,
+          "nativeFps": 23.995898001219597,
+          "consumerFps": 23.995898001219597,
+          "videoFps": 24.012561819276,
+          "mpvDrops": 0,
+          "videoDrops": 0,
+          "constructMsPerFrame": 1.7089583449893528,
+          "transferredFrames": 0,
+          "stride": 15360,
+          "advance": 60.083332999999996,
+          "renderMsPerFrame": null,
+          "normalizeMsPerFrame": null,
+          "copyMsPerFrame": null,
+          "allocateMsPerFrame": null
+        },
+        "file": "/Users/nut/Project/JavdexLabs/Javdex/out/playback-acceptance/mac-cpu-direct-refinement-k1p7gtby/runs/review-4k-long-source-fourk24/report.json"
+      },
+      {
+        "step": {
+          "mode": "source",
+          "case": "padded24",
+          "seconds": 2,
+          "label": "review-lifecycle",
+          "script": "review-lifecycle.mjs"
+        },
+        "passed": true,
+        "realtime": true,
+        "measurement": {
+          "duration": 2.0087984999999997,
+          "cpuPercent": 109.34760255944042,
+          "cpuByType": {
+            "Browser": 2.177669885755094,
+            "GPU": 4.4410626551144885,
+            "Utility": 79.9718339096729,
+            "Tab": 22.75703610889794
+          },
+          "memoryMiB": 1054.6875,
+          "nativeFps": 24.392690456509204,
+          "consumerFps": 23.89488044719269,
+          "videoFps": 23.89488044719269,
+          "mpvDrops": 0,
+          "videoDrops": 0,
+          "constructMsPerFrame": 0.8687498966852824,
+          "transferredFrames": 0,
+          "stride": 8320,
+          "advance": 2.041666,
+          "renderMsPerFrame": null,
+          "normalizeMsPerFrame": null,
+          "copyMsPerFrame": null,
+          "allocateMsPerFrame": null
+        },
+        "lifecycleCount": 20,
+        "file": "/Users/nut/Project/JavdexLabs/Javdex/out/playback-acceptance/mac-cpu-direct-refinement-k1p7gtby/runs/review-lifecycle-source-padded24/report.json"
+      }
+    ],
+    "fourk60secondsMemoryMiB": {
+      "mean": 1746.6450520833334,
+      "first10": 1855.403125,
+      "last10": 1735.9109375,
+      "min": 1647.359375,
+      "max": 1900.8125,
+      "stopped": 894.015625,
+      "constructedAndClosed": {
+        "frames": 1564,
+        "constructMs": 2705.5000190734863,
+        "transferred": 0,
+        "constructed": 1565,
+        "closed": 1565,
+        "width": 3840,
+        "height": 2160,
+        "stride": 15360
+      },
+      "forcedGc": false
+    },
+    "gpuToCpuRecovery": {
+      "passed": true,
+      "before": {
+        "videoCodec": "H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10",
+        "audioCodec": null,
+        "width": 1920,
+        "height": 1080,
+        "hardwareDecoder": "videotoolbox",
+        "playbackMode": "gpu",
+        "playbackFallback": false,
+        "playbackDiagnostics": {
+          "decoding": "hardware",
+          "decoderFallback": false,
+          "displayProbe": "passed",
+          "fallbackReason": null
+        },
+        "audioOutput": null,
+        "droppedFrames": 0
+      },
+      "after": {
+        "videoCodec": "H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10",
+        "audioCodec": null,
+        "width": 1920,
+        "height": 1080,
+        "hardwareDecoder": "no",
+        "playbackMode": "cpu",
+        "playbackFallback": true,
+        "playbackDiagnostics": {
+          "decoding": "software",
+          "decoderFallback": false,
+          "displayProbe": "not-applicable",
+          "fallbackReason": "PLAYBACK_HOST_EXITED"
+        },
+        "audioOutput": null,
+        "droppedFrames": 0
+      },
+      "stopped": {
+        "alive": false,
+        "width": 0,
+        "height": 0,
+        "gpuAlive": false
+      },
+      "cleanup": {
+        "forced": false,
+        "code": 0,
+        "signal": null
+      }
+    },
+    "reports": [
+      {
+        "path": "out/playback-acceptance/mac-cpu-direct-refinement-k1p7gtby/runs/review-pair-source-baseline-padded60/report.json",
+        "bytes": 145992,
+        "sha256": "760ec33493f088518e5acfcad8caaf0665951383260613980bfaa7a2d7132a1c"
+      },
+      {
+        "path": "out/playback-acceptance/mac-cpu-direct-refinement-k1p7gtby/runs/review-pair-source-padded60/report.json",
+        "bytes": 145461,
+        "sha256": "c623735f26e074a324d2bca38c3c28ddba38d709b3e0dd467cd17ab3326fb7d8"
+      },
+      {
+        "path": "out/playback-acceptance/mac-cpu-direct-refinement-k1p7gtby/runs/review-pair-source-baseline-fourk24/report.json",
+        "bytes": 145578,
+        "sha256": "e8e457dc8a8d02eaf7e24a7e049526097b844e2c91682fa8f06f3c461586915e"
+      },
+      {
+        "path": "out/playback-acceptance/mac-cpu-direct-refinement-k1p7gtby/runs/review-pair-source-fourk24/report.json",
+        "bytes": 145470,
+        "sha256": "b718081618bc91bff785c382dbfbc21cad1ed3289af2db66ea6d11569d8096c2"
+      },
+      {
+        "path": "out/playback-acceptance/mac-cpu-direct-refinement-k1p7gtby/runs/review-4k-long-source-fourk24/report.json",
+        "bytes": 389928,
+        "sha256": "b14c520fc6f6b3d788a79b9b82857de5dfee96f8b9a622b6669e7a98149263bf"
+      },
+      {
+        "path": "out/playback-acceptance/mac-cpu-direct-refinement-k1p7gtby/runs/review-lifecycle-source-padded24/report.json",
+        "bytes": 129021,
+        "sha256": "0f7634eefa0399ec82a28550480829b3d59c0acb684b6233f9b7a94dfcd51bcd"
+      },
+      {
+        "path": "out/playback-acceptance/mac-cpu-review-ea_qv7zz/gpu-cpu-recovery/macos-cpu-producer-fault.json",
+        "bytes": 6774,
+        "sha256": "24519a593110b342539b9bf73879be6c2975d2d5670736ac93e9a5e5bd177d97"
+      }
+    ],
+    "logs": [
+      {
+        "path": "out/playback-acceptance/mac-cpu-review-ea_qv7zz/retirement-red.log",
+        "bytes": 6173,
+        "sha256": "e82055643faff134ca6634da3429f39dc0a36daf33c9038db49a623566307b8b"
+      },
+      {
+        "path": "out/playback-acceptance/mac-cpu-review-ea_qv7zz/ordered-retirement-red.log",
+        "bytes": 7880,
+        "sha256": "bcb60f01bf784ede517441b8d89a2901cdbb031cc59aea6844ff434c30db4969"
+      },
+      {
+        "path": "out/playback-acceptance/mac-cpu-review-ea_qv7zz/ordered-retirement-red-r2.log",
+        "bytes": 8099,
+        "sha256": "37fee3ef707a114fd1c56eacf239064c27faab850174756a1a307a7618b7a38b"
+      },
+      {
+        "path": "out/playback-acceptance/mac-cpu-review-ea_qv7zz/ordered-retirement-green.log",
+        "bytes": 12921,
+        "sha256": "f15e429da0c4ad0859a660a8664ebd3776f8c11620f561f496de281bc55c5a1c"
+      },
+      {
+        "path": "out/playback-acceptance/mac-cpu-review-ea_qv7zz/contracts-green.log",
+        "bytes": 33349,
+        "sha256": "7db89f3543eb6830b88d9a1b47e9a2409415627f2063d1514058d21af620c834"
+      },
+      {
+        "path": "out/playback-acceptance/mac-cpu-review-ea_qv7zz/typecheck-node.log",
+        "bytes": 87,
+        "sha256": "4d68714986ffa45da5676bedf006f231a19b3c57e31994b0be8eafc9989450bf"
+      },
+      {
+        "path": "out/playback-acceptance/mac-cpu-review-ea_qv7zz/lint.log",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "path": "out/playback-acceptance/mac-cpu-review-ea_qv7zz/desktop-build.log",
+        "bytes": 8425,
+        "sha256": "93797a3a9fad00931899fe93d0a5f7c35de6e933360d89dbdad31857e7b2233c"
+      },
+      {
+        "path": "out/playback-acceptance/mac-cpu-review-ea_qv7zz/desktop-architecture-final.log",
+        "bytes": 584,
+        "sha256": "8276adba10f01ecb9dff9bad219b9307847f58691cce3e8fdeb1806797e94591"
+      },
+      {
+        "path": "out/playback-acceptance/mac-cpu-review-ea_qv7zz/gpu-cpu-recovery.log",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    ]
+  }
+}

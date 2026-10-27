@@ -42,6 +42,23 @@ async function receive(fd) {
   throw new Error('Timed out waiting for frame');
 }
 
+async function receiveReady(fd) {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => { bridge.unwatch(fd); reject(new Error('Readiness timeout')); }, 5000);
+    bridge.watch(fd, 1, (status, events) => {
+      try {
+        assert.equal(status, 0);
+        assert.ok(events & 1);
+        const frame = bridge.receive(fd);
+        if (!frame) return; // Readiness is a hint, not a guarantee.
+        bridge.unwatch(fd);
+        clearTimeout(timeout);
+        resolve(frame);
+      } catch (error) { bridge.unwatch(fd); clearTimeout(timeout); reject(error); }
+    });
+  });
+}
+
 async function assertChild(done) {
   const result = await done;
   assert.equal(result.signal, null, result.stderr);
@@ -71,13 +88,72 @@ async function main() {
   assert.equal(bridge.close(idle.parentFd), false);
   assert.throws(() => bridge.receive(idle.parentFd), { code: 'ERR_FD_BRIDGE_OWNERSHIP' });
 
+  // Idle readable watches do not wake; writable interest can be removed inside
+  // the callback without leaving a permanent always-writable busy loop.
+  const watched = bridge.createChannel();
+  let wakes = 0;
+  bridge.watch(watched.parentFd, 1, () => { wakes++; });
+  assert.throws(() => bridge.watch(watched.parentFd, 1, () => {}), { code: 'ERR_FD_BRIDGE_WATCH' });
+  for (const value of [-1, 4, 0.5, NaN, '1']) {
+    assert.throws(() => bridge.updateWatch(watched.parentFd, value), { code: 'ERR_FD_BRIDGE_WATCH' });
+  }
+  await delay(30);
+  assert.equal(wakes, 0);
+  bridge.unwatch(watched.parentFd);
+  await new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error('Writable readiness timeout')), 1000);
+    bridge.watch(watched.parentFd, 2, (status, events) => {
+      assert.equal(status, 0); assert.ok(events & 2); wakes++;
+      bridge.updateWatch(watched.parentFd, 0);
+      clearTimeout(timeout); resolve();
+    });
+  });
+  await delay(30);
+  assert.equal(wakes, 1, 'Disabled writable watcher must not spin');
+  bridge.close(watched.parentFd); bridge.close(watched.childFd);
+  // Immediate FD reuse occurs before deferred uv_close callbacks. A stopped
+  // watcher must never notify the replacement channel or close its descriptor.
+  const replacement = bridge.createChannel();
+  bridge.watch(replacement.parentFd, 1, () => { wakes++; });
+  await delay(30);
+  assert.equal(wakes, 1);
+  assert.equal(bridge.receive(replacement.parentFd), null);
+  bridge.close(replacement.parentFd); bridge.close(replacement.childFd);
+  await delay(10);
+
+  const pressure = bridge.createChannel();
+  while (bridge.sendAck(pressure.parentFd, 0)) {}
+  let writableWakes = 0;
+  bridge.watch(pressure.parentFd, 2, () => { writableWakes++; });
+  await delay(30);
+  assert.equal(writableWakes, 0, 'Full send queue is not writable');
+  bridge.unwatch(pressure.parentFd);
+  const drained = spawn(fixturePath, ['drain-acks'], { stdio: ['ignore', 'ignore', 'pipe', pressure.childFd] });
+  const drainedDone = new Promise((resolve, reject) => {
+    drained.once('error', reject); drained.once('close', code => code === 0 ? resolve() : reject(new Error(`Drain exited ${code}`)));
+  });
+  drained.stderr.resume();
+  bridge.close(pressure.childFd);
+  await new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error('No writable wake after peer drain')), 5000);
+    bridge.watch(pressure.parentFd, 2, (status, events) => {
+      assert.equal(status, 0); assert.ok(events & 2);
+      if (!bridge.sendAck(pressure.parentFd, 1)) return;
+      bridge.unwatch(pressure.parentFd);
+      clearTimeout(timeout); resolve();
+    });
+  });
+  await drainedDone;
+  bridge.close(pressure.parentFd);
+  await delay(10);
+
   const unrelated = fs.openSync('/dev/null', 'r');
   assert.equal(bridge.close(unrelated), false);
   assert.doesNotThrow(() => fs.fstatSync(unrelated));
   fs.closeSync(unrelated);
 
   const valid = start('valid');
-  const frame = await receive(valid.parentFd);
+  const frame = await receiveReady(valid.parentFd);
   assert.ok(Buffer.isBuffer(frame.metadata));
   const metadata = JSON.parse(frame.metadata.toString('utf8'));
   assert.equal(metadata.isDmaBuf, false);
@@ -113,7 +189,13 @@ async function main() {
   // A worker's environment teardown must release addon-owned descriptors even
   // when its JS deliberately omits close(). Workers share the process FD table.
   const { Worker } = require('node:worker_threads');
-  const worker = new Worker(`require(${JSON.stringify(bridgePath)}).createChannel()`, { eval: true });
+  const worker = new Worker(`
+    const bridge = require(${JSON.stringify(bridgePath)});
+    const a = bridge.createChannel(), b = bridge.createChannel();
+    bridge.watch(a.parentFd, 1, () => {});
+    bridge.watch(b.parentFd, 1, () => {});
+    bridge.unwatch(b.parentFd); // Teardown includes an already-closing watch.
+  `, { eval: true });
   await new Promise((resolve, reject) => { worker.once('error', reject); worker.once('exit', resolve); });
   await delay(10);
   assert.equal(fdCount(), before, 'No descriptor leak after complete lifecycle and worker teardown');

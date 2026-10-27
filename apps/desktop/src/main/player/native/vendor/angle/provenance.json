@@ -1,0 +1,17 @@
+{
+  "repository": "https://github.com/google/angle",
+  "revision": "c5bf49e78850a5335a8fa2a7bfb53b559fbfc927",
+  "purpose": "Windows EGL ABI headers only; binaries are supplied by the matching Electron runtime",
+  "sha256": {
+    "include/EGL/egl.h": "b9669499729432653659b99ec9e92f3defed9207c480ec7926024f424e693f9a",
+    "include/EGL/eglext.h": "92fe2e491f9374afb88e9c8d96be7288f33f27db97d06610ba5671ea732f8aae",
+    "include/EGL/eglext_angle.h": "def215cbf9c5a3f7b57b2eb685a462f81287ab88165f55eb0232ebfc29e7e8a1",
+    "include/EGL/eglplatform.h": "b748729767798d85ecf8e1923552879328a76d572327b641ce737549b391cc9c",
+    "include/KHR/khrplatform.h": "e206a6931f98ffe1c5c7ece69c4f94bbe1c9279243f40cbe7782848a0d3fa2de",
+    "LICENSE": "bf4da21bd20bcfb5b60b7ecc67fa864a79be049e21d6178076887f178dd6c71a",
+    "LICENSE-Apache-2.0.txt": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+  },
+  "additionalSources": {
+    "LICENSE-Apache-2.0.txt": "https://www.apache.org/licenses/LICENSE-2.0.txt"
+  }
+}

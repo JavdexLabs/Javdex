@@ -13,6 +13,7 @@ export function verifyLinuxAngleRuntime(directory = linuxAngleDirectory) {
   assert.equal(manifest.patchSha256, playbackFileSha256('build/patches/angle-x11-vulkan-visual.patch'))
   assert.equal(manifest.argsSha256, playbackFileSha256('build/angle-args.gn'))
   assert.equal(manifest.provenanceSha256, playbackFileSha256('build/angle-runtime.json'))
+  assert.equal(manifest.sourceBundle.format, 'angle-rebuild-v1', 'Rebuild ANGLE to generate compact reconstruction materials')
   assert.deepEqual(Object.keys(manifest.files).sort(), ['libEGL.so', 'libGLESv2.so'])
   const allowed = new Set(['libGLESv2.so', 'libdl.so.2', 'libpthread.so.0', 'libX11.so.6', 'libXext.so.6', 'libxcb.so.1', 'libm.so.6', 'libgcc_s.so.1', 'libc.so.6', 'ld-linux-x86-64.so.2'])
   for (const [file, hash] of Object.entries(manifest.files)) {

@@ -14,6 +14,7 @@
 #include "mpvCore.h"
 #include "linuxDmaBuf.h"
 #include "frameTiming.h"
+#include "linuxStageTimings.h"
 #include <algorithm>
 #include <chrono>
 #include <cstdlib>
@@ -22,6 +23,7 @@
 #include <sys/eventfd.h>
 #include <sys/prctl.h>
 #include <sys/stat.h>
+#include <sys/sysmacros.h>
 
 namespace {
 using namespace javdex;
@@ -84,6 +86,7 @@ void loadGlFunctions() {
 MpvCore playback;
 Leases leases;
 Bounds requested;
+LinuxStageTiming bufferPrepare, renderCall, finishWait, transportSend;
 bool selfTestRequested = false, selfTestSent = false;
 PublicationState publication;
 int wakeFd = -1, pixelWidth = 1, pixelHeight = 1;
@@ -109,7 +112,7 @@ struct Buffer {
     uint64_t size = 0, modifier = DRM_FORMAT_MOD_INVALID;
 };
 class Gpu {
-    int node = -1;
+    int node = -1, decodeNode = -1;
     gbm_device *device = nullptr;
     EGLDisplay display = EGL_NO_DISPLAY;
     EGLContext context = EGL_NO_CONTEXT;
@@ -129,6 +132,11 @@ class Gpu {
         buffer = {};
     }
 public:
+    // Borrowed by libmpv VAAPI until playback.shutdown() precedes gpu.shutdown().
+    int renderFd() const { return decodeNode; }
+    unsigned vendorId = 0, deviceId = 0, renderMajor = 0, renderMinor = 0;
+    bool eglRenderNodeVerified = false;
+    std::string vendor, renderer, version;
     bool alive() const { return context != EGL_NO_CONTEXT; }
     void shutdown() noexcept {
         for (auto &buffer : buffers) release(buffer);
@@ -140,16 +148,35 @@ public:
         context = EGL_NO_CONTEXT; display = EGL_NO_DISPLAY;
         if (device) gbm_device_destroy(device);
         device = nullptr;
+        if (decodeNode >= 0) close(decodeNode);
+        decodeNode = -1;
         if (node >= 0) close(node);
         node = -1; createImage = nullptr; destroyImage = nullptr; imageTarget = nullptr;
     }
     std::vector<uint64_t> consumerModifiers;
     void initialize(const char *path) {
+        vendorId = deviceId = renderMajor = renderMinor = 0; eglRenderNodeVerified = false;
+        vendor.clear(); renderer.clear(); version.clear();
         node = open(path, O_RDWR | O_CLOEXEC | O_NOCTTY);
         if (node < 0) throw std::runtime_error("Cannot open DRM render node (missing device or permission)");
         struct stat status{};
         if (fstat(node, &status) != 0 || !S_ISCHR(status.st_mode) || drmGetNodeTypeFromFd(node) != DRM_NODE_RENDER)
             throw std::runtime_error("Selected device is not a DRM render node");
+        // Independent file description: Mesa and VAAPI must not share GEM
+        // handle ownership. dup() would still share the same DRM file.
+        decodeNode = open(path, O_RDWR | O_CLOEXEC | O_NOCTTY);
+        struct stat decodeStatus{};
+        if (decodeNode < 0 || fstat(decodeNode, &decodeStatus) != 0
+            || !S_ISCHR(decodeStatus.st_mode) || decodeStatus.st_rdev != status.st_rdev)
+            throw std::runtime_error("Cannot open independent decoder DRM node");
+        renderMajor = major(status.st_rdev); renderMinor = minor(status.st_rdev);
+        drmDevicePtr identity = nullptr;
+        if (drmGetDevice2(node, 0, &identity) == 0 && identity) {
+            if (identity->bustype == DRM_BUS_PCI && identity->deviceinfo.pci) {
+                vendorId = identity->deviceinfo.pci->vendor_id; deviceId = identity->deviceinfo.pci->device_id;
+            }
+            drmFreeDevice(&identity);
+        }
         if (const char *loader = std::getenv("JAVDEX_PLAYBACK_VULKAN_LOADER"))
             consumerModifiers = javdex::vulkanDmaBufModifiers(loader, node);
         device = gbm_create_device(node);
@@ -160,7 +187,25 @@ public:
         EGLint major = 0, minor = 0;
         if (display == EGL_NO_DISPLAY || !eglInitialize(display, &major, &minor))
             throw std::runtime_error("Cannot initialize EGL on DRM render node");
+        const auto queryDisplay = reinterpret_cast<PFNEGLQUERYDISPLAYATTRIBEXTPROC>(eglGetProcAddress("eglQueryDisplayAttribEXT"));
+        const auto queryDevice = reinterpret_cast<PFNEGLQUERYDEVICESTRINGEXTPROC>(eglGetProcAddress("eglQueryDeviceStringEXT"));
+        EGLAttrib eglDevice = 0;
         const auto *extensions = eglQueryString(display, EGL_EXTENSIONS);
+        const auto *clientExtensions = eglQueryString(EGL_NO_DISPLAY, EGL_EXTENSIONS);
+        if (queryDisplay && queryDevice && (extension(extensions, "EGL_EXT_device_query")
+            || extension(clientExtensions, "EGL_EXT_device_query") || extension(clientExtensions, "EGL_EXT_device_base"))
+            && queryDisplay(display, EGL_DEVICE_EXT, &eglDevice)) {
+            const auto deviceHandle = reinterpret_cast<EGLDeviceEXT>(eglDevice);
+            const char *deviceExtensions = queryDevice(deviceHandle, EGL_EXTENSIONS);
+            const char *renderNode = extension(deviceExtensions, "EGL_EXT_device_drm_render_node")
+                ? queryDevice(deviceHandle, EGL_DRM_RENDER_NODE_FILE_EXT) : nullptr;
+            if (renderNode && *renderNode) {
+                struct stat actual{};
+                if (stat(renderNode, &actual) != 0 || !S_ISCHR(actual.st_mode) || actual.st_rdev != status.st_rdev)
+                    throw std::runtime_error("EGL device does not match the selected DRM render node");
+                eglRenderNodeVerified = true;
+            }
+        }
         if (!extension(extensions, "EGL_EXT_image_dma_buf_import")
             || !extension(extensions, "EGL_KHR_image_base")
             || !extension(extensions, "EGL_KHR_surfaceless_context")
@@ -179,8 +224,9 @@ public:
         if (context == EGL_NO_CONTEXT || !eglMakeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE, context))
             throw std::runtime_error("Cannot create surfaceless OpenGL 3.2 context");
         loadGlFunctions();
-        const char *renderer = reinterpret_cast<const char *>(glGetString(GL_RENDERER));
-        std::string name = renderer ? renderer : "";
+        const auto glText = [](GLenum key) { const auto *text = glGetString(key); return text ? std::string(reinterpret_cast<const char *>(text)) : std::string(); };
+        vendor = glText(GL_VENDOR); renderer = glText(GL_RENDERER); version = glText(GL_VERSION);
+        std::string name = renderer;
         std::transform(name.begin(), name.end(), name.begin(), [](unsigned char value) { return static_cast<char>(std::tolower(value)); });
         if (name.empty() || name.find("llvmpipe") != std::string::npos || name.find("softpipe") != std::string::npos
             || name.find("software") != std::string::npos || name.find("swrast") != std::string::npos)
@@ -315,14 +361,16 @@ void create(const Bounds &rect) {
         }
         if (!initialized) throw std::runtime_error(reason);
     }
-    // This standalone EGL context deliberately has no native compositor/display
-    // decoder interop. auto-copy supports VAAPI where available, with software
-    // decode fallback; the rendered output still stays in GPU shared textures.
+    // Borrow a separately opened FD for the same GPU as GBM. Decoder
+    // selection is independent of output transport and its completion fence.
+    // Unsupported direct decoding retains mpv copy/software fallbacks.
     // Both Wayland EGL and X11 ANGLE Vulkan need rendering/completion and IPC
     // headroom. With zero lead, mpv misses deadlines even with an immediate-ACK
     // consumer. Keep nonblocking render and all producer/consumer fences;
     // reserve 20ms for either DMA-BUF path, independent of modifier negotiation.
     RenderConfig config; config.getProc = getProcAddress; config.wakeup = wake;
+    config.drmRenderFd = gpu.renderFd();
+    config.hardwareDecode = gpu.vendorId == 0x10de ? "nvdec,auto-copy" : "vaapi,auto-copy";
     playback.initialize(config);
     publication.request();
 }
@@ -398,18 +446,26 @@ void render() {
     if (preparedSlot < 0) {
         const int slot = leases.available();
         if (slot >= 0) {
+            const auto prepareStarted = linuxFrameClockUs();
             auto &buffer = gpu.prepare(slot, pixelWidth, pixelHeight);
+            bufferPrepare.record(linuxFrameClockUs() - prepareStarted);
             const auto delay = playback.nextFrameDelayUs();
             frameTiming.sample(linuxFrameClockUs(), delay);
             if (!playback.render(pixelWidth, pixelHeight, static_cast<int>(buffer.framebuffer), false))
                 throw std::runtime_error("libmpv could not render the shared texture");
-            gpu.finish(buffer); rendered = true; preparedSlot = slot; preparedSequence = leases.next();
+            renderCall.record(linuxFrameClockUs() - frameTiming.renderStartUs);
+            const auto finishStarted = linuxFrameClockUs();
+            gpu.finish(buffer); finishWait.record(linuxFrameClockUs() - finishStarted);
+            rendered = true; preparedSlot = slot; preparedSequence = leases.next();
             preparedMetadata = metadata(buffer, slot, preparedSequence); publication.consumed();
         }
     }
     if (preparedSlot >= 0) {
         auto &buffer = gpu.prepare(preparedSlot, pixelWidth, pixelHeight);
-        if (sendFrame(transportFd, preparedMetadata, buffer.fd)) {
+        const auto sendStarted = linuxFrameClockUs();
+        const bool sent = sendFrame(transportFd, preparedMetadata, buffer.fd);
+        transportSend.record(linuxFrameClockUs() - sendStarted);
+        if (sent) {
             leases.publish(preparedSlot, preparedSequence); /* No physical swap feedback is available through Canvas. */
             // Actual renderer presentation is tracked by the host. Exporting a
             // BO is not proof that Chromium displayed it.
@@ -428,6 +484,13 @@ void render() {
 std::string state() {
     auto result = playback.stateJson(); result.pop_back();
     return result + ",\"backend\":\"linux-dmabuf\",\"pixelWidth\":" + std::to_string(pixelWidth) + ",\"pixelHeight\":" + std::to_string(pixelHeight)
+        + ",\"producerVendorId\":" + std::to_string(gpu.vendorId) + ",\"producerDeviceId\":" + std::to_string(gpu.deviceId)
+        + ",\"producerRenderMajor\":" + std::to_string(gpu.renderMajor) + ",\"producerRenderMinor\":" + std::to_string(gpu.renderMinor)
+        + ",\"producerEglRenderNodeVerified\":" + (gpu.eglRenderNodeVerified ? "true" : "false")
+        + ",\"producerGLVendor\":" + jsonString(gpu.vendor.c_str()) + ",\"producerGLRenderer\":" + jsonString(gpu.renderer.c_str())
+        + ",\"producerGLVersion\":" + jsonString(gpu.version.c_str())
+        + ",\"producerTimings\":" + linuxTimingsJson({{"bufferPrepare", &bufferPrepare}, {"renderCall", &renderCall},
+            {"glFinishWait", &finishWait}, {"transportSend", &transportSend}})
         + ",\"exportedFrames\":" + std::to_string(leases.latest()) + ",\"dmaBufInFlight\":" + std::to_string(leases.inFlight()) + '}';
 }
 class Output {

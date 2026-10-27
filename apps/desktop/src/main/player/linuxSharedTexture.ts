@@ -1,6 +1,7 @@
 import { createFrameEndpoint, isFrameBinding as validBinding } from './frameEndpoint'
 import { app, ipcMain, sharedTexture, type BrowserWindow, type IpcMainEvent, type SharedTextureImported } from 'electron'
 import { randomUUID } from 'node:crypto'
+import { channel as diagnosticChannel } from 'node:diagnostics_channel'
 import { FrameHealthProbe } from './frameHealthProbe'
 import { createRequire } from 'node:module'
 import type { NativePlaybackState } from './nativePlayback'
@@ -13,16 +14,22 @@ const CPU_RELEASED = 'playback:cpu-frame-released'
 const CLOCK = 'playback:frame-clock'
 const monoMs = (): number => Number(process.hrtime.bigint()) / 1e6
 const SELF_TEST = 'playback:shared-texture-self-test'
+const TRANSFER = 'playback:linux-texture-transfer'
+const RELEASED = 'playback:linux-texture-released'
 const PIXELS = 'playback:shared-texture-pixel-diagnostic'
 const POOL_SIZE = 3
 const RELEASE_TIMEOUT = 5000
 const READY_TIMEOUT = 10000
+const READABLE = 1, WRITABLE = 2 // libuv uv_poll_event flags, private to the FD bridge.
 interface FramePacket { metadata: Buffer; fd: number }
 interface FdBridge {
   createChannel(): { parentFd: number; childFd: number }
   receive(fd: number): FramePacket | null
   sendAck(fd: number, sequence: number): boolean
   readPixels(fd: number, size: number): Buffer
+  watch(fd: number, events: number, callback: (status: number, events: number) => void): boolean
+  updateWatch(fd: number, events: number): boolean
+  unwatch(fd: number): boolean
   close(fd: number): void
 }
 interface DmaBufFrame {
@@ -93,10 +100,12 @@ import { FrameBudget } from './frameBudget'
 /** One manager belongs to one helper lifetime. Its token is published only in
  * the matching playback snapshot; neither socket nor DMA-BUF FDs cross IPC. */
 export function createLinuxSharedTexture(window: BrowserWindow, addonPath: string, onError: (error: Error) => void, software = false) {
-  if (!software && (typeof sharedTexture?.importSharedTexture !== 'function' || typeof sharedTexture.sendSharedTexture !== 'function')) {
+  if (!software && typeof sharedTexture?.importSharedTexture !== 'function') {
     throw new Error('当前 Electron 不支持共享视频纹理')
   }
   const transport = createRequire(addonPath)(addonPath) as FdBridge
+  if (typeof transport.watch !== 'function' || typeof transport.updateWatch !== 'function' || typeof transport.unwatch !== 'function')
+    throw new Error('Linux 帧传输运行库需更新，请重新构建播放运行库')
   const channel = transport.createChannel()
   const surfaceToken = (software ? 'cpu:' : '') + randomUUID()
   let parentFd: number | null = channel.parentFd
@@ -111,6 +120,12 @@ export function createLinuxSharedTexture(window: BrowserWindow, addonPath: strin
   let drawnFrames = 0
   const probe = new FrameHealthProbe()
   const budget = new FrameBudget()
+  const stages: Record<string, { samples: number; totalMs: number; maxMs: number }> = {}
+  const observeStage = (name: string, ms: number): void => {
+    if (!Number.isFinite(ms) || ms < 0 || ms > RELEASE_TIMEOUT) return
+    const s = stages[name] ??= { samples: 0, totalMs: 0, maxMs: 0 }
+    s.samples++; s.totalMs += ms; s.maxMs = Math.max(s.maxMs, ms)
+  }
   let setBudget: ((ms: number) => void) | undefined
   const timings = new Map<number, { start: number; target: number; binding: string }>()
   let lastLatenessMs = 0
@@ -124,7 +139,53 @@ export function createLinuxSharedTexture(window: BrowserWindow, addonPath: strin
   const diagnosticSequences = new Set<number>()
   let saturatedSince: number | null = null
   const pending = new Map<number, PendingFrame>()
+  // Keep main references until the sandbox preload's GPU-complete callback.
+  // Delivery failures are ambiguous; retain at most the three leased surfaces,
+  // including late imports/releases after this producer has been terminated.
+  const transfers = new Map<number, { imported: SharedTextureImported; binding: string;
+    frame: BrowserWindow['webContents']['mainFrame']; acknowledged: boolean }>()
+  let retiredTimer: ReturnType<typeof setInterval> | undefined
+  let documentChanging = false, documentReplaced = false
+  const lifecycle = diagnosticChannel('javdex.playback.linux-texture.statistics')
+  const reportLifecycle = (request: unknown): void => {
+    if (!request || typeof request !== 'object') return
+    try {
+      const value = request as { owners?: unknown[] }
+      if (Array.isArray(value.owners)) value.owners.push({ mode: software ? 'cpu' : 'gpu', stopped,
+        pendingFrames: pending.size, transferredFrames: transfers.size })
+    } catch { /* A read-only/frozen diagnostic request must not fail playback. */ }
+  }
+  lifecycle.subscribe(reportLifecycle)
+  const clearRetired = (): void => {
+    clearInterval(retiredTimer)
+    contents.removeListener('did-start-navigation', retiredNavigation)
+    contents.removeListener('dom-ready', retiredDocumentReady)
+    ipcMain.removeListener(RELEASED, consumerReleased)
+    lifecycle.unsubscribe(reportLifecycle)
+  }
+  const retireDestroyedFrames = (): void => {
+    if (!stopped) return
+    for (const value of transfers.values()) {
+      if (value.acknowledged || !documentReplaced && !contents.isDestroyed() && !value.frame.isDestroyed()) continue
+      value.acknowledged = true
+      // The producer is already stopped and never ACKed. A destroyed target
+      // cannot acquire a queued transfer; drop only our reference. Existing GPU
+      // references own their allocation independently. This never permits reuse.
+      try { value.imported.release() } catch { /* Retain ambiguous resources until process exit. */ }
+    }
+  }
+  const retiredNavigation = (_event: unknown, _url: string, inPlace: boolean, main: boolean): void => {
+    if (main && !inPlace) documentChanging = true
+  }
+  const retiredDocumentReady = (): void => {
+    // Reload can reuse the same RenderFrameHost. New Linux preloads discard
+    // unmatched transfers before import, so old queued messages cannot acquire
+    // a resource after its retired producer's main reference is dropped.
+    if (stopped && documentChanging) { documentReplaced = true; retireDestroyedFrames() }
+  }
   const acknowledgements: number[] = []
+  let interest = 0, pumping = false
+  const transportStats = { wakeups: 0, receiveAttempts: 0, packets: 0, blockedAcks: 0, watchdogTicks: 0 }
   const contents = window.webContents
   const { trusted, clock } = createFrameEndpoint(contents, surfaceToken, () => !stopped, monoMs)
   const closeFrame = (entry: PendingFrame): void => {
@@ -150,13 +211,26 @@ export function createLinuxSharedTexture(window: BrowserWindow, addonPath: strin
     contents.removeListener('destroyed', rendererGone)
     app.removeListener('child-process-gone', childGone)
     binding = null
-    if (parentFd !== null) { const fd = parentFd; parentFd = null; transport.close(fd) }
+    if (parentFd !== null) {
+      const fd = parentFd; parentFd = null
+      try { transport.unwatch(fd) } catch { /* close() also stops an owned poll before closing the descriptor. */ }
+      transport.close(fd)
+    }
     spawned()
     // Fail closed: the owner terminates the producer, and no buffer is ACKed or
     // reused. Electron owns its imported resource references independently.
     // Close our descriptor copies even if a crashed GPU never calls us back.
     for (const entry of pending.values()) closeFrame(entry)
     pending.clear(); timings.clear(); acknowledgements.length = 0
+    if (transfers.size === 0) {
+      clearRetired()
+    } else {
+      contents.on('did-start-navigation', retiredNavigation)
+      contents.on('dom-ready', retiredDocumentReady)
+      retiredTimer = setInterval(retireDestroyedFrames, 1000)
+      retiredTimer.unref()
+      retireDestroyedFrames()
+    }
   }
   const fail = (message: string, kind: 'graphics' | 'page' = 'graphics'): void => {
     if (stopped) return
@@ -168,15 +242,15 @@ export function createLinuxSharedTexture(window: BrowserWindow, addonPath: strin
     if (!software && binding?.bindingToken !== value.bindingToken) { probe.reset(); requestProbe?.() }
     binding = { surfaceToken, bindingToken: value.bindingToken }; waitingSince = null
     if (timeline) contents.send('playback:frame-flush', { ...binding, timeline })
-    readyChanged?.()
+    readyChanged?.(); refreshInterest()
   }
   const removed = (event: IpcMainEvent, value: unknown): void => {
     if (!trusted(event) || !validBinding(value) || value.surfaceToken !== surfaceToken || value.bindingToken !== binding?.bindingToken) return
     if (software) for (const [sequence, entry] of pending) {
-      if (!entry.released) { entry.released = true; entry.since = Date.now(); acknowledgements.push(sequence) }
+      if (!entry.released) { entry.released = true; entry.since = Date.now(); queueAck(sequence) }
     }
     binding = null; waitingSince = visible ? Date.now() : null
-    readyChanged?.()
+    readyChanged?.(); refreshInterest()
   }
   const receiverFailed = (event: IpcMainEvent, value: unknown): void => {
     if (trusted(event) && validBinding(value) && value.surfaceToken === surfaceToken && value.bindingToken === binding?.bindingToken) {
@@ -197,13 +271,20 @@ export function createLinuxSharedTexture(window: BrowserWindow, addonPath: strin
     const timing = timings.get(sequence)
     timings.delete(sequence)
     if (timing && timing.binding === binding?.bindingToken) {
-      const receipt = value as SurfaceBinding & { readyTime?: number; submittedTime?: number }
+      const receipt = value as SurfaceBinding & { readyTime?: number; submissionStartedTime?: number; submittedTime?: number }
       const now = monoMs()
       if (typeof receipt.readyTime === 'number' && typeof receipt.submittedTime === 'number'
         && Number.isFinite(receipt.readyTime) && Number.isFinite(receipt.submittedTime)
         && receipt.readyTime >= timing.start && receipt.submittedTime >= receipt.readyTime
         && receipt.submittedTime <= now + 10 && now - receipt.submittedTime < 1000) {
         lastLatenessMs = receipt.submittedTime - timing.target
+        observeStage('producerToReady', receipt.readyTime - timing.start)
+        observeStage('producerToSubmitted', receipt.submittedTime - timing.start)
+        if (typeof receipt.submissionStartedTime === 'number' && Number.isFinite(receipt.submissionStartedTime)
+          && receipt.submissionStartedTime >= receipt.readyTime && receipt.submissionStartedTime <= receipt.submittedTime) {
+          observeStage('rendererWait', receipt.submissionStartedTime - receipt.readyTime)
+          observeStage('rendererSubmit', receipt.submittedTime - receipt.submissionStartedTime)
+        }
         const next = budget.observe(receipt.readyTime - timing.start, now)
         if (next !== undefined) setBudget?.(next)
       }
@@ -216,7 +297,7 @@ export function createLinuxSharedTexture(window: BrowserWindow, addonPath: strin
     if (!integer(sequence, 1, lastSequence)) return
     const entry = pending.get(sequence)
     if (!entry || entry.released) return
-    entry.released = true; entry.since = Date.now(); timings.delete(sequence); acknowledgements.push(sequence)
+    entry.released = true; entry.since = Date.now(); timings.delete(sequence); queueAck(sequence)
   }
   const recordTiming = (frame: { sequence: number; targetTimeUs?: number; renderStartUs?: number }, target: SurfaceBinding): void => {
     const now = monoMs()
@@ -254,14 +335,24 @@ export function createLinuxSharedTexture(window: BrowserWindow, addonPath: strin
     console.info('[playback-texture-pixels]', JSON.stringify(result))
   }
   const navigation = (_event: unknown, _url: string, isInPlace: boolean, isMainFrame: boolean): void => {
-    if (isMainFrame && !isInPlace) fail('播放器页面已重新加载，请重新打开视频', 'page')
+    if (isMainFrame && !isInPlace) { documentChanging = true; fail('播放器页面已重新加载，请重新打开视频', 'page') }
   }
   const rendererGone = (): void => fail('播放器页面已关闭，请重新打开视频', 'page')
   const childGone = (_event: unknown, details: { type: string }): void => {
     if (!software && details.type === 'GPU') fail('GPU 进程已退出，请重新打开视频')
   }
-  const importFrame = async (packet: FramePacket, target: SurfaceBinding): Promise<void> => {
+  const consumerReleased = (event: IpcMainEvent, value: unknown): void => {
+    if (!trusted(event) || !validBinding(value) || value.surfaceToken !== surfaceToken) return
+    const sequence = (value as SurfaceBinding & { sequence?: unknown }).sequence
+    if (!integer(sequence, 1, lastSequence)) return
+    const transfer = transfers.get(sequence)
+    if (!transfer || transfer.binding !== value.bindingToken || transfer.acknowledged) return
+    transfer.acknowledged = true
+    try { transfer.imported.release() } catch { fail('共享视频纹理释放失败，请停止后重试') }
+  }
+  const importFrame = (packet: FramePacket, target: SurfaceBinding): void => {
     let imported: SharedTextureImported | undefined
+    let transferStarted = false
     let entry: PendingFrame | undefined
     try {
       if (software) {
@@ -272,10 +363,12 @@ export function createLinuxSharedTexture(window: BrowserWindow, addonPath: strin
         lastSequence = frame.sequence
         pending.set(frame.sequence, entry)
         if ((frame.timeline ?? 0) !== timeline) {
-          closeFrame(entry); entry.released = true; acknowledgements.push(frame.sequence); return
+          closeFrame(entry); entry.released = true; queueAck(frame.sequence); return
         }
         recordTiming(frame, target)
+        const readStarted = monoMs()
         const pixels = transport.readPixels(packet.fd, frame.size)
+        observeStage('cpuRead', monoMs() - readStarted)
         closeFrame(entry)
         contents.send('playback:cpu-frame', { ...target, ...frame, timeline, targetTime: (frame.targetTimeUs ?? 0) / 1000, pixels })
         return
@@ -291,44 +384,60 @@ export function createLinuxSharedTexture(window: BrowserWindow, addonPath: strin
       pending.set(frame.sequence, owner)
       if (!frame.selfTest && (frame.timeline ?? 0) !== timeline) {
         timings.delete(frame.sequence); closeFrame(owner); owner.released = true
-        acknowledgements.push(frame.sequence)
+        queueAck(frame.sequence)
         return
       }
       if (frame.selfTest) {
         if (!probe.exported(frame.sequence, target.bindingToken, frame.width, frame.height)) {
-          timings.delete(frame.sequence); closeFrame(owner); owner.released = true; acknowledgements.push(frame.sequence); return
+          timings.delete(frame.sequence); closeFrame(owner); owner.released = true; queueAck(frame.sequence); return
         }
       }
+      const importStarted = monoMs()
       imported = sharedTexture.importSharedTexture({
-        textureInfo: { pixelFormat: frame.pixelFormat, colorSpace: { primaries: 'bt709', transfer: 'srgb', matrix: 'rgb', range: 'full' }, codedSize: { width: frame.width, height: frame.height },
+        textureInfo: { pixelFormat: frame.pixelFormat, timestamp: frame.targetTimeUs || frame.renderStartUs,
+          colorSpace: { primaries: 'bt709', transfer: 'srgb', matrix: 'rgb', range: 'full' }, codedSize: { width: frame.width, height: frame.height },
           handle: { nativePixmap: { planes: [{ fd: packet.fd, stride: frame.stride, offset: frame.offset, size: frame.size }],
             modifier: frame.modifier, supportsZeroCopyWebGpuImport: false } } },
         allReferencesReleased: () => {
           if (owner.released) return
           owner.released = true
+          observeStage('gpuLease', monoMs() - importStarted)
+          transfers.delete(frame.sequence)
           owner.since = Date.now()
           closeFrame(owner)
-          if (stopped) return
+          if (stopped) {
+            if (transfers.size === 0) {
+              clearRetired()
+            }
+            return
+          }
           // Sending is not a GPU fence. Only this cross-process release callback
           // permits the producer to render into this slot again.
           if (acknowledgements.length >= POOL_SIZE) { fail('共享视频帧确认队列超出限制'); return }
-          acknowledgements.push(frame.sequence)
+          queueAck(frame.sequence)
         }
       })
+      observeStage('gpuImport', monoMs() - importStarted)
+      transfers.set(frame.sequence, { imported, binding: target.bindingToken, frame: contents.mainFrame, acknowledged: false })
       const diagnosePixels = pixelDiagnostics && frame.width === 640 && frame.height === 360
         && [1, 16, 31].includes(++diagnosticFrames)
       if (diagnosePixels) diagnosticSequences.add(frame.sequence)
-      await sharedTexture.sendSharedTexture({ frame: contents.mainFrame, importedSharedTexture: imported },
-        { ...target, sequence: frame.sequence, timeline, targetTime: (frame.targetTimeUs ?? 0) / 1000, colorContract: frame.colorContract,
-          ...(frame.selfTest ? { selfTest: frame.selfTest } : {}), ...(diagnosePixels ? { diagnosePixels: true } : {}) })
+      // Unlike sendSharedTexture, this has no fixed 1s Promise.race that can
+      // lose renderer reference tracking when import arrives after timeout.
+      const transfer = imported.subtle.startTransferSharedTexture()
+      transferStarted = true
+      contents.send(TRANSFER, { ...target, sequence: frame.sequence, timeline,
+        targetTime: (frame.targetTimeUs ?? 0) / 1000, colorContract: frame.colorContract, transfer,
+        ...(frame.selfTest ? { selfTest: frame.selfTest } : {}), ...(diagnosePixels ? { diagnosePixels: true } : {}) })
     } catch {
+      // Before transfer starts there can be no late consumer; afterwards a
+      // delivery exception does not grant permission to recycle its texture.
+      if (imported && !transferStarted) imported.release()
       if (!imported) {
         if (entry) closeFrame(entry)
         else transport.close(packet.fd)
       }
       fail(software ? 'CPU 视频帧读取或传输失败，请停止后重试' : '共享视频纹理导入或传输失败，请停止后重试')
-    } finally {
-      try { imported?.release() } catch { fail('共享视频纹理释放失败，请停止后重试') }
     }
   }
   const guarded = (listener: (event: IpcMainEvent, value: unknown) => void) => (event: IpcMainEvent, value: unknown): void => {
@@ -338,36 +447,75 @@ export function createLinuxSharedTexture(window: BrowserWindow, addonPath: strin
     [READY, guarded(ready)], [REMOVED, guarded(removed)], [FAILED, receiverFailed], [DRAWN, guarded(drawn)],
     [CPU_RELEASED, cpuReleased], [CLOCK, guarded(clock)], [PIXELS, pixels], [SELF_TEST, selfTest]
   ]
-  const timer = setInterval(() => {
+  const refreshInterest = (): void => {
     if (stopped || parentFd === null) return
+    const next = (visible && binding && pending.size < POOL_SIZE ? READABLE : 0)
+      | (acknowledgements.length ? WRITABLE : 0)
+    if (next === interest) return
+    interest = next
+    try { transport.updateWatch(parentFd, next) }
+    catch { fail('共享视频帧通道已中断，请停止后重试') }
+  }
+  const queueAck = (sequence: number): void => {
+    if (stopped) return
+    if (acknowledgements.length >= POOL_SIZE) { fail('共享视频帧确认队列超出限制'); return }
+    acknowledgements.push(sequence); refreshInterest()
+  }
+  const checkHealth = (): void => {
+    const now = Date.now()
+    // A paused display may retain a frame. Only a saturated pool or blocked
+    // ACK is a stalled pool; the low-frequency watchdog never polls the socket.
+    if (visible && pending.size === POOL_SIZE) saturatedSince ??= now
+    else saturatedSince = null
+    if (saturatedSince !== null && now - saturatedSince > RELEASE_TIMEOUT
+      || acknowledgements.some(sequence => now - pending.get(sequence)!.since > RELEASE_TIMEOUT)) {
+      fail('共享视频纹理释放超时，请停止后重试'); return
+    }
+    if (visible && !binding && waitingSince !== null && now - waitingSince > READY_TIMEOUT) {
+      fail('等待视频画面接收器超时，请停止后重试'); return
+    }
+    if (!software) {
+      try { probe.tick(visible && !!binding, now) }
+      catch { fail('共享视频合成色块自检超时') }
+    }
+  }
+  const pump = (): void => {
+    if (stopped || parentFd === null || pumping) return
+    pumping = true
     try {
-      while (acknowledgements.length && transport.sendAck(parentFd, acknowledgements[0])) {
+      while (acknowledgements.length) {
+        if (!transport.sendAck(parentFd, acknowledgements[0])) { transportStats.blockedAcks++; break }
         pending.delete(acknowledgements.shift()!)
       }
-      const now = Date.now()
-      // A paused canvas may retain its most recent frame. Only a saturated
-      // three-slot pool (or an ACK that cannot be delivered) is a stalled pool.
-      if (visible && pending.size === POOL_SIZE) saturatedSince ??= now
-      else saturatedSince = null
-      if (saturatedSince !== null && now - saturatedSince > RELEASE_TIMEOUT
-        || acknowledgements.some(sequence => now - pending.get(sequence)!.since > RELEASE_TIMEOUT)) {
-        fail('共享视频纹理释放超时，请停止后重试'); return
-      }
-      if (visible && !binding && waitingSince !== null && now - waitingSince > READY_TIMEOUT) {
-        fail('等待视频画面接收器超时，请停止后重试'); return
-      }
-      if (!software) {
-        try { probe.tick(visible && !!binding, now) }
-        catch { fail('共享视频合成色块自检超时'); return }
-      }
-      if (visible && binding && pending.size < POOL_SIZE) {
+      checkHealth()
+      // GPU metadata imports are cheap and bounded by three leases. A CPU
+      // packet copies up to 256MiB; yield after one instead of batching copies.
+      for (let count = 0; count < (software ? 1 : POOL_SIZE) && !stopped
+        && parentFd !== null && visible && binding && pending.size < POOL_SIZE; count++) {
+        transportStats.receiveAttempts++
         const packet = transport.receive(parentFd)
-        if (packet) void importFrame(packet, binding)
+        if (!packet) break // EAGAIN/false readiness is normal.
+        transportStats.packets++; importFrame(packet, binding)
       }
     } catch { fail('共享视频帧通道已中断，请停止后重试') }
-  }, 5)
+    finally { pumping = false; refreshInterest() }
+  }
+  const timer = setInterval(() => {
+    if (stopped) return
+    transportStats.watchdogTicks++
+    try { checkHealth() } catch { fail('共享视频帧通道已中断，请停止后重试') }
+  }, 250)
   timer.unref()
+  try {
+    transport.watch(channel.parentFd, 0, status => {
+      if (stopped) return
+      transportStats.wakeups++
+      if (status < 0) fail('共享视频帧通道已中断，请停止后重试')
+      else pump()
+    })
+  } catch (error) { destroy(); throw error }
   for (const [name, listener] of listeners) ipcMain.on(name, listener)
+  if (!software) ipcMain.on(RELEASED, consumerReleased)
   contents.on('did-start-navigation', navigation)
   contents.on('render-process-gone', rendererGone)
   contents.on('destroyed', rendererGone)
@@ -376,13 +524,16 @@ export function createLinuxSharedTexture(window: BrowserWindow, addonPath: strin
     resetTiming(): number | undefined {
       if (stopped) return
       timeline++; timings.clear(); budget.reset(!software); setBudget?.(budget.value)
+      if (!software && visible && binding && probe.state === 'pending') { probe.reset(); requestProbe?.() }
       if (binding) contents.send('playback:frame-flush', { ...binding, timeline })
       return timeline
     },
     displayProbe: () => software ? 'not-applicable' as const : probe.state,
     onReady(callback: () => void): void { readyChanged = callback },
     onProbe(callback: () => void): void { requestProbe = callback },
-    timingStats: () => ({ renderBudgetMs: budget.value, submissionLatenessMs: lastLatenessMs }),
+    timingStats: () => ({ renderBudgetMs: budget.value, submissionLatenessMs: lastLatenessMs, submittedFrames: drawnFrames,
+      pendingFrames: pending.size, transferredFrames: transfers.size, transportStats: { ...transportStats },
+      consumerTimings: Object.fromEntries(Object.entries(stages).map(([name, value]) => [name, { ...value }])) }),
     observeState: (state: NativePlaybackState): void => {
       if (software) return
       const next = budget.observeDrops(state['frame-drop-count'], visible && !state.pause && !state.seeking
@@ -395,6 +546,6 @@ export function createLinuxSharedTexture(window: BrowserWindow, addonPath: strin
       if (stopped) return
       if (value && !visible && !binding) waitingSince = Date.now()
       if (!value) { waitingSince = null; saturatedSince = null; probe.tick(false, Date.now()) }
-      visible = value
+      visible = value; refreshInterest()
     } }
 }

@@ -1,11 +1,13 @@
-import { app, utilityProcess, type UtilityProcess } from 'electron'
+import { app, utilityProcess, MessageChannelMain, type UtilityProcess, type WebContents } from 'electron'
 import path from 'node:path'
 import { createRequire } from 'node:module'
 import { randomUUID } from 'node:crypto'
 import { channel as diagnosticsChannel } from 'node:diagnostics_channel'
 import type { HostBounds, HostFrame, HostRequest, HostResponse } from './playbackHostProtocol'
+import type { CpuFrameBinding } from './playbackHostProtocol'
 import type { NativePlaybackState } from './nativePlayback'
 import { graphicsPlaybackFailure } from './playbackGraphicsFailure'
+import { selectWindowsPlaybackAdapter } from './windowsPlaybackAdapter'
 
 interface Interop {
   acquire?(pointer: Buffer, pid: number): Buffer
@@ -22,6 +24,21 @@ export function createIsolatedPlaybackHost(runtime: string, mode: 'gpu' | 'cpu')
   let failure: Error | undefined, state: NativePlaybackState = { alive: false }
   let wakeup: (() => void) | null = null, heartbeat: ReturnType<typeof setInterval> | undefined
   let lastHeartbeat = 0, channel = '', interop: Interop | undefined
+  let consumerGpu: unknown
+  const directCpuFrames = ['darwin', 'win32'].includes(process.platform) && mode === 'cpu'
+  let cpuDisplay: { contents: WebContents; binding: CpuFrameBinding; cpuChannelId: string; connected: boolean } | undefined
+  let cpuPortClosedAt: number | undefined
+  const connectCpuPort = (): void => {
+    const display = cpuDisplay
+    if (!display || display.connected || !child || !ready || stopped) return
+    const { port1, port2 } = new MessageChannelMain()
+    try {
+      child.postMessage({ type: 'cpu-frame-port', cpuChannelId: display.cpuChannelId } satisfies HostRequest, [port1])
+      display.contents.postMessage('playback:cpu-frame-port', { ...display.binding, cpuChannelId: display.cpuChannelId }, [port2])
+      display.connected = true
+    } catch (error) { port1.close(); port2.close(); throw error }
+  }
+  let selectingAdapter = false
   let lastSequence = 0, requestsPending = 0
   const queued: HostRequest[] = [], frames: HostFrame[] = []
   // A resource can outlive its producer. This map is captured by that bridge's
@@ -37,7 +54,7 @@ export function createIsolatedPlaybackHost(runtime: string, mode: 'gpu' | 'cpu')
   const report = (value: unknown): void => {
     if (value && typeof value === 'object') {
       try { Object.assign(value, { [mode]: { ...state, pid: child?.pid,
-        outstandingSurfaces: resources.size, queuedFrames: frames.length } }) } catch { /* Read-only diagnostics. */ }
+        outstandingSurfaces: resources.size, queuedFrames: frames.length, ...(consumerGpu ? { consumerGpu } : {}) } }) } catch { /* Read-only diagnostics. */ }
     }
   }
   const control = (value: unknown): void => {
@@ -54,7 +71,7 @@ export function createIsolatedPlaybackHost(runtime: string, mode: 'gpu' | 'cpu')
     if (failure) throw failure
     if (stopped || !child) throw new Error('播放进程未启动')
     const abort = (code: string): never => { fail(code); throw failure }
-    if (ready) {
+    if (ready && !selectingAdapter) {
       if (requestsPending >= 64) abort('HELPER_HEARTBEAT_TIMEOUT')
       try { child.postMessage(message); requestsPending++ } catch { abort('FRAME_CHANNEL_FAILED') }
     }
@@ -74,6 +91,7 @@ export function createIsolatedPlaybackHost(runtime: string, mode: 'gpu' | 'cpu')
     if (stopped) return
     stopped = true; clearInterval(heartbeat)
     const previous = child; child = null
+    cpuDisplay = undefined; cpuPortClosedAt = undefined
     try {
       discard()
       for (const resource of cache.values()) { resource.retired = true; dispose(resource) }
@@ -103,9 +121,22 @@ export function createIsolatedPlaybackHost(runtime: string, mode: 'gpu' | 'cpu')
   }
   const snapshot = (): NativePlaybackState => { if (failure) throw failure; return { ...state } }
   return {
+    directCpuFrames,
+    connectCpuFramePort(contents: WebContents, binding: CpuFrameBinding): void {
+      if (!directCpuFrames) return
+      if (cpuDisplay?.binding.surfaceToken === binding.surfaceToken && cpuDisplay.binding.bindingToken === binding.bindingToken) return
+      cpuDisplay = { contents, binding: { ...binding }, cpuChannelId: randomUUID(), connected: false }
+      cpuPortClosedAt = undefined
+      connectCpuPort()
+    },
+    disconnectCpuFramePort(): void {
+      const previous = cpuDisplay; cpuDisplay = undefined; cpuPortClosedAt = undefined
+      if (previous?.connected && child && !stopped) child.postMessage({ type: 'cpu-frame-detached', cpuChannelId: previous.cpuChannelId } satisfies HostRequest)
+    },
     create(bounds: HostBounds): void {
       if (!stopped || resources.size) throw new Error('播放进程资源仍在使用')
       ready = false; failure = undefined; stopped = false
+      selectingAdapter = false; consumerGpu = undefined
       lastSequence = requestsPending = 0
       state = { alive: true, generatedSubtitleOverlayVersion: 1, generatedSubtitleCommandsPending: 0,
         generatedSubtitleCommandErrors: 0, generatedSubtitleCommandReplies: 0 }
@@ -120,13 +151,40 @@ export function createIsolatedPlaybackHost(runtime: string, mode: 'gpu' | 'cpu')
         const launched = utilityProcess.fork(path.join(app.getAppPath(), 'out/main/playbackHost.js'), [runtime, mode, channel, interopFile],
           { serviceName: 'Javdex Playback', stdio: 'pipe', ...(process.platform === 'darwin' ? { allowLoadingUnsignedLibraries: true } : {}) })
         child = launched; lastHeartbeat = performance.now()
+        const initialization: HostRequest = { type: 'create', bounds }
+        if (mode === 'gpu' && process.platform === 'win32' && typeof app.getGPUInfo === 'function') {
+          selectingAdapter = true
+          // Keep create at the head of the queue while a bounded GPU snapshot
+          // selects the device. CPU startup never waits. Late results belong
+          // to this child only and cannot initialize a stopped/replaced host.
+          let timeout: ReturnType<typeof setTimeout>
+          const unavailable = new Promise<undefined>(resolve => { timeout = setTimeout(() => resolve(undefined), 2000); timeout.unref() })
+          void Promise.race([Promise.resolve().then(() => app.getGPUInfo('complete')).catch(() => undefined), unavailable]).then(value => {
+            clearTimeout(timeout)
+            if (child !== launched || stopped) return
+            initialization.windowsAdapter = selectWindowsPlaybackAdapter(value)
+            const info = (value ?? {}) as { gpuDevice?: Array<Record<string, unknown>>; auxAttributes?: Record<string, unknown> }
+            const narrow = (entry: Record<string, unknown>, keys: string[]): Record<string, unknown> => Object.fromEntries(keys.flatMap(key => {
+              const value = entry[key]
+              return typeof value === 'number' && Number.isFinite(value) || typeof value === 'boolean'
+                || typeof value === 'string' && value.length <= 512 ? [[key, value]] : []
+            }))
+            consumerGpu = { adapterSelection: initialization.windowsAdapter ? 'chromium-active-pci' : 'unknown', devices: (info.gpuDevice ?? []).slice(0, 8).map(device => narrow(device,
+              ['active', 'vendorId', 'deviceId', 'deviceString', 'gpuPreference', 'driverVendor', 'driverVersion', 'driverDate', 'luid'])),
+              ...narrow(info.auxAttributes ?? {}, ['glVendor', 'glRenderer', 'glVersion', 'directRenderingVersion']) }
+            selectingAdapter = false
+            if (ready) for (const message of queued.splice(0)) post(message)
+          }).catch(() => { if (child === launched && !stopped) fail('GPU_INITIALIZATION_FAILED') })
+        }
         launched.stderr?.on('data', (data: Buffer) => console.warn('[playback-host]', data.toString('utf8').slice(0, 2048)))
         launched.on('message', (message: HostResponse) => {
           if (stopped || child !== launched) return
           try {
             if (message.type === 'ready') {
               if (ready) throw new Error('Duplicate playback host initialization')
-              ready = true; for (const message of queued.splice(0)) post(message)
+              ready = true; connectCpuPort(); if (!selectingAdapter) for (const message of queued.splice(0)) post(message)
+            } else if (message.type === 'cpu-frame-port-closed') {
+              if (cpuDisplay?.cpuChannelId === message.cpuChannelId) cpuPortClosedAt ??= performance.now()
             } else if (message.type === 'state') { state = message.state; lastHeartbeat = performance.now(); wakeup?.() }
             else if (message.type === 'ack') requestsPending = Math.max(0, requestsPending - 1)
             else if (message.type === 'failed') fail('GPU_RUNTIME_FAILED')
@@ -151,14 +209,23 @@ export function createIsolatedPlaybackHost(runtime: string, mode: 'gpu' | 'cpu')
                 resource.frames++
                 resources.set(frame.sequence, resource)
                 if (process.platform === 'win32') frame.ntHandle = resource.pointer; else frame.ioSurface = resource.pointer
+              } else if (directCpuFrames) {
+                if (!cpuDisplay || frame.cpuChannelId !== cpuDisplay.cpuChannelId) { releaseFrame(frame.sequence); return }
+                if (frame.pixels !== undefined) throw new Error('CPU port metadata included pixels')
               } else if (frame.pixels) frame.pixels = Buffer.from(frame.pixels.buffer, frame.pixels.byteOffset, frame.pixels.byteLength)
               frames.push(frame); wakeup?.()
             }
           } catch (error) { console.warn('[playback-host-channel]', error); fail('FRAME_CHANNEL_FAILED') }
         })
         launched.once('exit', () => { if (!stopped && child === launched) fail('PLAYBACK_HOST_EXITED') })
-        heartbeat = setInterval(() => { if (performance.now() - lastHeartbeat > 5000) fail('HELPER_HEARTBEAT_TIMEOUT') }, 250)
-        heartbeat.unref(); post({ type: 'create', bounds })
+        heartbeat = setInterval(() => {
+          const now = performance.now()
+          if (now - lastHeartbeat > 5000) fail('HELPER_HEARTBEAT_TIMEOUT')
+          // A normal unmount/rebind retires the channel before this deadline.
+          // An unexpected closed active port cannot leave a live CPU host frozen.
+          else if (cpuPortClosedAt !== undefined && now - cpuPortClosedAt > 5000) fail('FRAME_CHANNEL_FAILED')
+        }, 250)
+        heartbeat.unref(); post(initialization)
       } catch { fail('GPU_INITIALIZATION_FAILED'); throw failure }
     },
     setBounds(bounds: HostBounds): void { post({ type: 'bounds', bounds }) },

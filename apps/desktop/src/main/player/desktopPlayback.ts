@@ -20,6 +20,7 @@ import { createAiSubtitleController } from './aiSubtitles/aiSubtitleController'
 import { getLocalModels } from '../services/localModels/desktopLocalModels'
 import { softwareStartupRequested } from '../bootstrap/startupGraphicsRecovery'
 import { waitForLinuxPlaybackCompositing } from './linuxPlaybackDevice'
+import { retireMacCpuSurface } from './macCpuShutdown'
 
 let active: ReturnType<typeof createPlaybackSession> | null = null
 let dispose: (() => Promise<void>) | null = null
@@ -176,13 +177,24 @@ export function registerBuiltinPlayback(backend: CatalogBackend, getWindow: () =
     if (!recordingEnabled) session.stopRecording()
   })
   dispose = () => {
+    const snapshot = session.snapshot()
+    let surface = snapshot?.sharedTextureSurface
+    // Recovery can switch to CPU between state samples. Only inspect an
+    // already-active CPU producer; a GPU read could itself start recovery.
+    if (process.platform === 'darwin' && snapshot && bound && !bound.isDestroyed()) {
+      try {
+        surface = native.currentCpuSurface() ?? surface
+      } catch { /* Keep the last published surface if the producer has gone. */ }
+    }
+    const contents = process.platform === 'darwin' && surface?.startsWith('cpu:') && bound && !bound.isDestroyed()
+      ? bound.webContents : undefined
     if (renderTimer) clearInterval(renderTimer)
     clearInterval(stateTimer); unsubscribe?.(); unsubscribeSettings?.()
     powerMonitor.off('suspend', onSuspend)
     bound?.off('closed', onClosed); bound?.off('hide', onHidden); bound?.off('leave-full-screen', onFullscreenExit)
     bound?.off('minimize', onMinimized)
     session.stop()
-    return aiSubtitles.close()
+    return Promise.all([aiSubtitles.close(), contents && surface ? retireMacCpuSurface(contents, surface) : Promise.resolve()]).then(() => {})
   }
   const availability = () => {
     const gpu = builtinPlaybackAvailability(renderMode === 'cpu' ? 'software' : undefined)

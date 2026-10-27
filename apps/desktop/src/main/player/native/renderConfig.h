@@ -29,6 +29,8 @@ struct RenderConfig {
     void *glContext = nullptr;
     void (*wakeup)(void *) = nullptr;
     void *wakeupContext = nullptr;
+    // Borrowed render node; the Linux adapter owns it through renderer teardown.
+    int drmRenderFd = -1;
     const char *hardwareDecode = "auto-copy";
     const char *renderLead = "0.02";
     bool cpu = false;

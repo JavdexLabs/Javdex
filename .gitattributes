@@ -5,3 +5,6 @@ scripts/research/server-mode-docker-probe.sh text eol=lf
 # Preserve checksum-pinned upstream patches byte-for-byte, including diff context.
 build/angle-electron-patches/** -whitespace
 build/patches/*.patch -whitespace
+
+# Checksum-pinned ANGLE ABI headers must survive Windows checkout byte-for-byte.
+apps/desktop/src/main/player/native/vendor/angle/** text eol=lf

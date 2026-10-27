@@ -121,3 +121,35 @@ for (const platform of ['darwin', 'win32'] as const) {
     assert.equal(f.destroys(), 1)
   })
 }
+
+const cpuChannelId = '55555555-5555-4555-8555-555555555555'
+for (const platform of ['darwin', 'win32'] as const) {
+  test(`${platform}: CPU metadata-only route attaches only after trusted ready and retains two-copy credit`, t => {
+    const f = softwareFixture(platform); t.after(f.bridge.destroy)
+    const attached: unknown[] = [], retired: number[] = []; let sequence = 0, detached = 0
+    Object.assign(f.native, { directCpuFrames: true,
+      connectCpuFramePort: (_contents: unknown, binding: unknown) => attached.push(binding), disconnectCpuFramePort: () => { detached++ },
+      releaseFrame: (id: number) => retired.push(id),
+      nextFrame: (writable: boolean) => writable ? { sequence: ++sequence, cpuChannelId, width: 1, height: 1, stride: 64, size: 64, delayUs: 0 } : undefined })
+    f.emit('playback:shared-texture-ready', f.binding, false); assert.equal(attached.length, 0)
+    f.ready(); assert.deepEqual(JSON.parse(JSON.stringify(attached)), [f.binding])
+    f.poll(); f.poll(); f.poll(); assert.equal(f.messages.filter(x => x.name === 'playback:cpu-frame').length, 2)
+    const frame = f.messages.find(x => x.name === 'playback:cpu-frame')!.data
+    assert.equal(frame.cpuChannelId, cpuChannelId); assert.equal(frame.pixels, undefined)
+    f.emit('playback:cpu-frame-released', { ...f.binding, sequence: 1 }); f.poll()
+    assert.equal(f.messages.filter(x => x.name === 'playback:cpu-frame').length, 3); assert.deepEqual(retired, [1])
+    f.emit('playback:shared-texture-removed'); assert.equal(detached, 1)
+  })
+  test(`${platform}: CPU port setup errors stay inside the authenticated IPC failure boundary`, t => {
+    const f = softwareFixture(platform); t.after(f.bridge.destroy)
+    Object.assign(f.native, { directCpuFrames: true, connectCpuFramePort() { throw Error('closed port') } })
+    assert.doesNotThrow(f.ready); assert.throws(f.bridge.inspect, /CPU/)
+    assert.equal(f.destroys(), 1)
+  })
+  test(`${platform}: CPU metadata cannot bypass pixel validation without a private producer`, () => {
+    const f = softwareFixture(platform)
+    Object.assign(f.native, {
+      nextFrame: () => ({ sequence: 1, cpuChannelId, width: 1, height: 1, stride: 64, size: 64, delayUs: 0 }) })
+    f.ready(); f.poll(); assert.throws(f.bridge.state, /Invalid .* CPU frame/)
+  })
+}

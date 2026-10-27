@@ -1,0 +1,175 @@
+{
+  "schemaVersion": 1,
+  "tag": "v0.9.2-beta.1",
+  "sourceSha": "793d97767b39ae0381dd4826dc33882b584300f7",
+  "baselineTag": "v0.9.1",
+  "baselineSourceSha": "7591e21e99d2416fefa01635ec5ba6fc3e1900bd",
+  "tagObjectSha": "69c2341b1a59660fdd97646bc234bae5b1c63d0b",
+  "release": {
+    "id": 425743139,
+    "url": "https://github.com/JavdexLabs/Javdex/releases/tag/v0.9.2-beta.1",
+    "draft": false,
+    "prerelease": true,
+    "publishedAt": "2026-10-27T16:55:57Z",
+    "targetCommitish": "main"
+  },
+  "workflow": {
+    "id": 40535660144,
+    "url": "https://github.com/JavdexLabs/Javdex/actions/runs/40535660144",
+    "event": "push",
+    "attempt": 1,
+    "headSha": "793d97767b39ae0381dd4826dc33882b584300f7",
+    "conclusion": "success",
+    "jobs": [
+      {
+        "id": 122300081919,
+        "name": "metadata",
+        "conclusion": "success"
+      },
+      {
+        "id": 122300085252,
+        "name": "resume-server",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 122300192275,
+        "name": "Typecheck and test",
+        "conclusion": "success"
+      },
+      {
+        "id": 122317039464,
+        "name": "Package mac-x64",
+        "conclusion": "success"
+      },
+      {
+        "id": 122317039562,
+        "name": "Package linux-x64",
+        "conclusion": "success"
+      },
+      {
+        "id": 122317039575,
+        "name": "Package mac-arm64",
+        "conclusion": "success"
+      },
+      {
+        "id": 122317039718,
+        "name": "Package win-x64",
+        "conclusion": "success"
+      },
+      {
+        "id": 122331827705,
+        "name": "Aggregate corresponding playback sources",
+        "conclusion": "success"
+      },
+      {
+        "id": 122332787007,
+        "name": "Server image (arm64)",
+        "conclusion": "success"
+      },
+      {
+        "id": 122332787165,
+        "name": "Server image (amd64)",
+        "conclusion": "success"
+      },
+      {
+        "id": 122334571704,
+        "name": "server-manifest",
+        "conclusion": "success"
+      },
+      {
+        "id": 122334826615,
+        "name": "Publish GitHub release",
+        "conclusion": "success"
+      }
+    ]
+  },
+  "assets": [
+    {
+      "id": 682244956,
+      "name": "Javdex-0.9.2-beta.1-amd64.deb",
+      "size": 172211756,
+      "digest": "sha256:ce38e36d54c03bfb9bdae4fe3aefd47fb20e9e557252bda4ac24851c1b745788",
+      "state": "uploaded",
+      "url": "https://github.com/JavdexLabs/Javdex/releases/download/v0.9.2-beta.1/Javdex-0.9.2-beta.1-amd64.deb"
+    },
+    {
+      "id": 682244942,
+      "name": "Javdex-0.9.2-beta.1-arm64.dmg",
+      "size": 172827217,
+      "digest": "sha256:fa64c759e86eb12e3d5847f4ed68cca35f439808d96a0a99689bd77aea2ce4c2",
+      "state": "uploaded",
+      "url": "https://github.com/JavdexLabs/Javdex/releases/download/v0.9.2-beta.1/Javdex-0.9.2-beta.1-arm64.dmg"
+    },
+    {
+      "id": 682244940,
+      "name": "Javdex-0.9.2-beta.1-x64.dmg",
+      "size": 181055135,
+      "digest": "sha256:e6f1393ffce27915c608ec4a9cf51029fde10fbdce0067410a27d95133d4e5b5",
+      "state": "uploaded",
+      "url": "https://github.com/JavdexLabs/Javdex/releases/download/v0.9.2-beta.1/Javdex-0.9.2-beta.1-x64.dmg"
+    },
+    {
+      "id": 682244943,
+      "name": "Javdex-0.9.2-beta.1-x86_64.AppImage",
+      "size": 195717878,
+      "digest": "sha256:d288567ccff006bdb0398a666561ae3b6e4c81da93ac5fab80e9e91137cf58fb",
+      "state": "uploaded",
+      "url": "https://github.com/JavdexLabs/Javdex/releases/download/v0.9.2-beta.1/Javdex-0.9.2-beta.1-x86_64.AppImage"
+    },
+    {
+      "id": 682244953,
+      "name": "Javdex-Playback-Sources-0.9.2-beta.1.tar.gz",
+      "size": 672890892,
+      "digest": "sha256:2e6958fe9413eb91cd02f6ff69be0b5b7119ab4d3d4641560f1eeea78528ee27",
+      "state": "uploaded",
+      "url": "https://github.com/JavdexLabs/Javdex/releases/download/v0.9.2-beta.1/Javdex-Playback-Sources-0.9.2-beta.1.tar.gz"
+    },
+    {
+      "id": 682244949,
+      "name": "Javdex-Setup-0.9.2-beta.1-x64.exe",
+      "size": 150496485,
+      "digest": "sha256:860e003d2eef57012c9829ff743f068e27916e5ae32067aa096e484caa6628ed",
+      "state": "uploaded",
+      "url": "https://github.com/JavdexLabs/Javdex/releases/download/v0.9.2-beta.1/Javdex-Setup-0.9.2-beta.1-x64.exe"
+    },
+    {
+      "id": 682244946,
+      "name": "Javdex-Setup-0.9.2-beta.1-x64.zip",
+      "size": 202962958,
+      "digest": "sha256:ede777787b33d29f0d6ce5236f07ececcaa2263f1343aa56c7db4bfcee93e3de",
+      "state": "uploaded",
+      "url": "https://github.com/JavdexLabs/Javdex/releases/download/v0.9.2-beta.1/Javdex-Setup-0.9.2-beta.1-x64.zip"
+    },
+    {
+      "id": 682244955,
+      "name": "Javdex-server-0.9.2-beta.1-linux-amd64.javdex-update",
+      "size": 24923043,
+      "digest": "sha256:f45369c22c4b889c25254ca13be4f19883024745c373384a258b7d82739947f5",
+      "state": "uploaded",
+      "url": "https://github.com/JavdexLabs/Javdex/releases/download/v0.9.2-beta.1/Javdex-server-0.9.2-beta.1-linux-amd64.javdex-update"
+    },
+    {
+      "id": 682244950,
+      "name": "Javdex-server-0.9.2-beta.1-linux-arm64.javdex-update",
+      "size": 25179629,
+      "digest": "sha256:23d1b6562e9191dd1a398a34f872b00eef6d7e768e5f593710398da64db100f2",
+      "state": "uploaded",
+      "url": "https://github.com/JavdexLabs/Javdex/releases/download/v0.9.2-beta.1/Javdex-server-0.9.2-beta.1-linux-arm64.javdex-update"
+    },
+    {
+      "id": 682244945,
+      "name": "SHA256SUMS.txt",
+      "size": 936,
+      "digest": "sha256:65ecfe0f2b253daf65396a1dd905b8ca1b74467fb0e19b3033610541527941f0",
+      "state": "uploaded",
+      "url": "https://github.com/JavdexLabs/Javdex/releases/download/v0.9.2-beta.1/SHA256SUMS.txt"
+    }
+  ],
+  "image": {
+    "tag": "ghcr.io/javdexlabs/javdex-server:0.9.2-beta.1",
+    "indexDigest": "sha256:c71d06665d7ebdef6765bf8185345df3f2e157452a351b809ce08d98fe209863",
+    "registryHeadStatus": 200
+  },
+  "latestStableTagAtCheck": "v0.9.1",
+  "independentPublicArtifactAcceptance": "not_performed_as_requested"
+}

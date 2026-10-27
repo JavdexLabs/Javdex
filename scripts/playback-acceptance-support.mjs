@@ -40,11 +40,16 @@ export function seedAcceptanceCatalog(directory, media) {
 export async function launchAcceptance(directory, logName = 'application.log', args = []) {
   assert.ok(['darwin', 'win32', 'linux'].includes(process.platform), 'unsupported desktop acceptance host')
   assert.match(logName, /^[a-z-]+\.log$/)
+  assert.ok(process.platform !== 'darwin' || !process.env.JAVDEX_PLAYBACK_ACCEPTANCE_APP_PATH,
+    'A development application override is not supported by the isolated macOS acceptance bundle')
   if (process.platform !== 'darwin' || process.env.JAVDEX_PLAYBACK_ACCEPTANCE_EXECUTABLE) {
     if (process.platform === 'linux' && !args.some(v => /^--javdex-(?:x11|wayland)$/.test(v))) args = [...args, process.env.WAYLAND_DISPLAY && !process.env.DISPLAY ? '--javdex-wayland' : '--javdex-x11']
     const env = { ...process.env, JAVDEX_TEST_USER_DATA: directory }
     delete env.ELECTRON_RUN_AS_NODE
     const packaged = process.env.JAVDEX_PLAYBACK_ACCEPTANCE_EXECUTABLE
+    const developmentApp = process.env.JAVDEX_PLAYBACK_ACCEPTANCE_APP_PATH
+    assert(!(packaged && developmentApp), 'Select one acceptance application source')
+    if (developmentApp) assert.ok(path.isAbsolute(developmentApp) && fs.statSync(path.join(developmentApp, 'package.json')).isFile(), 'development acceptance application must exist')
     let cwd = root
     if (packaged) {
       assert.ok(path.isAbsolute(packaged) && fs.statSync(packaged).isFile(), 'packaged acceptance executable must exist')
@@ -55,7 +60,7 @@ export async function launchAcceptance(directory, logName = 'application.log', a
       fs.mkdirSync(cwd, { recursive: true })
     }
     const application = await _electron.launch({ executablePath: packaged ?? electron,
-      args: packaged ? args : [root, ...args], cwd, env, timeout: 30000 })
+      args: packaged ? args : [developmentApp ?? root, ...args], cwd, env, timeout: 30000 })
     acceptanceProcesses.set(application, application.process())
     application.process().stderr.on('data', chunk => fs.appendFileSync(path.join(output, logName), chunk))
     return application
@@ -75,8 +80,10 @@ export async function launchAcceptance(directory, logName = 'application.log', a
   }
   const env = { ...process.env, JAVDEX_TEST_USER_DATA: directory }
   delete env.ELECTRON_RUN_AS_NODE
+  const entry = env.JAVDEX_ACCEPTANCE_NO_KEYCHAIN === '1'
+    ? [path.join(root, 'scripts/playback-acceptance-no-keychain.cjs'), root] : [root]
   const application = await _electron.launch({ executablePath: path.join(bundle, 'Contents/MacOS/Electron'),
-    args: [root, ...args], cwd: root, env, timeout: 30000 })
+    args: [...entry, ...args], cwd: root, env, timeout: 30000 })
   acceptanceProcesses.set(application, application.process())
   application.process().stderr.on('data', chunk => fs.appendFileSync(path.join(output, logName), chunk))
   return application
@@ -91,6 +98,18 @@ export async function waitForValue(read, predicate, description, timeout = 20000
     await new Promise(resolve => setTimeout(resolve, 100))
   } while (Date.now() < deadline)
   throw new Error(`${description}: ${JSON.stringify(value)}`)
+}
+
+// An isolated host stops publishing after its final lease is returned. Keep an
+// observed high-water mark separately; absence after teardown is not a zero or
+// an over-budget sample, and a live producer must still report its real value.
+export function observeTextureLeasePeak(previous, sample) {
+  if (sample.alive || sample.peakOutstanding !== undefined) {
+    assert.ok(Number.isSafeInteger(sample.peakOutstanding) && sample.peakOutstanding >= 0
+      && sample.peakOutstanding <= 3, 'live/native texture lease high-water mark must remain within three slots')
+    return Math.max(previous, sample.peakOutstanding)
+  }
+  return previous
 }
 
 export const waitForState = (page, predicate, description, timeout) =>
@@ -118,8 +137,8 @@ export const nativeEvidence = application => application.evaluate(() => {
 export const waitForNativeFrame = (application, page, subtitleId) => waitForValue(async () => {
   const native = await nativeEvidence(application)
   const canvas = await page.evaluate(() => {
-    const c = document.querySelector('canvas[data-playback-surface]'), r = c.getBoundingClientRect()
-    return { width: c.width, height: c.height, expectedWidth: Math.round(r.width * devicePixelRatio), expectedHeight: Math.round(r.height * devicePixelRatio) }
+    const c = document.querySelector('[data-playback-surface]'), r = c.getBoundingClientRect()
+    return { width: c.videoWidth ?? c.width, height: c.videoHeight ?? c.height, expectedWidth: Math.round(r.width * devicePixelRatio), expectedHeight: Math.round(r.height * devicePixelRatio) }
   })
   return { native, canvas }
 }, ({ native, canvas }) => native.alive && native.renderedFrames > 0
@@ -132,7 +151,7 @@ export const captureAcceptanceImage = (application, projection) => waitForValue(
   const { BrowserWindow } = dependencies
   const window = BrowserWindow.getAllWindows()[0]
   const geometry = `(() => {
-    const canvas = document.querySelector('canvas[data-playback-surface]'), r = canvas.getBoundingClientRect();
+    const canvas = document.querySelector('[data-playback-surface]'), r = canvas.getBoundingClientRect();
     const root = canvas.closest('[data-playback-session]');
     const toolbar = root.querySelector('input[aria-label="播放进度"]')?.parentElement.parentElement;
     const rendererFullscreen = root.dataset.rendererFullscreen === 'true';

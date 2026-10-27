@@ -56,11 +56,14 @@ npm run lint            # TypeScript 与 CSS 检查
 npm run check:encoding  # 检查可疑编码字符
 npm test                # 完整检查与测试
 npm run test:ui         # 小型真实浏览器交互回归（PR CI）
+npm run test:playback:pointer:native # GNOME/Mutter 原生多击计数；会临时移动指针并打开自有测试窗口
 npm run test:ui:matrix   # 完整主题/尺寸/页面矩阵（独立入口）
 npm run build           # 生产构建与运行时资源校验
 npm run measure:renderer # 已构建 renderer 的静态闭包体积与选择性加载检查
 npm start               # 预览生产构建
 ```
+
+原生点击检查要求 Linux GNOME/Mutter 和现有 Python `dbus` 模块，不自动安装依赖或改系统设置；缺失支持会失败。默认使用 Wayland，追加 `-- --x11` 检查 XWayland。浏览器用例人工提供 `clickCount`，原生入口则检查实际 Electron 收到的计数、无临时播放／暂停命令及第二次按住的情况。两者都模拟视频帧绑定与播放 RPC，不能作为视频画面或音画同步验收。若本地系统限制导致开发版 Electron 沙箱无法启动，可显式追加 `--no-sandbox`，仅用于该隔离测试窗口，不改变应用启动策略。
 
 `npm test` 会先运行架构边界、lint、CSS 架构和 UI 控件检查，再执行类型检查、打包运行时测试及 Electron 测试。Electron 测试自动发现 `apps/` 与 `packages/` 下的 `*.test.ts` / `*.test.tsx`，排除 `apps/server`。服务端测试单独运行 `npm run server:test`，发布元数据测试运行 `node --test scripts/release-metadata.test.mjs`；两者各有 CI 入口。测试具体入口见 [package.json](../package.json)。
 
@@ -102,7 +105,7 @@ npm run dist:linux           # Linux 目标
 
 目标开关和架构位于 [packaging.targets.json](../build/packaging.targets.json)，基础构建配置位于 [electron-builder.config.mjs](../electron-builder.config.mjs)。本地通常选择对应平台命令；不带平台参数的 `npm run dist` 会尝试全部启用目标，不会自动筛选当前操作系统。请在目标要求的平台构建，指定 `dist:mac` 等命令不会提供跨平台编译环境。安装包输出到 `dist/`。
 
-Windows 本地使用内置播放时，先完成 `playback:native:build`，再运行 `dist:win:local`。该入口显式检查 `out/native-playback/playback.node` 的 PE 架构及普通／延迟 DLL 导入闭包，只复制实际依赖，不复制旧 addon、测试程序或开发目录；缺少依赖时停止打包。包内 `local-runtime.json` 标记本地开发用途及文件摘要。正式分发继续使用 `JAVDEX_PLAYBACK_RUNTIME_DIR` 的审核清单与对应源码材料；本地入口与该配置互斥，打包不执行发布。
+Windows 本地使用内置播放时，先完成 `playback:native:build`，再运行 `dist:win:local`。该入口显式检查 `out/native-playback/playback.node` 的 PE 架构及普通／延迟 DLL 导入闭包，只复制实际依赖，不复制旧 addon、测试程序或开发目录；缺少依赖时停止打包。包内 `local-runtime.json` 标记本地开发用途及文件摘要。正式分发继续使用 `JAVDEX_PLAYBACK_RUNTIME_DIR` 的审核清单与对应源码材料；本地入口与该配置互斥，打包不执行发布。 Windows GPU 还需私有 ANGLE（Electron 44 不再附带 DLL），`playback:native:build` 按 `build/windows-angle-runtime.json` 下载或复用固定供应归档并验证 SHA-256；可用 `JAVDEX_WINDOWS_ANGLE_ARCHIVE` 指向已下载的同一归档。两个 DLL、完整许可与来源元数据随本地播放库复制，不能只复制 `playback.node`。正式 Windows 源码构建同样纳入这些动态依赖和匹配源码材料；Windows 生产端 ABI 与 Linux ANGLE 配置分开校验。
 
 Linux x64 普通打包与 Release 使用 GPU／CPU 双 helper 及匹配 Electron 的 ANGLE，构建和来源校验见 [Linux 播放](LINUX_COMPATIBLE_PLAYBACK.md)。[Linux portable phase 1](LINUX_PORTABLE_PHASE1.md) 仅保留为独立历史测试入口，不代替当前发行合同。
 
@@ -145,13 +148,13 @@ Linux x64 的 llama.cpp b11435 CUDA 12.8、Vulkan 和 CUDA/cuBLAS 依赖固定�
 
 Linux 发布 runner 会先升级字体／音频客户端的已安装依赖闭包，再复制库并按实际 `source:Version` 获取源码，避免预装库旧补丁已从当前 APT 源索引移除。此准备只发生在临时 CI runner，不用新源码替代旧二进制的对应源码。
 
-Windows、macOS 与 Linux 的正常内置播放均通过主窗口 Canvas 与 HTML 控件合成。Windows 使用 D3D11 共享纹理生产端，故障时自动使用 CPU 内存帧；旧 HWND 视频子窗口、原生工具栏和滑块实现已移除。
+内置播放在同一主窗口与 HTML 控件合成；Windows、macOS、Linux 的 GPU／CPU 路径均使用 video 消费者。Electron、原生构建 SDK 与 Linux ANGLE 材料统一固定为 44.9.3。Windows 使用 D3D11 共享纹理生产端，故障时自动使用 CPU 内存帧；旧 HWND 视频子窗口、原生工具栏和滑块实现已移除。
 
-Windows Canvas 无需启动开关，使用正常 DirectComposition；不再按 addon 是否存在选择旧合成路径。同一个 `playback.node` 仅导出 `sharedTexture` 和 `software`，经 WGL 私有 D3D11 bridge、GPU copy、三个 BGRA NT 导出槽和 Electron 共享纹理进入现有 Canvas2D。不宣称零复制。生产完成、消费者 GPU 释放及 `allReferencesReleased` 分别确认；设备或同步状态不明时保持旧 GPU 租约有界隔离，不强行释放。历史试验材料见 [Windows Canvas 接入记录](reviews/windows-canvas-implementation-2026-10-23.md)。
+Windows video 无需启动开关，使用正常 DirectComposition；不再按 addon 是否存在选择旧合成路径。同一个 `playback.node` 仅导出 `sharedTexture` 和 `software`。GPU 由 ANGLE／D3D11 直接渲染到三个 BGRA NT 共享槽，经 Electron 导入后交给 video，不再通过 WGL bridge 或额外 GPU copy；不宣称全链路零复制。生产完成、消费者 GPU 释放及 `allReferencesReleased` 分别确认；设备或同步状态不明时保持旧 GPU 租约有界隔离，不强行释放。旧 Canvas 路径保留在[历史接入记录](reviews/windows-canvas-implementation-2026-10-23.md)。
 
-Windows GPU 路径有独立的 CPU 故障回退，另可使用启动参数 `--javdex-cpu`。同一 addon 的 `software` 导出执行纯 CPU 解码／SW 渲染，通过最多两帧复制通道交给现有 preload Canvas，无需图形驱动互操作；与 Linux 一样按实际物理 viewport 渲染，保留 8192 单边／256 MiB 单帧边界，不额外限制 1080p。图形故障后恢复当前授权来源和播放状态，本次进程继续使用 CPU；页面销毁、媒体／授权／音频错误与 CPU 故障不触发循环重试。`node scripts/windows-software-acceptance.mjs --mode=disabled <合成媒体...>` 使用禁用 GPU 加速的真实应用验收；`initialization` 只注入 GL 创建失败，`gpu-fault` 实际终止自有测试宿主的 GPU 子进程。`producer-fault` 在真实 Canvas 播放后注入一次原生 `nextFrame` 异常，经正常共享帧桥验证 CPU 接管、字幕及控制状态恢复；每次只传一个素材并使用新宿主，因为回退会保持到进程重启。均使用隔离资料库，不改系统显卡设置。使用 `JAVDEX_PLAYBACK_ACCEPTANCE_EXECUTABLE` 检查实际包内程序时，原生诊断也从该包加载；`windowsSoftwareNative.test.ts` 可通过 `JAVDEX_TEST_WINDOWS_PLAYBACK_NATIVE` 指定新构建的 addon，显式路径缺失即失败。结果与未测范围见 [Windows CPU 记录](reviews/windows-cpu-fallback-2026-10-24.md)。
+Windows GPU 路径有独立的 CPU 故障回退，另可使用启动参数 `--javdex-cpu`。同一 addon 的 `software` 导出执行纯 CPU 解码／SW 渲染，通过最多两帧的私有复制通道交给 preload video，无需图形驱动互操作；与 Linux 一样按实际物理 viewport 渲染，保留 8192 单边／256 MiB 单帧边界，不额外限制 1080p。图形故障后恢复当前授权来源和播放状态，本次进程继续使用 CPU；页面销毁、媒体／授权／音频错误与 CPU 故障不触发循环重试。`node scripts/windows-software-acceptance.mjs --mode=disabled <合成媒体...>` 使用禁用 GPU 加速的真实应用验收；`initialization` 只注入 GL 创建失败，`gpu-fault` 实际终止自有测试宿主的 GPU 子进程。`producer-fault` 在真实 video 播放后注入一次原生 `nextFrame` 异常，验证 CPU 接管、字幕及控制状态恢复；每次只传一个素材并使用新宿主，因为回退会保持到进程重启。均使用隔离资料库，不改系统显卡设置。使用 `JAVDEX_PLAYBACK_ACCEPTANCE_EXECUTABLE` 检查实际包内程序时，原生诊断也从该包加载；`windowsSoftwareNative.test.ts` 可通过 `JAVDEX_TEST_WINDOWS_PLAYBACK_NATIVE` 指定新构建的 addon，显式路径缺失即失败。早期 CPU 路径结果见 [Windows CPU 记录](reviews/windows-cpu-fallback-2026-10-24.md)，当前 video 接入见[验证记录](reviews/windows-video-integration-2026-10-27.md)。
 
-Windows Canvas 显式创建 OpenGL 3.2 core context；旧兼容 context 在 Arc B390 上可播放视频，却会在 mpv 绘制 ASS／PGS 时产生 GL 1282。共享帧桥在主进程错误对象中保留 `playbackFailureKind`，图形故障回退不依赖本地化错误文案，页面退出仍单独排除。`windows-canvas-acceptance.mjs` 还检查 ASS／PGS 在展开和全屏状态的字幕开关像素差异、GPU 模式及停止后引用归零。本机修复与实际打包复验见 [Arc B390 Canvas 字幕修复](reviews/windows-arc-b390-canvas-fix-2026-10-24.md)。
+旧 Windows Canvas 的 OpenGL 3.2 core context 修复了 Arc B390 上 mpv 绘制 ASS／PGS 时的 GL 1282；当前 ANGLE 直接输出不再使用该 WGL context。主进程错误对象仍保留 `playbackFailureKind`，图形故障回退不依赖本地化错误文案，页面退出仍单独排除。沿用名称的 `windows-canvas-acceptance.mjs` 检查 ASS／PGS 在展开和全屏状态的字幕开关像素差异、GPU 模式及停止后引用归零；历史修复见 [Arc B390 记录](reviews/windows-arc-b390-canvas-fix-2026-10-24.md)，当前路径见 [Windows video 接入](reviews/windows-video-integration-2026-10-27.md)。
 
 内置播放行为与平台边界见 [播放合同](BUILTIN_PLAYBACK.md)，实际源码构建及发布证据见下文。`npm run playback:native:build` 只生成链接本机开发库的运行文件：macOS/Windows 为 addon，Linux 为独立 `playback-helper`；正式打包输入由 `npm run playback:runtime:build` 从固定源码构建。普通桌面打包明确排除 `out/native-playback`、`out/playback-acceptance`、`out/libmpv-prototype` 与 `out/playback-runtime`，审核后的运行库通过打包钩子复制到 Resources，不把构建目录、合成素材、截图或临时 Electron bundle 收入 `app.asar`。
 
@@ -163,25 +166,27 @@ Windows CMake 同时构建生产 addon、仅导入资源的 interop addon，以�
 
 `npm run test:playback:build` 只检查构建合同，不代替原生编译。[Playback Native Preflight](../.github/workflows/playback-native.yml) 在两种 Mac 架构及 Linux 使用系统开发库编译并运行原生预检；它不构建正式发行运行库，也不证明 Canvas 或物理 GPU 可用。正式构建仍消费固定源码配方和审核材料，必须带上匹配的新 addon、宿主版本和对应源码，不能用旧审核清单覆盖新二进制。
 
-完成原生和桌面构建后，Windows 可运行 `node scripts/windows-canvas-acceptance.mjs` 检查真实生产／Canvas 提交、暂停 seek、全屏、慢消费和停止重开。三平台共用 `node scripts/playback-color-fixtures.mjs <ffmpeg> <新目录>` 与 `node scripts/playback-color-acceptance.mjs <素材目录> gpu|cpu|recovery`；CPU 可加 `--compare=<GPU 报告>`，比较五组 SDR／HDR10／HLG／缺失元数据样本在八种播放状态中的 sRGB Canvas 输出。报告标记 `pixelSource` 并拒绝混用旧窗口截图报告；同时保留 Canvas 和窗口 PNG。数值读取可能改变 Canvas 加速状态，媒体、压力和负载检查分别执行。每个阶段验证实际播放路径，不能把自动回退后的画面当作 GPU 结果。这些检查不代表物理 HDR 输出或显示器校准。`node scripts/playback-load-acceptance.mjs <合成媒体> gpu|cpu --source-fps=30` 记录可见窗口短时负载、实际尺寸、帧生产、丢帧及资源归还，并要求产帧至少达到已知源帧率的 97%、播放区间新增丢帧不超过 1；不提供源帧率时只记录负载，不判定产帧质量。生产计数仍不是物理上屏证明。Windows/macOS 的 `playback-mode-acceptance.mjs <合成媒体>` 验证真实模式切换和初始化失败。
+完成原生和桌面构建后，Windows 可运行 `node scripts/windows-canvas-acceptance.mjs` 检查真实生产／video 提交、暂停 seek、全屏、慢消费和停止重开。三平台共用 `node scripts/playback-color-fixtures.mjs <ffmpeg> <新目录>` 与 `node scripts/playback-color-acceptance.mjs <素材目录> gpu|cpu|recovery`；CPU 可加 `--compare=<GPU 报告>`，比较五组 SDR／HDR10／HLG／缺失元数据样本在八种播放状态中的 sRGB 显示输出。报告标记 `pixelSource` 并拒绝混用旧窗口截图报告；同时保留 sRGB 采样和窗口 PNG。数值读取可能改变临时采样 Canvas 的状态，媒体、压力和负载检查分别执行。每个阶段验证实际播放路径，不能把自动回退后的画面当作 GPU 结果。这些检查不代表物理 HDR 输出或显示器校准。`node scripts/playback-load-acceptance.mjs <合成媒体> gpu|cpu --source-fps=30` 记录可见窗口短时负载、实际尺寸、帧生产、丢帧及资源归还，并要求产帧至少达到已知源帧率的 97%、播放区间新增丢帧不超过 1；不提供源帧率时只记录负载，不判定产帧质量。生产计数仍不是物理上屏证明。Windows/macOS 的 `playback-mode-acceptance.mjs <合成媒体>` 验证真实模式切换和初始化失败。
 
-`node scripts/run-electron-tests.mjs apps/desktop/src/main/player/macSharedTextureNative.test.ts apps/desktop/src/main/player/macSoftwareNative.test.ts` 自动使用本机正常构建的 addon，检查真实 CGL/IOSurface 的线程保护、事件合并、三槽、resize、destroy 与跨会话租约，以及独立 CPU 帧的物理尺寸、行对齐／清零、线程保护和重开；非 macOS 或缺少编译产物时明确跳过。Release CI 用 `JAVDEX_TEST_MAC_PLAYBACK_NATIVE=<审核矩阵中的 playback.node 绝对路径>` 检查刚构建的同架构 GPU／CPU 运行库，显式输入缺失即失败。 发布 CI 显式设置 `JAVDEX_TEST_MAC_ALLOW_NO_GPU=1` 时，仅允许将“没有加速 OpenGL pixel format”这一能力缺失记为结果，并将两个 GPU 租约／重绘用例明确标为跳过；默认实机运行仍要求 GPU，其他创建、加载或绘制错误继续失败。CPU、线程保护和 Mach 资源传输不随之跳过。`node scripts/software-playback-acceptance.mjs --mode=forced <合成媒体...>` 检查真实 CPU Canvas；`disabled`、`initialization`、`producer-fault` 和 `gpu-fault` 分别检查禁用加速、初始化失败、隔离宿主退出和自有 GPU 子进程退出。`host-stall` 检查宿主心跳超时；`producer-fault` 每次只传一个素材；所有宿主使用隔离资料目录，不改系统驱动。
+`node scripts/run-electron-tests.mjs apps/desktop/src/main/player/macSharedTextureNative.test.ts apps/desktop/src/main/player/macSoftwareNative.test.ts` 自动使用本机正常构建的 addon，检查真实 CGL/IOSurface 的线程保护、事件合并、三槽、resize、destroy 与跨会话租约，以及独立 CPU 帧的物理尺寸、行对齐／清零、线程保护和重开；非 macOS 或缺少编译产物时明确跳过。Release CI 用 `JAVDEX_TEST_MAC_PLAYBACK_NATIVE=<审核矩阵中的 playback.node 绝对路径>` 检查刚构建的同架构 GPU／CPU 运行库，显式输入缺失即失败。 发布 CI 显式设置 `JAVDEX_TEST_MAC_ALLOW_NO_GPU=1` 时，仅允许将“没有加速 OpenGL pixel format”这一能力缺失记为结果，并将两个 GPU 租约／重绘用例明确标为跳过；默认实机运行仍要求 GPU，其他创建、加载或绘制错误继续失败。CPU、线程保护和 Mach 资源传输不随之跳过。`node scripts/software-playback-acceptance.mjs --mode=forced <合成媒体...>` 检查实际 CPU video 显示；`disabled`、`initialization`、`producer-fault` 和 `gpu-fault` 分别检查禁用加速、初始化失败、隔离宿主退出和自有 GPU 子进程退出。`host-stall` 检查宿主心跳超时；`producer-fault` 每次只传一个素材；所有宿主使用隔离资料目录，不改系统驱动。Mac CPU 像素经隔离宿主到 preload 的私有通道交付，时序与信用额度仍由 main 管理；[配对实测及通道验证](performance/macos-cpu-private-frame-channel-2026-10-27.md)记录当前源码范围与 4K 工作集代价。
 
-`node scripts/mac-shared-texture-acceptance.mjs <同目录下的合成媒体...> --fps=24,30,60` 通过不带后端参数的正常应用入口，捕获真实 Chromium 窗口并核对视频／Canvas 速率、VideoToolbox、暂停、连续 seek、轨道、全屏、焦点、缩放与停止释放。fps 数量需与文件对应；多音轨夹具的真实速率以文件为准。`--color` 检查四种参考色块；`--stress` 对首个文件运行五轮 1.5 秒阻塞消费、立即停止与重开；`--crash` 只崩溃自有验收 renderer，检查未知引用隔离到退出。正常退出须无强制结束、exit=0、无信号；实际故障隔离不代表自动恢复。物理上屏、声音听感、多显示器、长时间能耗及正式包另行判断。
+`node scripts/mac-shared-texture-acceptance.mjs <同目录下的合成媒体...> --fps=24,30,60` 通过不带后端参数的正常应用入口，捕获真实 Chromium 窗口并核对原生／video／提交速率、VideoToolbox、暂停、连续 seek、轨道、全屏、焦点、缩放与停止释放。fps 数量需与文件对应；多音轨夹具的真实速率以文件为准。`--color` 检查四种参考色块；`--stress` 对首个文件运行五轮 1.5 秒阻塞消费、立即停止与重开；`--crash` 只崩溃自有验收 renderer，检查未知引用隔离到退出。正常退出须无强制结束、exit=0、无信号；实际故障隔离不代表自动恢复。物理上屏、声音听感、多显示器、长时间能耗及正式包另行判断。
+
+macOS 的无人值守源码验收若被系统钥匙串授权阻塞，可显式设置 `JAVDEX_ACCEPTANCE_NO_KEYCHAIN=1`，由测试入口启动同一编译后的应用，并将 safeStorage 标记为不可用。入口只允许未打包 Mac 和临时验收资料目录，拒绝打包应用、常规资料目录及越界符号链接；不读取密码、不修改钥匙串授权、不提供明文凭据。正常应用的凭据逻辑保持原样；这类结果不覆盖凭据集成验收。Mac video 接入与本次测试边界见 [记录](reviews/macos-video-consumer-integration-2026-10-26.md)。
 
 共享帧的主线程调度使用有界 [Node-API 线程安全回调](https://nodejs.org/api/n-api.html#asynchronous-thread-safe-function-calls)，同一 dispatcher 只保留一个待处理唤醒；暂停时的非视频命令、字幕事件与关闭重开也有原生回归。dispatcher 不拥有 IOSurface 租约，停止先解绑 JS 回调，退出时先结束 mpv 线程再终止队列；不能用它替代 GPU 完成或 `allReferencesReleased`。
 
 旧新后端对照、阶段剥离和 WebGL/video/WebGPU 候选已停止维护并移出活动入口；脚本、失败记录、profile 与逐文件哈希保留在 [正式化记录](reviews/macos-canvas-default-2026-10-23.md)指向的可恢复归档，不销毁研究证据。既有播放态 CPU 对照没有显示采用 Canvas 的性能收益，历史数字按一核满载为 100% 计量，不是整机归一化百分比。需要按需排查时仍可拉取 `javdex.playback.mac-shared-texture.statistics` 现有主进程统计；它不暴露原生句柄或媒体位置，也不是物理上屏回执。
 
-历史 Windows WGL 子窗口适配曾在 Windows 11 x64 用 MSVC 实际编译，并在 Electron 中加载、播放本地与 loopback 远程合成素材；范围及剩余关口见 [Windows 验收记录](BUILTIN_PLAYBACK_WINDOWS_ACCEPTANCE.md)。开发构建需要 Windows 本机的 MSVC、Visual Studio CMake generator、同架构 libmpv headers/import library/DLL，以及对应 Electron 的 headers 和 `node.lib`。设置 `JAVDEX_MPV_PREFIX` 为已安装开发前缀；默认 Electron 输入为 `~/.electron-gyp/<version>/include/node` 与 `<arch>/node.lib`，可分别用 `JAVDEX_ELECTRON_HEADERS` / `JAVDEX_ELECTRON_NODE_LIBRARY` 覆盖。Windows 开发构建完成后按实际 PE 导入闭包，从该前缀的 `bin` 复制所需 DLL 到 `out/native-playback`，普通 `npm run dev` / `npm start` 无需额外配置 libmpv PATH；缺失依赖或架构不匹配会拒绝构建，前缀中的 Mesa `opengl32.dll` 不复制，以保留系统 WGL。旧的 addon-only 开发产物需重新构建并正常退出、重启应用。构建器不下载依赖、不修改用户系统环境；这些开发文件仍排除在正式安装包之外。WGL 不等于 ANGLE 直接硬解，本轮 H.264/HEVC Main10 的实际内核状态为 `d3d11va-copy`。
+历史 Windows WGL 子窗口适配的构建、依赖与实机结果见 [Windows 验收记录](BUILTIN_PLAYBACK_WINDOWS_ACCEPTANCE.md)；当前 Windows ANGLE／D3D11 video 生产端及构建验证以本节前述路径和[当前接入记录](reviews/windows-video-integration-2026-10-27.md)为准。
 
-Windows 的播放、全屏、滑块与键盘输入均由现有 HTML 面板处理，不再创建显示用的原生子窗口、原生全屏工具栏或裁剪弹层。共享生产端的隐藏 WGL drawable 只服务 GPU 互操作，不承载输入或呈现。主线程通过有界唤醒消费 mpv 帧通知，常规观察继续处理故障；正常启动保留 Chromium DirectComposition，不再注入 `disable-direct-composition`。
+Windows 的播放、全屏、滑块与键盘输入均由现有 HTML 面板处理，不再创建显示用的原生子窗口、原生全屏工具栏或裁剪弹层。ANGLE／D3D11 生产端只服务 GPU 帧输出，不承载输入或呈现。主线程通过有界唤醒消费 mpv 帧通知，常规观察继续处理故障；正常启动保留 Chromium DirectComposition，不再注入 `disable-direct-composition`。
 
 默认 Windows MSVC 构建直接编入已安装 `@electron/rebuild` 所依赖的 node-gyp 延迟加载钩子，并链接 `delayimp`、`/DELAYLOAD:node.exe`；仅链接 `node.lib` 不足以在 Electron 或改名后的应用可执行文件中加载。构建器解析依赖自身的钩子路径，不下载或修改上游文件，缺少钩子时停止。CMake 也支持 LLVM MinGW/CLANG64：使用 Ninja、显式指定匹配的 `clang++.exe` 与 libmpv 前缀、Electron headers/node.lib，编入仓库的 `windowsElectronDelayHook.cpp` 并使用 `--delayload=node.exe`。npm 开发构建命令仍默认 MSVC。两条路径均重定向到当前应用宿主；MinGW 路径已在实际改名的 ZIP/NSIS 应用中加载。MSVC 钩子许可见 [第三方说明](THIRD_PARTY_NOTICES.md#node-gyp-延迟加载钩子)，宿主要求见 [Electron 原生模块说明](https://www.electronjs.org/docs/latest/tutorial/using-native-node-modules#a-note-about-win_delay_load_hook)。
 
 Linux X11／XWayland 和原生 Wayland 共用 DMA-BUF／CPU 内存帧链路，原生子窗口代码及构建目标已移除。`--javdex-x11` 和 `--javdex-wayland` 只选择显示后端，冲突参数仍拒绝启动。原生开发构建需要 CMake、C++17、pkg-config、EGL/GBM/DRM 开发库及 libmpv，设置 JAVDEX_MPV_PREFIX 后运行 npm run playback:native:build，构建 GPU helper、CPU helper 和 FD addon。完整隔离双运行库构建见 LINUX_COMPATIBLE_PLAYBACK.md；旧包的验证合同仅用于历史回归。
 
-Linux 的 playback-dmabuf-helper／playback-software-helper 在独立进程链接各自 libmpv，使用私有控制管道和 FD 3 帧通道，不接收 Electron 原生窗口句柄、不创建 X11 child 或 GLX context。主进程只持有 FD 桥，renderer 使用同一个 Canvas 显示。当前 Linux 源构建默认使用 dmabuf profile，不再构建 x11 profile。
+Linux 的 playback-dmabuf-helper／playback-software-helper 在独立进程链接各自 libmpv，使用私有控制管道和 FD 3 帧通道，不接收 Electron 原生窗口句柄、不创建 X11 child 或 GLX context。主进程只持有 FD 桥，renderer 使用同一个 video 显示。当前 Linux 源构建默认使用 dmabuf profile，不再构建 x11 profile。
 
 Linux GPU 模式要求可用的硬件 EGL 设备；可检测故障按自动模式策略切换至 CPU 兼容模式。CPU 视频链路使用软件 render API，不依赖 GLX 或 X11 原生窗口。
 
@@ -257,6 +262,8 @@ Release 的 `playback-sources` 任务在四个平台打包门禁之后执行 `no
 
 解开总包后，使用 Node.js 22+ 执行 `node restore.mjs windows-x64 <新目录路径>`（目标还包括 `macos-x64`、`macos-arm64`、`linux-x64`）；目标目录必须尚不存在。恢复工具先验证全部引用材料，再恢复原 `reviewed-runtime/`、`packaging-tools/` 和说明文件，保留文件模式。按平台 `build.json` 的工具链、补丁和配方重建；恢复工具不执行构建脚本。原单平台压缩包摘要记录来源，不能用来校验总包；总包摘要见 Release 的 SHA256SUMS。`SOURCE-ACCESS.txt` 同时说明公开总包与原 CI 绑定；分发安装包时须继续提供对应源码访问方式，不能仅提供未交付的文件名。普通用户无需下载源码包；系统 SDK、编译器和签名不由恢复工具提供。
 
+Linux 新构建将 ANGLE 材料标为 `angle-rebuild-v1`：只携带固定上游／depot_tools 提交、DEPS、许可、补丁与配方，不再放入完整检出树。`rebuild.json` 记录来源与逐文件摘要，归档使用较小的独立大小／条目上限；来源、配方、依赖许可或摘要缺失仍使门禁失败。重建需联网获取固定源码，工作目录使用 GPU 或 CPU 源码归档中的完整 `recipe/` 项目，安装匹配的 Electron 与构建前置后执行 `python3 scripts/build-linux-angle.py <全新工作目录>`。旧完整 ANGLE 归档继续按原摘要和原容量上限验证／恢复；已发布附件不改写。
+
 Windows 桌面打包保留当前架构的 clipboard/console 原生模块，排除其它平台与架构；桌面 `out/server` 不进入应用，局域网前端 `out/web` 保留。Photon 使用主进程 chunk 旁的 WASM，排除 node_modules 中的重复文件。Windows `files` 规则必须同时保留桌面允许列表：打包器把平台规则建成独立文件集，只有排除项会默认包含仓库全部文件；配置归一化回归及实际包内容检查共同覆盖这个边界。
 
 历史 Windows x64 精简播放库另有本地构建入口 `scripts/build-windows-playback-libraries.mjs`，显式传入 `--sources`、`--prefix`、`--toolchain`、`--msys`、`--python`、`--work` 和可选 `--jobs`。需要已准备的 FFmpeg 9.0.2/mpv 0.41.0 源码、CLANG64 依赖前缀、Clang、MSYS make/bash 及 Python Meson；入口不下载或安装工具，也不是上述 Release 固定源码构建入口。它保留解码、网络、字幕、WGL/WASAPI 和硬解接口，移除视频编码/封装、VapourSynth/Python、采集与终端画面依赖，仅保留 PNG/MJPEG 图像编码器。
@@ -277,11 +284,13 @@ RPATH/RUNPATH 只允许位于运行库内的 `$ORIGIN` 相对目录，RUNPATH �
 
 部分 macOS/Windows 播放回归以隔离资料目录运行：先生成 `playback:native:build`、`desktop:build`（远程另需 `server:build`），再运行 `node scripts/playback-media-acceptance.mjs` 检查合成素材，或 `node scripts/playback-subtitle-acceptance.mjs` 定向检查复杂 ASS 与原创 PGS；可加 `--bitmap-only` 缩短图像字幕回归。`npm run test:playback:fixtures` 独立核对原创 PGS 字节/像素结构，不依赖 FFmpeg、GUI 或播放运行库，已纳入根 `npm test`。远程使用 `npm run test:playback:remote -- --media-matrix`，该入口注册 TypeScript 及共享路径加载器；追加 `--system-subtitle-picker` 时会等待真实系统选择器分别选择生成的 SRT/ASS，不适合无人值守 CI，也不 mock 文件选择器。具体文件、像素证据、失败诊断及未覆盖范围见 [字幕验收说明](BUILTIN_PLAYBACK_SUBTITLE_ACCEPTANCE.md) 与 [PGS 验收合同/结果](BUILTIN_PLAYBACK_BITMAP_ACCEPTANCE.md)。Windows 原生输入可运行 `node scripts/playback-windows-input-acceptance.mjs`，它准备隔离暂停素材并写入只读状态，仍需实际鼠标/键盘检查及解锁的桌面。Windows GUI 宿主还接受 `JAVDEX_PLAYBACK_ACCEPTANCE_EXECUTABLE` 指向实际解压/安装后的绝对 exe 路径；该子进程不带源码入口参数，使用空 cwd、Windows 系统 PATH 并移除开发 mpv prefix，诊断桥从包内 Resources 加载。仍不代表独立干净机器或发布验收。
 
-Windows SDR/HDR 回归使用 `node scripts/windows-hdr-fixtures.mjs <ffmpeg绝对路径> <新素材目录>` 生成 SDR full/limited、带 mastering/CLL 的 HDR10、HLG，以及无亮度元数据的 PQ 亮场。然后运行 `node scripts/windows-hdr-acceptance.mjs <素材目录> gpu`，分别以 `cpu` 和 `recovery` 复验独立 CPU 与真实接管；每次用 `JAVDEX_PLAYBACK_ACCEPTANCE_OUTPUT` 指定新的证据目录。验收采集 Chromium 合成后的可见 Canvas，检查亮度参考、灰阶、色相、暂停/跳转/底栏/全屏/继续及释放；`recovery` 只注入一次原生帧生产异常，CPU 解码和绘制仍真实执行。参考数学回归已纳入 `test:playback:fixtures`。这些是 SDR 输出验收，不代表物理 HDR 输出、GPU/CPU 曲线一致或安装包验收。
+三平台 SDR/HDR 回归使用 `node scripts/playback-color-fixtures.mjs <ffmpeg绝对路径> <新素材目录>` 生成 SDR、HDR10、HLG 与缺失亮度元数据样本，再运行 `node scripts/playback-color-acceptance.mjs <素材目录> gpu|cpu|recovery` 检查亮度参考、灰阶、色相、暂停、跳转、布局和释放；每次用 `JAVDEX_PLAYBACK_ACCEPTANCE_OUTPUT` 指定新的证据目录。`recovery` 只注入一次原生帧生产异常，CPU 解码和绘制仍真实执行。参考数学回归已纳入 `test:playback:fixtures`。这些是 SDR 输出验收，不代表物理 HDR 输出、GPU/CPU 曲线一致或安装包验收。
 
 `npm run test:playback:remote:connection` 是无媒体的开发启动检查：真实 Node 业务宿主经临时 HTTPS 网关完成统一配对，桌面 runtime 重开后复用原凭据且不打开本地资料库。它使用生产配对与代理实现，但不提供 Linux manager、环境查询或升级接口，不替代 Docker 更新检查、原生媒体或系统密钥存储 GUI 验收；PR 在 `server:build` 后执行。
 
 `node scripts/playback-close-acceptance.mjs` 检查播放中正常关闭主窗口：窗口确实销毁，进程退出前内核已释放，随后应用正常退出。不要把清理移到可能被否决的 `close` 事件；本机实测还发现该事件中拆除活跃原生视图会让窗口留存。Windows 为 `closed` 清理保留私有隐藏 drawable/context，实际接受关闭时内核仍存活，原窗口销毁后内核释放、零窗口正常退出已通过；不用独立可见播放窗口代替主窗口嵌入。
+
+macOS 另可运行 `node scripts/macos-playback-quit-acceptance.mjs <合成媒体> cpu|gpu|recovery`，验证播放期间主动退出整个应用；`recovery` 用例在 GPU 宿主退出并自动回退到 CPU 后退出。CPU 用例确认当前视频消费者的解绑回执、正常退出以及隔离播放宿主退出。它不替代上述可能被否决的普通窗口关闭检查。
 
 ## 服务端构建与更新
 
@@ -396,7 +405,7 @@ Javdex 使用 Electron、React、TypeScript、Vite 和 `better-sqlite3`。主要
 
 原生播放区域、弹层遮挡和全屏指针坐标使用 Electron 当前显示器的有效 `scaleFactor`，再结合网页 `zoomFactor` 换算。不能只用 `GetDpiForWindow / 96`：Windows 辅助功能文字缩放可能让 Chromium 的有效缩放与 HWND DPI 不同，例如 175% 显示缩放加 110% 文字缩放时为 192.5%。网页 DPR 变化时，即使 CSS 矩形未变，也需重新上报播放区域。
 
-Windows 正常 Canvas 验收使用 `node scripts/windows-canvas-acceptance.mjs`，另以 `scripts/windows-software-acceptance.mjs` 检查 CPU 和故障恢复；关闭生命周期用 `scripts/playback-close-acceptance.mjs`。旧 HWND 的综合、几何、原生焦点和长播脚本已退出活动入口，本机可恢复材料及逐文件摘要在 `out/windows-hwnd-archive-20261024/inventory.json`；历史实测记录保留，不作为新 Canvas 的验收证据。
+Windows 正常 video 验收沿用脚本名 `node scripts/windows-canvas-acceptance.mjs`，另以 `scripts/windows-software-acceptance.mjs` 检查 CPU 和故障恢复；关闭生命周期用 `scripts/playback-close-acceptance.mjs`。旧 HWND 的综合、几何、原生焦点和长播脚本已退出活动入口，本机可恢复材料及逐文件摘要在 `out/windows-hwnd-archive-20261024/inventory.json`；历史实测记录保留，不作为当前 video 的验收证据。
 
 Linux x86_64 当前标准包的双播放运行库构建与验收见 [LINUX_COMPATIBLE_PLAYBACK.md](LINUX_COMPATIBLE_PLAYBACK.md)；CPU 专用源构建参数为 `--linux-software`，不修改系统驱动。旧第一阶段独立包仍可按原文档复现。
 

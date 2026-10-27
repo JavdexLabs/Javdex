@@ -6,6 +6,7 @@ The workspace must be empty on first use. Network access downloads pinned tools.
 Use --prepared only to package an already built tree from this recipe.
 """
 import hashlib
+import io
 import json
 import os
 import pathlib
@@ -66,27 +67,61 @@ pair.mkdir()
 for name in ['libEGL.so', 'libGLESv2.so']:
     shutil.copy2(angle / 'out/Javdex' / name, pair / name)
     shutil.copy2(angle / 'LICENSE', pair / 'ANGLE-LICENSE.txt')
-bundle = destination / ('Javdex-ANGLE-Sources-' + sha(root / 'build/patches/angle-x11-vulkan-visual.patch')[:12] + '.tar.gz')
-# Keep the complete source/dependency checkout, excluding VCS metadata, generated
-# binaries, downloaded compilers and the Debian sysroot. DEPS pins these tools.
-def source_filter(info):
+bundle = destination / ('Javdex-ANGLE-Rebuild-' + sha(root / 'build/patches/angle-x11-vulkan-visual.patch')[:12] + '.tar.gz')
+# ANGLE is BSD-licensed. Deliver pinned reconstruction inputs and all checked-out
+# license/notice texts, rather than copying its full dependency source tree.
+def source_filter(info, source_root=None):
     parts = pathlib.PurePosixPath(info.name).parts
+    assert not any(c in info.name for c in ('\\', ':', '\x00')) and not info.name.startswith('/') and all(p not in {'.', '..'} for p in parts), 'Unsafe ANGLE source path: ' + repr(info.name)
     if any(p in {'.git', 'out', '__pycache__', '.cipd', 'node_modules', 'llvm-build'} or p.endswith(('_sysroot', '-sysroot')) for p in parts):
         return None
-    assert not any(c in info.name for c in ('\\', ':', '\x00')) and not info.name.startswith('/') and all(p not in {'.', '..'} for p in parts), 'Unsafe ANGLE source path: ' + repr(info.name)
+    source_root = source_root or angle
     if parts[0] == 'angle':
-        assert (angle / pathlib.Path(*parts[1:])).resolve().is_relative_to(angle.resolve()), 'ANGLE source link escapes checkout'
+        assert (source_root / pathlib.Path(*parts[1:])).resolve().is_relative_to(source_root.resolve()), 'ANGLE source link escapes checkout'
     assert info.isfile() or info.isdir(), 'Only regular ANGLE source materials are delivered'
-    return info
-with tarfile.open(bundle, 'w:gz', compresslevel=3, dereference=True) as archive:
-    archive.add(angle, arcname='angle', filter=source_filter)
-    for name in ['scripts/build-linux-angle.py', 'build/angle-args.gn', 'build/angle-runtime.json', 'build/angle-electron-patches', 'build/patches/angle-x11-vulkan-visual.patch']:
-        archive.add(root / name, arcname='recipe/' + name)
-    archive.add(work / '.gclient', arcname='gclient-config')
+    preferred = {'include/EGL/egl.h', 'src/libANGLE/renderer/vulkan/linux/xcb/DisplayVkXcb.cpp',
+                 'src/libANGLE/renderer/vulkan/linux/xcb/DisplayVkXcb.h', 'build/linux/sysroot_scripts/install-sysroot.py'}
+    name = parts[-1].lower()
+    notice = name.startswith(('license', 'licence', 'copying', 'copyright', 'notice', 'patents', 'authors')) or any(p.lower() in {'licenses', 'licences'} for p in parts[:-1])
+    return info if info.isdir() or notice or name == 'deps' or '/'.join(parts[1:]) in preferred else None
+
+def create_source_bundle(bundle, angle, root, work, lock):
+    files = {}
+    with tarfile.open(bundle, 'w:gz', compresslevel=9, dereference=True) as archive:
+        def add(name, content):
+            entry = tarfile.TarInfo(name); entry.size = len(content); entry.mode = 0o644
+            archive.addfile(entry, io.BytesIO(content))
+            files[name] = hashlib.sha256(content).hexdigest()
+        for directory, subdirs, names in os.walk(angle, followlinks=False):
+            parent = pathlib.Path(directory)
+            kept = []
+            for name in sorted(subdirs):
+                info = archive.gettarinfo(parent / name, arcname='angle/' + (parent / name).relative_to(angle).as_posix())
+                if source_filter(info, angle) is not None:
+                    kept.append(name)
+            subdirs[:] = kept
+            for name in sorted(names):
+                file = parent / name
+                relative = 'angle/' + file.relative_to(angle).as_posix()
+                if source_filter(archive.gettarinfo(file, arcname=relative), angle) is not None:
+                    add(relative, file.read_bytes())
+        for name in ['scripts/build-linux-angle.py', 'build/angle-args.gn', 'build/angle-runtime.json',
+                     'build/patches/angle-x11-vulkan-visual.patch',
+                     *['build/angle-electron-patches/' + name for name in lock['electronPatches']]]:
+            add('recipe/' + name, (root / name).read_bytes())
+        add('gclient-config', (work / '.gclient').read_bytes())
+        add('README.txt', b'ANGLE reconstruction materials\n\nThis archive does not contain the full ANGLE source tree. It retains fixed upstream revisions, DEPS, licenses, Electron patches and the Javdex X11 patch. Extract sources/gpu.tar.gz or sources/cpu.tar.gz from the restored Linux delivery and use its recipe/ project as the working directory; this archive only carries the ANGLE-specific recipe subset. Install the matching Electron package and the documented build prerequisites, then run python3 scripts/build-linux-angle.py /absolute/new-workspace. The recipe fetches the pinned ANGLE and depot_tools commits and resolves their pinned dependencies. A network connection is required; this is not an offline source checkout. No reconstruction command runs when restoring this archive.\n')
+        reference = dict(schemaVersion=1, kind='angle-rebuild', electronVersion=lock['electronVersion'],
+                         angle=dict(url='https://chromium.googlesource.com/angle/angle.git', revision=lock['angleRevision']),
+                         depotTools=dict(url='https://chromium.googlesource.com/chromium/tools/depot_tools.git', revision=lock['depotToolsRevision']),
+                         files=files.copy())
+        add('rebuild.json', (json.dumps(reference, indent=2) + '\n').encode())
+
+create_source_bundle(bundle, angle, root, work, lock)
 manifest = dict(schemaVersion=1, electronVersion=lock['electronVersion'], angleRevision=lock['angleRevision'],
     x11RequestedVisual=True, patchSha256=sha(root / 'build/patches/angle-x11-vulkan-visual.patch'),
     argsSha256=sha(root / 'build/angle-args.gn'), provenanceSha256=sha(root / 'build/angle-runtime.json'),
     files={name: sha(pair / name) for name in ['libEGL.so', 'libGLESv2.so']},
-    sourceBundle=dict(filename=bundle.name, sha256=sha(bundle), bytes=bundle.stat().st_size))
+    sourceBundle=dict(format='angle-rebuild-v1', filename=bundle.name, sha256=sha(bundle), bytes=bundle.stat().st_size))
 (pair / 'javdex-angle.json').write_text(json.dumps(manifest, indent=2) + '\n')
 print(json.dumps(manifest, indent=2))

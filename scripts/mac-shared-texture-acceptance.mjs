@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
-import { createAcceptanceDirectory, seedAcceptanceCatalog, launchAcceptance, closeAcceptance, waitForState, waitForValue } from './playback-acceptance-support.mjs'
+import { createAcceptanceDirectory, seedAcceptanceCatalog, launchAcceptance, closeAcceptance, waitForState, waitForValue, observeTextureLeasePeak } from './playback-acceptance-support.mjs'
 import { prepareNonRecordingPlayback } from './playback-acceptance-settings.mjs'
 import { closeAcceptanceAndSave } from './playback-acceptance-cleanup.mjs'
 
@@ -19,7 +19,7 @@ assert.ok(!fps || fps.length === files.length && fps.every(value => Number.isFin
 assert.ok(files.every(file => path.dirname(file) === path.dirname(files[0])), 'synthetic fixtures must share one isolated library root')
 const directory = createAcceptanceDirectory('mac-playback-')
 const targets = seedAcceptanceCatalog(directory, files)
-const report = { backend: 'macos-iosurface-canvas2d', passed: false, color, directory, files: files.map(file => path.basename(file)), checks: [], samples: [], pending: [
+const report = { backend: 'macos-iosurface-video', passed: false, color, directory, files: files.map(file => path.basename(file)), checks: [], samples: [], pending: [
   'physical scanout, screen-reader speech, listening/lip-sync, multi-display moves and energy/power',
   'HDR/wide gamut/colorimetric acceptance and packaged runtime/signing'
 ] }
@@ -44,7 +44,9 @@ try {
       if (stats.recent.length > 120) stats.recent.shift()
     })
   })
-  const inspect = () => application.evaluate(({ app }) => {
+  let observedPeakOutstanding = 0
+  const inspect = async () => {
+    const sample = await application.evaluate(({ app }) => {
     const request = { gpu: { alive: false, outstandingSurfaces: 0, pixelWidth: 0, pixelHeight: 0 } }
     process.getBuiltinModule('diagnostics_channel').channel('javdex.playback.host.statistics').publish(request)
     const state = request.gpu
@@ -55,7 +57,10 @@ try {
       nativeFrames: state.nativeFrames, loadedFiles: state.loadedFiles, droppedFrames: state['frame-drop-count'], commandErrors: state.commandErrors,
       receipts: globalThis.macAcceptanceReceipts,
       processMetrics: app.getAppMetrics().map(p => ({ pid: p.pid, type: p.type, cpu: p.cpu, memory: p.memory })) }
-  })
+    })
+    observedPeakOutstanding = observeTextureLeasePeak(observedPeakOutstanding, sample)
+    return { ...sample, observedPeakOutstanding }
+  }
   const capture = async name => {
     // This is the composed Chromium window, not libmpv's private FBO capture.
     await page.screenshot({ path: path.join(directory, name + '.png') })
@@ -63,12 +68,19 @@ try {
   const control = (id, value) => page.evaluate(({ id, value }) => window.api.playback.control(id, value), { id, value })
   const iterations = stress ? Array.from({ length: 5 }, () => targets[0]) : targets
   for (const [index, target] of iterations.entries()) {
+    observedPeakOutstanding = 0
     const opened = await page.evaluate(t => window.api.player.openResource(t.libraryId, t.resourceId, t.videoId), target)
     assert.equal(opened.ok, true, opened.error)
     const state = await waitForState(page, s => s?.phase === 'playing' && s.position > 1, 'real playback')
     assert.ok(state.sharedTextureSurface)
     assert.equal(state.info.hardwareDecoder, 'videotoolbox')
-    await page.locator('canvas[data-playback-surface]').waitFor()
+    await page.locator('video[data-playback-surface]').waitFor()
+    const videoDisplay = await page.locator('video[data-playback-surface]').evaluate(v => ({
+      tag: v.tagName, width: v.videoWidth, height: v.videoHeight,
+      frames: v.getVideoPlaybackQuality().totalVideoFrames, dropped: v.getVideoPlaybackQuality().droppedVideoFrames
+    }))
+    assert.ok(videoDisplay.width > 0 && videoDisplay.height > 0 && videoDisplay.frames > 0, 'real mounted video consumer has output')
+    report.checks.push({ name: 'Mac GPU video consumer is mounted and has real video frames', index, videoDisplay })
     const id = state.sessionId
     if (crash) {
       const busy = page.evaluate(() => { const until = performance.now() + 1500; while (performance.now() < until) { /* crash in-flight imports */ } }).catch(() => {})
@@ -107,7 +119,7 @@ try {
           data = image.toBitmap(); ({ width, height } = image.getSize())
           // DOM bounds are converted to the captured window's backing pixels.
           const rect = await BrowserWindow.getAllWindows()[0].webContents.executeJavaScript(`(() => {
-            const r = document.querySelector('canvas[data-playback-surface]').getBoundingClientRect();
+            const r = document.querySelector('[data-playback-surface]').getBoundingClientRect();
             return {x:r.x,y:r.y,width:r.width,height:r.height,windowWidth:innerWidth}
           })()`)
           const scale = width / rect.windowWidth
@@ -143,14 +155,16 @@ try {
       continue
     }
     await capture('playing-' + index)
+    const videoBefore = await page.locator('video[data-playback-surface]').evaluate(v => v.getVideoPlaybackQuality().totalVideoFrames)
     const before = await inspect(); report.samples.push({ index, n: -1, ...(await inspect()) }); save()
     for (let n = 0; n < 8; n++) { await page.waitForTimeout(1000); report.samples.push({ index, n, ...(await inspect()) }); save() }
     assert.ok((await inspect()).position > before.position + 3, 'media clock advances')
     const after = await inspect(), elapsed = (after.observedAt - before.observedAt) / 1000
-    const cadence = { native: (after.nativeFrames - before.nativeFrames) / elapsed, submitted: (after.receipts.count - before.receipts.count) / elapsed }
+    const videoAfter = await page.locator('video[data-playback-surface]').evaluate(v => v.getVideoPlaybackQuality().totalVideoFrames)
+    const cadence = { video: (videoAfter - videoBefore) / elapsed, native: (after.nativeFrames - before.nativeFrames) / elapsed, submitted: (after.receipts.count - before.receipts.count) / elapsed }
     if (fps) for (const value of Object.values(cadence)) assert.ok(Math.abs(value - fps[stress ? 0 : index]) < Math.max(1, fps[stress ? 0 : index] * .05), JSON.stringify(cadence))
     assert.equal(after.droppedFrames - before.droppedFrames, 0)
-    report.checks.push({ name: 'actual native and Canvas cadence', index, elapsed, cadence })
+    report.checks.push({ name: 'actual native, video and submission cadence', index, elapsed, cadence })
     if (benchmark) {
       report.checks.push({ name: 'eight-second steady playback sample', index, state, native: await inspect() })
       await control(id, { kind: 'stop' }); await waitForState(page, s => s === null, 'benchmark stop')
@@ -206,12 +220,12 @@ try {
     await waitForState(page, s => s?.presentation === 'expanded', 'escape exits fullscreen')
     await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1050, 720))
     {
-      const geometry = await page.locator('canvas[data-playback-surface]').evaluate(c => ({ w: c.width, h: c.height, css: c.getBoundingClientRect().toJSON(), dpr: devicePixelRatio }))
-      report.checks.push({ name: 'Retina canvas', geometry }); save()
+      const geometry = await waitForValue(() => page.locator('[data-playback-surface]').evaluate(c => ({ w: c.videoWidth, h: c.videoHeight, css: c.getBoundingClientRect().toJSON(), dpr: devicePixelRatio })),
+        g => g.w > 0 && g.h > 0 && Math.abs(g.w - g.css.width * g.dpr) <= 2 && Math.abs(g.h - g.css.height * g.dpr) <= 2, 'resized Retina video has the actual physical output dimensions')
+      report.checks.push({ name: 'Retina video', geometry }); save()
       await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.setZoomFactor(1.25))
-      await page.waitForTimeout(500)
-      const zoom = await page.locator('canvas[data-playback-surface]').evaluate(c => ({ w: c.width, h: c.height, css: c.getBoundingClientRect().toJSON(), dpr: devicePixelRatio }))
-      assert.ok(Math.abs(zoom.w - zoom.css.width * zoom.dpr) <= 2)
+      const zoom = await waitForValue(() => page.locator('[data-playback-surface]').evaluate(c => ({ w: c.videoWidth, h: c.videoHeight, css: c.getBoundingClientRect().toJSON(), dpr: devicePixelRatio })),
+        g => g.w > 0 && g.h > 0 && Math.abs(g.w - g.css.width * g.dpr) <= 2 && Math.abs(g.h - g.css.height * g.dpr) <= 2, 'zoomed video has the actual physical output dimensions')
       report.checks.push({ name: 'zoom 125%', geometry: zoom })
       await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.setZoomFactor(1))
     }
@@ -227,7 +241,7 @@ try {
     await control(id, { kind: 'stop' }); await waitForState(page, s => s === null, 'stop')
     {
       const stopped = await waitForValue(inspect, s => s.outstanding === 0 && !s.alive, 'consumer references released', 10000)
-      assert.ok(stopped.peakOutstanding <= 3)
+      assert.ok(stopped.observedPeakOutstanding > 0 && stopped.observedPeakOutstanding <= 3)
       report.checks.push({ name: 'stop releases every confirmed lease', index, stopToZeroMs: Date.now() - stopStarted, native: stopped })
       save()
     }

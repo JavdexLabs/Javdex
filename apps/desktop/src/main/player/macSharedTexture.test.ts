@@ -189,6 +189,29 @@ test('macOS IOSurface slots wait for all references, not Canvas submission or se
   for (const item of f.imported) { item.allReferencesReleased(); item.allReferencesReleased() }
   assert.deepEqual(f.releases, [1, 2, 3, 4], 'late callbacks release only their original tickets once')
 })
+for (const platform of ['darwin', 'win32'] as const) test(`${platform} restarts a pending asynchronous video probe after a seek cancels its old stream`, async t => {
+  const f = fixture(platform); t.after(f.bridge.destroy)
+  const next = f.native.nextFrame.bind(f.native)
+  let requested = true
+  f.native.requestSelfTest = () => { requested = true }
+  f.native.nextFrame = () => {
+    const frame = next()
+    if (!frame || !requested) return frame
+    requested = false
+    return { ...frame, selfTest: 'solid-v1' } as never
+  }
+  await f.tick()
+  assert.equal(f.bridge.inspect().displayProbe, 'pending')
+  // The mounted video's flush cancels its callback without sending a stale
+  // result. Main must request a new probe rather than wait for that callback.
+  f.bridge.command(['seek', '12', 'absolute'])
+  await f.tick()
+  f.ipc.emit('playback:shared-texture-self-test', f.event, { ...f.binding, sequence: 2,
+    samples: Array(5).fill([64, 191, 128, 255]).flat() })
+  assert.equal(f.bridge.inspect().displayProbe, 'passed')
+  f.advance(8001); await f.tick()
+  assert.doesNotThrow(() => f.bridge.render())
+})
 test('macOS hide/restore and seeks invalidate old work, and GPU failure is terminal without CPU substitution', async t => {
   const f = fixture(); t.after(f.bridge.destroy)
   const before = f.bridge.inspect().frameTimeline!

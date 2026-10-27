@@ -29,7 +29,7 @@ jobs:
       matrix:
         os: [macos-15, macos-15-intel, ubuntu-24.04]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -45,7 +45,7 @@ jobs:
             echo "JAVDEX_MPV_PREFIX=$(brew --prefix mpv)" >> "$GITHUB_ENV"
           else
             sudo apt-get update
-            sudo apt-get install -y libmpv-dev libegl-dev libgbm-dev libdrm-dev libvulkan-dev
+            sudo apt-get install -y --no-install-recommends libmpv-dev libegl-dev libgbm-dev libdrm-dev libvulkan-dev
             echo "JAVDEX_MPV_PREFIX=/usr" >> "$GITHUB_ENV"
           fi
       - name: Prepare matching Electron headers

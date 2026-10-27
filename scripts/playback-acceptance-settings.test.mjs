@@ -67,12 +67,12 @@ test('bitmap area integrates filtered white coverage and subtracts the unchanged
   assert.equal(whiteBitmapCoverage(rgba([17, 17]), rgba([17, 17])), 0, 'cleared cue has no area')
 })
 
-test('small PGS transparency samples reject black patches without mistaking filtered white fringe for lost alpha', () => {
+test('small PGS transparency checks the center hole when borders cannot be sampled reliably', () => {
   const frame = { width: 272, height: 182, whiteBounds: { x: 111, y: 141, width: 50, height: 14 } }
   const baseline = Buffer.alloc(frame.width * frame.height * 4, Buffer.from([20, 20, 20, 255]))
   const current = Buffer.from(baseline)
   for (let x = 111; x < 161; x++) current.set([91, 91, 91, 255], (140 * frame.width + x) * 4)
-  assert.equal(bitmapTransparency(frame, current, baseline, bitmapFixture.cues[1]).length, 5)
+  assert.deepEqual(bitmapTransparency(frame, current, baseline, bitmapFixture.cues[1]).map(point => point.name), ['center hole'])
   current.set([0, 0, 0, 255], (147 * frame.width + 136) * 4)
   assert.throws(() => bitmapTransparency(frame, current, baseline, bitmapFixture.cues[1]), /center hole.*opaque black patch/)
 })
@@ -83,6 +83,8 @@ test('enlarged PGS transparency sampling stays beyond the scaled filter footprin
   const current = Buffer.from(baseline)
   current.set([117, 117, 117, 255], (628 * frame.width + 518) * 4)
   assert.equal(bitmapTransparency(frame, current, baseline, bitmapFixture.cues[1]).length, 5)
+  current.set([0, 0, 0, 255], (628 * frame.width + 515) * 4)
+  assert.throws(() => bitmapTransparency(frame, current, baseline, bitmapFixture.cues[1]), /left border.*opaque black patch/)
 })
 
 test('Windows follow-up submissions belong to the current surface, not any previous open', () => {

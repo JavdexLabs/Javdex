@@ -28,9 +28,11 @@ test('Windows command plan selects installed inputs and CMake, without macOS fla
     const steps = playbackNativeBuild({ ...input, platform: 'win32', arch })
     assert.deepEqual(steps.map(step => step.command), ['cmake', 'cmake', path.join(input.output, 'mpv-core-test.exe'), path.join(input.output, 'windows-texture-tickets-test.exe')])
     assert.equal(steps[0].args[steps[0].args.indexOf('-A') + 1], cmakeArch)
+    assert.equal(steps[0].args[steps[0].args.indexOf('-G') + 1], 'Visual Studio 17 2022')
     assert.ok(steps[0].args.includes(`-DELECTRON_NODE_LIBRARY=${input.nodeLibrary}`))
     assert.ok(steps[0].args.includes(`-DELECTRON_DELAY_LOAD_HOOK=${input.delayHook}`))
     assert.ok(steps[0].args.includes(`-DMPV_PREFIX=${input.prefix}`))
+    assert.ok(steps[0].args.includes('-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded'))
     assert.deepEqual(steps[1].args.slice(-2), ['--config', 'Release'])
     assert.ok(steps.every(step => !step.args.includes('-framework')))
   }

@@ -35,8 +35,24 @@ app.whenReady().then(async () => {
     const read = () => evaluate('({state: window.playbackHistoryFixture?.snapshot(), marker: history.state?.avOverlay, url: location.hash})')
     const waitPresentation = presentation => until(read, value => value.state?.presentation === presentation, presentation)
     let appCommands = 0
+    let canNavigate = true
     window.on('app-command', () => { appCommands++ })
-    bindWindowNavigation(window)
+    bindWindowNavigation(window, process.platform, () => canNavigate)
+    const linuxMouse = process.platform === 'linux'
+    if (linuxMouse) contents.debugger.attach('1.3')
+    const sendHistoryCommand = async direction => {
+      const button = direction === 'back' ? 'back' : 'forward'
+      // CDP supplies real mouse events (sendInputEvent cannot express side
+      // buttons); replay the preceding Linux native-window app-command too.
+      if (linuxMouse) await contents.debugger.sendCommand('Input.dispatchMouseEvent', {
+        type: 'mousePressed', x: 200, y: 200, button, buttons: direction === 'back' ? 8 : 16, clickCount: 1
+      })
+      window.emit('app-command', { defaultPrevented: false }, direction === 'back' ? 'browser-backward' : 'browser-forward')
+      if (linuxMouse) {
+        await delay(100)
+        await contents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseReleased', x: 200, y: 200, button, buttons: 0, clickCount: 1 })
+      }
+    }
     await window.loadFile(path.join(directory, 'index.html'), { hash: '/libraries/1' })
     await until(() => evaluate('Boolean(window.playbackHistoryFixture && document.querySelector("main"))'), Boolean, 'renderer startup')
     await evaluate('window.playbackHistoryFixture.detail()')
@@ -118,7 +134,7 @@ Write-Output 'message-sent'
         assert.equal(history.getActiveIndex(), before.index, 'press cannot navigate before release')
         await sendMessage(target, 'up')
         await drain(['history-back'])
-      } else window.emit('app-command', { defaultPrevented: false }, 'browser-backward')
+      } else await sendHistoryCommand('back')
       const after = await waitPresentation('docked')
       if (native) bridge.setPresentation('docked')
       await delay(100)
@@ -131,9 +147,24 @@ Write-Output 'message-sent'
       steps.push({ cycle, before, after })
     }
     assert.ok(steps.slice(1).some(step => !step.before.uiBack && step.before.exactBack), 'fixture must reproduce Chromium UI-skippable viewing entries')
-    navigateWindowHistory(window, 'back')
+    if (linuxMouse) {
+      canNavigate = false
+      await sendHistoryCommand('back')
+      await delay(200)
+      assert.equal(history.getActiveIndex(), detailIndex, 'a foreground guard must block the Chromium mouse default too')
+      canNavigate = true
+      await sendHistoryCommand('back')
+    } else navigateWindowHistory(window, 'back')
     await until(read, value => value.url === '#/libraries/1', 'business Back while docked')
-    fs.writeFileSync(path.join(directory, 'report.json'), JSON.stringify({ passed: true, electron: process.versions.electron, native, steps }, null, 2))
+    if (linuxMouse) {
+      await sendHistoryCommand('forward')
+      await until(read, value => value.url === detailRoute, 'business Forward')
+      await delay(200)
+      assert.equal(history.getActiveIndex(), detailIndex, 'Forward must not also enter the anonymous viewing entry')
+      assert.equal((await read()).state.presentation, 'docked', 'Forward must not resurrect an ended viewing overlay')
+    }
+    fs.writeFileSync(path.join(directory, 'report.json'), JSON.stringify({ passed: true, electron: process.versions.electron,
+      ozonePlatform: app.commandLine.getSwitchValue('ozone-platform') || null, native, linuxMouse, steps }, null, 2))
     console.log(`Playback navigation passed: ${steps.length} cycles; native Win32 messages: ${native}`)
   } catch (error) {
     fs.writeFileSync(path.join(directory, 'error.txt'), error.stack)

@@ -17,17 +17,22 @@ Commit-Queue: Amirali Abdolrashidi <abdolrashidi@google.com>
 Auto-Submit: Shahbaz Youssefi <syoussefi@chromium.org>
 Reviewed-by: Amirali Abdolrashidi <abdolrashidi@google.com>
 
-Electron adaptation notes (43-x-y):
-M150 ANGLE predates the own/owner texture index split, so the new robust
-init clear uses the gl::ImageIndex `index` passed to TextureVk::copyImage()
-in place of `ownIndex` / mState.toOwnerIndex(ownIndex). No behavioural
-change: both name the destination level/layer being redefined.
+Electron adaptation notes (44-x-y):
+ANGLE on this branch predates "Remove Own* types and rename Source* types
+to Owner*" (272d37f4cc): copyImage() receives a gl::OwnImageIndex and
+TextureState exposes toSourceIndex() instead of toOwnerIndex(). The new
+robust-init clear therefore reads the image description via
+mState.getImageDesc(ownIndex.getUntranslated()) and passes
+mState.toSourceIndex(ownIndex).get() (the translated gl::ImageIndex) to
+stageRobustResourceClearWithFormat(), matching the surrounding code in
+this file. New gl_tests/expectations entries are dropped (test-only
+conflicts); the Vulkan backend change is unchanged.
 
 diff --git a/src/libANGLE/renderer/vulkan/TextureVk.cpp b/src/libANGLE/renderer/vulkan/TextureVk.cpp
-index 7267bdf0627137a5dc0c559c6a9b4f58e9660781..8c233272b89c22893cdaf936a32419936f068acd 100644
+index ee06b61c321d110c77afb174be924f074613b277..073808819fa31b946e2c513f0d7f1ae73310c20b 100644
 --- a/src/libANGLE/renderer/vulkan/TextureVk.cpp
 +++ b/src/libANGLE/renderer/vulkan/TextureVk.cpp
-@@ -1447,6 +1447,22 @@ angle::Result TextureVk::copyImage(const gl::Context *context,
+@@ -1410,6 +1410,23 @@ angle::Result TextureVk::copyImage(const gl::Context *context,
  
      if (isSelfCopy)
      {
@@ -37,13 +42,14 @@ index 7267bdf0627137a5dc0c559c6a9b4f58e9660781..8c233272b89c22893cdaf936a3241993
 +        if ((context->isWebGL() || contextVk->isRobustResourceInitEnabled()) &&
 +            sourceArea != clippedSourceArea)
 +        {
-+            const gl::ImageDesc &desc = mState.getImageDesc(index);
++            const gl::ImageDesc &desc = mState.getImageDesc(ownIndex.getUntranslated());
 +            const vk::Format &format =
 +                contextVk->getRenderer()->getFormat(desc.format.info->sizedInternalFormat);
 +
 +            ASSERT(mImage);
 +            ANGLE_TRY(mImage->stageRobustResourceClearWithFormat(
-+                contextVk, index, desc.size, format.getIntendedFormat(),
++                contextVk, mState.toSourceIndex(ownIndex).get(), desc.size,
++                format.getIntendedFormat(),
 +                format.getActualImageFormat(getRequiredFormatSupport())));
 +        }
 +

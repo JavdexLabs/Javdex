@@ -108,7 +108,7 @@ git push origin v0.9.0
 5. 从已验证镜像取得各架构的完整程序闭包，封装签名清单和程序归档为两个 `.javdex-update`，读回验证内层字节；生成覆盖六个桌面包、总源码包和两个升级文件的 `SHA256SUMS.txt`。
 6. 创建 GitHub Release，上传第 6 节规定的 10 个附件；正文提供与本次源码提交对应的 Compose 示例、JSON 配置和部署说明链接。
 
-Linux 的包内与最终安装器门禁验证两个独立 ELF 闭包、ANGLE、启动器和 AppImage 运行时前缀，并在实际包内 Electron 加载 FD addon、分别解码 GPU／CPU libmpv 的 PCM 至 EOF。总源码汇总另检查两份 helper 材料的固定依赖、Ubuntu `.dsc` 与源码摘要、原生源码及 SDK，以及 ANGLE 源码和补丁。它们不能替代真机画面、硬解、音画同步或长播验收，详细合同见 [Linux 播放](LINUX_COMPATIBLE_PLAYBACK.md#validation-and-release-boundary)。
+Linux 的包内与最终安装器门禁验证两个独立 ELF 闭包、ANGLE、启动器和 AppImage 运行时前缀，并在实际包内 Electron 加载 FD addon、分别解码 GPU／CPU libmpv 的 PCM 至 EOF。总源码汇总另检查两份 helper 材料的固定依赖、Ubuntu `.dsc` 与源码摘要、原生源码及 SDK。ANGLE 新构建交付 `angle-rebuild-v1` 重建材料：固定上游版本、DEPS、许可声明、补丁、配方及逐文件摘要，不再附完整源码树，重建时联网获取固定来源；旧完整归档继续验证和恢复。它们不能替代真机画面、硬解、音画同步或长播验收，详细合同见 [Linux 播放](LINUX_COMPATIBLE_PLAYBACK.md#validation-and-release-boundary)。
 
 正式版进入 GitHub 最新正式 Release，供应用更新提醒与官网读取；服务镜像仍使用固定版本标签，当前工作流不创建 `latest` 滚动镜像标签。发布后核验默认分支包含发布代码，并检查 Pages 工作流生成的下载信息。
 

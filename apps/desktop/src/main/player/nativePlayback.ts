@@ -10,6 +10,32 @@ export interface NativePlaybackState {
   displayProbe?: 'pending' | 'passed' | 'not-applicable'
   /** Main-owned shared-texture generation, never a media locator or native FD. */
   sharedTextureSurface?: string
+  producerBackend?: 'angle-d3d11'
+  producerOutput?: 'direct-shared'
+  directOutputFrames?: number
+  producerSynchronization?: 'gl-finish'
+  producerAdapterSelection?: 'system-default' | 'chromium-active-pci' | 'chromium-active-preference' | 'diagnostic-override'
+  producerAdapterName?: string
+  producerAdapterLuidLow?: number
+  producerAdapterLuidHigh?: number
+  producerVendorId?: number
+  producerDeviceId?: number
+  producerGLVendor?: string
+  producerGLRenderer?: string
+  producerGLVersion?: string
+  producerRenderMajor?: number
+  producerRenderMinor?: number
+  producerEglRenderNodeVerified?: boolean
+  producerTimings?: Record<string, { samples: number; totalMs?: number; meanMs: number; maxMs: number; lastMs: number }>
+  decoderDeviceIdentitySource?: 'angle-shared-device' | 'decoded-frame'
+  decoderVendorId?: number
+  decoderDeviceId?: number
+  decoderAdapterLuidLow?: number
+  decoderAdapterLuidHigh?: number
+  hwdownloadSamples?: number
+  hwdownloadTotalUs?: number
+  hwdownloadMeanMs?: number
+  hwdownloadMaxMs?: number
   nativeFrames?: number
   /** New-frame swaps submitted while the surface is visible; not screen capture proof. */
   presentedFrames?: number

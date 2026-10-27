@@ -313,6 +313,7 @@ const api = {
     file: (input: import('@shared/protocol/backup').DesktopBackupFileRequest) => invokeApp(IPC.BACKUP_FILE, input)
   },
   desktop: {
+    pointerTiming: () => invokeApp(IPC.DESKTOP_POINTER_TIMING),
     getSession: () => invokeApp(IPC.DESKTOP_SESSION_GET),
     reconnect: () => invokeApp(IPC.DESKTOP_RECONNECT),
     claimWriter: (input: DesktopWriterClaimRequest) => invokeApp(IPC.WRITER_CLAIM, input),
@@ -864,6 +865,7 @@ const api = {
     end: (token: string) => invokeScrape(IPC.AVATAR_AUTO_CROP_BATCH_END, token)
   },
   playback: {
+    sharedTextureConsumer: 'video' as const,
     bindSharedTextureSurface,
     availability: () => invokeApp(IPC.PLAYBACK_AVAILABILITY),
     open: (target: import('@shared/desktop/playback').PlaybackTarget) => invokeApp(IPC.PLAYBACK_OPEN, target),

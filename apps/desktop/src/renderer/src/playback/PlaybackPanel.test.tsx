@@ -60,8 +60,10 @@ const localModels = (): LocalModelSnapshot => ({
     textTranslation: { model: 'qwen3', variant: 'fixture', mode: 'app-default' } }
 })
 const fake = {
+  desktop: { pointerTiming: async () => ({ doubleClickMs: 500, source: 'chromium' }) },
   settings: { getLocalModels: async () => localModels(), onLocalModelsChanged: () => () => {} },
   playback: {
+    sharedTextureConsumer: 'video' as const,
     bindSharedTextureSurface: (token: string) => { boundSurfaces.push(token); return () => { releasedSurfaces.push(token) } },
     aiSubtitleSnapshot: async () => aiState,
     onAiSubtitleChanged: (listener: typeof aiChanged) => { aiChanged = listener; return () => { aiChanged = () => {} } },
@@ -993,12 +995,12 @@ test('sidebar display failure does not open an unrelated toolbar guide', async (
 })
 
 
-test('shared-texture canvas stays in the video control and binds only to the current surface lifetime', async () => {
+test('shared-texture video stays in the playback control and binds only to the current surface lifetime', async () => {
   await mount()
-  assert.equal(renderer!.root.findAllByType('canvas').length, 0, 'legacy native surfaces are unchanged')
+  assert.equal(renderer!.root.findAllByType('video').length, 0, 'legacy native surfaces are unchanged')
   const current = { ...snapshot(), sharedTextureSurface: 'first-surface' }
   await act(async () => changed(current))
-  const canvas = renderer!.root.findByType('canvas')
+  const canvas = renderer!.root.findByType('video')
   assert.equal(canvas.props['data-playback-surface'], 'first-surface')
   assert.equal(canvas.props['aria-hidden'], 'true')
   assert.equal(canvas.parent!.type, 'button', 'video controls retain their existing hit target')
@@ -1006,28 +1008,28 @@ test('shared-texture canvas stays in the video control and binds only to the cur
   await act(async () => changed({ ...current, position: 2 }))
   await act(async () => changed({ ...current, presentation: 'fullscreen' }))
   assert.deepEqual(boundSurfaces, ['first-surface'], 'clock and presentation changes preserve the mounted receiver')
-  assert.equal(renderer!.root.findByType('canvas'), canvas, 'ordinary updates keep the same canvas backing')
+  assert.equal(renderer!.root.findByType('video'), canvas, 'ordinary updates keep the same video stream')
   await act(async () => button('视频画面，单击播放或暂停，双击全屏').props.onClick())
   assert.deepEqual(controls.at(-1), { id: 'first', command: { kind: 'pause', paused: true } })
   await act(async () => changed({ ...snapshot('replacement'), sharedTextureSurface: 'second-surface' }))
   assert.deepEqual(releasedSurfaces, ['first-surface'])
   assert.deepEqual(boundSurfaces, ['first-surface', 'second-surface'])
-  assert.notEqual(renderer!.root.findByType('canvas'), canvas, 'another surface cannot inherit a lost accelerated context')
+  assert.notEqual(renderer!.root.findByType('video'), canvas, 'another surface cannot inherit an old video stream')
   await act(async () => changed({ ...snapshot('replacement'), sharedTextureSurface: 'second-surface', phase: 'error', error: 'GPU stopped' }))
-  assert.equal(renderer!.root.findAllByType('canvas').length, 0)
+  assert.equal(renderer!.root.findAllByType('video').length, 0)
   assert.deepEqual(releasedSurfaces, ['first-surface', 'second-surface'])
   await act(async () => changed({ ...snapshot('reopened'), sharedTextureSurface: 'third-surface' }))
   await act(async () => changed(null))
-  assert.equal(renderer!.root.findAllByType('canvas').length, 0)
+  assert.equal(renderer!.root.findAllByType('video').length, 0)
   assert.deepEqual(releasedSurfaces, ['first-surface', 'second-surface', 'third-surface'])
 })
 
-test('CPU recovery replaces the GPU canvas within the same playback session', async () => {
+test('CPU recovery replaces the GPU video within the same playback session', async () => {
   await mount()
   await act(async () => changed({ ...snapshot(), sharedTextureSurface: 'gpu-surface' }))
-  const gpuCanvas = renderer!.root.findByType('canvas')
+  const gpuCanvas = renderer!.root.findByType('video')
   await act(async () => changed({ ...snapshot(), sharedTextureSurface: 'cpu:software-surface' }))
-  assert.notEqual(renderer!.root.findByType('canvas'), gpuCanvas)
+  assert.notEqual(renderer!.root.findByType('video'), gpuCanvas)
   assert.deepEqual(releasedSurfaces, ['gpu-surface'])
   assert.deepEqual(boundSurfaces, ['gpu-surface', 'cpu:software-surface'])
 })
@@ -1036,9 +1038,9 @@ test('CPU recovery replaces the GPU canvas within the same playback session', as
 test('shared-texture pointer gestures distinguish single-click pause from double-click fullscreen and cancel stale clicks', async context => {
   let timerId = 0
   const timers = new Map<number, () => void>()
-  context.mock.method(window, 'setTimeout', (callback: () => void, milliseconds: number) => {
+  context.mock.method(window, 'setTimeout', (callback: () => void) => {
     const id = ++timerId
-    if (milliseconds === 300) timers.set(id, callback)
+    timers.set(id, callback)
     return id
   })
   context.mock.method(window, 'clearTimeout', (id: number) => { timers.delete(id) })
@@ -1067,4 +1069,125 @@ test('shared-texture pointer gestures distinguish single-click pause from double
   await act(async () => changed({ ...snapshot('replacement'), sharedTextureSurface: 'next-surface', presentation: 'docked' }))
   await act(async () => button('恢复展开播放器').props.onClick({ detail: 1 }))
   assert.deepEqual(controls, [{ id: 'replacement', command: { kind: 'presentation', value: 'expanded' } }], 'docked mouse activation remains immediate')
+})
+
+for (const surface of ['gpu-surface', 'cpu:software-surface']) {
+  for (const phase of ['playing', 'paused', 'ended'] as const) test(`${surface} slow double-click preserves ${phase} state, including a held second press`, async context => {
+    const paused = phase !== 'playing'
+    let now = 0, nextId = 0
+    const timers = new Map<number, { callback: () => void; due: number }>()
+    context.mock.method(window, 'setTimeout', (callback: () => void, milliseconds: number) => {
+      const id = ++nextId
+      timers.set(id, { callback, due: now + milliseconds })
+      return id
+    })
+    context.mock.method(window, 'clearTimeout', (id: number) => { timers.delete(id) })
+    const advance = (milliseconds: number) => act(async () => {
+      now += milliseconds
+      for (const [id, timer] of [...timers]) {
+        if (timer.due <= now) { timers.delete(id); timer.callback() }
+      }
+    })
+    await mount()
+    const current = { ...snapshot(), sharedTextureSurface: surface, paused, phase }
+    const singleCommand: PlaybackControl = phase === 'ended' ? { kind: 'restart' } : { kind: 'pause', paused: !paused }
+    await act(async () => changed({ ...current, presentation: 'docked' }))
+    await act(async () => changed(current))
+    const video = () => button('视频画面，单击播放或暂停，双击全屏')
+    for (const gap of [100, 350, 450, 490]) {
+      controls.length = 0
+      await act(async () => video().props.onClick({ detail: 1 }))
+      await advance(gap)
+      assert.deepEqual(controls, [], `${gap}ms must remain within the browser double-click window`)
+      await act(async () => video().props.onMouseDown({ button: 0, detail: 2 }))
+      await advance(800)
+      assert.deepEqual(controls, [], 'holding the second press past the deadline must not toggle playback')
+      await act(async () => { video().props.onClick({ detail: 2 }); video().props.onDoubleClick() })
+      assert.deepEqual(controls, [{ id: 'first', command: { kind: 'presentation', value: 'fullscreen' } }])
+    }
+    controls.length = 0
+    await act(async () => video().props.onClick({ detail: 1 }))
+    await advance(600)
+    assert.deepEqual(controls, [{ id: 'first', command: singleCommand }], 'an isolated click still activates exactly once')
+    await advance(1000)
+    assert.equal(controls.length, 1)
+    controls.length = 0
+    await act(async () => video().props.onClick({ detail: 1 }))
+    await advance(525)
+    await act(async () => video().props.onMouseDown({ button: 0, detail: 1 }))
+    assert.deepEqual(controls, [{ id: 'first', command: singleCommand }], 'an independent new press confirms the previous single click')
+    const afterSingle = { ...current, paused: phase === 'ended' ? false : !paused, phase: phase === 'playing' ? 'paused' as const : 'playing' as const }
+    await act(async () => changed(afterSingle))
+    await act(async () => video().props.onClick({ detail: 1 }))
+    await advance(600)
+    assert.deepEqual(controls, [{ id: 'first', command: singleCommand }, { id: 'first', command: { kind: 'pause', paused: !afterSingle.paused } }], 'two independent clicks must not be collapsed into one')
+    await act(async () => changed(current))
+    controls.length = 0
+    await act(async () => video().props.onClick({ detail: 1 }))
+    await act(async () => button(phase === 'ended' ? '从头重播' : paused ? '播放' : '暂停').props.onClick())
+    await advance(600)
+    assert.deepEqual(controls, [{ id: 'first', command: singleCommand }], 'a subsequent explicit control supersedes the pending video click')
+    controls.length = 0
+    await act(async () => video().props.onClick({ detail: 1 }))
+    await act(async () => history.go())
+    await advance(600)
+    assert.deepEqual(controls, [{ id: 'first', command: { kind: 'presentation', value: 'docked' } }], 'history docking cancels the pending video click before its acknowledgement')
+  })
+}
+
+for (const surface of ['gpu-surface', 'cpu:software-surface']) for (const paused of [false, true]) {
+  test(`${surface} keeps a pending ${paused ? 'play' : 'pause'} across unrelated controls`, async context => {
+    let nextId = 0
+    const timers = new Map<number, () => void>()
+    context.mock.method(window, 'setTimeout', (callback: () => void) => { const id = ++nextId; timers.set(id, callback); return id })
+    context.mock.method(window, 'clearTimeout', (id: number) => { timers.delete(id) })
+    await mount()
+    const current: PlaybackSnapshot = { ...snapshot(), sharedTextureSurface: surface, paused, phase: paused ? 'paused' : 'playing' }
+    const ensureOptions = async (): Promise<void> => { if (!button('播放设置').props['aria-expanded']) await options() }
+    const cases: Array<{ action(): Promise<void>; command: PlaybackControl }> = [
+      { action: () => act(async () => button('静音').props.onClick()), command: { kind: 'mute', muted: true } },
+      { action: () => act(async () => button('前进 5 秒').props.onClick()), command: { kind: 'seek', relative: true, seconds: 5 } },
+      { action: () => act(async () => renderer!.root.findByProps({ 'aria-label': '内置播放器' }).props.onKeyDown({ ...seekKey('m'), target: { closest: () => null } })), command: { kind: 'mute', muted: true } },
+      { action: async () => { await ensureOptions(); await act(async () => renderer!.root.findAllByType(Select).find(node => node.props['aria-label'] === '倍速')!.props.onChange({ target: { value: '1.5' } })) }, command: { kind: 'speed', value: 1.5 } },
+      { action: () => act(async () => renderer!.root.findAllByType('input').find(node => node.props['aria-label'] === '音量')!.props.onChange({ target: { value: '25' } })), command: { kind: 'volume', value: 25 } },
+      { action: async () => { await ensureOptions(); await act(async () => renderer!.root.findAllByType(Select).find(node => node.props['aria-label'] === '音轨')!.props.onChange({ target: { value: 'no' } })) }, command: { kind: 'track', type: 'audio', id: null } },
+      { action: async () => {
+        const slider = () => renderer!.root.findAllByType('input').find(node => node.props['aria-label'] === '播放进度')!
+        await act(async () => slider().props.onChange({ target: { value: '30' } }))
+        await act(async () => slider().props.onPointerUp())
+      }, command: { kind: 'seek', seconds: 30 } }
+    ]
+    for (const item of cases) {
+      await act(async () => changed(current))
+      controls.length = 0
+      await act(async () => button('视频画面，单击播放或暂停，双击全屏').props.onClick({ detail: 1 }))
+      await item.action()
+      assert.deepEqual(controls, [{ id: 'first', command: item.command }])
+      await act(async () => { for (const callback of [...timers.values()]) callback(); timers.clear() })
+      assert.deepEqual(controls, [{ id: 'first', command: item.command }, { id: 'first', command: { kind: 'pause', paused: !paused } }])
+    }
+  })
+}
+
+
+test('GPU and CPU recovery mount separate video consumers with the same controls', async () => {
+  fake.playback.sharedTextureConsumer = 'video'
+  try {
+    await mount()
+    await act(async () => changed({ ...snapshot(), sharedTextureSurface: 'mac-gpu' }))
+    const surface = renderer!.root.findByType('video')
+    assert.equal(surface.props['data-playback-surface'], 'mac-gpu')
+    assert.equal(surface.props.muted, true)
+    assert.equal(surface.props.playsInline, true)
+    assert.equal(surface.props.disablePictureInPicture, true)
+    assert.equal(surface.parent!.type, 'button')
+    assert.equal(renderer!.root.findAllByType('canvas').length, 0)
+    await act(async () => changed({ ...snapshot(), sharedTextureSurface: 'mac-gpu', paused: true }))
+    assert.equal(renderer!.root.findByType('video'), surface)
+    await act(async () => changed({ ...snapshot(), sharedTextureSurface: 'cpu:mac-recovery' }))
+    assert.equal(renderer!.root.findAllByType('canvas').length, 0)
+    assert.equal(renderer!.root.findByType('video').props['data-playback-surface'], 'cpu:mac-recovery')
+    assert.notEqual(renderer!.root.findByType('video'), surface)
+    assert.deepEqual(releasedSurfaces, ['mac-gpu'])
+  } finally { fake.playback.sharedTextureConsumer = 'video' }
 })

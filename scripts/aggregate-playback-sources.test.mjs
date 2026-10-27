@@ -7,13 +7,12 @@ import { c as createTar, x as extractTar } from 'tar'
 import test from 'node:test'
 import { aggregatePlaybackSources, splitSourceTar } from './aggregate-playback-sources.mjs'
 import { restorePlatform, sha256, safePath } from './restore-playback-sources.mjs'
+import { playbackPackagingFiles as packagingFiles } from './playback-source-materials.mjs'
 import { linuxReleaseFixture } from './test-support/linux-release-fixture.mjs'
 
 const version = '0.9.0'
 const targetNames = ['win32-x64', 'darwin-x64', 'darwin-arm64', 'linux-x64']
 const names = ['windows-x64', 'macos-x64', 'macos-arm64', 'linux-x64']
-const packagingFiles = ['scripts/playback-runtime.mjs', 'scripts/playback-source-materials.mjs', 'scripts/packaging-runtime.mjs', 'scripts/packaged-asar.mjs', 'scripts/dist.mjs',
-  'electron-builder.config.mjs', 'build/packaging.targets.json', 'package.json', 'package-lock.json', 'LICENSE', 'NOTICE']
 function write(root, name, bytes) {
   fs.mkdirSync(path.dirname(path.join(root, name)), { recursive: true })
   fs.writeFileSync(path.join(root, name), bytes)
@@ -61,6 +60,7 @@ async function fixture(t, windowsEntry = 'windowsPlaybackAddon.cpp', omitCpuHead
     const nativeTar = path.join(root, 'native-' + i + '.tar.gz')
     await createTar({ cwd: native, file: nativeTar, gzip: true }, ['.'])
     const payload = { 'sources/libmpv-sources.tar': fs.readFileSync(tar), 'sources/javdex-native.tar.gz': fs.readFileSync(nativeTar),
+      ...(i === 0 ? { 'ANGLE-LICENSE.txt': Buffer.from('ANGLE notices'), 'sources/windows-angle-sources.tar.gz': Buffer.from('fixture ANGLE and supplier preferred sources') } : {}),
       'licenses/libmpv.txt': Buffer.from('upstream licenses'), 'licenses/javdex.txt': Buffer.from('native license'),
       'build.json': Buffer.from(JSON.stringify({ platform: target.split('-')[0], arch: target.split('-')[1],
         commands: ['patch ' + i], toolchain: 'compiler-' + i,
@@ -70,8 +70,9 @@ async function fixture(t, windowsEntry = 'windowsPlaybackAddon.cpp', omitCpuHead
     const entry = platform === 'linux' ? 'playback-helper' : 'playback.node'
     const runtime = { schemaVersion: 1, hashStage: 'pre-sign', platform, arch, electronVersion: 'test', mpvVersion: 'fixture',
       files: { ...Object.fromEntries(Object.entries(payload).map(([name, bytes]) => [name, sha256(bytes)])),
+        ...(i === 0 ? { 'libEGL.dll': sha256(Buffer.from('angle-egl')), 'libGLESv2.dll': sha256(Buffer.from('angle-gles')) } : {}),
         [entry]: sha256(Buffer.from(target)), 'mpv.dll': sha256(Buffer.from('library-' + i)) },
-      components: [{ name: 'mpv', version: 'fixture', binaries: ['mpv.dll'], licenseFile: 'licenses/libmpv.txt', sourceArchive: 'sources/libmpv-sources.tar', buildRecipe: 'build.json' },
+      components: [...(i === 0 ? [{ name: 'windows-angle', version: 'fixture', binaries: ['libEGL.dll', 'libGLESv2.dll'], licenseFile: 'ANGLE-LICENSE.txt', sourceArchive: 'sources/windows-angle-sources.tar.gz', buildRecipe: 'build.json' }] : []), { name: 'mpv', version: 'fixture', binaries: ['mpv.dll'], licenseFile: 'licenses/libmpv.txt', sourceArchive: 'sources/libmpv-sources.tar', buildRecipe: 'build.json' },
         { name: 'javdex-native', version, binaries: [entry], licenseFile: 'licenses/javdex.txt', sourceArchive: 'sources/javdex-native.tar.gz', buildRecipe: 'build.json' }] }
     write(input, 'reviewed-runtime/runtime.json', JSON.stringify(runtime))
     const tools = createHash('sha256')
@@ -238,10 +239,10 @@ test('opaque native blob is rejected even when all outer digests and receipts ag
   assert.ok(!fs.readdirSync(f.directory).some(name => name.startsWith('.playback-source-aggregate-')))
 })
 
-test('integrated Linux and three native targets share one public source archive with exact restoration', async t => {
+for (const compactAngle of [false, true]) test(`integrated Linux with ${compactAngle ? 'compact' : 'legacy'} ANGLE and three native targets round-trip in one public archive`, async t => {
   const f = await fixture(t), linuxRoot = path.join(f.root, 'integrated-linux')
   fs.mkdirSync(linuxRoot)
-  const linux = await linuxReleaseFixture(linuxRoot, version)
+  const linux = await linuxReleaseFixture(linuxRoot, version, { compactAngle })
   for (const suffix of ['', '.runtime.json', '.installers.json']) fs.unlinkSync(path.join(f.directory, f.inputs[3].archive + suffix))
   const name = linux.manifest.sourceBundle.fileName
   for (const suffix of ['', '.runtime.json']) fs.copyFileSync(path.join(linux.output, name + suffix), path.join(f.directory, name + suffix))

@@ -7,7 +7,8 @@ import { isGraphicsPlaybackFailure, graphicsPlaybackFailure, playbackFallbackRea
  * a graphics failure, stay on CPU until explicit GPU retry; never reuse uncertain GL or
  * consumer-held shared textures. Media/auth/audio failures are not GPU failures. */
 export function createPlaybackEngine(gpu: NativePlayback, cpu: NativePlayback,
-  options: { mode(): PlaybackRenderMode; gpuAvailable(): boolean; gpuUnavailableReason?(): string }, platform: 'darwin' | 'win32' | 'linux'): NativePlayback {
+  options: { mode(): PlaybackRenderMode; gpuAvailable(): boolean; gpuUnavailableReason?(): string }, platform: 'darwin' | 'win32' | 'linux'):
+  NativePlayback & { currentCpuSurface(): string | undefined } {
   let current = gpu, active = false, gpuFailed = false, reason: string | undefined
   let mode: PlaybackRenderMode = 'auto', hadHardwareDecoder = false, decoderFallback = false
   let epoch = 0, restoring = false, restoreFailure: unknown
@@ -90,6 +91,7 @@ export function createPlaybackEngine(gpu: NativePlayback, cpu: NativePlayback,
     })().catch(error => { if (valid()) restoreFailure = error })
   }
   return {
+    currentCpuSurface(): string | undefined { return active && current === cpu ? cpu.read().sharedTextureSurface : undefined },
     renderPolling: gpu.renderPolling === false && cpu.renderPolling === false ? false : undefined,
     create(): void {
       epoch++; active = true; source = null; last = { alive: false }; recovery = null

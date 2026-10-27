@@ -1,3 +1,4 @@
+import { stageWindowsAngleRuntime, verifyWindowsAngleRuntime } from './windows-angle-runtime.mjs'
 import assert from 'node:assert/strict'
 import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
@@ -608,3 +609,22 @@ test('macOS Mach-O fixture loads its runtime-local dependency after relocation, 
     assert.throws(() => inspectMacPlaybackBinary(stagedAddon, { directory: staged.directory, archName: target.archName, binaryFiles: stagedFiles }), /absent from the inventory/)
     assert.throws(() => inspectMacPlaybackBinary(stagedAddon, { directory: staged.directory, archName: target.archName === 'arm64' ? 'x64' : 'arm64', binaryFiles: stagedFiles }), /architecture/)
   })
+
+
+test('private Windows ANGLE rejects unsupported targets and changed supplier archives before extraction', async t => {
+  const f = peFixture(t)
+  writeFileSync(f.file, 'changed supplier archive')
+  await assert.rejects(stageWindowsAngleRuntime(f.directory, 'ia32', f.file), /Unsupported/)
+  await assert.rejects(stageWindowsAngleRuntime(f.directory, 'x64', f.file), /archive digest mismatch/)
+  assert.equal(readFileSync(f.file, 'utf8'), 'changed supplier archive')
+  assert.equal(existsSync(path.join(f.directory, 'windows-angle.json')), false)
+})
+
+test('Electron 44 local packaging rejects a missing private ANGLE runtime', t => {
+  const f = peFixture(t)
+  writeFileSync(f.file, f.data)
+  writeFileSync(path.join(f.directory, 'playback-interop.node'), f.data)
+  const context = { electronPlatformName: 'win32', arch: 1, packager: { info: { framework: { version: '44.9.3' } } } }
+  assert.throws(() => verifyLocalPlaybackRuntime(context, { environment: { JAVDEX_LOCAL_PLAYBACK_DIR: f.directory } }), /Private Windows ANGLE is missing/)
+  assert.throws(() => verifyWindowsAngleRuntime(f.directory, 'x64'), /ENOENT/)
+})

@@ -3,6 +3,7 @@
 #include "mpvCore.h"
 #include "linuxDmaBuf.h"
 #include "frameTiming.h"
+#include "linuxStageTimings.h"
 #include <algorithm>
 #include <chrono>
 #include <cstdlib>
@@ -36,6 +37,7 @@ using namespace javdex::dmabuf;
 MpvCore playback;
 Leases leases;
 Bounds requested;
+LinuxStageTiming bufferPrepare, renderCall, alphaFill, transportSend;
 PublicationState publication;
 int wakeFd = -1, pixelWidth = 1, pixelHeight = 1;
 uint64_t now() { return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count(); }
@@ -160,18 +162,26 @@ void render() {
     if (preparedSlot < 0) {
         const int slot = leases.available();
         if (slot >= 0) {
+            const auto prepareStarted = linuxFrameClockUs();
             auto &buffer = buffers.prepare(slot, pixelWidth, pixelHeight);
+            bufferPrepare.record(linuxFrameClockUs() - prepareStarted);
             const auto delay = playback.nextFrameDelayUs();
             frameTiming.sample(linuxFrameClockUs(), delay);
             if (!playback.renderSoftware(pixelWidth, pixelHeight, buffer.stride, buffer.data))
                 throw std::runtime_error("libmpv could not render CPU pixels");
-            buffers.finish(buffer); rendered = true; preparedSlot = slot; preparedSequence = leases.next();
+            renderCall.record(linuxFrameClockUs() - frameTiming.renderStartUs);
+            const auto finishStarted = linuxFrameClockUs();
+            buffers.finish(buffer); alphaFill.record(linuxFrameClockUs() - finishStarted);
+            rendered = true; preparedSlot = slot; preparedSequence = leases.next();
             preparedMetadata = metadata(buffer, slot, preparedSequence); publication.consumed();
         }
     }
     if (preparedSlot >= 0) {
         auto &buffer = buffers.prepare(preparedSlot, pixelWidth, pixelHeight);
-        if (sendFrame(transportFd, preparedMetadata, buffer.fd)) {
+        const auto sendStarted = linuxFrameClockUs();
+        const bool sent = sendFrame(transportFd, preparedMetadata, buffer.fd);
+        transportSend.record(linuxFrameClockUs() - sendStarted);
+        if (sent) {
             leases.publish(preparedSlot, preparedSequence);
             // Publication is not proof that the canvas reached the display.
             preparedSlot = -1; preparedMetadata.clear(); publication.stalled(false, now()); return;
@@ -189,6 +199,8 @@ void render() {
 std::string state() {
     auto result = playback.stateJson(); result.pop_back();
     return result + ",\"backend\":\"linux-software\",\"pixelWidth\":" + std::to_string(pixelWidth) + ",\"pixelHeight\":" + std::to_string(pixelHeight)
+        + ",\"producerTimings\":" + linuxTimingsJson({{"bufferPrepare", &bufferPrepare}, {"renderCall", &renderCall},
+            {"alphaFill", &alphaFill}, {"transportSend", &transportSend}})
         + ",\"exportedFrames\":" + std::to_string(leases.latest()) + ",\"cpuFramesInFlight\":" + std::to_string(leases.inFlight()) + '}';
 }
 class Output {

@@ -6,11 +6,12 @@ import type { NativePlaybackState } from './nativePlayback'
 import { FrameBudget } from './frameBudget'
 import { FrameHealthProbe } from './frameHealthProbe'
 import { playbackFallbackReason, graphicsPlaybackFailure } from './playbackGraphicsFailure'
+import type { WindowsPlaybackAdapter } from './playbackHostProtocol'
 
 interface Bounds { width: number; height: number; scale?: number }
 interface Binding { surfaceToken: string; bindingToken: string }
 export interface SharedTextureProducer {
-  create(bounds: Bounds): void
+  create(bounds: Bounds, windowsAdapter?: WindowsPlaybackAdapter): void
   setBounds(bounds: Bounds): void
   setVisible(visible: boolean): void
   resetTiming(timeline: number): void
@@ -70,6 +71,11 @@ export function createNativeSharedTextureBridge(native: SharedTextureProducer, w
     targets.clear()
     budget.reset(); native.setRenderBudget(budget.value)
     native.resetTiming(++timeline)
+    // The video probe waits asynchronously for actual presentation. A
+    // timeline flush cancels that stream, so its pending receipt cannot arrive.
+    if (shown && requested && binding && probe.state === 'pending') {
+      probe.reset(); native.requestSelfTest()
+    }
     if (binding && !contents.isDestroyed()) contents.send('playback:frame-flush', { ...binding, timeline })
   }
   const visibility = (): void => {
@@ -175,6 +181,7 @@ export function createNativeSharedTextureBridge(native: SharedTextureProducer, w
     pending.set(frame.sequence, owner)
     try {
       imported = sharedTexture.importSharedTexture({ textureInfo: { codedSize: { width: frame.width, height: frame.height }, pixelFormat: 'bgra',
+        timestamp: frame.targetTimeUs || frame.renderStartUs,
         colorSpace: { primaries: 'bt709', transfer: 'srgb', matrix: 'rgb', range: 'full' },
         handle: { [handleKey]: frame[handleKey] } }, allReferencesReleased: () => {
         if (owner.released) return

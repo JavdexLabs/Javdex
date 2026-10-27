@@ -273,7 +273,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: out/linux-angle-runtime
-          key: linux-angle-ubuntu22-v1-${{ hashFiles('scripts/build-linux-angle.py', 'build/angle-runtime.json', 'build/angle-args.gn', 'build/angle-electron-patches/**', 'build/patches/angle-x11-vulkan-visual.patch') }}
+          key: linux-angle-ubuntu22-v2-${{ hashFiles('scripts/build-linux-angle.py', 'build/angle-runtime.json', 'build/angle-args.gn', 'build/angle-electron-patches/**', 'build/patches/angle-x11-vulkan-visual.patch') }}
 
       - name: Build Electron-matched patched ANGLE
         if: matrix.platform == 'linux' && steps.linux_angle.outputs.cache-hit != 'true'

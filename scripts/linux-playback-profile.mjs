@@ -20,6 +20,9 @@ const decoderPreference = process.env.JAVDEX_PROFILE_HWDEC
 assert(!decoderPreference || mode === 'gpu' && ['auto-copy', 'nvdec,auto-copy', 'vaapi,auto-copy', 'no'].includes(decoderPreference))
 const expectedDecoder = process.env.JAVDEX_PROFILE_EXPECT_HWDEC
 assert(!expectedDecoder || ['nvdec', 'vaapi', 'nvdec-copy', 'vaapi-copy', 'no'].includes(expectedDecoder))
+const deviceScaleFactor = process.env.JAVDEX_PROFILE_DEVICE_SCALE_FACTOR
+assert(!deviceScaleFactor || /^\d+(?:\.\d+)?$/.test(deviceScaleFactor) && Number(deviceScaleFactor) >= 1 && Number(deviceScaleFactor) <= 3,
+  'JAVDEX_PROFILE_DEVICE_SCALE_FACTOR must be a number from 1 to 3')
 assert(Number.isInteger(seconds) && seconds >= 60 && seconds <= 660)
 assert(Number.isFinite(sourceFps) && sourceFps > 0 && sourceFps <= 240)
 const output = path.resolve(destination), media = path.resolve(input)
@@ -69,7 +72,8 @@ try {
   fs.mkdirSync(process.env.JAVDEX_PLAYBACK_ACCEPTANCE_OUTPUT ?? 'out/playback-acceptance', { recursive: true })
   report.launchArguments = [`--javdex-${display}`,
     ...(process.env.JAVDEX_PROFILE_DYNAMIC_ANGLE === '1' ? ['--use-dynamic-angle'] : []),
-    ...(process.env.JAVDEX_PROFILE_ANGLE === 'gl' ? ['--use-angle=gl'] : [])]
+    ...(process.env.JAVDEX_PROFILE_ANGLE === 'gl' ? ['--use-angle=gl'] : []),
+    ...(deviceScaleFactor ? [`--force-device-scale-factor=${deviceScaleFactor}`] : [])]
   application = await launchAcceptance(profile, 'profile-application.log', report.launchArguments)
   const page = await application.firstWindow()
   await page.waitForFunction(() => window.api?.player && document.querySelector('nav'))

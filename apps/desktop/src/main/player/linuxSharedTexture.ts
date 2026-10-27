@@ -85,7 +85,7 @@ export function decodeDmaBufFrame(metadata: Buffer): DmaBufFrame {
 export function decodeCpuFrame(metadata: Buffer) {
   if (!Buffer.isBuffer(metadata) || metadata.length > 4096) throw new Error('无效的 CPU 帧元数据')
   const v = JSON.parse(metadata.toString('utf8')) as Record<string, unknown>
-  if (!v || v.protocol !== 'javdex-cpu-v1' || v.pixelFormat !== 'rgba'
+  if (!v || v.protocol !== 'javdex-cpu-v1' || v.pixelFormat !== 'rgbx'
     || !integer(v.sequence, 1, Number.MAX_SAFE_INTEGER) || !integer(v.slot, 0, 2)
     || !integer(v.width, 1, 8192) || !integer(v.height, 1, 8192)
     || !integer(v.stride, v.width * 4, 32768) || v.stride % 64 !== 0
@@ -93,7 +93,7 @@ export function decodeCpuFrame(metadata: Buffer) {
     || v.colorContract !== undefined && v.colorContract !== 'bt709-srgb-rgb-full')
     throw new Error('无效的 CPU 帧元数据')
   return v as { sequence: number; slot: number; width: number; height: number; stride: number; size: number;
-    timeline?: number; targetTimeUs?: number; renderStartUs?: number; colorContract?: 'bt709-srgb-rgb-full' }
+    pixelFormat: 'rgbx'; timeline?: number; targetTimeUs?: number; renderStartUs?: number; colorContract?: 'bt709-srgb-rgb-full' }
 }
 import { FrameBudget } from './frameBudget'
 

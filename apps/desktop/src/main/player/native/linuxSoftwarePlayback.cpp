@@ -76,10 +76,10 @@ public:
         if (mapped == MAP_FAILED) throw std::runtime_error("Cannot map CPU frame");
         b.data = static_cast<unsigned char *>(mapped); return b;
     }
-    void finish(Buffer &b) {
-        // mpv's rgb0 has undefined alpha. Canvas requires opaque RGBA.
-        for (int y = 0; y < b.height; y++)
-            for (int x = 0; x < b.width; x++) b.data[y * b.stride + x * 4 + 3] = 255;
+    void finish(Buffer &) {
+        // mpv rgb0 leaves alpha undefined. Linux consumers read opaque RGBX and
+        // ignore that byte, so it is not scanned or forced. Row padding stays
+        // outside the coded width and is not a pixel.
     }
 } buffers;
 int preparedSlot = -1;
@@ -137,7 +137,7 @@ std::string metadata(const Buffer &buffer, int slot, uint64_t sequence) {
     return "{\"protocol\":\"javdex-cpu-v1\",\"sequence\":" + std::to_string(sequence) + ",\"slot\":" + std::to_string(slot)
         + ",\"width\":" + std::to_string(buffer.width) + ",\"height\":" + std::to_string(buffer.height)
         + frameTiming.metadata()
-        + ",\"pixelFormat\":\"rgba\",\"colorContract\":\"bt709-srgb-rgb-full\",\"stride\":" + std::to_string(buffer.stride)
+        + ",\"pixelFormat\":\"rgbx\",\"colorContract\":\"bt709-srgb-rgb-full\",\"stride\":" + std::to_string(buffer.stride)
         + ",\"size\":" + std::to_string(buffer.size) + '}';
 }
 void render() {
@@ -170,8 +170,7 @@ void render() {
             if (!playback.renderSoftware(pixelWidth, pixelHeight, buffer.stride, buffer.data))
                 throw std::runtime_error("libmpv could not render CPU pixels");
             renderCall.record(linuxFrameClockUs() - frameTiming.renderStartUs);
-            const auto finishStarted = linuxFrameClockUs();
-            buffers.finish(buffer); alphaFill.record(linuxFrameClockUs() - finishStarted);
+            buffers.finish(buffer);
             rendered = true; preparedSlot = slot; preparedSequence = leases.next();
             preparedMetadata = metadata(buffer, slot, preparedSequence); publication.consumed();
         }

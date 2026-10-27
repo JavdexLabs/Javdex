@@ -25,7 +25,7 @@ function fixture() {
   }
   const exports = {} as typeof import('./sharedTextureVideo')
   runInNewContext(code, {
-    exports, setTimeout, clearTimeout, Uint8ClampedArray,
+    exports, setTimeout, clearTimeout, Uint8ClampedArray, performance,
     VideoFrame: class {
       displayWidth: number; displayHeight: number; pixels: Uint8Array; closed = 0
       constructor(pixels: Uint8Array, public init: {format: string; codedWidth: number; codedHeight: number; layout: Array<{offset: number; stride: number}>; timestamp: number; colorSpace: unknown; transfer?: ArrayBuffer[]}) {
@@ -253,5 +253,17 @@ test('private CPU port frames can keep the input owned while VideoFrame copies i
   assert.equal(f.cpuFrames[0].init.transfer, undefined)
   assert.deepEqual(Array.from(f.cpuFrames[0].pixels), [255, 0, 0, 255])
   assert.equal(f.cpuFrames[0].closed, 1)
+  f.sink.dispose()
+})
+
+test('CPU timing diagnostics report construction, writer and presentation waits after a successful frame', async () => {
+  const f = fixture(), readings: Array<{ frameConstructMs: number; writerWaitMs: number; presentWaitMs: number }> = []
+  const source = { pixels: new Uint8Array([255, 0, 0, 255]), width: 1, height: 1, stride: 4, timestamp: 1,
+    copyInput: true, diagnostics: (value: typeof readings[number]) => readings.push(value) }
+  assert.equal(await f.sink.submitCpu(source, () => true), true)
+  assert.equal(readings.length, 1)
+  for (const value of Object.values(readings[0])) assert.ok(Number.isFinite(value) && value >= 0)
+  assert.equal(await f.sink.submitCpu(source, () => false), false)
+  assert.equal(readings.length, 1, 'discarded frames cannot report a successful presentation')
   f.sink.dispose()
 })

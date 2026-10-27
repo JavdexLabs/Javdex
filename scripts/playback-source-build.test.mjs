@@ -324,3 +324,14 @@ test('EGL DMA-BUF mapper probes DRM headers without enabling KMS or libdisplay-i
   assert(!patched.includes('libdisplay-info'))
   assert.throws(() => playbackLinuxDmabufGlDependency('changed upstream recipe'), /recipe drift/)
 })
+
+// Keep this check before expensive source builds: Electron upgrades must refresh
+// the platform's private producer ABI independently of consumer ANGLE upgrades.
+test('Windows ANGLE headers match the configured runtime revision and pinned bytes', () => {
+  const directory = new URL('../apps/desktop/src/main/player/native/vendor/angle/', import.meta.url)
+  const pin = JSON.parse(readFileSync(new URL('provenance.json', directory), 'utf8'))
+  const runtime = JSON.parse(readFileSync(new URL('../build/windows-angle-runtime.json', import.meta.url), 'utf8'))
+  assert.equal(pin.revision, runtime.angleRevision)
+  for (const [file, expected] of Object.entries(pin.sha256))
+    assert.equal(createHash('sha256').update(readFileSync(new URL(file, directory))).digest('hex'), expected, file)
+})

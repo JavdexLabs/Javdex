@@ -71,9 +71,9 @@ export function createNativeSharedTextureBridge(native: SharedTextureProducer, w
     targets.clear()
     budget.reset(); native.setRenderBudget(budget.value)
     native.resetTiming(++timeline)
-    // The Mac video probe waits asynchronously for actual presentation. A
+    // The video probe waits asynchronously for actual presentation. A
     // timeline flush cancels that stream, so its pending receipt cannot arrive.
-    if (platform === 'darwin' && shown && requested && binding && probe.state === 'pending') {
+    if (shown && requested && binding && probe.state === 'pending') {
       probe.reset(); native.requestSelfTest()
     }
     if (binding && !contents.isDestroyed()) contents.send('playback:frame-flush', { ...binding, timeline })
@@ -181,7 +181,7 @@ export function createNativeSharedTextureBridge(native: SharedTextureProducer, w
     pending.set(frame.sequence, owner)
     try {
       imported = sharedTexture.importSharedTexture({ textureInfo: { codedSize: { width: frame.width, height: frame.height }, pixelFormat: 'bgra',
-        ...(platform === 'darwin' ? { timestamp: frame.targetTimeUs || frame.renderStartUs } : {}),
+        timestamp: frame.targetTimeUs || frame.renderStartUs,
         colorSpace: { primaries: 'bt709', transfer: 'srgb', matrix: 'rgb', range: 'full' },
         handle: { [handleKey]: frame[handleKey] } }, allReferencesReleased: () => {
         if (owner.released) return

@@ -20,7 +20,7 @@ test('pixel diagnostic distinguishes opaque black from colored and transparent s
   assert.deepEqual(JSON.parse(JSON.stringify(exports.summarizePixels(data, 2, 2, 12))),
     { samples: 4, nonblack: 2, maximum: 255, opaque: 3 })
 })
-function fixture(options: { platform?: 'linux' | 'darwin' | 'win32'; videoConsumer?: boolean; canvasOnly?: boolean; mainFrame?: boolean; registerFails?: boolean; contextFails?: boolean; probePixels?: 'valid' | 'black' | 'throw'; clockShift?: number; clockDelays?: number[]; copyWait?: Promise<void>; videoCreateFails?: boolean; videoWriteWait?: Promise<void> } = {}) {
+function fixture(options: { platform?: 'linux' | 'darwin' | 'win32'; diagnostics?: boolean; videoConsumer?: boolean; canvasOnly?: boolean; mainFrame?: boolean; registerFails?: boolean; contextFails?: boolean; probePixels?: 'valid' | 'black' | 'throw'; clockShift?: number; clockDelays?: number[]; copyWait?: Promise<void>; videoCreateFails?: boolean; videoWriteWait?: Promise<void> } = {}) {
   let nextToken = 0, draws = 0, closes = 0, releases = 0, clears = 0, drawFails = false
   let gpuReleased: (() => void) | undefined
   const transferCalls: string[] = []
@@ -47,11 +47,11 @@ function fixture(options: { platform?: 'linux' | 'darwin' | 'win32'; videoConsum
     addEventListener: () => {}, removeEventListener: () => {},
     requestVideoFrameCallback: (callback: () => void) => { callbacks.set(++callbackId, callback); return callbackId },
     cancelVideoFrameCallback: (id: number) => { callbacks.delete(id) } }
-  const document = { querySelectorAll: () => options.canvasOnly ? [canvas] : ['darwin', 'linux'].includes(options.platform ?? 'win32') || options.videoConsumer ? [video, canvas] : [canvas],
+  const document = { querySelectorAll: () => options.canvasOnly ? [canvas] : [video, canvas],
     createElement: () => ({ width: 0, height: 0, getContext: () => ({ drawImage: () => {},
       getImageData: () => canvas.getContext('2d', {}).getImageData() }) }) }
   const videoExports = {} as typeof import('./sharedTextureVideo')
-  runInNewContext(videoCode, { exports: videoExports, setTimeout, clearTimeout, Uint8ClampedArray, document,
+  runInNewContext(videoCode, { exports: videoExports, setTimeout, clearTimeout, Uint8ClampedArray, document, performance,
     VideoFrame: class {
       displayWidth: number; displayHeight: number; pixels: Uint8Array; closed = 0
       constructor(pixels: Uint8Array, public init: {codedWidth: number; codedHeight: number; layout: Array<{offset: number; stride: number}>; timestamp: number; transfer: ArrayBuffer[]}) {
@@ -73,7 +73,7 @@ function fixture(options: { platform?: 'linux' | 'darwin' | 'win32'; videoConsum
         } }) }
     } })
   const exports = {} as typeof import('./sharedTextureReceiver')
-  runInNewContext(code, { exports, Uint8Array, performance, setTimeout, clearTimeout, process: { platform: options.platform ?? 'win32', isMainFrame: options.mainFrame ?? true },
+  runInNewContext(code, { exports, Uint8Array, performance, setTimeout, clearTimeout, process: { platform: options.platform ?? 'win32', isMainFrame: options.mainFrame ?? true, env: { JAVDEX_PLAYBACK_DIAGNOSTICS: options.diagnostics ? '1' : '' } },
     crypto: { randomUUID: () => `33333333-3333-4333-8333-${String(++nextToken).padStart(12, '0')}` },
     document,
     require(id: string) {
@@ -136,17 +136,15 @@ test('persistently uncertain frame clock still fails and releases without drawin
   assert.ok(f.clockRequests() <= 24, 'probe rate remains bounded')
   stop()
 })
-test('draws on the mounted canvas and releases VideoFrame and imported texture in finally', async () => {
+test('submits on the mounted video and releases VideoFrame and imported texture in finally', async () => {
   const f = fixture(); const unbind = f.bind(token)
   await f.receive(1)
-  assert.equal(f.canvas.width, 320); assert.equal(f.canvas.height, 180)
-  assert.equal(f.composite(), 'copy', 'each complete video frame replaces the prior Canvas content')
+  assert.equal(f.video.videoWidth, 320); assert.equal(f.video.videoHeight, 180)
+  assert.equal(f.contextOptions.length, 0, 'normal playback never creates a Canvas context')
   assert.deepEqual(f.counts(), { draws: 1, closes: 1, releases: 1, clears: 0 })
   assert.equal(f.messages.at(-1)?.channel, 'playback:shared-texture-submitted')
   unbind(); unbind()
-  assert.equal(f.counts().clears, 1)
-  assert.equal(f.canvas.width, 0, 'unbind discards the Canvas backing store, not just its visible pixels')
-  assert.equal(f.canvas.height, 0)
+  assert.equal(f.video.srcObject, null, 'unbind stops the stream and releases its last frame')
   assert.equal(f.messages.at(-1)?.channel, 'playback:shared-texture-removed')
 })
 for (const [platform, channel] of [['darwin', 'mac'], ['win32', 'windows'], ['linux', 'linux']] as const)
@@ -170,31 +168,26 @@ test('macOS video uses the same submission and reference-release interface', asy
   stop()
 })
 
-test('direct rebind discards the old backing store and stale cleanup cannot clear its replacement', async () => {
+test('direct rebind stops the old stream and stale cleanup cannot clear its replacement', async () => {
   const f = fixture(), oldCleanup = f.bind(token)
   const oldBinding = f.messages.find(m => m.channel.endsWith('ready'))!.data
   await f.receive(1)
-  const cleanup = f.bind(token)
-  assert.equal(f.canvas.width, 0)
-  assert.equal(f.canvas.height, 0)
-  assert.equal(f.counts().clears, 1)
+  const oldStream = f.video.srcObject
+  const cleanup = f.bind(token), stream = f.video.srcObject
+  assert.notEqual(stream, oldStream)
   assert.ok(f.messages.some(m => m.channel.endsWith('removed') && m.data.bindingToken === oldBinding.bindingToken))
-  await f.receive(2)
-  oldCleanup()
-  assert.equal(f.canvas.width, 320)
-  assert.equal(f.counts().clears, 1)
-  cleanup()
-  assert.equal(f.canvas.width, 0)
-  assert.equal(f.counts().clears, 2)
+  await f.receive(2); oldCleanup()
+  assert.equal(f.video.srcObject, stream)
+  cleanup(); assert.equal(f.video.srcObject, null)
 })
 
-test('Windows rebind clears backing without acknowledging a texture before its GPU callback', async () => {
+test('Windows rebind stops the old stream without acknowledging a texture before its GPU callback', async () => {
   const f = fixture({ platform: 'win32' }), oldCleanup = f.bind(token)
   const binding = f.messages.find(m => m.channel.endsWith('ready'))!.data
   f.listeners.get('playback:windows-texture-transfer')!(null, { ...binding, sequence: 1, transfer: {} })
-  await Promise.resolve(); await Promise.resolve()
-  const cleanup = f.bind(token)
-  assert.equal(f.canvas.width, 0)
+  await new Promise<void>(resolve => setImmediate(resolve))
+  const previous = f.video.srcObject, cleanup = f.bind(token)
+  assert.notEqual(f.video.srcObject, previous)
   assert.equal(f.messages.filter(m => m.channel === 'playback:windows-texture-released').length, 0)
   f.gpuRelease()
   const ack = f.messages.filter(m => m.channel === 'playback:windows-texture-released')
@@ -202,7 +195,7 @@ test('Windows rebind clears backing without acknowledging a texture before its G
   assert.equal(ack[0].data.bindingToken, binding.bindingToken)
   oldCleanup(); cleanup()
 })
-test('stale sessions, duplicate frames, detached canvases and old mount tokens cannot draw', async () => {
+test('stale sessions, duplicate frames, detached videos and old mount tokens cannot draw', async () => {
   const f = fixture(); const firstCleanup = f.bind(token)
   const old = f.messages.at(-1)!.data
   await f.receive(1)
@@ -211,9 +204,9 @@ test('stale sessions, duplicate frames, detached canvases and old mount tokens c
   f.bind(token); firstCleanup()
   await f.receive(2, old)
   await f.receive(2)
-  f.canvas.isConnected = false
+  f.video.isConnected = false
   await f.receive(3)
-  assert.deepEqual(f.counts(), { draws: 2, closes: 2, releases: 6, clears: 1 })
+  assert.deepEqual(f.counts(), { draws: 2, closes: 2, releases: 6, clears: 0 })
 })
 test('drawing failures always close the frame and imported reference and notify main', async () => {
   const f = fixture(); f.bind(token); f.failDraw()
@@ -224,40 +217,25 @@ test('drawing failures always close the frame and imported reference and notify 
 test('unbound frames release without attempting to create a VideoFrame', async () => {
   const f = fixture(); const cleanup = f.bind(token); const binding = f.messages.at(-1)!.data
   cleanup(); await f.receive(1, binding)
-  assert.deepEqual(f.counts(), { draws: 0, closes: 0, releases: 1, clears: 1 })
+  assert.deepEqual(f.counts(), { draws: 0, closes: 0, releases: 1, clears: 0 })
 })
 test('invalid tokens cannot select arbitrary DOM elements or send registration IPC', () => {
   const f = fixture(); f.bind('[data-secret]')()
   assert.deepEqual(f.messages, [])
 })
 
-for (const options of [{ registerFails: true }, { contextFails: true }]) test(`unsupported shared-texture setup fails closed without breaking the preload (${JSON.stringify(options)})`, () => {
+for (const options of [{ registerFails: true }, { videoCreateFails: true }]) test(`unsupported shared-texture setup fails closed without breaking the preload (${JSON.stringify(options)})`, () => {
   const f = fixture(options)
   assert.doesNotThrow(() => f.bind(token)())
   assert.equal(f.messages.at(-1)?.channel, 'playback:shared-texture-failed')
   assert.deepEqual(f.counts(), { draws: 0, closes: 0, releases: 0, clears: 0 })
 })
 
-test('CPU frames strip row padding, distinguish submission from release and reject stale/oversized input', () => {
-  const f = fixture(); f.bind(token)
-  const binding = f.messages.at(-1)!.data
-  const pixels = new Uint8Array(128); pixels.set([255, 0, 0, 255]); pixels.set([0, 255, 0, 255], 64)
-  const frame = { ...binding, sequence: 1, width: 1, height: 2, stride: 64, size: 128, pixels }
-  f.cpu(frame)
-  assert.deepEqual([...f.cpuPixels()], [255, 0, 0, 255, 0, 255, 0, 255])
-  assert.equal(f.messages.at(-2)?.channel, 'playback:shared-texture-submitted')
-  assert.equal(f.messages.at(-1)?.channel, 'playback:cpu-frame-released')
-  f.cpu(frame); assert.equal(f.counts().draws, 1)
-  f.cpu({ ...frame, sequence: 2, width: 8193 })
-  assert.equal(f.messages.at(-2)?.channel, 'playback:shared-texture-failed')
-})
-
 for (const platform of ['linux', 'win32', 'darwin'] as const) test(`${platform}: CPU display remains usable without shared-texture receiver registration`, async () => {
   const f = fixture({ registerFails: true, platform }), cpuToken = 'cpu:' + token
-  f.canvas.dataset.playbackSurface = f.video.dataset.playbackSurface = cpuToken
+  f.video.dataset.playbackSurface = cpuToken
   f.bind(cpuToken)
-  if (platform !== 'win32') assert.equal(f.contextOptions.length, 0)
-  else assert.equal(f.contextOptions.at(-1)?.willReadFrequently, true)
+  assert.equal(f.contextOptions.length, 0)
   const binding = f.messages.at(-1)!.data
   assert.equal(f.messages.at(-1)?.channel, 'playback:shared-texture-ready')
   await f.cpu({ ...binding, sequence: 1, width: 1, height: 1, stride: 64, size: 64, pixels: new Uint8Array(64) })
@@ -266,7 +244,7 @@ for (const platform of ['linux', 'win32', 'darwin'] as const) test(`${platform}:
 
 for (const options of [{ mainFrame: false }, { videoCreateFails: true }]) test(`Mac CPU binding still rejects unsafe or missing drawing targets (${JSON.stringify(options)})`, () => {
   const f = fixture({ platform: 'darwin', registerFails: true, ...options }), cpuToken = 'cpu:' + token
-  f.canvas.dataset.playbackSurface = f.video.dataset.playbackSurface = cpuToken
+  f.video.dataset.playbackSurface = cpuToken
   f.bind(cpuToken)
   assert.equal(f.messages.at(-1)?.channel, 'playback:shared-texture-failed')
   assert.equal(f.counts().draws, 0)
@@ -285,7 +263,7 @@ test('scheduled GPU frames wait for target time and receipt reports submission, 
 })
 test('CPU frame waits for its calibrated target instead of displaying on IPC delivery', async () => {
   const f = fixture(), cpuToken = 'cpu:' + token
-  f.canvas.dataset.playbackSurface = cpuToken; f.bind(cpuToken)
+  f.video.dataset.playbackSurface = cpuToken; f.bind(cpuToken)
   const binding = f.messages.find(m => m.channel.endsWith('ready'))!.data
   const due = performance.now() + 35
   const drawing = f.cpu({ ...binding, sequence: 1, timeline: 0, targetTime: due,
@@ -298,7 +276,7 @@ test('CPU frame waits for its calibrated target instead of displaying on IPC del
 test('CPU and GPU reject unbounded future targets and release without drawing', async () => {
   for (const cpu of [false, true]) {
     const f = fixture(), surfaceToken = (cpu ? 'cpu:' : '') + token
-    f.canvas.dataset.playbackSurface = surfaceToken; f.bind(surfaceToken)
+    f.video.dataset.playbackSurface = surfaceToken; f.bind(surfaceToken)
     const binding = f.messages.find(m => m.channel.endsWith('ready'))!.data
     const timing = { targetTime: performance.now() + 200, timeline: 0 }
     if (cpu) await f.cpu({ ...binding, ...timing, sequence: 1,
@@ -311,7 +289,7 @@ test('CPU and GPU reject unbounded future targets and release without drawing', 
 })
 test('CPU timeline flush discards scheduled work but releases copied frames without submission', async () => {
   const f = fixture(), cpuToken = 'cpu:' + token
-  f.canvas.dataset.playbackSurface = cpuToken; f.bind(cpuToken)
+  f.video.dataset.playbackSurface = cpuToken; f.bind(cpuToken)
   const binding = f.messages.find(m => m.channel.endsWith('ready'))!.data
   const frame = { ...binding, sequence: 1, timeline: 0, targetTime: performance.now() + 60,
     width: 1, height: 1, stride: 64, size: 64, pixels: new Uint8Array(64) }
@@ -326,7 +304,7 @@ test('CPU timeline flush discards scheduled work but releases copied frames with
 })
 for (const fps of [24, 30, 60]) test(`CPU ${fps}fps targets map a different monotonic epoch and never add delay to overdue frames`, async () => {
   const f = fixture({ clockShift: -5000 }), cpuToken = 'cpu:' + token
-  f.canvas.dataset.playbackSurface = cpuToken; f.bind(cpuToken)
+  f.video.dataset.playbackSurface = cpuToken; f.bind(cpuToken)
   const binding = f.messages.find(m => m.channel.endsWith('ready'))!.data
   const frame = { ...binding, sequence: 1, timeline: 0, width: 1, height: 1, stride: 64, size: 64, pixels: new Uint8Array(64) }
   const due = performance.now() + 1000 / fps
@@ -339,7 +317,7 @@ for (const fps of [24, 30, 60]) test(`CPU ${fps}fps targets map a different mono
 test('continuous CPU seeks and unbind cancel all old waits and release each copied frame once', async () => {
   for (const unbind of [false, true]) {
     const f = fixture(), cpuToken = 'cpu:' + token
-    f.canvas.dataset.playbackSurface = cpuToken; const stop = f.bind(cpuToken)
+    f.video.dataset.playbackSurface = cpuToken; const stop = f.bind(cpuToken)
     const binding = f.messages.find(m => m.channel.endsWith('ready'))!.data
     const frame = { ...binding, sequence: 1, timeline: 0, width: 1, height: 1, stride: 64, size: 64, pixels: new Uint8Array(64) }
     const a = f.cpu({ ...frame, targetTime: performance.now() + 60 })
@@ -389,7 +367,7 @@ test('slow opt-in GPU diagnostics cannot regress sequence or submission across a
   f.bind(token)
   const binding = f.messages.find(m => m.channel.endsWith('ready'))!.data
   const first = f.receive(1, binding, { diagnosePixels: true, timeline: 0 })
-  await Promise.resolve()
+  await new Promise<void>(resolve => setImmediate(resolve))
   f.listeners.get('playback:frame-flush')!(null, { ...binding, timeline: 1 })
   await f.receive(2, binding, { timeline: 1 })
   finishCopy(); await first
@@ -404,11 +382,11 @@ for (const probePixels of ['valid', 'black', 'throw'] as const) test('fixed prob
   const result = f.messages.at(-1) as unknown as { channel: string; data: { samples: number[] } }
   assert.equal(result.channel, 'playback:shared-texture-self-test')
   assert.deepEqual(Array.from(result.data.samples), probePixels === 'valid' ? Array(5).fill([64, 191, 128, 255]).flat() : probePixels === 'black' ? Array(20).fill(0) : [])
-  assert.deepEqual(f.counts(), { draws: 1, closes: 1, releases: 1, clears: 1 })
+  assert.deepEqual(f.counts(), { draws: 1, closes: 1, releases: 1, clears: 0 })
 })
 
 
-for (const platform of ['darwin', 'linux'] as const) test(`${platform} video self-test uses the mounted consumer and releases its import normally`, async () => {
+for (const platform of ['darwin', 'linux', 'win32'] as const) test(`${platform} video self-test uses the mounted consumer and releases its import normally`, async () => {
   const f = fixture({ platform, videoConsumer: true, probePixels: 'valid' }), stop = f.bind(token)
   await f.receive(1, undefined, { selfTest: 'solid-v1', timeline: 0 })
   const result = f.messages.find(m => m.channel === 'playback:shared-texture-self-test')
@@ -422,7 +400,7 @@ for (const platform of ['darwin', 'linux'] as const) test(`${platform} video sel
 })
 
 
-for (const platform of ['darwin', 'linux'] as const) for (const stride of [4, 64])
+for (const platform of ['darwin', 'linux', 'win32'] as const) for (const stride of [4, 64])
   test(`${platform} CPU video preserves pixels and credit with stride ${stride} without a Canvas context`, async () => {
     const f = fixture({platform}), cpuToken = 'cpu:' + token
     f.video.dataset.playbackSurface = cpuToken; const stop = f.bind(cpuToken)
@@ -488,8 +466,8 @@ test('Mac paused CPU frame preserves its producer render timestamp without a tim
 })
 
 
-for (const cpu of [false, true]) test(`Linux rejects the removed Canvas consumer (CPU: ${cpu})`, () => {
-  const f = fixture({ platform: 'linux', canvasOnly: true })
+for (const platform of ['darwin', 'linux', 'win32'] as const) for (const cpu of [false, true]) test(`${platform} rejects the removed Canvas consumer (CPU: ${cpu})`, () => {
+  const f = fixture({ platform, canvasOnly: true })
   const surfaceToken = cpu ? 'cpu:' + token : token
   f.canvas.dataset.playbackSurface = surfaceToken
   f.bind(surfaceToken)
@@ -498,8 +476,8 @@ for (const cpu of [false, true]) test(`Linux rejects the removed Canvas consumer
 })
 
 
-test('Mac private port uses copied VideoFrame input and sends no raw pixels through the main envelope', async () => {
-  const f = fixture({ platform: 'darwin' }), cpuToken = 'cpu:' + token
+for (const platform of ['darwin', 'win32'] as const) test(`${platform}: private port uses copied VideoFrame input and sends no raw pixels through the main envelope`, async () => {
+  const f = fixture({ platform }), cpuToken = 'cpu:' + token
   f.video.dataset.playbackSurface = cpuToken; const stop = f.bind(cpuToken)
   const binding = f.messages.find(m => m.channel.endsWith('ready'))!.data
   const cpuChannelId = '55555555-5555-4555-8555-555555555555'
@@ -514,4 +492,22 @@ test('Mac private port uses copied VideoFrame input and sends no raw pixels thro
   assert.deepEqual(Array.from(f.cpuVideoFrames[0].pixels), [255, 0, 0, 255]); assert.equal(f.cpuVideoFrames[0].closed, 1)
   assert.equal(f.messages.filter(m => m.channel === 'playback:shared-texture-failed').length, 0)
   stop(); assert.equal(closed, 1)
+})
+
+test('Windows private CPU diagnostics report bounded delivery and video stages for a displayed frame', async () => {
+  const f = fixture({ platform: 'win32', diagnostics: true }), cpuToken = 'cpu:' + token
+  f.video.dataset.playbackSurface = cpuToken; const stop = f.bind(cpuToken)
+  const binding = f.messages.find(m => m.channel.endsWith('ready'))!.data
+  const cpuChannelId = '55555555-5555-4555-8555-555555555555'
+  const port: CpuPixelsPort = { onmessage: null, onmessageerror: null, start() {}, close() {} }
+  f.listeners.get('playback:cpu-frame-port')!({ ports: [port] }, { ...binding, cpuChannelId })
+  const now = performance.now() * 1000
+  const pending = f.cpu({ ...binding, cpuChannelId, sequence: 1, timeline: 0, width: 1, height: 1, stride: 4, size: 4,
+    cpuPostStartUs: now - 2000, cpuPostDoneUs: now - 1000 })
+  port.onmessage!({ data: { cpuChannelId, sequence: 1, timeline: 0, pixels: new Uint8Array([255, 0, 0, 255]) } })
+  await pending
+  const sent = f.messages.find(m => m.channel === 'playback:shared-texture-submitted')!.data as unknown as { cpuTimings: Record<string, number> }
+  assert.deepEqual(Object.keys(sent.cpuTimings).sort(), ['deliveryMs', 'frameConstructMs', 'postMs', 'presentWaitMs', 'writerWaitMs'])
+  for (const value of Object.values(sent.cpuTimings)) assert.ok(Number.isFinite(value) && value >= 0)
+  stop()
 })

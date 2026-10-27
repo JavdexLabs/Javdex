@@ -229,7 +229,7 @@ export function inspectWindowsPlaybackBinary(file, { directory, archName, binary
     'shell32.dll', 'ole32.dll', 'oleaut32.dll', 'comdlg32.dll', 'winmm.dll', 'ws2_32.dll', 'crypt32.dll', 'bcrypt.dll',
     'secur32.dll', 'shlwapi.dll', 'd3d11.dll', 'dxgi.dll', 'dwmapi.dll', 'dcomp.dll', 'ntdll.dll', 'msvcrt.dll', 'ucrtbase.dll',
     'version.dll', 'imm32.dll', 'setupapi.dll', 'avrt.dll', 'powrprof.dll', 'winhttp.dll', 'normaliz.dll', 'iphlpapi.dll',
-    'shcore.dll', 'uxtheme.dll', 'dwrite.dll', 'wldap32.dll', 'bcryptprimitives.dll', 'avicap32.dll', 'd2d1.dll', 'cfgmgr32.dll',
+    'd3d9.dll', 'd3dcompiler_47.dll', 'shcore.dll', 'uxtheme.dll', 'dwrite.dll', 'wldap32.dll', 'bcryptprimitives.dll', 'avicap32.dll', 'd2d1.dll', 'cfgmgr32.dll',
     'usp10.dll', 'rpcrt4.dll', 'msimg32.dll', 'ncrypt.dll', 'wsock32.dll', 'dnsapi.dll', 'gdiplus.dll'])
   const local = new Map()
   for (const binary of binaryFiles) {

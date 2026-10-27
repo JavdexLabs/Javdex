@@ -9,23 +9,25 @@ import { captureAcceptanceImage, captureAcceptanceFrame, createAcceptanceDirecto
 import { closeAcceptanceAndSave } from './playback-acceptance-cleanup.mjs'
 import { installCanvasSubmissionObserver, checkSyntheticCanvasFrame } from './windows-canvas-checks.mjs'
 
-assert.equal(process.platform, 'win32', 'Windows Canvas acceptance requires a native Windows desktop')
-const fixture = prepareMediaFixtures(), directory = createAcceptanceDirectory('windows-canvas-')
+assert.equal(process.platform, 'win32', 'Windows video acceptance requires a native Windows desktop')
+const fixture = prepareMediaFixtures(), directory = createAcceptanceDirectory('windows-video-')
 const [target, assTarget, pgsTarget] = seedAcceptanceCatalog(directory,
   [fixture.media[0], fixture.media[fixture.complexIndex], fixture.media[fixture.bitmapIndex]])
-const report = { passed: false, backend: 'windows-d3d11-nt-canvas2d', checks: [], pending: [
+const report = { passed: false, backend: 'windows-d3d11-nt-video', checks: [], pending: [
   'four-corner orientation, SDR reference colors and HDR mapping',
   'device removal, renderer/GPU crash quarantine, multi-GPU/display/remote-desktop compatibility',
   'physical display/audio sync, long-run handles/memory/power and installed/signed packages'
 ] }
-const reportFile = path.join(output, 'windows-canvas-report.json')
+const reportFile = path.join(output, 'windows-video-report.json')
 let application, surfaceToken
 const save = () => fs.writeFileSync(reportFile, JSON.stringify(report, null, 2))
 try {
-  application = await launchAcceptance(directory, 'windows-canvas-application.log', [])
+  application = await launchAcceptance(directory, 'windows-video-application.log', [])
   const page = await application.firstWindow()
   await page.waitForFunction(() => window.api?.playback && document.querySelector('nav'))
   await prepareNonRecordingPlayback(page)
+  assert.equal(await page.evaluate(() => window.api.playback.sharedTextureConsumer), 'video')
+  await page.waitForTimeout(100)
   await application.evaluate(({ app }) => {
     assertStartup()
     function assertStartup() {
@@ -45,16 +47,16 @@ try {
   for (let iteration = 0; iteration < 3; iteration++) {
     const opened = await page.evaluate(t => window.api.player.openResource(t.libraryId, t.resourceId, t.videoId), target)
     assert.equal(opened.ok, true, opened.error)
-    const state = await waitForState(page, s => s?.phase === 'playing' && s.position > .5, 'Windows Canvas playback')
+    const state = await waitForState(page, s => s?.phase === 'playing' && s.position > .5, 'Windows video playback')
     assert.ok(state.sharedTextureSurface)
     surfaceToken = state.sharedTextureSurface
-    await waitForValue(inspect, s => s.frames > 2 && s.submitted > 1, 'native production and real Canvas submission')
-    assert.equal((await nativeEvidence(application)).presentedFrames, undefined, 'Canvas receipt is not physical presentation')
+    await waitForValue(inspect, s => s.frames > 2 && s.submitted > 1, 'native production and real video submission')
+    assert.equal((await nativeEvidence(application)).presentedFrames, undefined, 'Video submission receipt is not physical presentation')
     const image = await captureAcceptanceImage(application)
     const firstPixels = checkSyntheticCanvasFrame(image)
     await waitForState(page, s => s?.position > state.position + 1, 'synthetic video clock advances')
     const laterPixels = checkSyntheticCanvasFrame(await captureAcceptanceImage(application), firstPixels.hash)
-    await page.screenshot({ path: path.join(output, `windows-canvas-${iteration}.png`) })
+    await page.screenshot({ path: path.join(output, `windows-video-${iteration}.png`) })
     const control = value => page.evaluate(({ id, value }) => window.api.playback.control(id, value), { id: state.sessionId, value })
     await control({ kind: 'pause', paused: true }); await waitForState(page, s => s?.paused, 'pause')
     await control({ kind: 'seek', seconds: 2, relative: false }); await waitForState(page, s => s?.paused && s.position >= 1.8, 'paused seek')
@@ -78,7 +80,7 @@ try {
   // pixels while remaining on the GPU path, in both presentation modes.
   for (const [name, subtitleTarget] of [['ass', assTarget], ['pgs', pgsTarget]]) {
     assert.equal((await page.evaluate(t => window.api.playback.open(t), subtitleTarget)).ok, true)
-    const state = await waitForState(page, s => s?.phase === 'playing' && s.position > .5, `${name} starts on Canvas`)
+    const state = await waitForState(page, s => s?.phase === 'playing' && s.position > .5, `${name} starts on video`)
     surfaceToken = state.sharedTextureSurface
     const sub = state.tracks.find(t => t.type === 'sub'); assert.ok(sub)
     const control = value => page.evaluate(({ id, value }) => window.api.playback.control(id, value), { id: state.sessionId, value })

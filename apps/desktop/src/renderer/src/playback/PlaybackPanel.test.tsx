@@ -63,7 +63,7 @@ const fake = {
   desktop: { pointerTiming: async () => ({ doubleClickMs: 500, source: 'chromium' }) },
   settings: { getLocalModels: async () => localModels(), onLocalModelsChanged: () => () => {} },
   playback: {
-    sharedTextureConsumer: 'canvas' as 'canvas' | 'video',
+    sharedTextureConsumer: 'video' as const,
     bindSharedTextureSurface: (token: string) => { boundSurfaces.push(token); return () => { releasedSurfaces.push(token) } },
     aiSubtitleSnapshot: async () => aiState,
     onAiSubtitleChanged: (listener: typeof aiChanged) => { aiChanged = listener; return () => { aiChanged = () => {} } },
@@ -995,12 +995,12 @@ test('sidebar display failure does not open an unrelated toolbar guide', async (
 })
 
 
-test('shared-texture canvas stays in the video control and binds only to the current surface lifetime', async () => {
+test('shared-texture video stays in the playback control and binds only to the current surface lifetime', async () => {
   await mount()
-  assert.equal(renderer!.root.findAllByType('canvas').length, 0, 'legacy native surfaces are unchanged')
+  assert.equal(renderer!.root.findAllByType('video').length, 0, 'legacy native surfaces are unchanged')
   const current = { ...snapshot(), sharedTextureSurface: 'first-surface' }
   await act(async () => changed(current))
-  const canvas = renderer!.root.findByType('canvas')
+  const canvas = renderer!.root.findByType('video')
   assert.equal(canvas.props['data-playback-surface'], 'first-surface')
   assert.equal(canvas.props['aria-hidden'], 'true')
   assert.equal(canvas.parent!.type, 'button', 'video controls retain their existing hit target')
@@ -1008,28 +1008,28 @@ test('shared-texture canvas stays in the video control and binds only to the cur
   await act(async () => changed({ ...current, position: 2 }))
   await act(async () => changed({ ...current, presentation: 'fullscreen' }))
   assert.deepEqual(boundSurfaces, ['first-surface'], 'clock and presentation changes preserve the mounted receiver')
-  assert.equal(renderer!.root.findByType('canvas'), canvas, 'ordinary updates keep the same canvas backing')
+  assert.equal(renderer!.root.findByType('video'), canvas, 'ordinary updates keep the same video stream')
   await act(async () => button('视频画面，单击播放或暂停，双击全屏').props.onClick())
   assert.deepEqual(controls.at(-1), { id: 'first', command: { kind: 'pause', paused: true } })
   await act(async () => changed({ ...snapshot('replacement'), sharedTextureSurface: 'second-surface' }))
   assert.deepEqual(releasedSurfaces, ['first-surface'])
   assert.deepEqual(boundSurfaces, ['first-surface', 'second-surface'])
-  assert.notEqual(renderer!.root.findByType('canvas'), canvas, 'another surface cannot inherit a lost accelerated context')
+  assert.notEqual(renderer!.root.findByType('video'), canvas, 'another surface cannot inherit an old video stream')
   await act(async () => changed({ ...snapshot('replacement'), sharedTextureSurface: 'second-surface', phase: 'error', error: 'GPU stopped' }))
-  assert.equal(renderer!.root.findAllByType('canvas').length, 0)
+  assert.equal(renderer!.root.findAllByType('video').length, 0)
   assert.deepEqual(releasedSurfaces, ['first-surface', 'second-surface'])
   await act(async () => changed({ ...snapshot('reopened'), sharedTextureSurface: 'third-surface' }))
   await act(async () => changed(null))
-  assert.equal(renderer!.root.findAllByType('canvas').length, 0)
+  assert.equal(renderer!.root.findAllByType('video').length, 0)
   assert.deepEqual(releasedSurfaces, ['first-surface', 'second-surface', 'third-surface'])
 })
 
-test('CPU recovery replaces the GPU canvas within the same playback session', async () => {
+test('CPU recovery replaces the GPU video within the same playback session', async () => {
   await mount()
   await act(async () => changed({ ...snapshot(), sharedTextureSurface: 'gpu-surface' }))
-  const gpuCanvas = renderer!.root.findByType('canvas')
+  const gpuCanvas = renderer!.root.findByType('video')
   await act(async () => changed({ ...snapshot(), sharedTextureSurface: 'cpu:software-surface' }))
-  assert.notEqual(renderer!.root.findByType('canvas'), gpuCanvas)
+  assert.notEqual(renderer!.root.findByType('video'), gpuCanvas)
   assert.deepEqual(releasedSurfaces, ['gpu-surface'])
   assert.deepEqual(boundSurfaces, ['gpu-surface', 'cpu:software-surface'])
 })
@@ -1170,7 +1170,7 @@ for (const surface of ['gpu-surface', 'cpu:software-surface']) for (const paused
 }
 
 
-test('Mac GPU and CPU recovery mount separate video consumers with the same controls', async () => {
+test('GPU and CPU recovery mount separate video consumers with the same controls', async () => {
   fake.playback.sharedTextureConsumer = 'video'
   try {
     await mount()
@@ -1189,5 +1189,5 @@ test('Mac GPU and CPU recovery mount separate video consumers with the same cont
     assert.equal(renderer!.root.findByType('video').props['data-playback-surface'], 'cpu:mac-recovery')
     assert.notEqual(renderer!.root.findByType('video'), surface)
     assert.deepEqual(releasedSurfaces, ['mac-gpu'])
-  } finally { fake.playback.sharedTextureConsumer = 'canvas' }
+  } finally { fake.playback.sharedTextureConsumer = 'video' }
 })

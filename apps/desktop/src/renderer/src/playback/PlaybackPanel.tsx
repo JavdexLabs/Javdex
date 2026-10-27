@@ -343,10 +343,8 @@ export default function PlaybackPanel(): JSX.Element | null {
           onDoubleClick={sharedTextureSurface && !docked ? () => {
             transport({ kind: 'presentation', value: fullscreen ? 'expanded' : 'fullscreen' })
           } : undefined}>
-          {sharedTextureSurface && (api.playback.sharedTextureConsumer === 'video'
-            ? <video key={sharedTextureSurface} className={styles.sharedTexture} data-playback-surface={sharedTextureSurface}
-              muted playsInline disablePictureInPicture disableRemotePlayback tabIndex={-1} aria-hidden="true" />
-            : <canvas key={sharedTextureSurface} className={styles.sharedTexture} data-playback-surface={sharedTextureSurface} aria-hidden="true" />)}
+          {sharedTextureSurface && <video key={sharedTextureSurface} className={styles.sharedTexture} data-playback-surface={sharedTextureSurface}
+              muted playsInline disablePictureInPicture disableRemotePlayback tabIndex={-1} aria-hidden="true" />}
         </button>}
         {options && !docked && state.phase !== 'error' && <aside className={styles.options} aria-label="播放设置" id={settingsId} data-playback-overlay-surface={rendererFullscreen || undefined}>
           <div className={styles.optionsHeader}><span>播放设置</span><IconButton size="sm" icon={<X size={16} />} label="关闭播放设置" onClick={() => presentationHistory.setOptions(false)} /></div>
@@ -405,7 +403,7 @@ export default function PlaybackPanel(): JSX.Element | null {
           <dl className={styles.info}><dt>来源</dt><dd>{state.source === 'remote' ? '远程原文件' : '本机文件'}</dd>
             <dt>视频</dt><dd>{state.info.videoCodec ?? '未知'} · {state.info.width ?? '?'}×{state.info.height ?? '?'}</dd>
             {state.info.playbackMode ? <><dt>播放模式</dt><dd>{state.info.playbackMode === 'cpu' ? 'CPU 兼容' : 'GPU'}{state.info.playbackFallback ? '（自动回退）' : ''}</dd></> : null}<dt>实际硬解</dt><dd>{state.info.hardwareDecoder && state.info.hardwareDecoder !== 'no' ? state.info.hardwareDecoder : '软件解码'}{state.info.playbackDiagnostics?.decoderFallback ? '（已从硬解切换）' : ''}</dd><dt>音频</dt><dd>{state.info.audioCodec ?? '无'} / {state.info.audioOutput ?? '无输出'}</dd>
-            {state.info.playbackDiagnostics?.displayProbe !== 'not-applicable' && state.info.playbackDiagnostics ? <><dt>画面通道</dt><dd>{state.info.playbackDiagnostics.displayProbe === 'passed' ? '导入与画布检查通过' : '正在检查'}</dd></> : null}
+            {state.info.playbackDiagnostics?.displayProbe !== 'not-applicable' && state.info.playbackDiagnostics ? <><dt>画面通道</dt><dd>{state.info.playbackDiagnostics.displayProbe === 'passed' ? '导入与显示检查通过' : '正在检查'}</dd></> : null}
             {state.info.playbackDiagnostics?.fallbackReason ? <><dt>回退原因</dt><dd>{recoveryLabel(state.info.playbackDiagnostics.fallbackReason)}</dd></> : null}
           </dl>
           <section className={styles.shortcuts} aria-label="画面快捷键">

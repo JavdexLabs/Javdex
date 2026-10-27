@@ -189,8 +189,8 @@ test('macOS IOSurface slots wait for all references, not Canvas submission or se
   for (const item of f.imported) { item.allReferencesReleased(); item.allReferencesReleased() }
   assert.deepEqual(f.releases, [1, 2, 3, 4], 'late callbacks release only their original tickets once')
 })
-test('Mac restarts a pending asynchronous video probe after a seek cancels its old stream', async t => {
-  const f = fixture(); t.after(f.bridge.destroy)
+for (const platform of ['darwin', 'win32'] as const) test(`${platform} restarts a pending asynchronous video probe after a seek cancels its old stream`, async t => {
+  const f = fixture(platform); t.after(f.bridge.destroy)
   const next = f.native.nextFrame.bind(f.native)
   let requested = true
   f.native.requestSelfTest = () => { requested = true }

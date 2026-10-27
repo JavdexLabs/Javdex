@@ -1,6 +1,6 @@
 #pragma once
-// EGL is loaded only in the isolated playback process, from Electron's own
-// directory. This does not redistribute or independently upgrade ANGLE.
+// EGL is loaded only in the isolated playback process, from the private
+// playback runtime. Electron 44 statically links its own consumer-side ANGLE.
 #include <windows.h>
 #include <d3d11.h>
 #include <EGL/egl.h>
@@ -32,8 +32,11 @@ class WindowsAngleContext {
     }
     static HMODULE library(const wchar_t *name) {
         wchar_t executable[32768]{};
-        const DWORD length = GetModuleFileNameW(nullptr, executable, 32768);
-        if (!length || length >= 32768) throw std::runtime_error("Cannot locate Electron ANGLE");
+        HMODULE module = nullptr;
+        if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+            reinterpret_cast<LPCWSTR>(&library), &module)) throw std::runtime_error("Cannot locate playback module");
+        const DWORD length = GetModuleFileNameW(module, executable, 32768);
+        if (!length || length >= 32768) throw std::runtime_error("Cannot locate private playback ANGLE");
         std::wstring path(executable, length);
         path = path.substr(0, path.find_last_of(L"\\/") + 1) + name;
         // A module with the same basename from another directory must not be
@@ -45,7 +48,7 @@ class WindowsAngleContext {
                 throw std::runtime_error("A different ANGLE library is already loaded");
         }
         auto result = LoadLibraryExW(path.c_str(), nullptr, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
-        if (!result) throw std::runtime_error("Electron ANGLE library is unavailable");
+        if (!result) throw std::runtime_error("Private playback ANGLE library is unavailable");
         return result;
     }
 public:

@@ -17,7 +17,7 @@ test('real Windows CPU producer bounds frames, clears padding and survives a rej
     create(bounds: { width: number; height: number; scale: number }): void
     setBounds(bounds: { width: number; height: number; scale: number }): void
     setVisible(value: boolean): void
-    nextFrame(writable: boolean): { width: number; height: number; stride: number; pixels: Buffer }
+    nextFrame(writable: boolean): { width: number; height: number; stride: number; pixels: Uint8Array }
     inspect(): { alive: boolean; pixelWidth: number; pixelHeight: number }
     destroy(): void
   }
@@ -44,6 +44,20 @@ test('real Windows CPU producer bounds frames, clears padding and survives a rej
     for (let x: number = 0; x < frame.width; x++) assert.equal(frame.pixels[y * frame.stride + x * 4 + 3], 255)
     for (let x: number = frame.width * 4; x < frame.stride; x++) assert.equal(frame.pixels[y * frame.stride + x], 0)
   }
+  assert.equal(frame.pixels.buffer.byteLength, frame.pixels.length + 63)
+  const backing = new Uint8Array(frame.pixels.buffer)
+  for (let i = 0; i < frame.pixels.byteOffset; i++) assert.equal(backing[i], 0, 'alignment prefix cannot expose allocator contents')
+  for (let i = frame.pixels.byteOffset + frame.pixels.byteLength; i < backing.length; i++) assert.equal(backing[i], 0, 'alignment suffix cannot expose allocator contents')
+  const saved = Uint8Array.from(frame.pixels)
+  native.setBounds({ width: 33, height: 3, scale: 1 })
+  const resized = native.nextFrame(true)
+  assert.notEqual(resized.pixels.buffer, frame.pixels.buffer, 'a later frame cannot reuse an outstanding buffer')
+  assert.deepEqual(frame.pixels, saved, 'resizing cannot overwrite an earlier frame')
+  const cloned = structuredClone(frame.pixels)
+  native.destroy()
+  assert.deepEqual(frame.pixels, saved, 'destroy cannot free JavaScript-owned frame memory')
+  assert.deepEqual(cloned, saved, 'message-cloned pixels remain stable after shutdown')
+  native.create({ width: 17, height: 2, scale: 1 }); native.setVisible(true)
   const worker = new Worker(`const {parentPort,workerData}=require('node:worker_threads');
     try {require(workerData);parentPort.postMessage('loaded')} catch(e){parentPort.postMessage(e.message)}`, {
     eval: true, execArgv: [], workerData: file

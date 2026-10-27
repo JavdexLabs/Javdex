@@ -6,8 +6,8 @@ import path from 'node:path'
 import { createAcceptanceDirectory, seedAcceptanceCatalog, launchAcceptance, closeAcceptance,
   waitForState, output } from './playback-acceptance-support.mjs'
 
-const [media, display = 'wayland', mode = 'gpu'] = process.argv.slice(2)
-assert(media && ['wayland', 'x11'].includes(display) && ['gpu', 'cpu'].includes(mode))
+const [media, display = process.platform === 'win32' ? 'windows' : process.platform === 'darwin' ? 'macos' : 'wayland', mode = 'gpu'] = process.argv.slice(2)
+assert(media && ['wayland', 'x11', 'windows', 'macos'].includes(display) && ['gpu', 'cpu'].includes(mode))
 const directory = createAcceptanceDirectory('seek-continuity-')
 const [target] = seedAcceptanceCatalog(directory, [path.resolve(media)])
 fs.writeFileSync(path.join(directory, 'this-computer.json'), JSON.stringify({ mode: 'local', closeToTray: false,
@@ -15,8 +15,7 @@ fs.writeFileSync(path.join(directory, 'this-computer.json'), JSON.stringify({ mo
 const report = { passed: false, display, mode, captures: [], limits: ['Compositor captures, not physical scanout; sampling can miss shorter flashes'] }
 let application
 try {
-  application = await launchAcceptance(directory, 'seek-application.log', [`--javdex-${display}`,
-    ...(!process.env.JAVDEX_PLAYBACK_ACCEPTANCE_EXECUTABLE ? ['--no-sandbox'] : [])])
+  application = await launchAcceptance(directory, 'seek-application.log', ['wayland', 'x11'].includes(display) ? [`--javdex-${display}`] : [])
   const page = await application.firstWindow()
   await page.waitForFunction(() => window.api?.playback && document.querySelector('nav'))
   await application.evaluate(({ BrowserWindow }) => {
@@ -43,10 +42,12 @@ try {
   await capture('initial')
   // Seek while both playing and paused. Send the next seek without waiting for
   // the previous seek's replacement frame, as with a held navigation key.
+  assert.ok(state.duration > 5, 'Seek fixture must provide a usable time range')
+  const lastSeek = Math.min(20, state.duration - 2)
   for (const paused of [false, true]) {
     await control({ kind: 'pause', paused })
     for (let n = 0; n < 20; n++) {
-      await control({ kind: 'seek', seconds: 2 + (n % 10) * 2 })
+      await control({ kind: 'seek', seconds: 2 + (n % 10) / 9 * (lastSeek - 2) })
       for (let sample = 0; sample < 3; sample++) {
         await capture(paused ? 'paused-seek' : 'playing-seek')
         await page.waitForTimeout(20)
@@ -54,7 +55,7 @@ try {
     }
   }
   await control({ kind: 'pause', paused: false })
-  await waitForState(page, s => s?.phase === 'playing' && s.position > 20.2 && s.info.playbackMode === mode, 'resume after repeated seeking')
+  await waitForState(page, s => s?.phase === 'playing' && s.position > lastSeek + .2 && s.info.playbackMode === mode, 'resume after repeated seeking')
   await capture('resumed')
   await control({ kind: 'stop' })
   await waitForState(page, s => s === null, 'stop after seek captures')

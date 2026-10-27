@@ -40,6 +40,8 @@ export function createSoftwarePlaybackBridge(native: SoftwareProducer, window: B
   const pending = new Map<number, { binding: string; since: number; timeline: number; start?: number; target?: number }>()
   const budget = new FrameBudget()
   let lateness = 0
+  const timingNames = ['postMs', 'deliveryMs', 'frameConstructMs', 'writerWaitMs', 'presentWaitMs'] as const
+  const timings = Object.fromEntries(timingNames.map(name => [name, { samples: 0, totalMs: 0, maxMs: 0 }])) as Record<typeof timingNames[number], { samples: number; totalMs: number; maxMs: number }>
   const clearPending = (): void => { for (const sequence of pending.keys()) native.releaseFrame?.(sequence); pending.clear() }
   const { matches, clock } = createFrameEndpoint(contents, surfaceToken, () => !stopped, monotonicMs)
   const flush = (): void => {
@@ -57,7 +59,7 @@ export function createSoftwarePlaybackBridge(native: SoftwareProducer, window: B
     if (stopped || !matches(event, value)) return
     if (binding?.bindingToken !== value.bindingToken) clearPending()
     binding = { surfaceToken, bindingToken: value.bindingToken }
-    if (platform === 'darwin' && native.directCpuFrames) native.connectCpuFramePort?.(contents, binding)
+    if (native.directCpuFrames) native.connectCpuFramePort?.(contents, binding)
     flush(); visibility()
   }
   const removed = (event: IpcMainEvent, value: unknown): void => {
@@ -72,10 +74,18 @@ export function createSoftwarePlaybackBridge(native: SoftwareProducer, window: B
   }
   const drawn = (event: IpcMainEvent, value: unknown): void => {
     if (stopped || !matches(event, value) || value.bindingToken !== binding?.bindingToken) return
-    const v = value as Binding & { sequence: number; timeline: number; readyTime?: number; submittedTime?: number }
+    const v = value as Binding & { sequence: number; timeline: number; readyTime?: number; submittedTime?: number; cpuTimings?: Record<string, unknown> }
     const frame = pending.get(v.sequence)
     if (frame && frame.binding === v.bindingToken && frame.timeline === timeline && v.timeline === timeline && v.sequence > lastDrawn) {
       lastDrawn = v.sequence; submitted++
+      if (process.env.JAVDEX_PLAYBACK_DIAGNOSTICS === '1' && v.cpuTimings) {
+        for (const name of timingNames) {
+          const value = v.cpuTimings[name]
+          if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 10000) continue
+          const item = timings[name]; item.samples++; item.totalMs += value; item.maxMs = Math.max(item.maxMs, value)
+        }
+        if (submitted % 30 === 0) console.info('[playback-cpu-timings]', JSON.stringify(timings))
+      }
       const now = monotonicMs()
       if (frame.start && frame.target && typeof v.readyTime === 'number' && typeof v.submittedTime === 'number'
         && Number.isFinite(v.readyTime) && Number.isFinite(v.submittedTime) && v.readyTime >= frame.start
@@ -121,7 +131,7 @@ export function createSoftwarePlaybackBridge(native: SoftwareProducer, window: B
         throw new Error('CPU 视频帧消费超时')
       const start = monotonicMs()
       const frame = native.nextFrame(shown && pending.size < 2)
-      const direct = platform === 'darwin' && native.directCpuFrames === true
+      const direct = native.directCpuFrames === true
       if (!frame || !shown || !binding) return
       if (!Number.isSafeInteger(frame.sequence) || frame.sequence <= lastSequence
         || ![frame.width, frame.height, frame.stride, frame.size].every(Number.isSafeInteger)

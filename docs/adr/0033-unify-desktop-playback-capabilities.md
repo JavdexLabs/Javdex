@@ -16,7 +16,7 @@
 
 硬件、驱动和操作系统可影响性能、实际硬解及系统集成方式。应用自身的播放模式、恢复规则、显示目标、字幕默认样式和诊断语义由共用层决定。能力探测描述当前设备和运行库的实际状态。
 
-继续保留共用的资源授权、播放会话、续播、音量、轨道、字幕和 HTML 界面。平台底层保留必要的 D3D11/WGL、IOSurface/CGL、EGL/GBM/DMA-BUF，以及内存、句柄、FD、窗口和进程桥接实现。
+继续保留共用的资源授权、播放会话、续播、音量、轨道、字幕和 HTML 界面。平台底层保留必要的 D3D11/ANGLE、IOSurface/CGL、EGL/GBM/DMA-BUF，以及内存、句柄、FD、窗口和进程桥接实现。
 
 2026-10-26 补充：按用户确认升级 Electron 44.9.3，Mac GPU 改用原始 VideoFrame → MediaStreamTrackGenerator → video，去除正常 Canvas 缓存复制。此变更只替换显示消费者；共用时序、三槽租约、色彩、控制和恢复语义不变。具体前置条件和本机证据见 [接入记录](../reviews/macos-video-consumer-integration-2026-10-26.md)。
 
@@ -25,6 +25,8 @@
 2026-10-27 Mac CPU 后续：配对实测后按用户确认正式采用私有帧通道，保留原生对齐 scratch 和输出复制，由隔离宿主通过私有 MessagePort 直接交付像素，主进程继续认证绑定、校验元数据、调度和管理两帧信用额度。Mac CPU 的 VideoFrame 改为复制输入，取代上段的紧密缓冲区转移方式；CPU 兼容及自动回退进入 CPU 时均使用此实现，无需实验开关。默认 GPU、Linux 和 Windows 的显示与内存路径保持。最初 M4 配对的 1080p60／4K24 CPU 成本分别下降约 23%／18%，4K 工作集增加约 195MiB，按本次取舍采用；提交前再修复两项帧回收时序问题，最终源码的复核结果另记，范围与恢复检查见 [实测记录](../performance/macos-cpu-private-frame-channel-2026-10-27.md)。
 
 2026-10-27 后续：按用户选择，Linux GPU/CPU 共用 video 消费者并移除旧 Canvas 入口；保留 CPU 自动接管与硬解失败后的 copy/software 解码。默认优先当前输出 GPU 对应的直接硬解。Intel VAAPI 的 DRM FD 隔离修复通过 producer 检查，强制 Intel 消费、NVIDIA 桌面呈现归入非阻塞的系统兼容性边界，不能作为纯 Intel 全链路证明；详见 [Intel 调查记录](../performance/linux-intel-direct-investigation-2026-10-27.md)。CPU 4K60 性能下降为已接受取舍。
+
+2026-10-27 Windows 后续：GPU／CPU 同样接到共用 video，保留 ANGLE／D3D11 共享槽直接渲染、`glFinish` 和默认缩放。CPU 进一步复用 Mac 私有 MessagePort，像素由隔离宿主直达 preload，主进程继续认证、校验元数据及管理两帧信用额度；VideoFrame 复制输入，原生软件绘制不变。两平台共用通道代、时间线配对、退休顺序和故障边界；验收见 [Windows video 接入](../reviews/windows-video-integration-2026-10-27.md)及[私有 CPU 通道](../reviews/windows-cpu-private-frame-channel-2026-10-27.md)。以下早期差异表与实施顺序保留为决策时的记录，当前行为以播放合同为准。
 
 ## 能力与行为合同
 

@@ -16,7 +16,7 @@ const native = (gpu ? process.platform === 'win32' ? module.sharedTexture : modu
 const interop = gpu && process.platform === 'darwin' ? require(interopFile) as { publishSurface(channel: string, sequence: number, pointer: Buffer): void } : null
 let created = false, stopped = false, polling = false
 const cpuCredits = new Set<number>()
-const directCpuFrames = !gpu && process.platform === 'darwin'
+const directCpuFrames = !gpu && ['darwin', 'win32'].includes(process.platform)
 let cpuFramePort: { port: MessagePortMain; id: string } | undefined
 const detachCpuPort = (): void => { const previous = cpuFramePort; cpuFramePort = undefined; previous?.port.close() }
 const announced = new Map<number, number>()
@@ -52,7 +52,9 @@ const poll = (): void => {
       if (directCpuFrames) {
         const owner = cpuFramePort!
         const pixels = frame.pixels; delete frame.pixels; frame.cpuChannelId = owner.id
+        if (process.env.JAVDEX_PLAYBACK_DIAGNOSTICS === '1') frame.cpuPostStartUs = Number(process.hrtime.bigint()) / 1000
         postCpuMessage({ cpuChannelId: owner.id, sequence: frame.sequence, timeline: frame.timeline!, pixels: pixels! })
+        if (frame.cpuPostStartUs !== undefined) frame.cpuPostDoneUs = Number(process.hrtime.bigint()) / 1000
       }
       send({ type: 'frame', frame })
     }

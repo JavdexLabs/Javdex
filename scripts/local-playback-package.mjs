@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto'
 import path from 'node:path'
 import { electronBuilderArchName } from './packaging-runtime.mjs'
 import { inspectWindowsPlaybackBinary } from './playback-runtime.mjs'
+import { verifyWindowsAngleRuntime, windowsAngleBinaries, windowsAngleMetadata } from './windows-angle-runtime.mjs'
 
 const digest = file => createHash('sha256').update(readFileSync(file)).digest('hex')
 
@@ -27,7 +28,11 @@ export function verifyLocalPlaybackRuntime(context, { environment = process.env 
   assert.equal(byName.size, candidates.length, 'Ambiguous local playback DLL names')
   const archName = electronBuilderArchName(context.arch)
   const selected = new Set()
-  const queue = [addon, interop]
+  // Dynamic EGL loads do not appear in the addon's PE import table.
+  const angle = existsSync(path.join(directory, 'windows-angle.json'))
+  if (Number(context.packager.info.framework.version.split('.')[0]) >= 44) assert.ok(angle, 'Private Windows ANGLE is missing; rebuild the playback runtime')
+  if (angle) verifyWindowsAngleRuntime(directory, archName)
+  const queue = [addon, interop, ...(angle ? windowsAngleBinaries.map(name => path.join(directory, name)) : [])]
   while (queue.length) {
     const file = queue.shift()
     if (selected.has(file)) continue
@@ -38,6 +43,7 @@ export function verifyLocalPlaybackRuntime(context, { environment = process.env 
       if (byName.has(name)) queue.push(byName.get(name))
     }
   }
+  if (angle) for (const name of windowsAngleMetadata) selected.add(path.join(directory, name))
   return { directory, archName, electronVersion: context.packager.info.framework.version,
     files: Object.fromEntries([...selected].map(file => [path.basename(file), digest(file)])) }
 }
@@ -58,6 +64,6 @@ export function stageLocalPlaybackRuntime(context, options) {
   writeFileSync(path.join(destination, 'local-runtime.json'), JSON.stringify(manifest, null, 2) + '\n')
   writeFileSync(path.join(destination, 'LOCAL-DEVELOPMENT.txt'),
     'Local development playback build. This is not an audited release runtime. Public distributions require JAVDEX_PLAYBACK_RUNTIME_DIR and its corresponding source materials.\n')
-  console.log(`Staged local development playback: win32/${input.archName}, ${Object.keys(input.files).length} binaries`)
+  console.log(`Staged local development playback: win32/${input.archName}, ${Object.keys(input.files).length} files`)
   return { directory: destination, manifest }
 }

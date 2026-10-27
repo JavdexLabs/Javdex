@@ -12,6 +12,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { playbackBuildFingerprint, playbackMpvRenderFenceFix, playbackMpvHwdownloadTiming, playbackMpvAngleDeviceQueryFix, playbackLinuxAssDependency, playbackLinuxVaapiRenderDependency, playbackLinuxDmabufGlDependency, playbackPkgConfigEnvironment, playbackSourceNativePlan, playbackSourcePlan, playbackWindowsExportNames, playbackWindowsSourceEnvironment, stageWindowsStaticZlib, staticPlaybackDependencies, verifyPlaybackSource } from './playback-source-build.mjs'
 import { playbackFileSha256, validatePlaybackRuntime } from './playback-runtime.mjs'
+import { stageWindowsAngleRuntime } from './windows-angle-runtime.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'), require = createRequire(import.meta.url)
 const software = process.argv.includes('--linux-software')
@@ -73,7 +74,7 @@ const recipeFiles = ['build/playback-sources.json', 'scripts/build-playback-runt
   'package.json', 'package-lock.json', 'LICENSE', 'NOTICE', 'LICENSES/Javdex-MIT.txt', 'LICENSES/node-gyp-MIT.txt',
   ...readdirSync(native).filter(name => /\.(cpp|mm|h)$|^CMakeLists.txt$/.test(name)).map(name => 'apps/desktop/src/main/player/native/' + name)]
 if (platform === 'win32') {
-  recipeFiles.push('build/angle-runtime.json')
+  recipeFiles.push('build/windows-angle-runtime.json', 'scripts/windows-angle-runtime.mjs')
   const headers = path.join(native, 'vendor/angle')
   for (const file of readdirSync(headers, { recursive: true, withFileTypes: true }).filter(entry => entry.isFile())) {
     const parent = file.parentPath ?? file.path
@@ -145,7 +146,7 @@ const patches = []
 if (platform === 'win32') {
   const headers = path.join(root, 'apps/desktop/src/main/player/native/vendor/angle')
   const pin = JSON.parse(readFileSync(path.join(headers, 'provenance.json')))
-  assert.equal(pin.revision, JSON.parse(readFileSync(path.join(root, 'build/angle-runtime.json'))).angleRevision)
+  assert.equal(pin.revision, JSON.parse(readFileSync(path.join(root, 'build/windows-angle-runtime.json'))).angleRevision)
   for (const [name, sha256] of Object.entries(pin.sha256)) assert.equal(playbackFileSha256(path.join(headers, name)), sha256, 'ANGLE header provenance mismatch')
   cpSync(path.join(headers, 'include'), path.join(prefix, 'include'), { recursive: true })
   // Meson probes must see the same pinned EGL declarations as the adapter.
@@ -315,6 +316,17 @@ if (platform === 'darwin') {
 mkdirSync(path.join(staged, 'sources')); mkdirSync(path.join(staged, 'licenses'))
 cpSync(path.join(prefix, 'include/mpv'), path.join(staged, 'sources/mpv'), { recursive: true })
 const sourceDelivery = path.join(buildRoot, 'source-delivery'); mkdirSync(sourceDelivery)
+const windowsAngleComponents = []
+if (platform === 'win32') {
+  const pin = JSON.parse(readFileSync(path.join(root, 'build/windows-angle-runtime.json')))
+  await stageWindowsAngleRuntime(staged, arch)
+  const material = path.join(buildRoot, 'angle-source-delivery'); mkdirSync(material)
+  for (const input of [pin.source, pin.supplierSource]) cpSync(await download({ ...input, id: 'windows-angle-source' }), path.join(material, input.filename))
+  cpSync(path.join(root, 'build/windows-angle-runtime.json'), path.join(material, 'provenance.json'))
+  run('tar', ['-czf', path.join(staged, 'sources/windows-angle-sources.tar.gz'), '-C', material, '.'])
+  windowsAngleComponents.push({ name: 'windows-angle', version: pin.angleRevision, license: 'BSD-3-Clause AND bundled upstream notices',
+    binaries: pin.binaries, licenseFile: 'ANGLE-LICENSE.txt', sourceArchive: 'sources/windows-angle-sources.tar.gz', buildRecipe: 'build.json' })
+}
 const notices = []
 const sdkNotices = []
 for (const notice of lock.notices.filter(item => !item.platforms || item.platforms.includes(platform))) {
@@ -359,7 +371,7 @@ function inventory(directory, relative = '') {
 }
 inventory(staged)
 writeFileSync(path.join(staged, 'runtime.json'), JSON.stringify({ schemaVersion: 1, playbackHostVersion: 1, hashStage: 'pre-sign', platform, arch, electronVersion,
-  mpvVersion: lock.sources.find(item => item.id === 'mpv').version, files, components: [
+  mpvVersion: lock.sources.find(item => item.id === 'mpv').version, files, components: [...windowsAngleComponents,
     { name: 'mpv', version: lock.sources.find(item => item.id === 'mpv').version, license: 'GPL-3.0-or-later', binaries: libraries,
       licenseFile: 'licenses/libmpv.txt', sourceArchive: 'sources/libmpv-sources.tar', buildRecipe: 'build.json' },
     { name: 'javdex-native', version: require('../package.json').version, license: 'GPL-3.0-or-later', binaries: nativeEntries,

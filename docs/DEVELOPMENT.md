@@ -105,7 +105,7 @@ npm run dist:linux           # Linux 目标
 
 目标开关和架构位于 [packaging.targets.json](../build/packaging.targets.json)，基础构建配置位于 [electron-builder.config.mjs](../electron-builder.config.mjs)。本地通常选择对应平台命令；不带平台参数的 `npm run dist` 会尝试全部启用目标，不会自动筛选当前操作系统。请在目标要求的平台构建，指定 `dist:mac` 等命令不会提供跨平台编译环境。安装包输出到 `dist/`。
 
-Windows 本地使用内置播放时，先完成 `playback:native:build`，再运行 `dist:win:local`。该入口显式检查 `out/native-playback/playback.node` 的 PE 架构及普通／延迟 DLL 导入闭包，只复制实际依赖，不复制旧 addon、测试程序或开发目录；缺少依赖时停止打包。包内 `local-runtime.json` 标记本地开发用途及文件摘要。正式分发继续使用 `JAVDEX_PLAYBACK_RUNTIME_DIR` 的审核清单与对应源码材料；本地入口与该配置互斥，打包不执行发布。
+Windows 本地使用内置播放时，先完成 `playback:native:build`，再运行 `dist:win:local`。该入口显式检查 `out/native-playback/playback.node` 的 PE 架构及普通／延迟 DLL 导入闭包，只复制实际依赖，不复制旧 addon、测试程序或开发目录；缺少依赖时停止打包。包内 `local-runtime.json` 标记本地开发用途及文件摘要。正式分发继续使用 `JAVDEX_PLAYBACK_RUNTIME_DIR` 的审核清单与对应源码材料；本地入口与该配置互斥，打包不执行发布。 Windows GPU 还需私有 ANGLE（Electron 44 不再附带 DLL），`playback:native:build` 按 `build/windows-angle-runtime.json` 下载或复用固定供应归档并验证 SHA-256；可用 `JAVDEX_WINDOWS_ANGLE_ARCHIVE` 指向已下载的同一归档。两个 DLL、完整许可与来源元数据随本地播放库复制，不能只复制 `playback.node`。正式 Windows 源码构建同样纳入这些动态依赖和匹配源码材料；Windows 生产端 ABI 与 Linux ANGLE 配置分开校验。
 
 Linux x64 普通打包与 Release 使用 GPU／CPU 双 helper 及匹配 Electron 的 ANGLE，构建和来源校验见 [Linux 播放](LINUX_COMPATIBLE_PLAYBACK.md)。[Linux portable phase 1](LINUX_PORTABLE_PHASE1.md) 仅保留为独立历史测试入口，不代替当前发行合同。
 

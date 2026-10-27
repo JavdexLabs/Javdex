@@ -66,4 +66,4 @@ Linux x64 文本 GPU 新增固定 llama.cpp b11435 官方发行及 CUDA 12.8 运
 
 ## Windows ANGLE 播放接入
 
-Windows 播放宿主按绝对路径使用当前 Electron 随附的 `libEGL.dll` 和 `libGLESv2.dll`，不另外分发不同版本的 ANGLE。编译所需 EGL／KHR ABI 头文件固定于 `c5bf49e78850a5335a8fa2a7bfb53b559fbfc927`；每个文件保留上游版权／SPDX，包含 ANGLE BSD 和 Khronos Apache-2.0 声明。来源、逐文件摘要及完整许可证位于 `apps/desktop/src/main/player/native/vendor/angle/`，并进入 Windows 构建指纹和对应源码归档。固定 libmpv 额外保留 client 扩展查询兼容补丁及可选回读计时补丁，不修改其许可。
+Electron 44 不再分发 EGL／GLES DLL。Windows 播放宿主从私有播放目录按绝对路径加载独立固定的 ANGLE：来源为官方 Electron 43.8.1 的两个 DLL，不运行旧 Electron。`build/windows-angle-runtime.json` 记录官方供应 ZIP、SHA-256、ANGLE 修订和上游／供应方源码摘要；完整上游及第三方许可保留在运行库的 `ANGLE-LICENSE.txt`。消费端仍使用 Electron 44.9.3 内置 ANGLE，双方通过 D3D11 原生纹理互通。编译所需 EGL／KHR ABI 头文件固定于 `c5bf49e78850a5335a8fa2a7bfb53b559fbfc927`；每个文件保留上游版权／SPDX，包含 ANGLE BSD 和 Khronos Apache-2.0 声明。来源、逐文件摘要及完整许可证位于 `apps/desktop/src/main/player/native/vendor/angle/`，并进入 Windows 构建指纹和对应源码归档。固定 libmpv 额外保留 client 扩展查询兼容补丁及可选回读计时补丁，不修改其许可。

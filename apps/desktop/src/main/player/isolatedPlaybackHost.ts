@@ -25,7 +25,7 @@ export function createIsolatedPlaybackHost(runtime: string, mode: 'gpu' | 'cpu')
   let wakeup: (() => void) | null = null, heartbeat: ReturnType<typeof setInterval> | undefined
   let lastHeartbeat = 0, channel = '', interop: Interop | undefined
   let consumerGpu: unknown
-  const directCpuFrames = process.platform === 'darwin' && mode === 'cpu'
+  const directCpuFrames = ['darwin', 'win32'].includes(process.platform) && mode === 'cpu'
   let cpuDisplay: { contents: WebContents; binding: CpuFrameBinding; cpuChannelId: string; connected: boolean } | undefined
   let cpuPortClosedAt: number | undefined
   const connectCpuPort = (): void => {

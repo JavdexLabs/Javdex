@@ -25,11 +25,12 @@ for (const fixture of fixtures) {
 }
 const directory = createAcceptanceDirectory('hdr-'), targets = seedAcceptanceCatalog(directory, fixtures.map(f => f.file))
 const packaged = process.env.JAVDEX_PLAYBACK_ACCEPTANCE_EXECUTABLE
+const developmentApp = process.env.JAVDEX_PLAYBACK_ACCEPTANCE_APP_PATH ?? '.'
 const resources = packaged ? process.platform === 'darwin' ? path.resolve(path.dirname(packaged), '../Resources') : path.join(path.dirname(path.resolve(packaged)), 'resources') : undefined
 const nativeDirectory = process.platform === 'linux' ? resources
   ? path.join(resources, mode === 'cpu' ? 'linux-software-playback' : 'linux-texture-experimental')
-  : mode === 'cpu' ? path.resolve('out/linux-software-runtime/linux-x64') : path.resolve('out/native-playback')
-  : resources ? path.join(resources, 'native-playback') : path.resolve('out/native-playback')
+  : mode === 'cpu' ? path.resolve(developmentApp, 'out/linux-software-runtime/linux-x64') : path.resolve(developmentApp, 'out/native-playback')
+  : resources ? path.join(resources, 'native-playback') : path.resolve(developmentApp, 'out/native-playback')
 const entry = process.platform === 'linux' ? mode === 'cpu' ? 'playback-software-helper' : 'playback-dmabuf-helper' : 'playback.node'
 const library = fs.readdirSync(nativeDirectory).find(name => /^libmpv.*\.(?:dll|dylib|so(?:\.\d+)*)$/.test(name))
 assert(library, 'missing libmpv identity for the tested host')
@@ -53,7 +54,7 @@ try {
   const page = await application.firstWindow()
   await page.waitForFunction(() => window.api?.playback && document.querySelector('nav'))
   report.consumer = await page.evaluate(() => window.api.playback.sharedTextureConsumer)
-  assert.equal(report.consumer, process.platform === 'win32' ? 'canvas' : 'video')
+  assert.equal(report.consumer, 'video')
   await prepareNonRecordingPlayback(page)
   await page.evaluate(mode => window.api.thisComputer.update({ playbackRenderMode: mode === 'recovery' ? 'auto' : mode }), mode)
   report.environment = await application.evaluate(async ({ app, screen }) => ({

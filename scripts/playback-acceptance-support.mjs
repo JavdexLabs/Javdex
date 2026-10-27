@@ -40,11 +40,16 @@ export function seedAcceptanceCatalog(directory, media) {
 export async function launchAcceptance(directory, logName = 'application.log', args = []) {
   assert.ok(['darwin', 'win32', 'linux'].includes(process.platform), 'unsupported desktop acceptance host')
   assert.match(logName, /^[a-z-]+\.log$/)
+  assert.ok(process.platform !== 'darwin' || !process.env.JAVDEX_PLAYBACK_ACCEPTANCE_APP_PATH,
+    'A development application override is not supported by the isolated macOS acceptance bundle')
   if (process.platform !== 'darwin' || process.env.JAVDEX_PLAYBACK_ACCEPTANCE_EXECUTABLE) {
     if (process.platform === 'linux' && !args.some(v => /^--javdex-(?:x11|wayland)$/.test(v))) args = [...args, process.env.WAYLAND_DISPLAY && !process.env.DISPLAY ? '--javdex-wayland' : '--javdex-x11']
     const env = { ...process.env, JAVDEX_TEST_USER_DATA: directory }
     delete env.ELECTRON_RUN_AS_NODE
     const packaged = process.env.JAVDEX_PLAYBACK_ACCEPTANCE_EXECUTABLE
+    const developmentApp = process.env.JAVDEX_PLAYBACK_ACCEPTANCE_APP_PATH
+    assert(!(packaged && developmentApp), 'Select one acceptance application source')
+    if (developmentApp) assert.ok(path.isAbsolute(developmentApp) && fs.statSync(path.join(developmentApp, 'package.json')).isFile(), 'development acceptance application must exist')
     let cwd = root
     if (packaged) {
       assert.ok(path.isAbsolute(packaged) && fs.statSync(packaged).isFile(), 'packaged acceptance executable must exist')
@@ -55,7 +60,7 @@ export async function launchAcceptance(directory, logName = 'application.log', a
       fs.mkdirSync(cwd, { recursive: true })
     }
     const application = await _electron.launch({ executablePath: packaged ?? electron,
-      args: packaged ? args : [root, ...args], cwd, env, timeout: 30000 })
+      args: packaged ? args : [developmentApp ?? root, ...args], cwd, env, timeout: 30000 })
     acceptanceProcesses.set(application, application.process())
     application.process().stderr.on('data', chunk => fs.appendFileSync(path.join(output, logName), chunk))
     return application

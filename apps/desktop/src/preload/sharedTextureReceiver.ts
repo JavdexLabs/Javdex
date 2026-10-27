@@ -1,6 +1,6 @@
 import { ipcRenderer, sharedTexture, type ReceivedSharedTextureData } from 'electron'
 import { createCpuFramePortReceiver, type CpuPixelsPort } from './cpuFramePort'
-import { createSharedTextureVideo, type SharedVideoSurface } from './sharedTextureVideo'
+import { createSharedTextureVideo, type SharedVideoSurface, type CpuVideoTimings } from './sharedTextureVideo'
 
 interface SurfaceBinding { surfaceToken: string; bindingToken: string }
 interface FrameMetadata extends SurfaceBinding { cpuChannelId?: string; sequence: number; targetTime?: number; timeline?: number; diagnosePixels?: boolean; selfTest?: 'solid-v1' }
@@ -11,34 +11,19 @@ interface ReceivedVideoFrame {
   allocationSize(options: { format: 'RGBA' }): number
   copyTo(data: Uint8Array, options: { format: 'RGBA' }): Promise<Array<{ offset: number; stride: number }>>
 }
-interface CanvasContext {
-  globalCompositeOperation: 'copy'
-  createImageData(width: number, height: number): { data: Uint8ClampedArray }
-  putImageData(image: { data: Uint8ClampedArray }, x: number, y: number): void
-  drawImage(frame: ReceivedVideoFrame, x: number, y: number): void
-  clearRect(x: number, y: number, width: number, height: number): void
-  getImageData(x: number, y: number, width: number, height: number): { data: Uint8ClampedArray }
-}
 interface PlaybackDisplay {
   isConnected: boolean
   dataset: { playbackSurface?: string }
   getBoundingClientRect(): { width: number; height: number }
 }
-interface PlaybackCanvas extends PlaybackDisplay {
-  width: number
-  height: number
-  getContext(kind: '2d', options: { alpha: boolean; colorSpace: 'srgb'; willReadFrequently?: boolean }): CanvasContext | null
-}
-declare const document: { querySelectorAll(selector: string): Iterable<PlaybackCanvas | PlaybackDisplay & SharedVideoSurface> }
+declare const document: { querySelectorAll(selector: string): Iterable<PlaybackDisplay & SharedVideoSurface> }
+
 declare const getComputedStyle: (surface: PlaybackDisplay) => { display: string; visibility: string; opacity: string }
 declare const crypto: { randomUUID(): string }
 interface MountedSurface extends SurfaceBinding {
   element: PlaybackDisplay
-  canvas?: PlaybackCanvas
-  context?: CanvasContext
-  video?: ReturnType<typeof createSharedTextureVideo>
+  video: ReturnType<typeof createSharedTextureVideo>
   sequence: number
-  image?: { data: Uint8ClampedArray }
   timeline: number
   clockOffset?: number
   bestRtt: number
@@ -94,15 +79,9 @@ export function installSharedTextureReceiver(): (surfaceToken: string) => () => 
     cancel(target)
     try {
       cpuFrames.dispose(target)
-      target.video?.dispose()
-      if (target.canvas) target.context?.clearRect(0, 0, target.canvas.width, target.canvas.height)
+      target.video.dispose()
     }
     finally {
-      // Reset the backing store on direct rebind as well as effect cleanup.
-      // clearRect alone can retain the last VideoFrame in a deferred display
-      // list. Actual ticket release still waits for its consumer GPU callback.
-      if (target.canvas) { target.canvas.width = 0; target.canvas.height = 0 }
-      target.image = undefined
       ipcRenderer.send('playback:shared-texture-removed', {
         surfaceToken: target.surfaceToken, bindingToken: target.bindingToken
       })
@@ -118,7 +97,7 @@ export function installSharedTextureReceiver(): (surfaceToken: string) => () => 
     if (!target || !v || v.surfaceToken !== target.surfaceToken || v.bindingToken !== target.bindingToken
       || !Number.isSafeInteger(v.timeline) || v.timeline <= target.timeline) return
     target.timeline = v.timeline; cancel(target)
-    try { target.video?.flush(); cpuFrames.flush() }
+    try { target.video.flush(); cpuFrames.flush() }
     catch { ipcRenderer.send('playback:shared-texture-failed', { surfaceToken: target.surfaceToken, bindingToken: target.bindingToken }) }
   })
   const current = (target: MountedSurface, metadata: FrameMetadata): boolean => mounted === target
@@ -158,20 +137,13 @@ export function installSharedTextureReceiver(): (surfaceToken: string) => () => 
       frame = importedSharedTexture.getVideoFrame() as ReceivedVideoFrame
       if (!frame.displayWidth || !frame.displayHeight) throw new Error('Empty video frame')
       if (metadata.selfTest === 'solid-v1') {
-        // Exercise the actual mounted consumer. Video probes gate film writes
-        // and reset the stream; Canvas probes clear synchronously before paint.
+        // Exercise the actual mounted video; probes gate film writes and reset
+        // the hidden test stream before normal media resumes.
         let samples: number[] = []
         let probeFailure: string | undefined
         try {
           if (frame.displayWidth !== 640 || frame.displayHeight !== 360) throw new Error('Invalid self-test dimensions')
-          if (target.video) samples = await target.video.selfTest(frame, () => mounted === target && target.timeline === epoch && target.element.isConnected)
-          else {
-            target.canvas!.width = 640; target.canvas!.height = 360
-            target.context!.drawImage(frame, 0, 0)
-            const pixels = target.context!.getImageData(0, 0, 640, 360).data
-            for (const [x, y] of [[80, 45], [559, 45], [320, 180], [80, 314], [559, 314]])
-              samples.push(...pixels.slice((y * 640 + x) * 4, (y * 640 + x) * 4 + 4))
-          }
+          samples = await target.video.selfTest(frame, () => mounted === target && target.timeline === epoch && target.element.isConnected)
         } catch (error) {
           samples = []
           const message = error instanceof Error ? error.message : ''
@@ -179,7 +151,6 @@ export function installSharedTextureReceiver(): (surfaceToken: string) => () => 
             : message === 'Invalid video diagnostic dimensions' ? 'dimensions'
               : message === 'Video frame observation cancelled' ? 'cancelled' : 'consumer'
         }
-        finally { if (!target.video) target.context?.clearRect(0, 0, 640, 360) }
         if (mounted !== target || target.timeline !== epoch) return
         target.sequence = Math.max(target.sequence, metadata.sequence)
         ipcRenderer.send('playback:shared-texture-self-test', { surfaceToken: target.surfaceToken,
@@ -189,16 +160,8 @@ export function installSharedTextureReceiver(): (surfaceToken: string) => () => 
       const arrivedAt = performance.now()
       const timed = typeof metadata.targetTime === 'number' && metadata.targetTime > 0
       if (!await waitForTarget(target, metadata, arrivedAt)) return
-      // Changing intrinsic size clears the context, so do it only on resize.
       const submissionStarted = performance.now()
-      if (target.video) {
-        if (!await target.video.submit(frame, () => current(target, metadata))) return
-      } else {
-        if (target.canvas!.width !== frame.displayWidth) target.canvas!.width = frame.displayWidth
-        if (target.canvas!.height !== frame.displayHeight) target.canvas!.height = frame.displayHeight
-        target.context!.globalCompositeOperation = 'copy'
-        target.context!.drawImage(frame, 0, 0)
-      }
+      if (!await target.video.submit(frame, () => current(target, metadata))) return
       const submissionCompleted = performance.now()
       // Commit the submission before an opt-in asynchronous readback. A newer
       // frame/epoch may arrive while copyTo is pending; it must not be undone.
@@ -216,7 +179,7 @@ export function installSharedTextureReceiver(): (surfaceToken: string) => () => 
       if (metadata.diagnosePixels === true && frame.displayWidth === 640 && frame.displayHeight === 360) {
         const result: Record<string, unknown> = { sequence: metadata.sequence, readbackPerturbsRendering: true }
         try {
-          const data = target.video ? target.video.pixels(640, 360) : target.context!.getImageData(0, 0, 640, 360).data
+          const data = target.video.pixels(640, 360)
           result.canvas = summarizePixels(data, 640, 360, 640 * 4)
           const rect = target.element.getBoundingClientRect(), style = getComputedStyle(target.element)
           result.geometry = { width: rect.width, height: rect.height, connected: target.element.isConnected,
@@ -245,11 +208,10 @@ export function installSharedTextureReceiver(): (surfaceToken: string) => () => 
   const receiveCpu = async (value: unknown): Promise<void> => {
     const target = mounted
     const epoch = target?.timeline
-    const v = value as FrameMetadata & { width: number; height: number; stride: number; size: number; pixels: Uint8Array; renderStartUs?: number }
+    const v = value as FrameMetadata & { width: number; height: number; stride: number; size: number; pixels: Uint8Array; renderStartUs?: number; cpuPostStartUs?: number; cpuPostDoneUs?: number }
     if (!target || !v || v.surfaceToken !== target.surfaceToken || v.bindingToken !== target.bindingToken
       || !Number.isSafeInteger(v.sequence) || v.sequence <= target.sequence) return
     try {
-      if (!target.video && (!target.canvas || !target.context)) throw new Error('CPU display unavailable')
       const arrivedAt = performance.now()
       if (v.targetTime !== undefined && (!Number.isFinite(v.targetTime) || v.targetTime < 0)) throw new Error('Invalid CPU target')
       if (v.targetTime && !await waitForTarget(target, v, arrivedAt)) return
@@ -259,36 +221,30 @@ export function installSharedTextureReceiver(): (surfaceToken: string) => () => 
         || v.stride < v.width * 4 || v.stride > 32768 || v.size !== v.stride * v.height
         || v.size > 256 * 1024 * 1024 || !(v.pixels instanceof Uint8Array) || v.pixels.byteLength !== v.size)
         throw new Error('Invalid CPU pixels')
-      let submissionStarted: number
-      if (target.video) {
-        submissionStarted = performance.now()
-        if (v.renderStartUs !== undefined && (!Number.isFinite(v.renderStartUs) || v.renderStartUs < 0)) throw new Error('Invalid CPU render timestamp')
-        // Keep VideoFrame in the producer's monotonic epoch, like GPU frames.
-        // Only the delivery wait maps that epoch to renderer performance.now().
-        const timestamp = Math.round(v.targetTime ? v.targetTime * 1000
-          : v.renderStartUs ?? (submissionStarted - (target.clockOffset ?? 0)) * 1000)
-        if (!await target.video.submitCpu({ pixels: v.pixels, width: v.width, height: v.height, stride: v.stride, timestamp, copyInput: process.platform === 'darwin' && !!v.cpuChannelId },
-          () => current(target, v))) return
-      } else {
-        if (target.canvas!.width !== v.width) { target.canvas!.width = v.width; target.image = undefined }
-        if (target.canvas!.height !== v.height) { target.canvas!.height = v.height; target.image = undefined }
-        if (!target.image || target.image.data.length !== v.width * v.height * 4) target.image = target.context!.createImageData(v.width, v.height)
-        const image = target.image
-        for (let y = 0; y < v.height; y++) image.data.set(v.pixels.subarray(y * v.stride, y * v.stride + v.width * 4), y * v.width * 4)
-        submissionStarted = performance.now()
-        target.context!.putImageData(image, 0, 0)
-      }
+      const submissionStarted = performance.now()
+      if (v.renderStartUs !== undefined && (!Number.isFinite(v.renderStartUs) || v.renderStartUs < 0)) throw new Error('Invalid CPU render timestamp')
+      // Keep the producer's monotonic epoch; only delivery waits use page time.
+      const timestamp = Math.round(v.targetTime ? v.targetTime * 1000
+        : v.renderStartUs ?? (submissionStarted - (target.clockOffset ?? 0)) * 1000)
+      const diagnostics = process.platform === 'win32' && process.env?.JAVDEX_PLAYBACK_DIAGNOSTICS === '1' && !!v.cpuChannelId
+      let stages: CpuVideoTimings | undefined
+      if (!await target.video.submitCpu({ pixels: v.pixels, width: v.width, height: v.height, stride: v.stride, timestamp, copyInput: !!v.cpuChannelId,
+        ...(diagnostics ? { diagnostics: (value: CpuVideoTimings) => { stages = value } } : {}) },
+        () => current(target, v))) return
       const submissionCompleted = performance.now()
       target.sequence = v.sequence
       ipcRenderer.send('playback:shared-texture-submitted', { surfaceToken: target.surfaceToken, bindingToken: target.bindingToken, sequence: v.sequence,
-        timeline: v.timeline ?? 0, ...(v.targetTime && target.clockOffset !== undefined ? { readyTime: arrivedAt - target.clockOffset,
+        timeline: v.timeline ?? 0, ...(diagnostics && stages && target.clockOffset !== undefined && Number.isFinite(v.cpuPostStartUs) && Number.isFinite(v.cpuPostDoneUs)
+          ? { cpuTimings: { ...stages, postMs: (v.cpuPostDoneUs! - v.cpuPostStartUs!) / 1000,
+            deliveryMs: arrivedAt - target.clockOffset - v.cpuPostDoneUs! / 1000 } } : {}),
+        ...(v.targetTime && target.clockOffset !== undefined ? { readyTime: arrivedAt - target.clockOffset,
           submissionStartedTime: submissionStarted - target.clockOffset, submittedTime: submissionCompleted - target.clockOffset } : {}) })
     } catch {
       if (target === mounted && target.timeline === epoch) ipcRenderer.send('playback:shared-texture-failed', {
         surfaceToken: target.surfaceToken, bindingToken: target.bindingToken
       })
     } finally {
-      // The pixels were copied by main; video owns its transferred copy.
+      // CPU pixels are private copies; video never leases the producer's pool.
       // Consumption and discard both return CPU credit, not GPU completion.
       ipcRenderer.send('playback:cpu-frame-released', { surfaceToken: target.surfaceToken, bindingToken: target.bindingToken, sequence: v.sequence })
     }
@@ -299,7 +255,7 @@ export function installSharedTextureReceiver(): (surfaceToken: string) => () => 
     release: (binding, sequence) => ipcRenderer.send('playback:cpu-frame-released', { ...binding, sequence }),
     fail: binding => ipcRenderer.send('playback:shared-texture-failed', binding)
   })
-  if (process.platform === 'darwin' && process.isMainFrame) {
+  if (['darwin', 'win32'].includes(process.platform) && process.isMainFrame) {
     ipcRenderer.on('playback:cpu-frame-port', (event, value: unknown) => cpuFrames.attach(value, event.ports?.[0] as unknown as CpuPixelsPort))
   }
   ipcRenderer.on('playback:cpu-frame', (_event, value: unknown) => { if (!cpuFrames.frame(value)) void receiveCpu(value) })
@@ -351,35 +307,23 @@ export function installSharedTextureReceiver(): (surfaceToken: string) => () => 
     // Ready also identifies a failed binding, so main can authenticate failure
     // without trusting an arbitrary error string from page code.
     ipcRenderer.send('playback:shared-texture-ready', binding)
-    let canvas: PlaybackCanvas | undefined
-    let context: CanvasContext | null | undefined
-    let element: PlaybackDisplay | undefined
-    let video: MountedSurface['video']
+    let element: PlaybackDisplay & SharedVideoSurface | undefined
+    let video: MountedSurface['video'] | undefined
     try {
-      const surface = [...document.querySelectorAll('[data-playback-surface]')]
+      element = [...document.querySelectorAll('[data-playback-surface]')]
         .find(element => element.dataset.playbackSurface === surfaceToken)
-      element = surface
-      if (['darwin', 'linux'].includes(process.platform) && process.isMainFrame && (supported || surfaceToken.startsWith('cpu:')) && surface && 'videoWidth' in surface) {
-        video = createSharedTextureVideo(surface, () => {
+      if (['darwin', 'linux', 'win32'].includes(process.platform) && process.isMainFrame
+        && (supported || surfaceToken.startsWith('cpu:')) && element && 'videoWidth' in element) {
+        video = createSharedTextureVideo(element, () => {
           if (mounted?.bindingToken === binding.bindingToken) ipcRenderer.send('playback:shared-texture-failed', binding)
         })
-      } else if (surface && 'getContext' in surface && process.platform === 'win32') {
-        canvas = surface
-        // Make the browser default explicit; this does not convert untagged
-        // producer bytes from BT.709 transfer or certify GPU color management.
-        // CPU recovery gets a fresh canvas from React and requests software
-        // backing. Reusing an accelerated 2D context after a GPU exit can accept
-        // putImageData yet keep presenting a lost GPU resource.
-        context = canvas?.getContext('2d', { alpha: false, colorSpace: 'srgb',
-          ...(surfaceToken.startsWith('cpu:') ? { willReadFrequently: true } : {}) })
       }
-    } catch { /* Treat context creation failure like an unavailable receiver. */ }
-    if ((!supported && !(surfaceToken.startsWith('cpu:') && ['linux', 'win32', 'darwin'].includes(process.platform) && process.isMainFrame)) || !element || (!video && (!canvas || !context))) {
-      video?.dispose()
+    } catch { /* Treat video creation failure like an unavailable receiver. */ }
+    if (!element || !video) {
       ipcRenderer.send('playback:shared-texture-failed', binding)
       return () => {}
     }
-    const target: MountedSurface = { ...binding, element, canvas, context: context ?? undefined, video, sequence: 0, timeline: 0, bestRtt: Infinity, clockSamples: 0, clockRequestedAt: 0, cancellations: new Set() }
+    const target: MountedSurface = { ...binding, element, video, sequence: 0, timeline: 0, bestRtt: Infinity, clockSamples: 0, clockRequestedAt: 0, cancellations: new Set() }
     mounted = target
     requestClock(target)
     return () => {

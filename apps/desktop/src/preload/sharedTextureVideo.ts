@@ -1,6 +1,7 @@
 // Structural DOM types keep the sandbox preload independent of the full DOM lib.
 export interface VideoFrameSource { displayWidth: number; displayHeight: number; clone(): VideoFrameSource; close(): void }
-export interface CpuVideoSource { pixels: Uint8Array; width: number; height: number; stride: number; timestamp: number; copyInput?: boolean }
+export interface CpuVideoTimings { frameConstructMs: number; writerWaitMs: number; presentWaitMs: number }
+export interface CpuVideoSource { pixels: Uint8Array; width: number; height: number; stride: number; timestamp: number; copyInput?: boolean; diagnostics?: (timings: CpuVideoTimings) => void }
 declare const VideoFrame: new (pixels: Uint8Array, options: {
   format: 'RGBX'; codedWidth: number; codedHeight: number
   layout: Array<{ offset: number; stride: number }>; timestamp: number
@@ -101,7 +102,7 @@ export function createSharedTextureVideo(video: SharedVideoSurface, fail: () => 
   // discarded before that sink exists. Retry references to the same pixels only
   // until the first compositor observation, within the existing deadline.
   // Clones retain the import: this is not permission to reuse its native slot.
-  const writeObserved = async (frame: VideoFrameSource, current: () => boolean, timeoutMs: number): Promise<void> => {
+  const writeObserved = async (frame: VideoFrameSource, current: () => boolean, timeoutMs: number, timings?: CpuVideoTimings): Promise<void> => {
     const epoch = generation, owner = writer!, retry = !started
     const observed = observe(timeoutMs)
     let presented = false
@@ -113,8 +114,10 @@ export function createSharedTextureVideo(video: SharedVideoSurface, fail: () => 
         if (!active || generation !== epoch || !current()) throw new Error('Video frame observation cancelled')
         const reference = frame.clone()
         try {
+          const start = timings ? performance.now() : 0
           const written = owner.write(reference)
           await Promise.race([written, completion.then(() => written)])
+          if (timings) timings.writerWaitMs += performance.now() - start
         }
         finally { reference.close() }
         if (!retry) break
@@ -123,7 +126,9 @@ export function createSharedTextureVideo(video: SharedVideoSurface, fail: () => 
           await Promise.race([completion, new Promise<void>(resolve => { timer = setTimeout(resolve, 32) })])
         } finally { clearTimeout(timer) }
       } while (!presented)
+      const start = timings ? performance.now() : 0
       await completion
+      if (timings) timings.presentWaitMs += performance.now() - start
       if (active && generation === epoch && current()) started = true
     } finally { observed.cancel() }
   }
@@ -167,17 +172,21 @@ export function createSharedTextureVideo(video: SharedVideoSurface, fail: () => 
         // Chromium's transferred, padded RGBX path displays red/blue swapped
         // although Canvas readback is correct. Let VideoFrame normalize padded
         // rows by copying; tightly packed private IPC buffers remain transferable.
-        // Mac private-port input uses a copied VideoFrame: external backing
+        // Private-port input uses a copied VideoFrame: external backing
         // transfer increased the live video path's working set in paired runs.
         // Never transfer the producer's pool or a shared GPU allocation.
+        const timings = source.diagnostics ? { frameConstructMs: 0, writerWaitMs: 0, presentWaitMs: 0 } : undefined
+        const constructStart = timings ? performance.now() : 0
         const frame = new VideoFrame(source.pixels, {
           format: 'RGBX', codedWidth: source.width, codedHeight: source.height,
           layout: [{ offset: 0, stride: source.stride }], timestamp: source.timestamp,
           colorSpace: { primaries: 'bt709', transfer: 'iec61966-2-1', matrix: 'rgb', fullRange: true },
           ...(source.copyInput !== true && source.stride === source.width * 4 ? { transfer: [source.pixels.buffer as ArrayBuffer] } : {})
         })
+        if (timings) timings.frameConstructMs = performance.now() - constructStart
         try {
-          await writeObserved(frame, () => active && generation === epoch && current(), 5000)
+          await writeObserved(frame, () => active && generation === epoch && current(), 5000, timings)
+          if (timings) source.diagnostics?.(timings)
           return active && generation === epoch && current()
         } catch (reason) {
           if (!active || generation !== epoch || !current()) return false

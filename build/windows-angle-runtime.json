@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "provider": "electron",
+  "providerVersion": "43.8.1",
+  "angleRevision": "c5bf49e78850a5335a8fa2a7bfb53b559fbfc927",
+  "reason": "Private D3D11 producer ABI. Electron 44 embeds consumer ANGLE and no longer supplies DLLs. Producer and consumer exchange native D3D11 textures, not ANGLE objects.",
+  "checksumUrl": "https://github.com/electron/electron/releases/download/v43.8.1/SHASUMS256.txt",
+  "archives": {
+    "x64": {
+      "filename": "electron-v43.8.1-win32-x64.zip",
+      "sha256": "ce7eedcef94de0d12b9ba54d5244f5a323c00e17b5cdea2ef0e4f440e1a74c4c"
+    },
+    "arm64": {
+      "filename": "electron-v43.8.1-win32-arm64.zip",
+      "sha256": "b403d62c6b3fb655da2061489e8b6beff296c5e22d6a44edff8ef7f111e6d56c"
+    }
+  },
+  "binaries": [
+    "libEGL.dll",
+    "libGLESv2.dll"
+  ],
+  "source": {
+    "url": "https://codeload.github.com/google/angle/tar.gz/c5bf49e78850a5335a8fa2a7bfb53b559fbfc927",
+    "filename": "angle-c5bf49e78850a5335a8fa2a7bfb53b559fbfc927.tar.gz",
+    "bytes": 16913427,
+    "sha256": "5037dc53af3efde1dc9a7043be8b2d242d914afa39c95d270b9d58cb3c1d8dc6"
+  },
+  "supplierSource": {
+    "url": "https://codeload.github.com/electron/electron/tar.gz/refs/tags/v43.8.1",
+    "filename": "electron-43.8.1-source.tar.gz",
+    "bytes": 20884549,
+    "sha256": "e9c255208f8d61d2724321cd9875af0260ff0850a994709679ce5be150d76286"
+  }
+}

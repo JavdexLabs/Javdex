@@ -143,8 +143,10 @@ test('host heartbeat failure is bounded and leaves the main process responsive',
 test('CPU host returns copy credits only on consumer acknowledgement', t => {
   const f = fixture('cpu'); t.after(() => f.host.destroy())
   f.emit({ type: 'ready' })
-  f.emit({ type: 'frame', frame: { sequence: 1, width: 1, height: 1, stride: 64, size: 64, pixels: new Uint8Array(64) } })
-  assert.ok(Buffer.isBuffer(f.host.nextFrame()?.pixels))
+  f.host.connectCpuFramePort(f.contents, cpuBinding)
+  const { cpuChannelId } = f.deliveries[0].value as { cpuChannelId: string }
+  f.emit({ type: 'frame', frame: { sequence: 1, width: 1, height: 1, stride: 64, size: 64, cpuChannelId } })
+  assert.equal(f.host.nextFrame()?.sequence, 1)
   assert.equal(f.messages.some(m => m.type === 'release'), false)
   f.host.releaseFrame(1)
   assert.equal(f.messages.filter(m => m.type === 'release').length, 1)
@@ -169,45 +171,49 @@ for (const mode of ['gpu', 'cpu'] as const) test(`${mode}: sending to a closed u
 
 
 const cpuBinding = { surfaceToken: 'cpu:22222222-2222-4222-8222-222222222222', bindingToken: '33333333-3333-4333-8333-333333333333' }
-test('Mac CPU establishes one authenticated private channel and main receives only metadata', t => {
-  const f = fixture('cpu', undefined, 'darwin'); t.after(f.host.destroy)
-  assert.equal(f.host.directCpuFrames, true)
-  f.host.connectCpuFramePort(f.contents, cpuBinding); assert.equal(f.deliveries.length, 0)
-  f.emit({ type: 'ready' }); assert.equal(f.deliveries.length, 1)
-  f.host.connectCpuFramePort(f.contents, cpuBinding); assert.equal(f.deliveries.length, 1)
-  const auth = f.deliveries[0].value as typeof cpuBinding & { cpuChannelId: string }
-  assert.equal(auth.bindingToken, cpuBinding.bindingToken); assert.equal(f.transfers[0].length, 1)
-  f.emit({ type: 'frame', frame: { sequence: 1, width: 1, height: 1, stride: 64, size: 64, cpuChannelId: auth.cpuChannelId } })
-  assert.equal(f.host.nextFrame()?.pixels, undefined)
-  f.host.releaseFrame(1)
-  assert.ok(f.messages.some(m => m.type === 'release' && m.sequence === 1))
-  assert.equal(f.deliveries.length, 1, 'retirement is ordered by the utility on the private port')
-})
-test('Mac CPU rejects late channel metadata after replacement while returning its copy credit', t => {
-  const f = fixture('cpu', undefined, 'darwin'); t.after(f.host.destroy); f.emit({ type: 'ready' })
-  f.host.connectCpuFramePort(f.contents, cpuBinding)
-  const old = f.deliveries[0].value as { cpuChannelId: string }
-  f.host.connectCpuFramePort(f.contents, { ...cpuBinding, bindingToken: '44444444-4444-4444-8444-444444444444' })
-  const next = f.deliveries[1].value as { cpuChannelId: string }; assert.notEqual(next.cpuChannelId, old.cpuChannelId)
-  f.emit({ type: 'frame', frame: { sequence: 1, width: 1, height: 1, cpuChannelId: old.cpuChannelId } })
-  assert.equal(f.host.nextFrame(), undefined)
-  assert.ok(f.messages.some(m => m.type === 'release' && m.sequence === 1))
-  f.emit({ type: 'frame', frame: { sequence: 2, width: 1, height: 1, cpuChannelId: next.cpuChannelId } })
-  assert.equal(f.host.nextFrame()?.sequence, 2)
-})
-test('Mac CPU active port loss is bounded without confusing normal detach with failure', () => {
-  for (const detach of [false, true]) {
-    const f = fixture('cpu', undefined, 'darwin'); f.emit({ type: 'ready' }); f.host.connectCpuFramePort(f.contents, cpuBinding)
-    const auth = f.deliveries[0].value as { cpuChannelId: string }
-    f.emit({ type: 'cpu-frame-port-closed', cpuChannelId: auth.cpuChannelId })
-    if (detach) f.host.disconnectCpuFramePort()
-    f.advance(4000); f.emit({ type: 'state', state: { alive: true } }); f.advance(1002)
-    if (detach) assert.doesNotThrow(f.host.inspect); else assert.throws(f.host.inspect, /CPU/)
-    f.host.destroy()
-  }
-})
-test('Windows CPU retains its existing copied main relay', t => {
-  const f = fixture('cpu'); t.after(f.host.destroy); f.emit({ type: 'ready' })
-  assert.equal(f.host.directCpuFrames, false); f.host.connectCpuFramePort(f.contents, cpuBinding)
-  assert.equal(f.deliveries.length, 0)
-})
+for (const platform of ['darwin', 'win32'] as const) {
+  test(`${platform}: CPU establishes one authenticated private channel and main receives only metadata`, t => {
+    const f = fixture('cpu', undefined, platform); t.after(f.host.destroy)
+    assert.equal(f.host.directCpuFrames, true)
+    f.host.connectCpuFramePort(f.contents, cpuBinding); assert.equal(f.deliveries.length, 0)
+    f.emit({ type: 'ready' }); assert.equal(f.deliveries.length, 1)
+    f.host.connectCpuFramePort(f.contents, cpuBinding); assert.equal(f.deliveries.length, 1)
+    const auth = f.deliveries[0].value as typeof cpuBinding & { cpuChannelId: string }
+    assert.equal(auth.bindingToken, cpuBinding.bindingToken); assert.equal(f.transfers[0].length, 1)
+    f.emit({ type: 'frame', frame: { sequence: 1, width: 1, height: 1, stride: 64, size: 64, cpuChannelId: auth.cpuChannelId } })
+    assert.equal(f.host.nextFrame()?.pixels, undefined)
+    f.host.releaseFrame(1)
+    assert.ok(f.messages.some(m => m.type === 'release' && m.sequence === 1))
+    assert.equal(f.deliveries.length, 1, 'retirement is ordered by the utility on the private port')
+  })
+  test(`${platform}: CPU rejects late channel metadata after replacement while returning its copy credit`, t => {
+    const f = fixture('cpu', undefined, platform); t.after(f.host.destroy); f.emit({ type: 'ready' })
+    f.host.connectCpuFramePort(f.contents, cpuBinding)
+    const old = f.deliveries[0].value as { cpuChannelId: string }
+    f.host.connectCpuFramePort(f.contents, { ...cpuBinding, bindingToken: '44444444-4444-4444-8444-444444444444' })
+    const next = f.deliveries[1].value as { cpuChannelId: string }; assert.notEqual(next.cpuChannelId, old.cpuChannelId)
+    f.emit({ type: 'frame', frame: { sequence: 1, width: 1, height: 1, cpuChannelId: old.cpuChannelId } })
+    assert.equal(f.host.nextFrame(), undefined)
+    assert.ok(f.messages.some(m => m.type === 'release' && m.sequence === 1))
+    f.emit({ type: 'frame', frame: { sequence: 2, width: 1, height: 1, cpuChannelId: next.cpuChannelId } })
+    assert.equal(f.host.nextFrame()?.sequence, 2)
+  })
+  test(`${platform}: CPU active port loss is bounded without confusing normal detach with failure`, () => {
+    for (const detach of [false, true]) {
+      const f = fixture('cpu', undefined, platform); f.emit({ type: 'ready' }); f.host.connectCpuFramePort(f.contents, cpuBinding)
+      const auth = f.deliveries[0].value as { cpuChannelId: string }
+      f.emit({ type: 'cpu-frame-port-closed', cpuChannelId: auth.cpuChannelId })
+      if (detach) f.host.disconnectCpuFramePort()
+      f.advance(4000); f.emit({ type: 'state', state: { alive: true } }); f.advance(1002)
+      if (detach) assert.doesNotThrow(f.host.inspect); else assert.throws(f.host.inspect, /CPU/)
+      f.host.destroy()
+    }
+  })
+  test(`${platform}: CPU rejects pixels leaking through the metadata channel`, t => {
+    const f = fixture('cpu', undefined, platform); t.after(f.host.destroy); f.emit({ type: 'ready' })
+    f.host.connectCpuFramePort(f.contents, cpuBinding)
+    const { cpuChannelId } = f.deliveries[0].value as { cpuChannelId: string }
+    f.emit({ type: 'frame', frame: { sequence: 1, width: 1, height: 1, stride: 64, size: 64, cpuChannelId, pixels: new Uint8Array(64) } })
+    assert.throws(f.host.inspect, /CPU/)
+  })
+}

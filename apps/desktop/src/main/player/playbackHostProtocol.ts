@@ -11,6 +11,7 @@ export interface HostFrame {
   slot?: number; resourceId?: number
   pixelFormat?: string; producerComplete?: boolean; colorContract?: string
   renderStartUs?: number; targetTimeUs?: number; delayUs?: number; selfTest?: 'solid-v1'
+  cpuPostStartUs?: number; cpuPostDoneUs?: number
 }
 export type HostRequest =
   | { type: 'cpu-frame-port'; cpuChannelId: string }
@@ -44,4 +45,5 @@ export type CpuFramePortMessage = CpuFramePixels | CpuFrameRetirement
 export interface CpuFrameEnvelope extends CpuFramePortBinding {
   sequence: number; timeline: number; width: number; height: number; stride: number; size: number
   targetTime?: number; renderStartUs?: number
+  cpuPostStartUs?: number; cpuPostDoneUs?: number
 }

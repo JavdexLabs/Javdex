@@ -65,9 +65,9 @@ export function playbackNativeBuild({ platform, arch, root, prefix, include, nod
     if (!delayHook) throw new Error('Windows requires the installed node-gyp delay-load hook')
     const build = path.join(output, 'cmake')
     return [
-      { command: 'cmake', args: ['-S', source, '-B', build, '-A', arch === 'x64' ? 'x64' : 'ARM64',
+      { command: 'cmake', args: ['-S', source, '-B', build, '-G', 'Visual Studio 17 2022', '-A', arch === 'x64' ? 'x64' : 'ARM64',
         `-DELECTRON_INCLUDE_DIR=${include}`, `-DELECTRON_NODE_LIBRARY=${nodeLibrary}`, `-DELECTRON_DELAY_LOAD_HOOK=${delayHook}`,
-        `-DMPV_PREFIX=${prefix}`, `-DPLAYBACK_OUTPUT_DIR=${output}`] },
+        `-DMPV_PREFIX=${prefix}`, `-DPLAYBACK_OUTPUT_DIR=${output}`, '-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded'] },
       { command: 'cmake', args: ['--build', build, '--config', 'Release'] },
       { command: path.join(output, 'mpv-core-test.exe'), args: [] },
       { command: path.join(output, 'windows-texture-tickets-test.exe'), args: [] }

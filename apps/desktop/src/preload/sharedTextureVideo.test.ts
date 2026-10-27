@@ -112,6 +112,19 @@ test('self-test samples the mounted video after its callback and gates film writ
   assert.equal(f.video.style.opacity, '')
   f.sink.dispose()
 })
+test('the first GPU film frame after self-test waits for the new video stream to present it', async () => {
+  const f = fixture(); f.automatic(false)
+  const probe = f.sink.selfTest(frame(), () => true)
+  await Promise.resolve(); f.present(); await probe
+  let completed = false
+  const film = f.sink.submit(frame(), () => true).then(result => { completed = true; return result })
+  await new Promise<void>(resolve => setImmediate(resolve))
+  assert.equal(f.writes.length, 2)
+  assert.equal(completed, false, 'a write into an unconnected stream is not a presented frame')
+  f.present()
+  assert.equal(await film, true)
+  f.sink.dispose()
+})
 test('seek cancels an outstanding synthetic-video probe and restores normal visibility', async () => {
   const f = fixture(); f.automatic(false)
   const result = assert.rejects(f.sink.selfTest(frame(), () => true), /cancelled/)

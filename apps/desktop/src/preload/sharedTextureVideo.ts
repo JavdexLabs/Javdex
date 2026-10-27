@@ -102,24 +102,27 @@ export function createSharedTextureVideo(video: SharedVideoSurface, fail: () => 
   // discarded before that sink exists. Retry references to the same pixels only
   // until the first compositor observation, within the existing deadline.
   // Clones retain the import: this is not permission to reuse its native slot.
-  const writeObserved = async (frame: VideoFrameSource, current: () => boolean, timeoutMs: number, timings?: CpuVideoTimings): Promise<void> => {
+  const writeObserved = async (frame: VideoFrameSource, current: () => boolean, timeoutMs: number,
+    timings?: CpuVideoTimings, useOriginalFirst = false): Promise<void> => {
     const epoch = generation, owner = writer!, retry = !started
     const observed = observe(timeoutMs)
     let presented = false
+    let first = true
     const completion = observed.promise.then(() => { presented = true })
     // Attach immediately: cancellation may occur while a writer is pending.
     void completion.catch(() => {})
     try {
       do {
         if (!active || generation !== epoch || !current()) throw new Error('Video frame observation cancelled')
-        const reference = frame.clone()
+        const reference = useOriginalFirst && first ? frame : frame.clone()
+        first = false
         try {
           const start = timings ? performance.now() : 0
           const written = owner.write(reference)
           await Promise.race([written, completion.then(() => written)])
           if (timings) timings.writerWaitMs += performance.now() - start
         }
-        finally { reference.close() }
+        finally { if (reference !== frame) reference.close() }
         if (!retry) break
         let timer: ReturnType<typeof setTimeout> | undefined
         try {
@@ -151,7 +154,8 @@ export function createSharedTextureVideo(video: SharedVideoSurface, fail: () => 
     if (!active || !current()) return false
     const epoch = generation, owner = writer!
     try {
-      await owner.write(frame)
+      if (started) await owner.write(frame)
+      else await writeObserved(frame, () => active && generation === epoch && current(), 1500, undefined, true)
     } catch (reason) {
       if (!active || generation !== epoch || !current()) return false
       throw reason

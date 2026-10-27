@@ -62,7 +62,7 @@ ANGLE 直接渲染到空闲的非 keyed NT 共享输出槽，不经过全尺寸�
 
 Electron 44 已将消费端 ANGLE 静态链接，不再携带 EGL／GLES DLL。Windows 生产端从 `playback.node` 所在目录按绝对路径加载独立固定的 `libEGL.dll`／`libGLESv2.dll`；使用 `build/windows-angle-runtime.json` 固定的官方 Electron 43.8.1 发行中的 ANGLE D3D11 库（不运行该旧 Electron），核对官方发行 ZIP 的 SHA-256，再提取两个 DLL 及完整许可。Windows 的 ABI 头文件与该生产端修订对齐，和 Linux 的 Electron 44 ANGLE 构建配置分别校验。生产／消费双方只交接 D3D11 原生纹理，不交接 ANGLE 对象或原生指针。开发构建、本地打包和正式运行库包含动态加载依赖、来源摘要、上游 ANGLE 与供应方源码及许可。
 
-Windows GPU 与 CPU 复用 `sharedTextureVideo.ts`：GPU 导入帧保留生产端单调时间戳，自检在跳转／视口刷新取消后重新申请；CPU 的 RGBA 按真实 stride 构造 `RGBX VideoFrame`，带填充的行使用复制规范化。GPU 普通帧不等待 video 呈现回调，CPU 保留有界呈现背压；两者的引用与信用额度继续分别回收。正常播放没有逐帧 Canvas 绘制或读回，音频仍由 libmpv／WASAPI 输出。Windows 实机范围与构建发现见[接入记录](reviews/windows-video-integration-2026-10-27.md)。
+Windows GPU 与 CPU 复用 `sharedTextureVideo.ts`：GPU 导入帧保留生产端单调时间戳，自检在跳转／视口刷新取消后重新申请；CPU 的 RGBA 按真实 stride 构造 `RGBX VideoFrame`，带填充的行使用复制规范化。新 video 流的首个 GPU 影片帧等待视频帧回调，并在显示端尚未连接时短时重交同一帧引用；后续 GPU 帧不等待呈现，CPU 保留有界呈现背压。视频帧回调不代表物理上屏或 GPU 租约释放；两者的引用与信用额度继续分别回收。正常播放没有逐帧 Canvas 绘制或读回，音频仍由 libmpv／WASAPI 输出。Windows 实机范围与构建发现见[接入记录](reviews/windows-video-integration-2026-10-27.md)。
 
 Windows CPU 后续复用 Mac 私有帧通道：像素从隔离宿主直达 preload，主进程不再接收或序列化整帧像素。surface／binding 与独立通道代认证、两路有界配对、未来时间线保留、先退休再回收生产额度，以及活动端口意外关闭后的五秒故障预算均保持共用；正常解绑不当作故障。默认缩放与 CPU 自动接管保持，实机证据见[私有 CPU 通道记录](reviews/windows-cpu-private-frame-channel-2026-10-27.md)。
 
@@ -84,7 +84,7 @@ Mac CPU 的 `VideoFrame` 复制私有端口输入，以降低外部缓冲区转�
 
 2026-10-27 M4 大输出窗口高负载播放的帧率不足和丢帧已由用户接受；退出修复不改变输出尺寸、画质或播放模式。这一取舍不代表其他设备具有相同表现。
 
-Mac CPU video 保留生产者的单调时间戳，只有交付等待转换到页面时钟；提交按实际视频帧回调串行背压，避免本地 MediaStream 突发写入覆盖尚未呈现的帧。CPU 消费等待沿用复制通道的五秒预算，GPU 固定色块自检仍为 1.5 秒。视频帧回调仅用于 CPU 消费背压，不代表物理扫描输出或 GPU 资源最终释放。
+Mac CPU video 保留生产者的单调时间戳，只有交付等待转换到页面时钟；提交按实际视频帧回调串行背压，避免本地 MediaStream 突发写入覆盖尚未呈现的帧。CPU 消费等待沿用复制通道的五秒预算，GPU 固定色块自检仍为 1.5 秒。新流首个 GPU 影片帧也等待一次视频帧回调，避免自检重置流后的孤立帧丢失。视频帧回调不代表物理扫描输出或 GPU 资源最终释放。
 
 Mac video 的固定色块自检仍通过实际挂载的显示元素：暂时隐藏合成色块，等待视频帧回调后以一次临时 sRGB Canvas 读取固定样本，随后销毁该流并恢复影片流；影片帧等待自检结束。正常播放没有逐帧 Canvas 读回。Electron 固定为 44.9.3，其中共享 VideoFrame 的跨线程释放修复是此消费者的前提；不在旧 43.8.1 上开启。
 

@@ -25,8 +25,6 @@ const frame = (sequence = 1, slot = 0, extra: Record<string, unknown> = {}) => (
 function fixture(diagnostics = false, software = false) {
   let nextFd = 100
   let now = 0, receiveCalls = 0, ackWritable = true, importFailure = false, sendFailure = false, flushFailure = false
-  let holdReads = false
-  const held: Array<(pixels: Buffer) => void> = []
   const timers = new Set<() => void>()
   let frameDestroyed = false, interest = 0
   let readiness: ((status: number, events: number) => void) | undefined
@@ -46,11 +44,6 @@ function fixture(diagnostics = false, software = false) {
   const sent: Array<{ frame: unknown; metadata: { surfaceToken: string; bindingToken: string; sequence: number } }> = []
   const transport = {
     readPixels: (_fd: number, size: number) => Buffer.alloc(size, 255),
-    readPixelsAsync: (_fd: number, size: number) => {
-      const pixels = Buffer.alloc(size, 255)
-      if (!holdReads) return Promise.resolve(pixels)
-      return new Promise<Buffer>(resolve => { held.push(resolve.bind(null, pixels)) })
-    },
     watch: (_fd: number, events: number, callback: typeof readiness) => { interest = events; readiness = callback; return true },
     updateWatch: (_fd: number, events: number) => { interest = events; return true },
     unwatch: () => { readiness = undefined; interest = 0; return true },
@@ -104,9 +97,7 @@ function fixture(diagnostics = false, software = false) {
     owners: () => { const request = { owners: [] }; lifecycleReport?.(request); return request.owners },
     blockedAck: () => { ackWritable = false },
     failImport: () => { importFailure = true }, failSend: () => { sendFailure = true }, failFlush: () => { flushFailure = true },
-    release: (index = 0) => imports[index].options.allReferencesReleased!(),
-    hold: () => { holdReads = true },
-    releaseReads: () => { const pending = held.splice(0); for (const resolve of pending) resolve(Buffer.alloc(230400, 255)) }
+    release: (index = 0) => imports[index].options.allReferencesReleased!()
   }
 }
 
@@ -398,26 +389,6 @@ test('CPU timing reset rejects old epochs, releases stale packets and forwards c
   assert.equal((f.sent.at(-1)!.metadata as unknown as { targetTime: number }).targetTime, 20)
   f.ipc.emit('playback:cpu-frame-released', f.event, { ...f.binding, sequence: 2 }); await f.tick()
   assert.deepEqual(f.acknowledgements, [1, 2])
-})
-test('an in-flight CPU read keeps its slot until the copy finishes', async t => {
-  const f = fixture(false, true); t.after(f.manager.destroy)
-  f.ready(); f.manager.setVisible(true); f.hold()
-  const cpu = { protocol: 'javdex-cpu-v1', pixelFormat: 'rgba', timeline: 0, renderStartUs: 1, targetTimeUs: 20000 }
-  const cpuFrames = () => f.sent.filter(item => 'pixels' in (item.metadata as object))
-  f.packet(1, 0, cpu); await f.tick()
-  assert.equal(cpuFrames().length, 0)
-  assert.equal(f.manager.timingStats().pendingFrames, 1)
-  assert.equal(f.closed.includes(101), false)
-  assert.equal(f.manager.resetTiming(), 1)
-  assert.deepEqual(f.acknowledgements, [])
-  assert.equal(f.manager.timingStats().pendingFrames, 1, 'a seek cannot reuse the slot while its read is running')
-  f.ipc.emit(REMOVED, f.event, f.binding); await f.tick()
-  assert.deepEqual(f.acknowledgements, [])
-  f.releaseReads(); await f.tick(); await f.tick()
-  assert.equal(cpuFrames().length, 0)
-  assert.deepEqual(f.acknowledgements, [1])
-  assert.equal(f.closed.includes(101), true)
-  assert.equal(f.errors.length, 0)
 })
 test('a hidden CPU submission is not counted but still releases its copied frame', async t => {
   const f = fixture(false, true); t.after(f.manager.destroy)

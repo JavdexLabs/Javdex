@@ -19,7 +19,6 @@
 #include <map>
 #include <set>
 #include <string>
-#include <vector>
 
 #include "linuxFdTransport.h"
 
@@ -27,31 +26,12 @@ namespace {
 using namespace javdex_transport;
 
 struct Watch;
-struct ReadJob;
 struct State {
   std::set<int> owned;
   std::set<int> parents;
   std::map<int, Watch*> watchers;
   std::set<Watch*> allocated;
-  std::map<int, ReadJob*> reads;
-  bool shutting_down = false;
-  bool in_cleanup = false;
 };
-// A started libuv worker cannot be cancelled. The job owns the descriptor
-// until its complete callback runs, including after session teardown.
-struct ReadJob {
-  State* state = nullptr;
-  napi_env env = nullptr;
-  int fd = -1;
-  size_t length = 0;
-  void* pixels = nullptr;
-  napi_ref buffer = nullptr;
-  napi_async_work work = nullptr;
-  napi_deferred deferred = nullptr;
-  bool close_after = false;
-  int error = 0;
-};
-constexpr int kMaxCpuReads = 3;
 struct Watch {
   uv_poll_t poll{};
   State* owner = nullptr;
@@ -90,58 +70,13 @@ void CloseOwned(State* state, int fd) {
   // libuv never owns the descriptor. Stop before close/reuse, including when
   // JS forgets to unwatch or closes a channel from inside its own callback.
   StopWatch(state, fd);
-  if (const auto found = state->reads.find(fd); found != state->reads.end()) {
-    found->second->close_after = true;
-    return;
-  }
   state->parents.erase(fd);
   state->owned.erase(fd);
   ::close(fd);
 }
 
-void FinishRead(napi_env env, napi_status status, void* data) {
-  auto* job = static_cast<ReadJob*>(data);
-  auto* state = job->state;
-  if (state) state->reads.erase(job->fd);
-  if (state && (job->close_after || state->shutting_down) && state->owned.erase(job->fd)) {
-    state->parents.erase(job->fd);
-    ::close(job->fd);
-  }
-  if (state && !state->shutting_down) {
-    napi_value result = nullptr;
-    if (status != napi_ok || job->error) {
-      napi_value message = nullptr, code = nullptr;
-      napi_create_string_utf8(env, job->error ? "Cannot read CPU frame" : "CPU frame read cancelled", NAPI_AUTO_LENGTH, &message);
-      napi_create_string_utf8(env, "ERR_CPU_FRAME", NAPI_AUTO_LENGTH, &code);
-      napi_create_error(env, code, message, &result);
-      napi_reject_deferred(env, job->deferred, result);
-    } else {
-      napi_get_reference_value(env, job->buffer, &result);
-      napi_resolve_deferred(env, job->deferred, result);
-    }
-    if (job->buffer) napi_delete_reference(env, job->buffer);
-    if (job->work) napi_delete_async_work(env, job->work);
-  }
-  const bool retire = state && state->shutting_down && !state->in_cleanup && state->reads.empty();
-  delete job;
-  if (retire) delete state;
-}
-
-void ExecuteRead(napi_env, void* data) {
-  auto* job = static_cast<ReadJob*>(data);
-  size_t offset = 0;
-  while (offset < job->length) {
-    const auto read = ::pread(job->fd, static_cast<char*>(job->pixels) + offset, job->length - offset, static_cast<off_t>(offset));
-    if (read < 0 && errno == EINTR) continue;
-    if (read <= 0) { job->error = errno ? errno : EIO; return; }
-    offset += static_cast<size_t>(read);
-  }
-}
-
 void Cleanup(void* data) {
   auto* state = static_cast<State*>(data);
-  state->shutting_down = true;
-  state->in_cleanup = true;
   state->watchers.clear();
   while (!state->allocated.empty()) {
     auto* watch = *state->allocated.begin(); state->allocated.erase(state->allocated.begin());
@@ -151,14 +86,8 @@ void Cleanup(void* data) {
     // after the N-API environment is gone, and must then only delete memory.
     ReleaseWatchReferences(watch); watch->env = nullptr;
   }
-  std::vector<int> idle;
-  for (int fd : state->owned) if (!state->reads.count(fd)) idle.push_back(fd);
-  for (int fd : idle) { state->owned.erase(fd); ::close(fd); }
-  std::vector<ReadJob*> jobs;
-  for (const auto& entry : state->reads) jobs.push_back(entry.second);
-  for (auto* job : jobs) napi_cancel_async_work(job->env, job->work);
-  state->in_cleanup = false;
-  if (state->reads.empty()) delete state;
+  for (int fd : state->owned) ::close(fd);
+  delete state;
 }
 
 napi_value Error(napi_env env, const char* code, const std::string& text) {
@@ -444,78 +373,31 @@ napi_value Close(napi_env env, napi_callback_info info) {
 }
 
 // Copy only an addon-owned, fixed-size sealed memfd. Renderer never supplies FDs.
-bool ValidateCpuFrame(napi_env env, State* state, int fd, double length, size_t* bytes) {
-  if (!std::isfinite(length) || length < 4 || length > 256 * 1024 * 1024 || std::floor(length) != length
-      || !state->owned.count(fd) || state->parents.count(fd) || state->reads.count(fd))
-    return Error(env, "ERR_CPU_FRAME", "Invalid CPU frame ownership or size"), false;
-  struct stat status{};
-  const int seals = fcntl(fd, F_GET_SEALS);
-  if (fstat(fd, &status) != 0 || !S_ISREG(status.st_mode) || status.st_size != static_cast<off_t>(length)
-      || seals < 0 || (seals & (F_SEAL_SHRINK | F_SEAL_GROW)) != (F_SEAL_SHRINK | F_SEAL_GROW))
-    return Error(env, "ERR_CPU_FRAME", "CPU frame must have a sealed fixed size"), false;
-  *bytes = static_cast<size_t>(length);
-  return true;
-}
-
 napi_value ReadPixels(napi_env env, napi_callback_info info) {
   napi_value args[2]; size_t count = 2; void* data = nullptr;
   napi_get_cb_info(env, info, &count, args, nullptr, &data);
   auto* state = static_cast<State*>(data);
-  int32_t fd = -1; double length = 0; size_t bytes = 0;
+  int32_t fd = -1; double length = 0;
   if (count != 2 || napi_get_value_int32(env, args[0], &fd) != napi_ok
-      || napi_get_value_double(env, args[1], &length) != napi_ok
-      || !ValidateCpuFrame(env, state, fd, length, &bytes)) return nullptr;
+      || napi_get_value_double(env, args[1], &length) != napi_ok || !std::isfinite(length)
+      || length < 4 || length > 256 * 1024 * 1024 || std::floor(length) != length
+      || !state->owned.count(fd) || state->parents.count(fd))
+    return Error(env, "ERR_CPU_FRAME", "Invalid CPU frame ownership or size");
+  struct stat status{};
+  const int seals = fcntl(fd, F_GET_SEALS);
+  if (fstat(fd, &status) != 0 || !S_ISREG(status.st_mode) || status.st_size != length
+      || seals < 0 || (seals & (F_SEAL_SHRINK | F_SEAL_GROW)) != (F_SEAL_SHRINK | F_SEAL_GROW))
+    return Error(env, "ERR_CPU_FRAME", "CPU frame must have a sealed fixed size");
   void* pixels = nullptr; napi_value result;
-  if (napi_create_buffer(env, bytes, &pixels, &result) != napi_ok) return nullptr;
+  if (napi_create_buffer(env, static_cast<size_t>(length), &pixels, &result) != napi_ok) return nullptr;
   size_t offset = 0;
-  while (offset < bytes) {
-    const auto read = pread(fd, static_cast<char*>(pixels) + offset, bytes - offset, static_cast<off_t>(offset));
+  while (offset < static_cast<size_t>(length)) {
+    const auto read = pread(fd, static_cast<char*>(pixels) + offset, static_cast<size_t>(length) - offset, offset);
     if (read < 0 && errno == EINTR) continue;
     if (read <= 0) return Error(env, "ERR_CPU_FRAME", "Cannot read CPU frame");
     offset += static_cast<size_t>(read);
   }
   return result;
-}
-
-napi_value ReadPixelsAsync(napi_env env, napi_callback_info info) {
-  napi_value args[2]; size_t count = 2; void* data = nullptr;
-  napi_get_cb_info(env, info, &count, args, nullptr, &data);
-  auto* state = static_cast<State*>(data);
-  if (state->reads.size() >= static_cast<size_t>(kMaxCpuReads))
-    return Error(env, "ERR_CPU_FRAME", "CPU frame read budget exhausted");
-  int32_t fd = -1; double length = 0; size_t bytes = 0;
-  if (count != 2 || napi_get_value_int32(env, args[0], &fd) != napi_ok
-      || napi_get_value_double(env, args[1], &length) != napi_ok
-      || !ValidateCpuFrame(env, state, fd, length, &bytes)) return nullptr;
-  auto* job = new (std::nothrow) ReadJob();
-  if (!job) return Error(env, "ERR_FD_BRIDGE_MEMORY", "Cannot allocate CPU frame read");
-  job->state = state; job->env = env; job->fd = fd; job->length = bytes;
-  napi_value buffer = nullptr, promise = nullptr, name = nullptr;
-  if (napi_create_buffer(env, bytes, &job->pixels, &buffer) != napi_ok
-      || napi_create_reference(env, buffer, 1, &job->buffer) != napi_ok
-      || napi_create_promise(env, &job->deferred, &promise) != napi_ok
-      || napi_create_string_utf8(env, "javdex:cpu-frame-read", NAPI_AUTO_LENGTH, &name) != napi_ok
-      || napi_create_async_work(env, nullptr, name, ExecuteRead, FinishRead, job, &job->work) != napi_ok
-      || napi_queue_async_work(env, job->work) != napi_ok) {
-    if (job->work) napi_delete_async_work(env, job->work);
-    if (job->buffer) napi_delete_reference(env, job->buffer);
-    if (promise) {
-      napi_value message = nullptr, code = nullptr, error_value = nullptr;
-      napi_create_string_utf8(env, "Cannot start CPU frame read", NAPI_AUTO_LENGTH, &message);
-      napi_create_string_utf8(env, "ERR_CPU_FRAME", NAPI_AUTO_LENGTH, &code);
-      napi_create_error(env, code, message, &error_value);
-      napi_reject_deferred(env, job->deferred, error_value);
-      delete job;
-      return promise;
-    }
-    delete job;
-    bool pending = false;
-    napi_is_exception_pending(env, &pending);
-    if (pending) return nullptr;
-    return Error(env, "ERR_CPU_FRAME", "Cannot start CPU frame read");
-  }
-  state->reads.emplace(fd, job);
-  return promise;
 }
 
 napi_value Init(napi_env env, napi_value exports) {
@@ -527,8 +409,7 @@ napi_value Init(napi_env env, napi_value exports) {
     {"receive", nullptr, Receive, nullptr, nullptr, nullptr, napi_default, state},
     {"sendAck", nullptr, SendAck, nullptr, nullptr, nullptr, napi_default, state},
     {"close", nullptr, Close, nullptr, nullptr, nullptr, napi_default, state},
-    {"readPixels", nullptr, ReadPixels, nullptr, nullptr, nullptr, napi_default, state},
-    {"readPixelsAsync", nullptr, ReadPixelsAsync, nullptr, nullptr, nullptr, napi_default, state},
+      {"readPixels", nullptr, ReadPixels, nullptr, nullptr, nullptr, napi_default, state},
     {"watch", nullptr, WatchChannel, nullptr, nullptr, nullptr, napi_default, state},
     {"updateWatch", nullptr, UpdateWatch, nullptr, nullptr, nullptr, napi_default, state},
     {"unwatch", nullptr, Unwatch, nullptr, nullptr, nullptr, napi_default, state},

@@ -64,43 +64,6 @@ bool Send(const std::string& payload, std::size_t fd_count) {
   return true;
 }
 
-bool SendSealed() {
-  const int fd = ::memfd_create("javdex-sealed-cpu-frame", MFD_CLOEXEC | MFD_ALLOW_SEALING);
-  if (fd < 0) return false;
-  constexpr std::size_t kBytes = 4096;
-  std::vector<unsigned char> bytes(kBytes, 0xA5);
-  if (::ftruncate(fd, static_cast<off_t>(kBytes)) != 0
-      || ::pwrite(fd, bytes.data(), kBytes, 0) != static_cast<ssize_t>(kBytes)
-      || ::fcntl(fd, F_ADD_SEALS, F_SEAL_SHRINK | F_SEAL_GROW) != 0) {
-    std::cerr << "sealed memfd setup failed: " << std::strerror(errno) << '\n';
-    ::close(fd);
-    return false;
-  }
-  const std::string metadata = R"({"type":"sealed-cpu-frame","bytes":4096})";
-  iovec iov{const_cast<char*>(metadata.data()), metadata.size()};
-  const int descriptor = fd;
-  std::vector<unsigned char> control(CMSG_SPACE(sizeof(int)));
-  msghdr message{};
-  message.msg_iov = &iov;
-  message.msg_iovlen = 1;
-  message.msg_control = control.data();
-  message.msg_controllen = control.size();
-  cmsghdr* header = CMSG_FIRSTHDR(&message);
-  header->cmsg_level = SOL_SOCKET;
-  header->cmsg_type = SCM_RIGHTS;
-  header->cmsg_len = CMSG_LEN(sizeof(int));
-  std::memcpy(CMSG_DATA(header), &descriptor, sizeof(descriptor));
-  ssize_t size;
-  do { size = ::sendmsg(kChannelFd, &message, MSG_NOSIGNAL); } while (size < 0 && errno == EINTR);
-  const int error = errno;
-  ::close(fd);
-  if (size != static_cast<ssize_t>(metadata.size())) {
-    std::cerr << "sealed send failed: " << std::strerror(error) << '\n';
-    return false;
-  }
-  return true;
-}
-
 bool WaitAck(std::uint64_t expected) {
   pollfd wait{kChannelFd, POLLIN, 0};
   int ready;
@@ -134,7 +97,6 @@ int main(int argc, char** argv) {
       if (sequence == 1) return 0;
     }
   }
-  if (mode == "sealed") return SendSealed() && WaitAck(1) ? 0 : 1;
   if (mode == "valid" || mode == "send-only") {
     const std::string metadata = R"({"type":"transport-fixture","sequence":"18446744073709551615","isDmaBuf":false})";
     if (!Send(metadata, 1)) return 1;

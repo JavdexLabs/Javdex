@@ -4,8 +4,8 @@ import path from 'node:path'
 import electron from 'electron'
 import { captureAcceptanceFrame, closeAcceptance, recordAcceptanceCleanup, createAcceptanceDirectory, launchAcceptance, nativeEvidence, output, root, seedAcceptanceCatalog, waitForValue as until } from './playback-acceptance-support.mjs'
 import { prepareMediaFixtures } from './playback-media-fixtures.mjs'
-import { checkBitmapSubtitlePixels, checkComplexSubtitlePixels, checkLocalSubtitlePicker } from './playback-subtitle-checks.mjs'
-import { openPlaybackSettings, closePlaybackSettings, selectPlaybackSetting, revealFullscreenControls } from './playback-settings-ui.mjs'
+import { checkBitmapSubtitlePixels, checkComplexSubtitlePixels, checkLocalSubtitlePicker, fullscreenSubtitleComposition } from './playback-subtitle-checks.mjs'
+import { openPlaybackSettings, closePlaybackSettings, selectPlaybackSetting } from './playback-settings-ui.mjs'
 import { startPlaybackRemoteServer } from './playback-remote-server.ts'
 import { assertOrdinaryAcceptanceExit } from './playback-acceptance-cleanup.mjs'
 
@@ -135,19 +135,19 @@ try {
     await page.getByRole('button', { name: '全屏', exact: true }).click()
     await until(state, value => value?.presentation === 'fullscreen' && value.paused, 'remote ASS fullscreen')
     await page.waitForTimeout(1500)
-    await revealFullscreenControls(page)
-    await page.evaluate(id => window.api.playback.control(id, { kind: 'track', type: 'sub', id: null }), playing.sessionId)
-    await until(state, value => !value.tracks.some(track => track.type === 'sub' && track.selected), 'remote fullscreen subtitle off')
-    await page.waitForTimeout(300)
-    await frame('remote-ass-fullscreen-off', { baseline: true })
-    const sid = playing.tracks.find(track => track.type === 'sub' && track.codec === 'ass').id
-    await page.evaluate(({ id, sid }) => window.api.playback.control(id, { kind: 'track', type: 'sub', id: sid }), { id: playing.sessionId, sid })
-    await until(state, value => value.tracks.some(track => track.type === 'sub' && track.id === sid && track.selected), 'remote fullscreen ASS on')
-    await page.waitForTimeout(300)
-    const assFullscreen = await frame('remote-ass-fullscreen-on', { compare: true })
-    assert.ok(assFullscreen.differentPixels > 200)
-    assert.ok(Number.isFinite(assFullscreen.controlsTop) && assFullscreen.bottom < assFullscreen.controlsTop,
-      'remote ASS must remain above visible fullscreen controls')
+    const assFullscreen = await fullscreenSubtitleComposition(application, page, fixtures.directory, 'remote-ass', async () => {
+      await page.evaluate(id => window.api.playback.control(id, { kind: 'track', type: 'sub', id: null }), playing.sessionId)
+      await until(state, value => !value.tracks.some(track => track.type === 'sub' && track.selected), 'remote fullscreen subtitle off')
+      await page.waitForTimeout(300)
+      await frame('remote-ass-fullscreen-off', { baseline: true })
+      const sid = playing.tracks.find(track => track.type === 'sub' && track.codec === 'ass').id
+      await page.evaluate(({ id, sid }) => window.api.playback.control(id, { kind: 'track', type: 'sub', id: sid }), { id: playing.sessionId, sid })
+      await until(state, value => value.tracks.some(track => track.type === 'sub' && track.id === sid && track.selected), 'remote fullscreen ASS on')
+      await page.waitForTimeout(300)
+      const captured = await frame('remote-ass-fullscreen-on', { compare: true })
+      assert.ok(captured.differentPixels > 200)
+      return captured
+    })
     assert.equal((await state()).sessionId, playing.sessionId)
     assert.equal((await nativeState()).loadedFiles, 1)
     matrix.push({ name: 'remote chapter UI and ASS pixels', chapter: chapter.position, expanded: assExpanded, fullscreen: assFullscreen })

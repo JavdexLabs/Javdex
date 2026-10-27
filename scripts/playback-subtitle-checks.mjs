@@ -25,18 +25,19 @@ export function bitmapTransparency(frame, current, baseline, cue) {
   const scale = Math.min(frame.width / canvas.width, frame.height / canvas.height)
   const ox = (frame.width - canvas.width * scale) / 2, oy = (frame.height - canvas.height * scale) / 2
   const ink = frame.whiteBounds, { hole } = object
-  // A 4-source-pixel border can be less than 2 output pixels in the dock.
-  // Sampling 1.5 source pixels from the origin then hits bilinear white fringe.
-  // Preserve the original 2.5-source-pixel ink clearance when enlarged, with
-  // at least two output pixels for downsampling and compositor filtering.
+  // A four-source-pixel border can shrink below the filter footprint in the
+  // dock. There is then no reliable interior border sample: the white fringe
+  // can cover the entire border. Keep checking the larger center hole, and
+  // check all four borders when the scaled border has enough room.
   const guard = Math.max(2, Math.ceil((object.border - 1.5) * scale))
-  const points = [
+  const borders = [
     ['left border', ink.x - guard, ink.y + ink.height / 2],
     ['right border', ink.x + ink.width + guard - 1, ink.y + ink.height / 2],
     ['top border', ink.x + ink.width / 2, ink.y - guard],
-    ['bottom border', ink.x + ink.width / 2, ink.y + ink.height + guard - 1],
-    ['center hole', ox + (cue.x + hole.x + hole.width / 2) * scale, oy + (cue.y + hole.y + hole.height / 2) * scale]
+    ['bottom border', ink.x + ink.width / 2, ink.y + ink.height + guard - 1]
   ]
+  const points = [...(object.border * scale > 2 ? borders : []),
+    ['center hole', ox + (cue.x + hole.x + hole.width / 2) * scale, oy + (cue.y + hole.y + hole.height / 2) * scale]]
   return points.map(([name, x, y]) => {
     x = Math.floor(x); y = Math.floor(y)
     assert.ok(x >= 0 && y >= 0 && x < frame.width && y < frame.height, 'transparent sample must remain in the captured video')

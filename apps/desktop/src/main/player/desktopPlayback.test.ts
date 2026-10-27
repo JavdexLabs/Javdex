@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync, mkdtempSync, rmSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { EventEmitter } from 'node:events'
 import { createRequire } from 'node:module'
 import { runInNewContext } from 'node:vm'
 import { test, type TestContext } from 'node:test'
@@ -12,6 +13,7 @@ import { playbackCatalogKey } from './playbackSource'
 import type { NativePlaybackState } from './nativePlayback'
 import type { PlaybackSource } from './playbackSource'
 import type { createAiSubtitleController } from './aiSubtitles/aiSubtitleController'
+import type { BrowserWindow, WebContents } from 'electron'
 
 const requireDependency = createRequire(import.meta.url)
 const code = transpileModule(readFileSync(new URL('./desktopPlayback.ts', import.meta.url), 'utf8'), {
@@ -25,7 +27,8 @@ function deferred() {
 }
 
 function fixture(t: TestContext, pause: 'recent' | 'playlist', renderPolling = true, platform: NodeJS.Platform = process.platform,
-  startup: { args?: readonly string[]; gpuAvailable?: boolean } = {}) {
+  startup: { args?: readonly string[]; gpuAvailable?: boolean; window?: BrowserWindow;
+    retireSurface?: (contents: WebContents, surface: string) => Promise<void> } = {}) {
   const root = mkdtempSync(path.join(os.tmpdir(), 'javdex-playback-start-'))
   const entered = deferred(), release = deferred(), finished = deferred()
   const removals: Array<{ catalog: string; videoId: number }> = []
@@ -55,6 +58,7 @@ function fixture(t: TestContext, pause: 'recent' | 'playlist', renderPolling = t
   let session!: ReturnType<typeof createPlaybackSession>
   const mocks: Record<string, unknown> = {
     './linuxPlaybackDevice': { waitForLinuxPlaybackCompositing: async () => {} },
+    './macCpuShutdown': { retireMacCpuSurface: startup.retireSurface ?? (async () => {}) },
     electron: { app: { getPath: () => root, isHardwareAccelerationEnabled: () => startup.gpuAvailable ?? true }, dialog: {}, shell: {}, powerSaveBlocker: { start: () => 1, stop() {} }, powerMonitor: { on() {}, off() {} } },
     './libmpvPlayback': { builtinPlaybackAvailability: () => ({ available: true }), createLibmpvPlayback: (_window: unknown, selected?: string) => selected === 'software' ? cpu : native },
     './playbackSource': { playbackCatalogKey, createPlaybackSourceResolver: () => ({
@@ -81,10 +85,13 @@ function fixture(t: TestContext, pause: 'recent' | 'playlist', renderPolling = t
     setInterval: (callback: () => void, ms: number) => { timers.set(ms, callback); return { unref() {} } }, clearInterval() {},
     require: (name: string) => Object.hasOwn(mocks, name) ? mocks[name] : requireDependency(name)
   }, { filename: 'desktopPlayback.ts' })
-  const open = exports.registerBuiltinPlayback(backend, () => null, { read: async () => ({ resumePlayback: false, playbackVolume: 50 }) } as never,
+  const open = exports.registerBuiltinPlayback(backend, () => startup.window ?? null, { read: async () => ({ resumePlayback: false, playbackVolume: 50 }) } as never,
     async () => { if (pause === 'recent') { entered.resolve(); await release.promise } })
   t.after(async () => { release.resolve(); await exports.disposeBuiltinPlayback(); rmSync(root, { recursive: true, force: true }) })
   return { removals, entered, release, finished, open, source, released, native, timers, snapshot: () => session.snapshot(), subtitles: () => subtitleDependencies,
+    setSurface: (surface: string) => { raw = { ...raw, sharedTextureSurface: surface, presentedFrames: 0 } },
+    control: (command: Parameters<typeof session.control>[1]) => session.control(session.snapshot()!.sessionId, command),
+    dispose: () => exports.disposeBuiltinPlayback(),
     resolutions: () => resolutions, validations: () => validations, subtitleStops: () => subtitleStops,
     creates: () => ({ gpu: gpuCreates, cpu: cpuCreates }),
     restore: () => { identity.catalogId = 'catalog-B'; generation++; exports.stopBuiltinPlayback() },
@@ -96,6 +103,48 @@ function fixture(t: TestContext, pause: 'recent' | 'playlist', renderPolling = t
       await entered.promise
     } }
 }
+
+test('macOS CPU shutdown stops playback and waits for the current renderer surface to retire', async t => {
+  const retire = deferred(), calls: Array<{ contents: WebContents; surface: string }> = []
+  t.after(() => retire.resolve())
+  const contents = Object.assign(new EventEmitter(), { isDestroyed: () => false, focus() {}, getZoomFactor: () => 1 }) as unknown as WebContents
+  const window = Object.assign(new EventEmitter(), { webContents: contents, isDestroyed: () => false,
+    isFullScreen: () => false, setFullScreen() {}, getContentSize: () => [1280, 720] }) as unknown as BrowserWindow
+  const f = fixture(t, 'recent', false, 'darwin', { args: ['--javdex-cpu'], window,
+    retireSurface: (received, surface) => { calls.push({ contents: received, surface }); return retire.promise } })
+  assert.equal((await f.open(f.source.target)).ok, true)
+  const surface = 'cpu:11111111-1111-4111-8111-111111111111'
+  f.setSurface(surface); f.timers.get(200)!()
+  assert.equal(f.snapshot()?.sharedTextureSurface, surface)
+  let settled = false
+  const pending = f.dispose().then(() => { settled = true })
+  await new Promise<void>(resolve => setImmediate(resolve))
+  assert.equal(f.snapshot(), null, 'the producer is stopped before awaiting the renderer')
+  assert.deepEqual(calls, [{ contents, surface }])
+  assert.equal(settled, false, 'shutdown must wait for renderer retirement')
+  retire.resolve(); await pending
+})
+
+for (const [platform, args, surface] of [
+  ['darwin', [], '11111111-1111-4111-8111-111111111111'],
+  ['win32', ['--javdex-cpu'], 'cpu:11111111-1111-4111-8111-111111111111'],
+  ['linux', ['--javdex-cpu'], 'cpu:11111111-1111-4111-8111-111111111111']
+] as const) test(`${platform} ${surface.startsWith('cpu:') ? 'CPU' : 'GPU'} shutdown does not use the Mac CPU retirement handshake`, async t => {
+  const calls: string[] = []
+  const contents = Object.assign(new EventEmitter(), { isDestroyed: () => false, focus() {}, getZoomFactor: () => 1 }) as unknown as WebContents
+  const window = Object.assign(new EventEmitter(), { webContents: contents, isDestroyed: () => false,
+    isFullScreen: () => false, setFullScreen() {}, getContentSize: () => [1280, 720], focusOnWebView() {} }) as unknown as BrowserWindow
+  const f = fixture(t, 'recent', false, platform, { args, window, retireSurface: async (_contents, token) => { calls.push(token) } })
+  assert.equal((await f.open(f.source.target)).ok, true)
+  f.setSurface(surface); f.timers.get(200)!()
+  assert.equal(f.snapshot()?.sharedTextureSurface, surface)
+  if (platform === 'darwin') f.native.read = () => {
+    throw Object.assign(new Error('graphics failure'), { playbackFailureKind: 'graphics' })
+  }
+  await f.dispose()
+  assert.deepEqual(calls, [])
+  if (platform === 'darwin') assert.equal(f.creates().cpu, 0, 'quit must not start CPU recovery')
+})
 
 for (const [name, startup, expected] of [
   ['default', {}, 'gpu'],
@@ -130,6 +179,43 @@ test('macOS graphics failure recovers in CPU without requesting another authoriz
   assert.equal(f.snapshot()!.info.playbackFallback, true)
   assert.equal(f.resolutions(), 1)
   assert.deepEqual(f.creates(), { gpu: 1, cpu: 1 })
+})
+
+test('macOS shutdown retires the CPU surface after automatic GPU recovery', async t => {
+  const calls: string[] = []
+  const contents = Object.assign(new EventEmitter(), { isDestroyed: () => false, focus() {}, getZoomFactor: () => 1 }) as unknown as WebContents
+  const window = Object.assign(new EventEmitter(), { webContents: contents, isDestroyed: () => false,
+    isFullScreen: () => false, setFullScreen() {}, getContentSize: () => [1280, 720] }) as unknown as BrowserWindow
+  const f = fixture(t, 'recent', false, 'darwin', { window, retireSurface: async (_contents, surface) => { calls.push(surface) } })
+  assert.equal((await f.open(f.source.target)).ok, true)
+  f.timers.get(200)!()
+  const surface = 'cpu:11111111-1111-4111-8111-111111111111'
+  f.setSurface(surface)
+  f.native.read = () => { throw Object.assign(new Error('graphics failure'), { playbackFailureKind: 'graphics' }) }
+  f.timers.get(200)!()
+  f.timers.get(200)!()
+  assert.equal(f.snapshot()?.info.playbackMode, 'cpu')
+  assert.equal(f.snapshot()?.info.playbackFallback, true)
+  assert.equal(f.snapshot()?.sharedTextureSurface, surface)
+  await f.dispose()
+  assert.deepEqual(calls, [surface])
+})
+
+test('macOS shutdown finds a CPU surface when recovery outruns the state sample', async t => {
+  const calls: string[] = []
+  const contents = Object.assign(new EventEmitter(), { isDestroyed: () => false, focus() {}, getZoomFactor: () => 1 }) as unknown as WebContents
+  const window = Object.assign(new EventEmitter(), { webContents: contents, isDestroyed: () => false,
+    isFullScreen: () => false, setFullScreen() {}, getContentSize: () => [1280, 720] }) as unknown as BrowserWindow
+  const f = fixture(t, 'recent', false, 'darwin', { window, retireSurface: async (_contents, surface) => { calls.push(surface) } })
+  assert.equal((await f.open(f.source.target)).ok, true)
+  f.setSurface('11111111-1111-4111-8111-111111111111'); f.timers.get(200)!()
+  const cpuSurface = 'cpu:22222222-2222-4222-8222-222222222222'
+  f.setSurface(cpuSurface)
+  f.native.command = () => { throw Object.assign(new Error('graphics failure'), { playbackFailureKind: 'graphics' }) }
+  f.control({ kind: 'pause', paused: true })
+  assert.notEqual(f.snapshot()?.sharedTextureSurface, cpuSurface)
+  await f.dispose()
+  assert.deepEqual(calls, [cpuSurface])
 })
 
 test('self-driven native hosts omit the render poll but still publish controlled failures through state observation', async t => {

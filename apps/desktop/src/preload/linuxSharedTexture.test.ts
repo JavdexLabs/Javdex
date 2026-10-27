@@ -494,6 +494,65 @@ for (const platform of ['darwin', 'win32'] as const) test(`${platform}: private 
   stop(); assert.equal(closed, 1)
 })
 
+test('macOS shutdown retires the matching CPU video before acknowledging and remains safe to unbind', () => {
+  const f = fixture({ platform: 'darwin' }), cpuToken = 'cpu:' + token
+  const request = { surfaceToken: cpuToken, requestId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' }
+  f.video.dataset.playbackSurface = cpuToken
+  const stop = f.bind(cpuToken)
+  assert.notEqual(f.video.srcObject, null)
+  f.listeners.get('playback:cpu-shutdown')!(null, request)
+  assert.equal(f.video.srcObject, null)
+  assert.deepEqual(f.messages.slice(-2).map(message => message.channel), ['playback:shared-texture-removed', 'playback:cpu-shutdown-ready'])
+  assert.deepEqual(JSON.parse(JSON.stringify(f.messages.at(-1)!.data)), request)
+  stop(); stop()
+  assert.equal(f.messages.filter(message => message.channel === 'playback:shared-texture-removed').length, 1)
+})
+
+test('macOS shutdown ignores malformed requests and does not retire a replacement or GPU surface', () => {
+  const f = fixture({ platform: 'darwin' }), cpuToken = 'cpu:' + token
+  const replacement = 'cpu:22222222-2222-4222-8222-222222222222'
+  f.video.dataset.playbackSurface = cpuToken; f.bind(cpuToken)
+  f.video.dataset.playbackSurface = replacement; const stop = f.bind(replacement)
+  const stream = f.video.srcObject, requestId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+  const shutdown = f.listeners.get('playback:cpu-shutdown')!
+  const before = f.messages.length
+  shutdown(null, { requestId: 'bad', surfaceToken: replacement })
+  shutdown(null, { requestId, surfaceToken: token })
+  assert.equal(f.messages.length, before)
+  shutdown(null, { requestId, surfaceToken: cpuToken })
+  assert.equal(f.video.srcObject, stream, 'a stale request cannot retire a replacement binding')
+  assert.equal(f.messages.at(-1)?.channel, 'playback:cpu-shutdown-ready')
+  stop()
+  const gpu = fixture({ platform: 'darwin' }), stopGpu = gpu.bind(token), gpuStream = gpu.video.srcObject
+  gpu.listeners.get('playback:cpu-shutdown')!(null, { requestId, surfaceToken: cpuToken })
+  assert.equal(gpu.video.srcObject, gpuStream)
+  stopGpu()
+  const unmounted = fixture({ platform: 'darwin' })
+  unmounted.listeners.get('playback:cpu-shutdown')!(null, { requestId, surfaceToken: cpuToken })
+  assert.equal(unmounted.messages.at(-1)?.channel, 'playback:cpu-shutdown-ready', 'an already-retired surface cannot delay shutdown')
+  for (const platform of ['linux', 'win32'] as const)
+    assert.equal(fixture({ platform }).listeners.has('playback:cpu-shutdown'), false)
+  assert.equal(fixture({ platform: 'darwin', mainFrame: false }).listeners.has('playback:cpu-shutdown'), false)
+})
+
+test('macOS CPU shutdown cancels in-flight video work without a late failure or submission', async () => {
+  let reject!: (reason: Error) => void
+  const f = fixture({ platform: 'darwin', videoWriteWait: new Promise<void>((_resolve, fail) => { reject = fail }) })
+  const cpuToken = 'cpu:' + token
+  f.video.dataset.playbackSurface = cpuToken; const stop = f.bind(cpuToken)
+  const binding = f.messages.find(message => message.channel === 'playback:shared-texture-ready')!.data
+  const pending = f.cpu({ ...binding, sequence: 1, timeline: 0, width: 1, height: 1, stride: 64, size: 64, pixels: new Uint8Array(64) })
+  await new Promise<void>(resolve => setImmediate(resolve))
+  assert.equal(f.cpuVideoFrames.length, 1)
+  f.listeners.get('playback:cpu-shutdown')!(null, { surfaceToken: cpuToken, requestId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' })
+  reject(new Error('old stream cancelled')); await pending
+  assert.equal(f.cpuVideoFrames[0].closed, 1)
+  assert.equal(f.messages.filter(message => message.channel === 'playback:cpu-frame-released').length, 1)
+  assert.equal(f.messages.filter(message => message.channel === 'playback:shared-texture-submitted').length, 0)
+  assert.equal(f.messages.filter(message => message.channel === 'playback:shared-texture-failed').length, 0)
+  stop()
+})
+
 test('Windows private CPU diagnostics report bounded delivery and video stages for a displayed frame', async () => {
   const f = fixture({ platform: 'win32', diagnostics: true }), cpuToken = 'cpu:' + token
   f.video.dataset.playbackSurface = cpuToken; const stop = f.bind(cpuToken)

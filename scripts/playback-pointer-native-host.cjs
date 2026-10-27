@@ -34,7 +34,7 @@ app.whenReady().then(async () => {
       while (!lastMouse && Date.now() < deadline) await delay(20)
       assert.ok(lastMouse, 'Native pointer motion must reach the owned window')
       for (let attempt = 0; attempt < 4; attempt++) {
-        const rect = await contents.executeJavaScript('(() => { const r=document.querySelector("canvas[data-playback-surface]").getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2} })()')
+        const rect = await contents.executeJavaScript('(() => { const r=document.querySelector("video[data-playback-surface]").getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2} })()')
         await inject('move', rect.x - lastMouse.x, rect.y - lastMouse.y)
         const target = await contents.executeJavaScript(`Boolean(document.elementFromPoint(${lastMouse.x},${lastMouse.y})?.closest('button[aria-label="视频画面，单击播放或暂停，双击全屏"]'))`)
         if (target) break

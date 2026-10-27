@@ -290,6 +290,8 @@ Windows SDR/HDR 回归使用 `node scripts/windows-hdr-fixtures.mjs <ffmpeg绝�
 
 `node scripts/playback-close-acceptance.mjs` 检查播放中正常关闭主窗口：窗口确实销毁，进程退出前内核已释放，随后应用正常退出。不要把清理移到可能被否决的 `close` 事件；本机实测还发现该事件中拆除活跃原生视图会让窗口留存。Windows 为 `closed` 清理保留私有隐藏 drawable/context，实际接受关闭时内核仍存活，原窗口销毁后内核释放、零窗口正常退出已通过；不用独立可见播放窗口代替主窗口嵌入。
 
+macOS 另可运行 `node scripts/macos-playback-quit-acceptance.mjs <合成媒体> cpu|gpu|recovery`，验证播放期间主动退出整个应用；`recovery` 用例在 GPU 宿主退出并自动回退到 CPU 后退出。CPU 用例确认当前视频消费者的解绑回执、正常退出以及隔离播放宿主退出。它不替代上述可能被否决的普通窗口关闭检查。
+
 ## 服务端构建与更新
 
 服务端源码构建、Docker 部署及更新备份见 [服务端部署指南](SERVER_MODE.md)。当前能力与接口见 [实现与合同](SERVER_MODE_CONTRACT_INVENTORY.md)，未完成验收和历史测试边界见 [当前状态](SERVER_MODE_NEXT_STEPS.md)。服务端部署不需要 Electron，也不运行 `setup:desktop`。

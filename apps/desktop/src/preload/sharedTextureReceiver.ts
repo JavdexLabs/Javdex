@@ -258,6 +258,18 @@ export function installSharedTextureReceiver(): (surfaceToken: string) => () => 
   if (['darwin', 'win32'].includes(process.platform) && process.isMainFrame) {
     ipcRenderer.on('playback:cpu-frame-port', (event, value: unknown) => cpuFrames.attach(value, event.ports?.[0] as unknown as CpuPixelsPort))
   }
+  if (process.platform === 'darwin' && process.isMainFrame) {
+    ipcRenderer.on('playback:cpu-shutdown', (_event, value: unknown) => {
+      const request = value as { requestId?: unknown; surfaceToken?: unknown } | null
+      if (typeof request?.requestId !== 'string' || !/^[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}$/i.test(request.requestId)
+        || !token(request.surfaceToken) || !request.surfaceToken.startsWith('cpu:')) return
+      const target = mounted
+      try {
+        if (target?.surfaceToken === request.surfaceToken) { mounted = null; retire(target) }
+        ipcRenderer.send('playback:cpu-shutdown-ready', { requestId: request.requestId, surfaceToken: request.surfaceToken })
+      } catch { /* Main keeps its bounded shutdown fallback. */ }
+    })
+  }
   ipcRenderer.on('playback:cpu-frame', (_event, value: unknown) => { if (!cpuFrames.frame(value)) void receiveCpu(value) })
   const nativeTransfer = process.platform === 'darwin' ? 'mac' : process.platform === 'win32' ? 'windows' : process.platform === 'linux' ? 'linux' : null
   if (nativeTransfer && process.isMainFrame) ipcRenderer.on(`playback:${nativeTransfer}-texture-transfer`, (_event, value: unknown) => {

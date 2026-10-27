@@ -29,7 +29,7 @@ try {
     const url = `http://127.0.0.1:${server.httpServer.address().port}/playback-settings.html?${query}`
     const reset = async () => {
       await page.goto(url)
-      await page.locator('canvas[data-playback-surface]').waitFor()
+      await page.locator('video[data-playback-surface]').waitFor()
     }
     const video = page.getByRole('button', { name: '视频画面，单击播放或暂停，双击全屏', exact: true })
     const center = async () => {

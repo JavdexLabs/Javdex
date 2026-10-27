@@ -80,8 +80,15 @@ try {
     const window = BrowserWindow.getAllWindows()[0]
     window.setAlwaysOnTop(true); window.show(); window.focus()
   })
-  report.environment = await application.evaluate(async ({ app, screen }) => ({ pid: process.pid, executable: process.execPath, versions: process.versions,
-    gpu: await app.getGPUInfo('complete'), displays: screen.getAllDisplays() }))
+  report.environment = await application.evaluate(async ({ app, screen }) => {
+    let gpu
+    try { gpu = await app.getGPUInfo('complete') }
+    catch (error) {
+      gpu = { unavailable: String(error && error.message || error) }
+      try { gpu.basic = await app.getGPUInfo('basic') } catch (basicError) { gpu.basicError = String(basicError && basicError.message || basicError) }
+    }
+    return { pid: process.pid, executable: process.execPath, versions: process.versions, gpu, displays: screen.getAllDisplays() }
+  })
   const executable = process.env.JAVDEX_PLAYBACK_ACCEPTANCE_EXECUTABLE
   report.executable = executable ?? 'development Electron'
   if (executable) report.executableSha256 = await hash(executable)
@@ -151,7 +158,10 @@ try {
   await control({ kind: 'seek', seconds: 0 })
   await control({ kind: 'pause', paused: false })
   await sleep(report.warmupSeconds * 1000)
-  report.activeGpu = await application.evaluate(async ({ app }) => app.getGPUInfo('complete'))
+  report.activeGpu = await application.evaluate(async ({ app }) => {
+    try { return await app.getGPUInfo('complete') }
+    catch (error) { return { unavailable: String(error && error.message || error) } }
+  })
   const inspect = () => application.evaluate(() => {
     const hosts = { gpu: { alive: false }, cpu: { alive: false } }, lifecycle = { owners: [] }
     process.getBuiltinModule('diagnostics_channel').channel('javdex.playback.host.statistics').publish(hosts)

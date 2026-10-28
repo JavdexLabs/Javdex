@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import path from 'node:path'
 
 export const playbackPackagingFiles = ['scripts/playback-runtime.mjs', 'scripts/playback-source-materials.mjs',
-  'scripts/packaging-runtime.mjs', 'scripts/local-playback-package.mjs', 'scripts/windows-angle-runtime.mjs',
+  'scripts/packaging-runtime.mjs', 'scripts/local-playback-package.mjs', 'scripts/windows-angle-runtime.mjs', 'scripts/windows-angle-notices.mjs',
   'build/windows-angle-runtime.json', 'scripts/packaged-asar.mjs', 'scripts/dist.mjs', 'electron-builder.config.mjs',
   'build/packaging.targets.json', 'package.json', 'package-lock.json', 'LICENSE', 'NOTICE']
 export function playbackPackagingDigest(directory, names = playbackPackagingFiles) {

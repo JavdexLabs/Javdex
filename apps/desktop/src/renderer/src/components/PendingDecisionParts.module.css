@@ -32,7 +32,7 @@
   background: var(--surface-selected);
 }
 
-.choice:focus-within {
+.choice:has(:focus-visible) {
   outline: var(--focus-outline);
   box-shadow: var(--focus-ring);
 }

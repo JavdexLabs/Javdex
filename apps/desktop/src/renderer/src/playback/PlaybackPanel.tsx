@@ -58,10 +58,14 @@ export default function PlaybackPanel(): JSX.Element | null {
   const recoveryRef = useRef<string | null>(null)
   const [sources, setSources] = useState<{ sessionId: string; items: Array<{ id: number; label: string }>; error: string | null } | null>(null)
   const [videoTitle, setVideoTitle] = useState<{ sessionId: string; label: string } | null>(null)
+  const [chromeActivity, setChromeActivity] = useState(0)
+  const revealChrome = useCallback(() => { setChromeVisible(true); setChromeActivity(value => value + 1) }, [])
   const stateRef = useRef(state)
   stateRef.current = state
   const root = useRef<HTMLDivElement>(null)
   const video = useRef<HTMLButtonElement>(null)
+  const settingsToggle = useRef<HTMLButtonElement>(null)
+  const previousOptions = useRef(options)
   const { cancel: cancelVideoClick, onMouseDown: videoMouseDown, click: videoClick } = usePlaybackPointerGestures(state)
   const header = useRef<HTMLElement>(null)
   const toolbar = useRef<HTMLDivElement>(null)
@@ -78,6 +82,14 @@ export default function PlaybackPanel(): JSX.Element | null {
   const control = useCallback((command: PlaybackControl): void => {
     const id = stateRef.current?.sessionId
     if (id) void api.playback.control(id, command).catch(error => toast.show((error as Error).message, 'error'))
+  }, [toast])
+  const changeVolume = useCallback((sessionId: string, value: number): void => {
+    const pending = { sessionId, value }
+    pendingVolume.current = pending; setVolumeDraft(value)
+    void api.playback.control(sessionId, { kind: 'volume', value }).catch(error => {
+      if (pendingVolume.current !== pending) return
+      pendingVolume.current = null; setVolumeDraft(null); toast.show((error as Error).message, 'error')
+    })
   }, [toast])
   const transport = (command: Extract<PlaybackControl, { kind: 'pause' | 'restart' | 'resume' | 'stop' | 'presentation' }>): void => {
     cancelVideoClick()
@@ -105,6 +117,53 @@ export default function PlaybackPanel(): JSX.Element | null {
       else transport({ kind: 'presentation', value: stateRef.current?.presentation === 'fullscreen' ? 'expanded' : 'docked' })
     }
   })
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent): void => {
+      const key = event.key
+      const seek = key === 'ArrowLeft' || key === 'ArrowRight'
+      const volumeKey = key === 'ArrowUp' || key === 'ArrowDown'
+      const letter = key.toLowerCase()
+      if (!seek && !volumeKey && key !== ' ' && letter !== 'm' && letter !== 'f') return
+      if (event.defaultPrevented || event.isComposing || event.keyCode === 229 || event.metaKey || event.ctrlKey || event.altKey
+        || !document.hasFocus() || event.repeat && (key === ' ' || letter === 'm' || letter === 'f')) return
+      const current = stateRef.current
+      if (!current || current.phase === 'error') return
+      const target = event.target
+      const insidePlayer = typeof Node !== 'undefined' && target instanceof Node && Boolean(root.current?.contains(target))
+      const page = target === window || target === document || target === document.body || target === document.documentElement
+      if (current.presentation === 'docked' ? !insidePlayer || interactionLayers.hasModal() : !layer.isTop() || !insidePlayer && !page) return
+      const focusedPlayerSlider = (seek || volumeKey) && typeof Element !== 'undefined' && target instanceof Element && (
+        target.matches('input[type="range"][aria-label="音量"]')
+        || volumeKey && target.matches('input[type="range"][aria-label="播放进度"]'))
+      if (typeof Element !== 'undefined' && target instanceof Element) {
+        if (!focusedPlayerSlider && target.closest('input,select,textarea,[contenteditable]:not([contenteditable="false"]),[role="combobox"],[role="listbox"],[role="slider"],[aria-haspopup="listbox"]')) return
+        if (key === ' ' && target.closest('button,[role="button"],a[href],summary')) return
+      }
+      if (seek && (current.phase === 'opening' || current.resumePosition != null || !current.seekable)) {
+        if (focusedPlayerSlider) event.preventDefault()
+        return
+      }
+      if (key === ' ' && (current.phase === 'opening' || current.resumePosition != null)) return
+      if (letter === 'f' && current.resumePosition != null) return
+      event.preventDefault()
+      if (current.presentation === 'fullscreen') revealChrome()
+      if (seek) control({ kind: 'seek', relative: true, seconds: (key === 'ArrowLeft' ? -1 : 1) * (event.shiftKey ? 30 : 5) })
+      else if (volumeKey) {
+        const from = pendingVolume.current?.sessionId === current.sessionId ? pendingVolume.current.value : current.volume
+        const value = Math.max(0, Math.min(100, from + (key === 'ArrowUp' ? 5 : -5)))
+        if (value !== from) changeVolume(current.sessionId, value)
+      } else if (key === ' ') {
+        cancelVideoClick()
+        control(current.phase === 'ended' ? { kind: 'restart' } : { kind: 'pause', paused: !current.paused })
+      } else if (letter === 'm') control({ kind: 'mute', muted: !current.muted })
+      else {
+        cancelVideoClick()
+        control({ kind: 'presentation', value: current.presentation === 'fullscreen' ? 'expanded' : 'fullscreen' })
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [cancelVideoClick, changeVolume, control, layer, revealChrome])
   const locatePointer = useCallback((y: number): void => {
     const bounds = root.current?.getBoundingClientRect()
     const top = bounds?.top ?? 0, height = bounds?.height ?? window.innerHeight
@@ -167,8 +226,6 @@ export default function PlaybackPanel(): JSX.Element | null {
   }, [sharedTextureSurface])
   const presentationRevision = state?.presentationRevision
   const rendererFullscreen = presentation === 'fullscreen'
-  const [chromeActivity, setChromeActivity] = useState(0)
-  const revealChrome = useCallback(() => { setChromeVisible(true); setChromeActivity(value => value + 1) }, [])
   useEffect(() => {
     if (!rendererFullscreen) { setChildLayerActive(false); return }
     const sync = (): void => setChildLayerActive(!layer.isTop() && interactionLayers.isActiveModal(layer.id))
@@ -198,6 +255,14 @@ export default function PlaybackPanel(): JSX.Element | null {
     previousPresentation.current = presentation
     if (previous === 'fullscreen' && presentation === 'expanded' && layer.isTop()) video.current?.focus()
   }, [presentation, layer])
+  useLayoutEffect(() => {
+    const wasOpen = previousOptions.current
+    previousOptions.current = options
+    if (wasOpen && !options && state?.presentation !== 'docked' && state?.phase !== 'error'
+      && (!document.activeElement || document.activeElement === document.body || document.activeElement === settingsToggle.current)) {
+      video.current?.focus({ preventScroll: true })
+    }
+  }, [options, state?.presentation, state?.phase])
   useLayoutEffect(() => {
     if (!sessionId || !presentation || presentationRevision == null) return
     let last = ''
@@ -301,16 +366,6 @@ export default function PlaybackPanel(): JSX.Element | null {
       }}
       onBlurCapture={event => {
         if (!event.currentTarget.contains(event.relatedTarget) && !(event.relatedTarget as HTMLElement | null)?.closest?.('[data-playback-overlay-surface]')) setControlsFocused(false)
-      }}
-      onKeyDown={event => {
-        if (event.defaultPrevented || event.nativeEvent.isComposing || event.metaKey || event.ctrlKey || event.altKey || !document.hasFocus()) return
-        if ((event.target as HTMLElement).closest('input,select,textarea,[contenteditable="true"]')) return
-        if (!docked && !layer.isTop()) return
-        if (state.phase === 'error') return
-        if (event.key === ' ' && event.target === root.current) { event.preventDefault(); transport(state.phase === 'ended' ? { kind: 'restart' } : { kind: 'pause', paused: !state.paused }) }
-        else if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); control({ kind: 'seek', relative: true, seconds: (event.key === 'ArrowLeft' ? -1 : 1) * (event.shiftKey ? 30 : 5) }) }
-        else if (event.key.toLowerCase() === 'm') { event.preventDefault(); control({ kind: 'mute', muted: !state.muted }) }
-        else if (event.key.toLowerCase() === 'f') { event.preventDefault(); transport({ kind: 'presentation', value: fullscreen ? 'expanded' : 'fullscreen' }) }
       }}>
       {!docked && <header ref={header} className={styles.header} hidden={!headerShown && !rendererFullscreen}
         data-chrome-visible={headerShown} aria-hidden={rendererFullscreen && !headerShown || undefined} data-playback-overlay-surface={rendererFullscreen || undefined}>
@@ -329,9 +384,10 @@ export default function PlaybackPanel(): JSX.Element | null {
           </div>
           <p className={styles.note}>重试会重新检查同一资源，不自动切换资源或播放器。</p>
         </div> : <button ref={video} className={styles.video} tabIndex={0}
-          aria-label={docked ? '恢复展开播放器' : '视频画面，单击播放或暂停，双击全屏'}
-          onMouseDown={videoMouseDown}
+          aria-label={docked ? '恢复展开播放器' : options ? '视频画面，关闭播放设置' : '视频画面，单击播放或暂停，双击全屏'}
+          onMouseDown={event => { if (options) cancelVideoClick(); else videoMouseDown(event) }}
           onClick={event => {
+            if (options) { cancelVideoClick(); presentationHistory.setOptions(false); return }
             const activate = (): void => {
               const current = stateRef.current
               if (!current || current.sessionId !== state.sessionId || current.presentation !== state.presentation || current.phase === 'error') return
@@ -412,6 +468,7 @@ export default function PlaybackPanel(): JSX.Element | null {
               <div><dt className={styles.shortcutAction}>播放 / 暂停</dt><dd className={styles.shortcutKeys}><kbd className={styles.shortcutKey}>Space</kbd></dd></div>
               <div><dt className={styles.shortcutAction}>跳转 5 秒</dt><dd className={styles.shortcutKeys}><kbd className={styles.shortcutKey}>←</kbd><span>/</span><kbd className={styles.shortcutKey}>→</kbd></dd></div>
               <div><dt className={styles.shortcutAction}>跳转 30 秒</dt><dd className={styles.shortcutKeys}><kbd className={styles.shortcutKey}>Shift</kbd><span>+</span><kbd className={styles.shortcutKey}>←</kbd><span>/</span><kbd className={styles.shortcutKey}>→</kbd></dd></div>
+              <div><dt className={styles.shortcutAction}>音量 ±5%</dt><dd className={styles.shortcutKeys}><kbd className={styles.shortcutKey}>↑</kbd><span>/</span><kbd className={styles.shortcutKey}>↓</kbd></dd></div>
               <div><dt className={styles.shortcutAction}>静音</dt><dd className={styles.shortcutKeys}><kbd className={styles.shortcutKey}>M</kbd></dd></div>
               <div><dt className={styles.shortcutAction}>全屏</dt><dd className={styles.shortcutKeys}><kbd className={styles.shortcutKey}>F</kbd></dd></div>
               <div><dt className={styles.shortcutAction}>返回</dt><dd className={styles.shortcutKeys}><kbd className={styles.shortcutKey}>Esc</kbd></dd></div>
@@ -462,19 +519,15 @@ export default function PlaybackPanel(): JSX.Element | null {
           <div className={styles.volumeGroup}>
             <IconButton size="control" icon={state.muted ? <VolumeX size={18} /> : <Volume2 size={18} />} label={state.muted ? '取消静音' : '静音'} onClick={() => control({ kind: 'mute', muted: !state.muted })} />
             <input className={`${styles.range} ${styles.volume}`} aria-label="音量" type="range" min={0} max={100} style={rangeFill(volume, 100)} value={volume}
-              onPointerDown={() => setAdjusting(true)} onPointerUp={() => setAdjusting(false)} onPointerCancel={() => setAdjusting(false)} onBlur={() => setAdjusting(false)}
-              onChange={event => {
-                const pending = { sessionId: state.sessionId, value: Number(event.target.value) }
-                pendingVolume.current = pending; setVolumeDraft(pending.value)
-                void api.playback.control(pending.sessionId, { kind: 'volume', value: pending.value }).catch(error => {
-                  if (pendingVolume.current !== pending) return
-                  pendingVolume.current = null; setVolumeDraft(null); toast.show((error as Error).message, 'error')
-                })
-              }} aria-valuetext={`${volume}%`} />
+              onPointerDown={() => setAdjusting(true)} onPointerUp={() => {
+                setAdjusting(false)
+                if (!docked && layer.isTop()) video.current?.focus({ preventScroll: true })
+              }} onPointerCancel={() => setAdjusting(false)} onBlur={() => setAdjusting(false)}
+              onChange={event => changeVolume(state.sessionId, Number(event.target.value))} aria-valuetext={`${volume}%`} />
             <span className={styles.volumeValue}>{volume}%</span>
           </div>
           {!docked && <><span className={styles.spacer} /><AiSubtitleToggle key={`${state.sessionId}-${state.presentation}`} playback={state} controller={aiSubtitles} onOpenModels={openSubtitleModels} /><span className={styles.separator} /><div className={styles.quickControls}>{speedSelect(true)}</div>
-            <span className={styles.separator} /><IconButton size="control" icon={<SlidersHorizontal size={18} />} label="播放设置" aria-expanded={options} aria-controls={settingsId} aria-pressed={options} onClick={() => presentationHistory.setOptions(!options)} /></>}
+            <span className={styles.separator} /><IconButton ref={settingsToggle} size="control" icon={<SlidersHorizontal size={18} />} label="播放设置" aria-expanded={options} aria-controls={settingsId} aria-pressed={options} onClick={() => presentationHistory.setOptions(!options)} /></>}
           <IconButton size="control" icon={docked ? <PanelTop size={18} /> : fullscreen ? <Minimize size={18} /> : <Maximize size={18} />}
             label={docked ? '恢复展开' : fullscreen ? '退出全屏' : '全屏'} disabled={waitingResume && !docked}
             onClick={() => transport({ kind: 'presentation', value: docked || fullscreen ? 'expanded' : 'fullscreen' })} />

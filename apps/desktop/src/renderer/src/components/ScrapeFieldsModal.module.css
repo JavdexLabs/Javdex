@@ -357,7 +357,7 @@
   color: var(--text-accent);
 }
 
-.scrapeModalPill:focus-within {
+.scrapeModalPill:has(:focus-visible) {
   box-shadow: var(--focus-ring);
 }
 
@@ -444,7 +444,7 @@
   box-shadow: inset 0 0 0 3px var(--surface-panel);
 }
 
-.scrapeModeOption:focus-within {
+.scrapeModeOption:has(:focus-visible) {
   box-shadow: var(--focus-ring);
 }
 

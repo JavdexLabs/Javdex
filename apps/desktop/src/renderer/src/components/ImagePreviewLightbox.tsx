@@ -291,7 +291,8 @@ export default function ImagePreviewLightbox({
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
-      if (!layer.isTop() || e.defaultPrevented || e.isComposing) return
+      if (!layer.isTop() || e.defaultPrevented || e.isComposing || e.keyCode === 229 || e.metaKey || e.ctrlKey || e.altKey) return
+      if ((e.target as HTMLElement | null)?.closest?.('input,select,textarea,[contenteditable="true"]')) return
       if (e.key === 'ArrowLeft') {
         e.preventDefault()
         bumpChrome()

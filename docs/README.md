@@ -17,6 +17,10 @@
 | 模型与第三方来源 | [云端模型目录](CLOUD_MODEL_CATALOG.md)、[第三方声明](THIRD_PARTY_NOTICES.md)、[来源依据](references/README.md) |
 | Issue 与领域文档约定 | [Issue](agents/issue-tracker.md)、[标签](agents/triage-labels.md)、[领域文档](agents/domain.md) |
 
+## 待实施计划
+
+- [字幕管理实施计划](SUBTITLE_MANAGEMENT_PLAN.md)：自动发现、资源绑定、持久 AI 任务、多语言与选用的数据库、接口和分阶段验收方案；尚未实施，不替代当前播放和 AI 合同。
+
 ## 决策与证据
 
 - [ADR](adr) 保存架构选择及其理由；现行实现以相应合同和代码为准。

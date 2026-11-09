@@ -60,6 +60,7 @@ export function createPlaybackSession(deps: Dependencies) {
   let pendingSeek: { target: number; requestedAt: number } | null = null
   let subtitleRefresh: { id: number; target: number; requestedAt: number } | null = null
   let openedAt = 0
+  let initializing = false
   const now = deps.now ?? Date.now
   const publish = (): void => { deps.changed(snapshot ? structuredClone(snapshot) : null) }
   function destroySource(): void {
@@ -90,7 +91,7 @@ export function createPlaybackSession(deps: Dependencies) {
     deps.focusControls?.()
     deps.awake(false)
     deps.presentation('expanded')
-    source = null; snapshot = null; sample = null; started = false; sequence = -1; pendingSeek = null; subtitleRefresh = null; validation = null
+    source = null; snapshot = null; sample = null; started = false; initializing = false; sequence = -1; pendingSeek = null; subtitleRefresh = null; validation = null
     publish()
   }
   function fail(message: string): void {
@@ -218,7 +219,7 @@ export function createPlaybackSession(deps: Dependencies) {
         if (request !== generation) return false
         saveProgress(true)
         destroySource(); deps.awake(false)
-        source = resolved; sequence = -1; started = false; sample = null; validation = null; lastValidation = now(); openedAt = now()
+        source = resolved; sequence = -1; started = false; initializing = false; sample = null; validation = null; lastValidation = now(); openedAt = now()
         sourceOwned = true; adopted = true
         lastProgressSave = now(); savedProgress = ''; pendingSeek = null; subtitleRefresh = null
         const resumePosition = progress.enabled ? progress.point?.position ?? null : null
@@ -235,6 +236,9 @@ export function createPlaybackSession(deps: Dependencies) {
           deps.native.create()
           deps.native.command({ kind: 'volume', value: volume })
           deps.native.load(resolved.locator, { paused: resumePosition != null })
+          // Synchronous OS/native loading can delay create before the first
+          // tick. The async host initialization has its own bounded deadline.
+          openedAt = now()
           deps.presentation('expanded'); publish(); return true
         } catch {
           const error = new PlaybackFailure('runtime')
@@ -262,7 +266,10 @@ export function createPlaybackSession(deps: Dependencies) {
       const valid = rect.width >= 1 && rect.height >= 1 && rect.x + rect.width <= width + 1 && rect.y + rect.height <= height + 1
       deps.native.viewport(valid ? rect : { x: 0, y: 0, width: 1, height: 1 }, viewport.visible && valid, snapshot)
     },
-    addSubtitle(id: string, file: string): void { current(id); deps.native.addSubtitle(file) },
+    addSubtitle(id: string, file: string, select = true): void { current(id); deps.native.addSubtitle(file, select) },
+    subtitleNotice(value: string | null): void {
+      if (snapshot && (snapshot.subtitleNotice ?? null) !== value) { snapshot.subtitleNotice = value; publish() }
+    },
     aiSubtitleSource(id: string): PlaybackSource {
       current(id)
       if (!source) throw new Error('播放会话已结束')
@@ -279,9 +286,11 @@ export function createPlaybackSession(deps: Dependencies) {
       // A replacement decoder can report loadedFiles=0 until its load replies.
       // Give that one backend transition a fresh deadline, not the old movie's.
       if (raw.playbackMode === 'cpu' && raw.playbackFallback && state.info.playbackMode !== 'cpu') openedAt = now()
+      if (initializing && !raw.initializing) openedAt = now()
+      initializing = raw.initializing === true
       state.paused = raw.pause ?? state.paused
       state.phase = raw['eof-reached'] ? 'ended' : raw.loadedFiles ? raw['paused-for-cache'] ? 'buffering' : state.paused ? 'paused' : 'playing' : 'opening'
-      if (state.phase === 'opening' && now() - openedAt >= 30000) { fail(new PlaybackFailure('openingTimeout').message); return }
+      if (state.phase === 'opening' && !initializing && now() - openedAt >= 30000) { fail(new PlaybackFailure('openingTimeout').message); return }
       state.position = finite(raw['time-pos']); state.duration = finite(raw.duration)
       if (pendingSeek != null && !raw.seeking && state.position != null && Math.abs(state.position - pendingSeek.target) < 2) pendingSeek = null
       if (pendingSeek != null && now() - pendingSeek.requestedAt >= 20000) { fail(new PlaybackFailure('seekTimeout').message); return }

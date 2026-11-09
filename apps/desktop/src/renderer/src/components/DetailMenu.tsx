@@ -11,21 +11,22 @@ export function DetailMenuPanel({ children }: { children: ReactNode }): JSX.Elem
   return <div className={styles.panel} role="menu">{children}</div>
 }
 
-export function DetailMenuItem({
+export const DetailMenuItem = forwardRef<HTMLButtonElement, ButtonHTMLAttributes<HTMLButtonElement> & { danger?: boolean }>(function DetailMenuItem({
   danger = false,
   className = '',
   type = 'button',
   ...props
-}: ButtonHTMLAttributes<HTMLButtonElement> & { danger?: boolean }): JSX.Element {
+}, ref): JSX.Element {
   return (
     <button
       {...props}
+      ref={ref}
       type={type}
       role="menuitem"
       className={`${styles.item}${danger ? ` ${styles.danger}` : ''}${className ? ` ${className}` : ''}`}
     />
   )
-}
+})
 
 export function DetailMenuSeparator(): JSX.Element {
   return <div className={styles.separator} />

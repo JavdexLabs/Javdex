@@ -9,6 +9,7 @@ interface Dependencies {
   changed(state: SubtitleSchedulerState): void
 }
 export interface SubtitleSchedulerState {
+  finished: boolean
   phase: 'recognizing' | 'translating' | 'ready' | 'error'
   activeStart: number | null
   recognizedSeconds: number
@@ -19,7 +20,7 @@ export interface SubtitleSchedulerState {
   cues: SubtitleCue[]
 }
 /** Exactly one inference task. A seek changes priority and invalidates publication from the old task. */
-export function createSubtitleScheduler(duration: number, deps: Dependencies) {
+export function createSubtitleScheduler(duration: number, deps: Dependencies, translate = true) {
   if (!Number.isFinite(duration) || duration <= 0 || duration > 604800) throw new Error('影片时长暂不可用')
   const count = Math.ceil(duration / SUBTITLE_CHUNK_SECONDS)
   const chunks = new Map<number, SubtitleChunk>()
@@ -51,7 +52,7 @@ export function createSubtitleScheduler(duration: number, deps: Dependencies) {
     if (stopped) return
     phase = value
     const seconds = (index: number): number => Math.min(SUBTITLE_CHUNK_SECONDS, duration - index * SUBTITLE_CHUNK_SECONDS)
-    deps.changed({ phase, activeStart: active ? active.index * SUBTITLE_CHUNK_SECONDS : null, error,
+    deps.changed({ finished: attempted.size === count, phase, activeStart: active ? active.index * SUBTITLE_CHUNK_SECONDS : null, error,
       recognizedSeconds: [...chunks.keys()].reduce((sum, index) => sum + seconds(index), 0),
       translatedSeconds: [...chunks.values()].filter(chunk => chunk.translated).reduce((sum, chunk) => sum + seconds(chunk.index), 0),
       recognizedUntil: coverageUntil(false), translatedUntil: coverageUntil(true),
@@ -82,7 +83,7 @@ export function createSubtitleScheduler(duration: number, deps: Dependencies) {
           await deps.write(chunk)
         }
         signal.throwIfAborted(); chunks.set(index, chunk)
-        if (!chunk.translated) {
+        if (translate && !chunk.translated) {
           publish('translating')
           const cues = await deps.translate(chunk.cues, signal, async cues => {
             signal.throwIfAborted()

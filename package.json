@@ -39,7 +39,7 @@
     "test:playback:pointer:native": "node scripts/playback-pointer-native-check.mjs",
     "test:playback:remote": "node --require ./scripts/register-test-paths.cjs --import tsx scripts/playback-remote-acceptance.mjs",
     "test:playback:remote:connection": "node --require ./scripts/register-test-paths.cjs --import tsx scripts/playback-remote-connection-smoke.mts",
-    "test:ui": "node scripts/test-ui.mjs && node scripts/ai-subtitle-guide-check.mjs && node scripts/modal-stability-check.mjs && node scripts/playback-settings-ui-check.mjs && node scripts/playback-pointer-ui-check.mjs && node scripts/model-providers-ui-check.mjs",
+    "test:ui": "node scripts/test-ui.mjs && node scripts/ai-subtitle-guide-check.mjs && node scripts/modal-stability-check.mjs && node scripts/playback-settings-ui-check.mjs && node scripts/playback-pointer-ui-check.mjs && node scripts/model-providers-ui-check.mjs && node scripts/subtitle-tasks-ui-check.mjs && node scripts/task-center-ui-check.mjs",
     "test:ui:server-update": "node scripts/server-update-ui-check.mjs",
     "test:ui:matrix": "node scripts/css-module-migration.mjs",
     "measure:renderer": "node scripts/renderer-bundle-report.mjs",

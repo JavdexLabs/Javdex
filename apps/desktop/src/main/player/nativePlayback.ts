@@ -3,6 +3,8 @@ import type { PlaybackControl, PlaybackSnapshot } from '@shared/desktop/playback
 /** Private seam: renderer cannot see this interface or call native commands. */
 export interface NativePlaybackState {
   alive: boolean
+  /** Private host initialization; excludes cold library/context loading from media deadlines. */
+  initializing?: boolean
   playbackMode?: 'gpu' | 'cpu'
   playbackFallback?: boolean
   playbackFallbackReason?: string
@@ -89,7 +91,7 @@ export interface NativePlayback {
   read(): NativePlaybackState
   viewport(rect: { x: number; y: number; width: number; height: number }, visible: boolean, state: PlaybackSnapshot): void
   render(): void
-  addSubtitle(file: string): void
+  addSubtitle(file: string, select?: boolean): void
   /** Main-owned ASS timeline and logical file identity; native display never reloads that file. */
   updateGeneratedSubtitle?(file: string, select: boolean, signal: AbortSignal | undefined, document: string): void | Promise<void>
   removeGeneratedSubtitle?(file: string, restoreId: number | null): void | Promise<void>

@@ -13,28 +13,33 @@ import type { HostRequest, HostResponse } from './playbackHostProtocol'
 const code = transpileModule(readFileSync(new URL('./isolatedPlaybackHost.ts', import.meta.url), 'utf8'), {
   compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022, esModuleInterop: true }
 }).outputText
-function fixture(mode: 'gpu' | 'cpu' = 'gpu', gpuInfo?: () => Promise<unknown>, platform: 'win32' | 'darwin' = 'win32') {
+function fixture(mode: 'gpu' | 'cpu' = 'gpu', gpuInfo?: () => Promise<unknown>, platform: 'win32' | 'darwin' = 'win32', preloaded?: { ready: boolean }, loadInterop?: () => Promise<void>) {
   const messages: HostRequest[] = [], acquired: Buffer[] = [], released: Buffer[] = []
   const intervals: Array<() => void> = [], timeouts: Array<() => void> = []
   let uuids = 0
   const transfers: unknown[][] = [], deliveries: Array<{ channel: string; value: unknown; ports?: unknown[] }> = []
   const contents = { isDestroyed: () => false, postMessage: (channel: string, value: unknown, ports?: unknown[]) => deliveries.push({ channel, value, ports }), send: (channel: string, value: unknown) => deliveries.push({ channel, value }) }
-  let time = 0, killed = false, postFailure = false, releaseFailure = false
+  let time = 0, killed = false, postFailure = false, releaseFailure = false, forks = 0
   const child = Object.assign(new EventEmitter(), { pid: 77, stderr: null,
     postMessage(value: HostRequest, ports: unknown[] = []) { if (postFailure) throw new Error('closed channel'); messages.push(value); transfers.push(ports) }, kill() { killed = true; child.emit('exit', 1) } })
+  const interop = { acquire() { const resource = Buffer.alloc(8, acquired.length + 1); acquired.push(resource); return resource },
+    createChannel() {}, closeChannel() {},
+    release(resource: Buffer) { if (releaseFailure) throw new Error('interop cleanup failed'); released.push(resource) } }
   const exports = {} as typeof import('./isolatedPlaybackHost')
   runInNewContext(code, { exports, Buffer, performance: { now: () => time }, process: { platform, env: {} },
     setInterval: (callback: () => void) => { intervals.push(callback); return { unref() {} } }, clearInterval() {},
     setTimeout: (callback: () => void) => { timeouts.push(callback); return { unref() {} } }, console,
     clearTimeout() {}, require(name: string) {
-      if (name === 'electron') return { app: { getAppPath: () => '/fixture', getGPUInfo: gpuInfo }, utilityProcess: { fork: () => child }, MessageChannelMain: class { port1 = { close() {} }; port2 = { close() {} } } }
+      if (name === 'electron') return { app: { getAppPath: () => '/fixture', getGPUInfo: gpuInfo }, utilityProcess: { fork: () => { forks++; return child } }, MessageChannelMain: class { port1 = { close() {} }; port2 = { close() {} } } }
       if (name === 'node:path') return path
       if (name === 'node:crypto') return { randomUUID: () => `11111111-1111-4111-8111-${String(++uuids).padStart(12, '0')}` }
       if (name === 'node:diagnostics_channel') return { channel }
       if (name === './playbackGraphicsFailure') return { graphicsPlaybackFailure }
       if (name === './windowsPlaybackAdapter') return { selectWindowsPlaybackAdapter }
-      if (name === 'node:module') return { createRequire: () => () => ({ acquire() { const resource = Buffer.alloc(8, acquired.length + 1); acquired.push(resource); return resource },
-        release(resource: Buffer) { if (releaseFailure) throw new Error('interop cleanup failed'); released.push(resource) } }) }
+      if (name === './playbackHostPreload') return { PLAYBACK_HOST_INITIALIZATION_TIMEOUT_MS: 60000, takePreloadedPlaybackHost: () => preloaded ? { child, ready: preloaded.ready } : undefined }
+      if (name === './windowsPlaybackInterop') return { getWindowsPlaybackInterop: () => loadInterop ? undefined : interop,
+        loadWindowsPlaybackInterop: () => loadInterop!().then(() => interop) }
+      if (name === 'node:module') return { createRequire: () => () => interop }
       throw Error(name)
     } })
   const host = exports.createIsolatedPlaybackHost('/fixture/playback.node', mode)
@@ -42,8 +47,46 @@ function fixture(mode: 'gpu' | 'cpu' = 'gpu', gpuInfo?: () => Promise<unknown>, 
   const emit = (message: HostResponse): void => { child.emit('message', message) }
   const frame = (sequence: number, resourceId = sequence, slot = (sequence - 1) % 3): void => emit({ type: 'frame', frame: { sequence, resourceId, slot, width: 640, height: 360, ntHandle: Buffer.alloc(8) } })
   return { host, emit, frame, messages, transfers, deliveries, contents: contents as unknown as import('electron').WebContents, acquired, released, intervals, timeouts, failPost: () => { postFailure = true }, failRelease: () => { releaseFailure = true },
-    advance: (ms: number) => { time += ms; for (const callback of intervals) callback() }, killed: () => killed }
+    advance: (ms: number) => { time += ms; for (const callback of intervals) callback() }, elapseWithoutTimers: (ms: number) => { time += ms }, killed: () => killed, forks: () => forks }
 }
+
+test('Windows GPU joins the asynchronous interop load before sending create or media commands', async t => {
+  let ready!: () => void
+  const f = fixture('gpu', undefined, 'win32', { ready: true }, () => new Promise(resolve => { ready = resolve })); t.after(f.host.destroy)
+  f.host.command(['loadfile', '/authorized media.mkv', 'replace'])
+  f.advance(35000)
+  assert.equal(f.host.inspect().initializing, true)
+  assert.equal(f.messages.length, 0)
+  ready(); await new Promise(setImmediate)
+  assert.deepEqual(f.messages.map(x => x.type), ['create', 'command'])
+  f.emit({ type: 'initialized' }); assert.equal(f.host.inspect().initializing, false)
+})
+
+test('an asynchronous interop failure is a recoverable GPU initialization fault', async t => {
+  const f = fixture('gpu', undefined, 'win32', { ready: true }, async () => { throw new Error('load failed') }); t.after(f.host.destroy)
+  await new Promise(setImmediate)
+  assert.throws(f.host.inspect, { playbackFailureCode: 'GPU_INITIALIZATION_FAILED' })
+  assert.equal(f.messages.some(x => x.type === 'create'), false)
+})
+
+for (const stop of [false, true]) test(`late interop readiness cannot create a stopped or expired host (stopped: ${stop})`, async t => {
+  let ready!: () => void
+  const f = fixture('gpu', undefined, 'win32', { ready: true }, () => new Promise(resolve => { ready = resolve })); t.after(f.host.destroy)
+  if (stop) f.host.destroy(); else f.elapseWithoutTimers(60001)
+  ready(); await new Promise(setImmediate)
+  if (!stop) assert.throws(f.host.inspect, { playbackFailureCode: 'HELPER_INITIALIZATION_TIMEOUT' })
+  assert.equal(f.messages.some(x => x.type === 'create'), false)
+})
+
+for (const mode of ['gpu', 'cpu'] as const) for (const ready of [false, true]) test(`${mode}: adopts a ${ready ? 'ready' : 'loading'} module-only child before creating the native instance`, t => {
+  const f = fixture(mode, undefined, 'win32', { ready }); t.after(f.host.destroy)
+  assert.equal(f.forks(), 0)
+  f.host.command(['loadfile', '/authorized media.mkv', 'replace'])
+  if (!ready) { assert.equal(f.messages.length, 0); f.emit({ type: 'ready' }) }
+  assert.deepEqual(f.messages.map(x => x.type), ['create', 'command'])
+  assert.equal(f.host.inspect().initializing, true, 'module readiness does not imply context readiness')
+  f.emit({ type: 'initialized' }); assert.equal(f.host.inspect().initializing, false)
+})
 
 test('Windows GPU initialization preserves create/command order while choosing the consumer adapter', async t => {
   let resolve!: (value: unknown) => void
@@ -77,7 +120,8 @@ test('stopping during Windows adapter discovery cannot initialize the old child'
   assert.equal(f.messages.some(message => message.type === 'create'), false)
 })
 test('CPU initialization never queries or waits for Windows graphics identity', t => {
-  const f = fixture('cpu', () => { throw Error('CPU must not query graphics') }); t.after(f.host.destroy)
+  const f = fixture('cpu', () => { throw Error('CPU must not query graphics') }, 'win32', undefined,
+    () => { throw Error('CPU must not load GPU interop') }); t.after(f.host.destroy)
   f.emit({ type: 'ready' }); assert.equal(f.messages[0].type, 'create')
 })
 
@@ -135,10 +179,49 @@ test('a producer cannot reuse an allocation that is still held by its consumer',
 })
 test('host heartbeat failure is bounded and leaves the main process responsive', t => {
   const f = fixture(); t.after(() => f.host.destroy())
-  f.emit({ type: 'ready' }); f.advance(5001)
+  f.emit({ type: 'ready' }); f.emit({ type: 'initialized' }); f.advance(5001)
   assert.throws(() => f.host.inspect(), (error: unknown) => (error as { playbackFailureCode: string }).playbackFailureCode === 'HELPER_HEARTBEAT_TIMEOUT')
   for (const callback of f.timeouts) callback()
   assert.equal(f.killed(), true)
+})
+
+for (const platform of ['win32', 'darwin'] as const) {
+  for (const mode of ['gpu', 'cpu'] as const) {
+    test(`${platform} ${mode}: cold library/context loading has its own deadline before the running heartbeat`, t => {
+      const f = fixture(mode, undefined, platform); t.after(f.host.destroy)
+      f.advance(35000)
+      assert.equal(f.host.inspect().initializing, true)
+      f.emit({ type: 'ready' }); f.advance(20000)
+      assert.equal(f.host.inspect().initializing, true, 'module ready is not render-context ready')
+      f.emit({ type: 'initialized' })
+      assert.equal(f.host.inspect().initializing, false)
+      f.advance(4999); assert.doesNotThrow(f.host.inspect)
+      f.advance(2)
+      assert.throws(f.host.inspect, mode === 'gpu' ? { playbackFailureCode: 'HELPER_HEARTBEAT_TIMEOUT' } : /CPU/)
+    })
+    test(`${platform} ${mode}: incomplete initialization is bounded even if a module-ready message arrives`, t => {
+      const f = fixture(mode, undefined, platform); t.after(f.host.destroy)
+      f.advance(35000); f.emit({ type: 'ready' }); f.advance(24999)
+      assert.equal(f.host.inspect().initializing, true)
+      f.advance(1)
+      assert.throws(f.host.inspect, mode === 'gpu' ? { playbackFailureCode: 'HELPER_INITIALIZATION_TIMEOUT' } : /CPU/)
+    })
+  }
+}
+
+test('late initialization after stop cannot revive the old host', () => {
+  const f = fixture()
+  f.emit({ type: 'ready' }); f.host.destroy(); f.emit({ type: 'initialized' })
+  assert.equal(f.host.inspect().alive, false)
+  assert.equal(f.host.inspect().initializing, false)
+})
+
+for (const moduleReady of [false, true]) test(`late initialization cannot bypass its deadline while timers were delayed (module ready: ${moduleReady})`, t => {
+  const f = fixture(); t.after(f.host.destroy)
+  if (moduleReady) f.emit({ type: 'ready' })
+  f.elapseWithoutTimers(60001)
+  f.emit(moduleReady ? { type: 'initialized' } : { type: 'ready' })
+  assert.throws(f.host.inspect, { playbackFailureCode: 'HELPER_INITIALIZATION_TIMEOUT' })
 })
 test('CPU host returns copy credits only on consumer acknowledgement', t => {
   const f = fixture('cpu'); t.after(() => f.host.destroy())

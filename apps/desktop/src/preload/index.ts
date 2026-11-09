@@ -363,6 +363,7 @@ const api = {
     getOverviewStats: () => invokeApp(IPC.SETTINGS_OVERVIEW_STATS)
   },
   scan: {
+    getActive: () => invokeApp(IPC.SCAN_ACTIVE_GET),
     run: (libraryId: number, rootIds?: number[]) =>
       invokeApp(IPC.SCAN_RUN, libraryId, rootIds),
     cancel: (runId: string) => invokeApp(IPC.SCAN_CANCEL, runId),
@@ -875,6 +876,12 @@ const api = {
     viewport: (viewport: import('@shared/desktop/playback').PlaybackViewport) => invokeApp(IPC.PLAYBACK_VIEWPORT, viewport),
     subtitle: (sessionId: string) => invokeApp(IPC.PLAYBACK_SUBTITLE, sessionId),
     aiSubtitleSnapshot: () => invokeApp(IPC.PLAYBACK_AI_SUBTITLE_SNAPSHOT),
+    subtitleTasks: () => invokeApp(IPC.SUBTITLE_TASKS_SNAPSHOT),
+    prepareSubtitles: (target: import('@shared/desktop/playback').PlaybackTarget) => invokeApp(IPC.SUBTITLE_TASKS_PREPARE, target),
+    subtitleTaskCommand: (command: import('@shared/desktop/subtitleTasks').SubtitleTaskCommand) => invokeApp(IPC.SUBTITLE_TASKS_COMMAND, command),
+    subtitleFiles: (target: import('@shared/desktop/playback').PlaybackTarget) => invokeApp(IPC.SUBTITLE_FILES_LIST, target),
+    associateSubtitleFiles: (target: import('@shared/desktop/playback').PlaybackTarget) => invokeApp(IPC.SUBTITLE_FILES_ADD, target),
+    refreshSubtitles: (sessionId: string) => invokeApp(IPC.PLAYBACK_SUBTITLE_REFRESH, sessionId),
     aiSubtitleCommand: (sessionId: string, command: import('@shared/desktop/aiSubtitles').AiSubtitleCommand) => invokeApp(IPC.PLAYBACK_AI_SUBTITLE_COMMAND, sessionId, command),
     onAiSubtitleChanged: (cb: (state: import('@shared/desktop/aiSubtitles').AiSubtitleSnapshot) => void) => onAppEvent(IPC.PLAYBACK_AI_SUBTITLE_CHANGED, cb),
     clearProgress: (input: import('@shared/desktop/playback').PlaybackClearProgress) => invokeApp(IPC.PLAYBACK_CLEAR_PROGRESS, input),

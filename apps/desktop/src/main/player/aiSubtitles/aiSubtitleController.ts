@@ -12,8 +12,11 @@ import { createOfflineSubtitleInference } from './offlineInference'
 import { createSubtitleScheduler } from './subtitleScheduler'
 import { renderSubtitleAss, renderSubtitleSrt, type SubtitleCue } from './subtitleDocument'
 import { createSubtitleLog } from './subtitleLog'
+import { createBackgroundSubtitleDisplay } from './backgroundSubtitleDisplay'
+import type { SubtitleTasks } from './subtitleTasks'
 
 interface Dependencies {
+  background?: SubtitleTasks
   root: string
   workRoot?: string
   native: NativePlayback
@@ -62,7 +65,8 @@ export function createAiSubtitleController(deps: Dependencies) {
   const state: AiSubtitleSnapshot = { sessionId: null, supported: localModelRuntimeSupported(), installed: false,
     enabled: false, phase: 'idle', activeStart: null, recognizedSeconds: 0, translatedSeconds: 0,
     recognizedUntil: null, translatedUntil: null, duration: null, display: 'bilingual', fontSize: 42, error: null }
-  const snapshot = (): AiSubtitleSnapshot => structuredClone(state)
+  const background = deps.background ? createBackgroundSubtitleDisplay({ ...deps, jobs: deps.background, base: () => structuredClone(state) }) : null
+  const snapshot = (): AiSubtitleSnapshot => background?.snapshot() ?? structuredClone(state)
   const publish = (): void => deps.changed(snapshot())
   const markDisplayFailure = (stage: string, error?: unknown): void => {
     displayError = '字幕显示更新失败；播放不受影响，可重试字幕显示'
@@ -232,9 +236,11 @@ export function createAiSubtitleController(deps: Dependencies) {
   }
   return {
     snapshot,
-    stop,
+    selectionChanged: () => background?.selectionChanged(),
+    stop: async () => { await background?.stop(); await stop() },
     async command(id: string, command: AiSubtitleCommand): Promise<AiSubtitleSnapshot> {
       current(id); await initialization; current(id)
+      if (background && deps.source(id).mode === 'local') return background.command(id, command)
       if (command.action === 'view-log') {
         if (!deps.openLog) throw new Error('当前环境不支持查看日志')
         if (logSession !== id) { log.clear(); logSession = id }
@@ -262,6 +268,7 @@ export function createAiSubtitleController(deps: Dependencies) {
       return snapshot()
     },
     tick(playback: PlaybackSnapshot | null): void {
+      background?.tick(playback, state.enabled && state.sessionId === playback?.sessionId)
       if (closed || !state.enabled) return
       if (!playback || playback.sessionId !== state.sessionId || playback.phase === 'error') { void stop(); return }
       const selected = deps.native.selectedAudioStream?.()
@@ -275,6 +282,6 @@ export function createAiSubtitleController(deps: Dependencies) {
       if (errors > nativeErrors && !displayError) markDisplayFailure('native-overlay')
       nativeErrors = errors
     },
-    async close(): Promise<void> { closed = true; runtimeRevision++; unsubscribe?.(); await stop(); await clearing }
+    async close(): Promise<void> { closed = true; runtimeRevision++; unsubscribe?.(); await background?.close(); await stop(); await clearing }
   }
 }

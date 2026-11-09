@@ -52,6 +52,7 @@ export const ROUTE_PATH = {
   settingsGroup: '/settings/:group/:tab',
   settingsPluginDev: '/settings/plugin-dev',
   pending: '/pending',
+  tasks: '/tasks',
   pendingTree: '/pending/*',
   pendingVideoStack: '/pending/video/:videoId',
   pendingActressStack: '/pending/video/:videoId/actress/:actressId',

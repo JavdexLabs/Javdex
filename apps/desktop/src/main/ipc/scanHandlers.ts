@@ -410,7 +410,35 @@ export function registerScanAuditRevealHandler(
   })
 }
 
+export async function readActiveScanProgress(
+  backend: CatalogBackend,
+  readLocal = () => scanCoordinator.getActiveProgress()
+): Promise<import('@shared/libraryTypes').LibraryScanProgressEvent[]> {
+    if (backend.mode === 'remote') {
+      const active = [] as import('@shared/libraryTypes').LibraryScanProgressEvent[]
+      // Page through recent tasks: a long-running scan need not be in the first page.
+      for (let offset = 0; ; offset += 100) {
+        const tasks = await backend.tasks.list({ limit: 100, offset })
+        for (const task of tasks) {
+          if (task.kind === 'scan' && task.libraryId != null && ['queued', 'running', 'cancelRequested'].includes(task.state)) {
+            active.push({ libraryId: task.libraryId, runId: task.taskId, progress: {
+              scanned: task.counts?.scanned ?? 0, imported: task.counts?.imported ?? 0, currentFile: task.label ?? ''
+            } })
+          }
+        }
+        if (tasks.length < 100) break
+      }
+      return active
+    }
+    const event = readLocal()
+    return event && (event.phase === 'started' || event.phase === 'progress')
+      ? [{ libraryId: event.libraryId, runId: event.runId,
+          progress: event.phase === 'progress' ? event.progress : { scanned: 0, imported: 0, currentFile: '' } }]
+      : []
+}
+
 export function registerScanHandlers(ctx: IpcContext, backend: CatalogBackend): void {
+  appCommandAdapter.register(IPC.SCAN_ACTIVE_GET, () => readActiveScanProgress(backend))
   scanCoordinator.subscribe((event) => {
     const webContents = ctx.getWindow()?.webContents
     appEventAdapter.send(webContents, IPC.SCAN_STATE_CHANGED, event)

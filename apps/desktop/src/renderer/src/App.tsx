@@ -18,6 +18,7 @@ import PlaylistShell from './components/PlaylistShell'
 import PlaylistDetailPage from './pages/PlaylistDetailPage'
 import EmptyState from './components/EmptyState'
 import PendingCenterShell from './components/PendingCenterShell'
+import TaskCenterPage from './tasks/TaskCenterPage'
 import MediaLibrarySettingsPage from './pages/MediaLibrarySettingsPage'
 import { PluginDevLeaveGuardProvider } from './components/pluginDev/PluginDevLeaveGuard'
 import { ToastProvider } from './components/Toast'
@@ -209,6 +210,7 @@ function AppContent(): JSX.Element {
                         <Route path={ROUTE_SEGMENT.detailActress} element={<ActressDetailPage fromVideo />} />
                       </Route>
                     </Route>
+                    <Route path={ROUTE_PATH.tasks} element={<TaskCenterPage />} />
                     <Route path="*" element={<Navigate to={ROUTE_PATH.home} replace />} />
                   </Routes>
                   </Layout>

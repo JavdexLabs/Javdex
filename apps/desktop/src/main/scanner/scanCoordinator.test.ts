@@ -720,9 +720,11 @@ describe('ScanCoordinator', () => {
     const running = coordinator.run()
     await started
     assert.equal(coordinator.activeRunId, 'test-run')
+    assert.deepEqual(coordinator.getActiveProgress(), { phase: 'started', libraryId: 1, runId: 'test-run', trigger: 'manual' })
     assert.equal(coordinator.cancel('another-run'), false)
     assert.equal(coordinator.cancel('test-run'), true)
     assert.equal((await running).cancelled, true)
+    assert.equal(coordinator.getActiveProgress(), null, 'late-opened task views must not retain completed runs')
     assert.equal(cleanupReads, 0)
     assert.equal(gate.active, null)
     assert.equal(summaries[0].status, 'cancelled')

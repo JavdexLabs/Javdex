@@ -101,6 +101,8 @@ function fixture(platform: 'darwin' | 'win32' | 'linux', software = false,
         case 'node:path': return path
         case 'node:timers/promises': return { setTimeout: delay }
         case './isolatedPlaybackHost': return { createIsolatedPlaybackHost: (filename: string) => { loaded.push(filename); return sharedProducer } }
+        case './playbackHostPreload': return { preloadPlaybackHost() {} }
+        case './windowsPlaybackInterop': return { preloadWindowsPlaybackInterop() {} }
         case './playbackGraphicsFailure': return { graphicsPlaybackFailure: (code: string) => Object.assign(new Error(code), { playbackFailureKind: 'graphics' }) }
         case './playbackDisplay': return { linuxPlaybackBackend: () => 'dmabuf' }
         case './linuxPlaybackBridge': return { createLinuxPlaybackBridge: () => bridge }

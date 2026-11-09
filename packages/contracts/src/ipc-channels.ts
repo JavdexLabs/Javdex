@@ -88,6 +88,7 @@ export const IPC = {
   // Scan / import
   SCAN_RUN: 'scan:run',
   SCAN_CANCEL: 'scan:cancel',
+  SCAN_ACTIVE_GET: 'scan:activeGet',
   SCAN_LATEST_GET: 'scan:getLatest',
   SCAN_AUDIT_GET: 'scan:auditGet',
   SCAN_AUDIT_HEADER: 'scan:auditHeader',
@@ -348,6 +349,12 @@ export const IPC = {
   RECENT_PLAYBACK_CLEAR: 'recentPlayback:clear',
   RECENT_PLAYBACK_CHANGED: 'recentPlayback:changed',
   PLAYBACK_AI_SUBTITLE_SNAPSHOT: 'playback:ai-subtitle-snapshot',
+  SUBTITLE_TASKS_SNAPSHOT: 'subtitles:tasks',
+  SUBTITLE_TASKS_PREPARE: 'subtitles:prepare',
+  SUBTITLE_TASKS_COMMAND: 'subtitles:command',
+  SUBTITLE_FILES_LIST: 'subtitles:files-list',
+  SUBTITLE_FILES_ADD: 'subtitles:files-add',
+  PLAYBACK_SUBTITLE_REFRESH: 'playback:subtitle-refresh',
   PLAYBACK_AI_SUBTITLE_COMMAND: 'playback:ai-subtitle-command',
   PLAYBACK_AI_SUBTITLE_CHANGED: 'playback:ai-subtitle-changed',
 

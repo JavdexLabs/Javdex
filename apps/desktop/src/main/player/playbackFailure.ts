@@ -16,6 +16,7 @@ const messages = {
   grant: '服务端未返回可用的原文件播放授权，请检查连接后重试',
   capacity: '本机播放授权已达上限，请重新连接资料库后重试',
   runtime: '内置播放运行库无法初始化，请检查运行库或显式使用外部播放器',
+  initializationTimeout: '60 秒内播放运行库未能初始化，请稍后重试或显式使用外部播放器',
   format: '无法识别所选影片格式，文件可能损坏或格式不受支持，可检查文件或显式使用外部播放器',
   streams: '所选文件没有可播放的音视频流，请检查文件或显式使用外部播放器',
   audio: '无法初始化音频输出，请检查系统音频设备后重试',
@@ -38,6 +39,8 @@ export class PlaybackFailure extends Error {
 /** Discard third-party messages, even when they are structured catalog errors. */
 export function playbackFailure(error: unknown, fallback: PlaybackFailureCode = 'load'): PlaybackFailure {
   if (error instanceof PlaybackFailure) return error
+  if ((error as { playbackFailureCode?: string } | null)?.playbackFailureCode === 'HELPER_INITIALIZATION_TIMEOUT')
+    return new PlaybackFailure('initializationTimeout')
   const code = (error as NodeJS.ErrnoException | null)?.code
   if (code === 'PLAYBACK_RESTART_REQUIRED') return new PlaybackFailure('restart')
   if (code === 'PLAYBACK_BRIDGE_CAPACITY') return new PlaybackFailure('capacity')

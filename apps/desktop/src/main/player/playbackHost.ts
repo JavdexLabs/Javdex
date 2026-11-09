@@ -80,13 +80,21 @@ port.on('message', ({ data, ports = [] }: { data: HostRequest; ports?: MessagePo
       if (gpu && process.platform === 'win32') native.create(data.bounds, data.windowsAdapter)
       else native.create(data.bounds)
       created = true
+      send({ type: 'initialized' })
+      // Module-only preloading stays idle: no render/state polling until create.
+      setInterval(poll, gpu ? 250 : 8).unref()
+      setInterval(() => {
+        if (!stopped) {
+          try { send({ type: 'state', state: native.state() }) } catch (error) { fail(error) }
+        }
+      }, 100).unref()
       if (gpu) native.setWakeup(poll)
     } else if (data.type === 'stall' && process.env.JAVDEX_PLAYBACK_DIAGNOSTICS === '1') {
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0)
     } else if (data.type === 'destroy') {
       stopped = true
       if (gpu && created) native.setWakeup(null)
-      detachCpuPort(); native.destroy(); process.exit(0)
+      detachCpuPort(); if (created) native.destroy(); process.exit(0)
     } else if (!created) throw new Error('Playback host not initialized')
     else if (data.type === 'bounds') native.setBounds(data.bounds)
     else if (data.type === 'visible') native.setVisible(data.value)
@@ -109,10 +117,4 @@ port.on('message', ({ data, ports = [] }: { data: HostRequest; ports?: MessagePo
     poll()
   } catch (error) { fail(error) }
 })
-setInterval(poll, gpu ? 250 : 8).unref()
-setInterval(() => {
-  if (created && !stopped) {
-    try { send({ type: 'state', state: native.state() }) } catch (error) { fail(error) }
-  }
-}, 100).unref()
 send({ type: 'ready' })

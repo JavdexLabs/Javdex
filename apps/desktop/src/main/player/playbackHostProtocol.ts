@@ -29,6 +29,7 @@ export type HostRequest =
   | { type: 'probe' }
 export type HostResponse =
   | { type: 'ready' }
+  | { type: 'initialized' }
   | { type: 'cpu-frame-port-closed'; cpuChannelId: string }
   | { type: 'ack' }
   | { type: 'state'; state: NativePlaybackState }

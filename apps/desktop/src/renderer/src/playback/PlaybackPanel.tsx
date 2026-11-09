@@ -27,6 +27,7 @@ function recoveryLabel(reason: string): string {
   if (reason === 'DISPLAY_SELF_TEST_TIMEOUT' || reason === 'RECEIVER_NOT_READY') return '等待 GPU 画面超时'
   if (reason === 'TEXTURE_IMPORT_FAILED' || reason === 'FRAME_CHANNEL_FAILED') return '共享画面传输失败'
   if (reason === 'GPU_PROCESS_EXITED') return 'GPU 进程退出'
+  if (reason === 'HELPER_INITIALIZATION_TIMEOUT') return 'GPU 播放运行库初始化超时'
   if (reason === 'HELPER_HEARTBEAT_TIMEOUT' || reason === 'FRAME_RELEASE_TIMEOUT') return 'GPU 播放通道未响应'
   return '当前 GPU 播放路径不可用'
 }
@@ -436,6 +437,9 @@ export default function PlaybackPanel(): JSX.Element | null {
           <div className={styles.optionBody} role="tabpanel" id={`${settingsId}-subtitle`} aria-labelledby={`${settingsId}-subtitle-tab`} hidden={optionTab !== 'subtitle'}>
           <AiSubtitleSettings playback={state} onOpenModels={openSubtitleModels} controller={aiSubtitles} />
           <label>字幕{trackSelect('sub')}</label>
+          {state.subtitleNotice && <p className={styles.note} role="status">{state.subtitleNotice}</p>}
+          {state.source === 'local' && <Button size="sm" onClick={() => void api.playback.refreshSubtitles(state.sessionId)
+            .then(notice => { if (notice) toast.show(notice, 'error') }).catch(error => toast.show((error as Error).message, 'error'))}>刷新同目录字幕</Button>}
           <Button size="sm" onClick={() => void api.playback.subtitle(state.sessionId).catch(error => toast.show((error as Error).message, 'error'))}>选择本机外挂字幕</Button>
           <label>字幕字号<SelectControl aria-label="字幕字号" value={state.subtitleSize ?? ''}
             disabled={disabled || !sizeSupported || state.subtitleSize == null}

@@ -9,6 +9,7 @@ import {
   LayoutGrid,
   List,
   ListVideo,
+  ListChecks,
   Send,
   Settings,
   Star,
@@ -34,7 +35,8 @@ const ICONS = {
   series: List,
   playlist: ListVideo,
   settings: Settings,
-  pending: CircleAlert
+  pending: CircleAlert,
+  tasks: ListChecks
 } satisfies Record<string, LucideIcon>
 
 export type NavIconName = keyof typeof ICONS

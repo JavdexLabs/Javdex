@@ -8,6 +8,8 @@ import styles from './FloatingLayer.module.css'
 interface FloatingLayerProps {
   open: boolean
   anchorRef: RefObject<HTMLElement | null>
+  /** Optional initial keyboard target, focused once the layer is positioned and visible. */
+  initialFocusRef?: RefObject<HTMLElement | null>
   side: FloatingSide
   align: FloatingAlign
   offset?: number
@@ -24,6 +26,7 @@ interface FloatingLayerProps {
 export default function FloatingLayer({
   open,
   anchorRef,
+  initialFocusRef,
   side,
   align,
   offset,
@@ -37,6 +40,7 @@ export default function FloatingLayer({
   children
 }: FloatingLayerProps): JSX.Element | null {
   const floatingRef = useRef<HTMLDivElement>(null)
+  const focused = useRef(false)
   const layer = useInteractionLayer({ enabled: open, rootRef: floatingRef, anchorRef, onDismiss: onClose })
   const coords = useFloatingLayer({
     open,
@@ -46,6 +50,22 @@ export default function FloatingLayer({
     align,
     offset
   })
+
+  useEffect(() => {
+    if (!open) { focused.current = false; return }
+    if (!coords || focused.current || !initialFocusRef?.current) return
+    let frame = 0, attempts = 0
+    const focusWhenVisible = (): void => {
+      const target = initialFocusRef.current
+      if (target && getComputedStyle(target).visibility !== 'hidden') {
+        target.focus()
+        focused.current = document.activeElement === target
+      }
+      if (!focused.current && ++attempts < 30) frame = requestAnimationFrame(focusWhenVisible)
+    }
+    frame = requestAnimationFrame(focusWhenVisible)
+    return () => cancelAnimationFrame(frame)
+  }, [coords, initialFocusRef, open])
 
   useEffect(() => {
     if (!open || !onClose) return

@@ -22,6 +22,12 @@
 
 ## 三平台播放统一
 
+[2026-11-07 Windows 首次播放初始化修复](windows-first-playback-initialization-2026-11-07.md)记录初始化与运行心跳分离、正常播放与有界故障恢复的新包实测；重启后首次播放留待用户验收。
+
+[2026-11-07 Windows 运行库预加载](windows-playback-runtime-preload-2026-11-07.md)记录仅模块加载、首次播放进程接管、空闲内存及真实 GPU／CPU 原生输出验证；保留主进程互操作库同步加载和重启冷启动的验证边界。
+
+[2026-11-07 Windows 互操作模块异步预加载](windows-interop-preload-2026-11-07.md)记录重启后剩余瓶颈、同进程 Worker 预加载、包内首播与 CPU 回退、退出边界及当前本地包摘要。
+
 [2026-10-24 播放统一验证](playback-unification-2026-10-24.md)记录共用控制器、隔离宿主、色彩对齐和当前平台验收边界。
 
 [2026-10-24 自动 CPU 回退审计](playback-fallback-audit-2026-10-24.md)记录 Deepin 25 虚拟机反馈后的三平台故障分支检查、本地修复和仍需真机验证的环境；不代表 Beta.1 附件已经更新。

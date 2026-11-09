@@ -1,7 +1,6 @@
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useEffect, type MouseEvent, type ReactNode } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { api, resolveMediaSrc } from '../api'
+import { resolveMediaSrc } from '../api'
 import { getDetailPosterScope } from '../listView/detailPosterScope'
 import { clearListScrollForPrimaryNav } from '../listView/listViewMemory'
 import {
@@ -19,20 +18,19 @@ import { useTheme } from './ThemeProvider'
 import { usePluginDevLeaveGuard } from './pluginDev/PluginDevLeaveGuard'
 import { NavIcon, type NavIconName } from './NavIcons'
 import { ROUTE_PATH } from '../listView/routePaths'
-import { pendingCenterPath } from '../listView/pendingRoutes'
-import { actressKeys, mediaLibraryKeys } from '../query/queryKeys'
 import MediaLibraryNav from './MediaLibraryNav'
-import { pendingInboxBadgeValue, type PendingInboxBadgeValue } from '../pendingInboxState'
+import { type PendingInboxBadgeValue } from '../pendingInboxState'
 import {
   isGlobalSearchShortcut,
   queueHomeGlobalSearchFocus
 } from '../globalSearchShortcut'
 import DesktopSessionOverlay from '../desktop/DesktopSessionOverlay'
-import { useDesktopSession } from '../desktop/DesktopSessionContext'
 import { interactionLayers } from '../interaction/interactionLayers'
 import { SidebarNavIcon, SidebarNavLabel, SidebarNavLink, SidebarNavRow } from './SidebarNav'
 import styles from './Layout.module.css'
 import PlaybackPanel from '../playback/PlaybackPanel'
+import { useTaskCenterData } from '../tasks/useTaskCenterData'
+import { taskCenterPath } from '../tasks/taskCenterRoutes'
 
 type NavItem = { to: string; label: string; icon: NavIconName; end?: boolean }
 
@@ -51,7 +49,7 @@ const NAV_FACETS: NavItem[] = [
 
 /** Maintenance zone: pinned to the sidebar bottom so the pending badge never shifts. */
 const NAV_BOTTOM: NavItem[] = [
-  { to: pendingCenterPath(), label: '待确认', icon: 'pending' },
+  { to: taskCenterPath(), label: '任务中心', icon: 'tasks' },
   { to: ROUTE_PATH.settings, label: '设置', icon: 'settings' }
 ]
 
@@ -92,6 +90,7 @@ function NavItems({
 
   const handleBadgeClick = (listRoot: string, target: string): void => {
     const go = (): void => {
+      if (listRoot === ROUTE_PATH.tasks) { navigate(taskCenterPath()); return }
       const listTarget = primaryNavLinkTo(listRoot, location.pathname, location.search)
       navigate({ pathname: target, search: listTarget.search })
     }
@@ -108,9 +107,9 @@ function NavItems({
         const badgeCount = badges[n.to] ?? 0
         const badgeTarget = badgeTargets[n.to]
         const hasBadge = typeof badgeCount !== 'number' || badgeCount > 0
-        const badgeLabel = badgeCount === 'loading' ? '待确认数量加载中，打开待确认项'
-          : badgeCount === 'error' ? '待确认数量加载失败，打开待确认项'
-          : `打开 ${badgeCount} 项待确认`
+        const badgeLabel = badgeCount === 'loading' ? '待处理数量加载中，打开任务中心'
+          : badgeCount === 'error' ? '待处理数量加载失败，打开任务中心'
+          : `查看 ${badgeCount} 项需要处理的事项`
         return (
           <SidebarNavRow key={n.to}>
             <SidebarNavLink
@@ -118,7 +117,7 @@ function NavItems({
               end={n.end}
               draggable={false}
               onClick={(event) => handleNavClick(event, n.to)}
-              active={activeListRoot === n.to}
+              active={activeListRoot === n.to || n.to === ROUTE_PATH.tasks && activeListRoot === ROUTE_PATH.pending}
               reserveBadgeSpace={Boolean(hasBadge && badgeTarget)}
             >
               <SidebarNavIcon>
@@ -161,34 +160,9 @@ export default function Layout({ children }: { children: ReactNode }): JSX.Eleme
   const backgroundSrc =
     imagePreviewOpen || privacyHidesBackground ? null : resolveMediaSrc(background?.path)
   const hasBackgroundLayer = Boolean(backgroundSrc)
-  const { catalogReadsEnabled } = useDesktopSession()
-  const conflictSummaryQuery = useQuery({
-    queryKey: actressKeys.conflictSummary(),
-    queryFn: () => api.actressScrape.conflictSummary(),
-    refetchInterval: 3_000,
-    enabled: catalogReadsEnabled
-  })
-  const librariesQuery = useQuery({
-    queryKey: mediaLibraryKeys.activeList(),
-    queryFn: () => api.mediaLibraries.list(),
-    staleTime: 2_000,
-    refetchInterval: 3_000,
-    enabled: catalogReadsEnabled
-  })
-  const pendingVideoQuery = useQuery({
-    queryKey: ['pending-video-scrapes', 'count'],
-    queryFn: () => api.scrape.countPending(),
-    refetchInterval: 3_000,
-    enabled: catalogReadsEnabled
-  })
-  /** One inbox, one badge: scan groups, scrape snapshots and actress name conflicts. */
+  const taskData = useTaskCenterData()
   const pendingBadges: Record<string, PendingInboxBadgeValue> = {
-    [ROUTE_PATH.pending]: pendingInboxBadgeValue({
-      libraries: librariesQuery.data,
-      pendingVideoCount: pendingVideoQuery.data,
-      actressConflictGroupCount: conflictSummaryQuery.data?.groupCount,
-      isError: librariesQuery.isError || pendingVideoQuery.isError || conflictSummaryQuery.isError
-    })
+    [ROUTE_PATH.tasks]: taskData.attention
   }
 
   useEffect(() => {
@@ -237,7 +211,7 @@ export default function Layout({ children }: { children: ReactNode }): JSX.Eleme
           <NavItems
             items={NAV_BOTTOM}
             badges={pendingBadges}
-            badgeTargets={{ [ROUTE_PATH.pending]: pendingCenterPath() }}
+            badgeTargets={{ [ROUTE_PATH.tasks]: taskCenterPath() }}
           />
         </nav>
       </aside>

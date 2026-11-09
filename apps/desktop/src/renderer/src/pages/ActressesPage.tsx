@@ -113,9 +113,9 @@ export default function ActressesPage(): JSX.Element {
     if (trimmed === urlQ.trim()) return
     setSearchParams(
       (prev) => patchSearchParams(prev, { [LIST_PARAM.q]: trimmed || null }),
-      { replace: true }
+      { replace: true, state: location.state }
     )
-  }, [debouncedQ, urlQ, setSearchParams])
+  }, [debouncedQ, urlQ, setSearchParams, location.state])
 
   const genderFilter = parseGender(searchParams.get(LIST_PARAM.gender))
   const statusFilter = parseActressStatus(searchParams.get(LIST_PARAM.status))
@@ -130,9 +130,9 @@ export default function ActressesPage(): JSX.Element {
 
   const patchParams = useCallback(
     (patch: Record<string, string | null | undefined>): void => {
-      setSearchParams((prev) => patchSearchParams(prev, patch), { replace: true })
+      setSearchParams((prev) => patchSearchParams(prev, patch), { replace: true, state: location.state })
     },
-    [setSearchParams]
+    [setSearchParams, location.state]
   )
 
   const [pendingDelete, setPendingDelete] = useState<ActressCard | null>(null)

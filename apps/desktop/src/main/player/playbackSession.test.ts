@@ -471,6 +471,29 @@ test('opening and seek timeouts release the core, retain actionable errors and e
   assert.equal(f.presentations.at(-1), 'expanded')
 })
 
+test('cold host initialization does not consume the media-opening deadline', async () => {
+  const f = fixture()
+  f.raw({ loadedFiles: 0, initializing: true })
+  await f.session.open(target)
+  f.session.tick(); f.advance(35000); f.session.tick()
+  assert.equal(f.session.snapshot()!.phase, 'opening')
+  f.raw({ initializing: false }); f.session.tick()
+  f.advance(29999); f.session.tick()
+  assert.equal(f.session.snapshot()!.phase, 'opening')
+  f.advance(1); f.session.tick()
+  assert.equal(f.session.snapshot()!.phase, 'error', 'a stalled file load remains bounded after initialization')
+})
+
+test('synchronous native loading before the first observation is excluded from media opening', async () => {
+  const f = fixture()
+  f.native.create = () => f.advance(35000)
+  f.raw({ loadedFiles: 0 })
+  await f.session.open(target)
+  f.session.tick(); assert.equal(f.session.snapshot()!.phase, 'opening')
+  f.advance(30000); f.session.tick()
+  assert.equal(f.session.snapshot()!.phase, 'error')
+})
+
 test('an old source validation does not stop a new session or block its validation', async () => {
   const f = fixture()
   let rejectOld!: (error: Error) => void

@@ -14,22 +14,38 @@ const source = readFileSync(new URL('./playbackHost.ts', import.meta.url), 'utf8
   .replace('require(runtime)', 'loadRuntime(runtime)').replace('require(interopFile)', 'loadRuntime(interopFile)')
 const code = transpileModule(source, { compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022 } }).outputText
 const cpuChannelId = '11111111-1111-4111-8111-111111111111'
-function fixture(platform: 'darwin' | 'win32') {
+function fixture(platform: 'darwin' | 'win32', mode = 'cpu') {
   const sent: HostResponse[] = [], pixels: unknown[] = [], ticks: Array<() => void> = [], budgets: boolean[] = []
   const parent = Object.assign(new EventEmitter(), { postMessage: (value: HostResponse) => sent.push(value) })
   const port = Object.assign(new EventEmitter(), { start() {}, close() { port.emit('close') }, postMessage(value: unknown) { pixels.push(value) } })
-  let sequence = 0, timeline = 1, destroyed = 0, exitCode = 0
-  const native = { create() {}, setVisible() {}, setBounds() {}, command() {}, generatedSubtitles() {}, resetTiming(value: number) { timeline = value }, setRenderBudget() {},
+  let sequence = 0, timeline = 1, destroyed = 0, exitCode = 0, creates = 0
+  const native = { create() { creates++ }, setWakeup() {}, setVisible() {}, setBounds() {}, command() {}, generatedSubtitles() {}, resetTiming(value: number) { timeline = value }, setRenderBudget() {},
     nextFrame(writable: boolean) { budgets.push(writable); return writable ? { sequence: ++sequence, timeline, width: 1, height: 1, stride: 64, size: 64, pixels: Buffer.alloc(64) } : undefined },
     state: () => ({ alive: true }), destroy() { destroyed++ } }
-  runInNewContext(code, { exports: {}, Buffer, process: { argv: ['node', 'entry', '/fixture/runtime.node', 'cpu', '', ''], platform, parentPort: parent, env: {}, set exitCode(n: number) { exitCode = n }, exit(n: number) { exitCode = n } },
+  runInNewContext(code, { exports: {}, Buffer, process: { argv: ['node', 'entry', '/fixture/runtime.node', mode, '', ''], platform, parentPort: parent, env: {}, set exitCode(n: number) { exitCode = n }, exit(n: number) { exitCode = n } },
     setInterval(callback: () => void) { ticks.push(callback); return { unref() {} } }, console: { error() {} },
-    require(id: string) { assert.equal(id, 'node:module'); return { createRequire: () => () => ({ software: native }) } }
+    require(id: string) { assert.equal(id, 'node:module'); return { createRequire: () => () => ({ ...native, sharedTexture: native, software: native }) } }
   })
-  return { sent, pixels, budgets, port, native, ticks, exit: () => exitCode, destroyed: () => destroyed,
+  return { sent, pixels, budgets, port, native, ticks, exit: () => exitCode, destroyed: () => destroyed, creates: () => creates,
     request(data: HostRequest, ports: unknown[] = []) { parent.emit('message', { data, ports }) } }
 }
+test('Windows GPU module-only preload leaves graphics and polling idle until the first create command', () => {
+  const f = fixture('win32', 'gpu')
+  assert.equal(f.creates(), 0); assert.equal(f.ticks.length, 0)
+  assert.deepEqual(f.sent.map(x => x.type), ['ready'])
+  f.request({ type: 'create', bounds: { width: 1, height: 1 } })
+  assert.equal(f.creates(), 1); assert.equal(f.ticks.length, 2)
+  assert.equal(f.sent.some(x => x.type === 'initialized'), true)
+  f.request({ type: 'destroy' }); assert.equal(f.destroyed(), 1)
+})
 for (const platform of ['darwin', 'win32'] as const) {
+  test(`${platform}: loading a module creates no native instance, frames or polling timers`, () => {
+    const f = fixture(platform)
+    assert.deepEqual(f.sent.map(x => x.type), ['ready'])
+    assert.equal(f.creates(), 0); assert.equal(f.ticks.length, 0); assert.equal(f.budgets.length, 0)
+    f.request({ type: 'destroy' })
+    assert.equal(f.destroyed(), 0); assert.equal(f.exit(), 0)
+  })
   test(`${platform}: CPU utility preserves two-copy credit across the private pixels and metadata channels`, () => {
     const f = fixture(platform); f.request({ type: 'create', bounds: { width: 1, height: 1 } })
     assert.equal(f.budgets.at(-1), false); assert.equal(f.pixels.length, 0)

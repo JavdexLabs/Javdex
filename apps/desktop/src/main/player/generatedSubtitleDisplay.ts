@@ -79,7 +79,10 @@ export function createGeneratedSubtitleDisplay(platform = process.platform) {
     }
   }
   const display: SubtitleDisplay = {
-    addSubtitle(file): void { subtitleSelectionRevision++; if (generated) generated.ownsSelection = false; showGenerated(false); command(['sub-add', file, 'select']) },
+    addSubtitle(file, select = true): void {
+      if (select) { subtitleSelectionRevision++; if (generated) generated.ownsSelection = false; showGenerated(false) }
+      command(['sub-add', file, select ? 'select' : 'auto', path.basename(file)])
+    },
     async updateGeneratedSubtitle(file, select, signal, document): Promise<void> {
       const epoch = generation
       const selection = subtitleSelectionRevision

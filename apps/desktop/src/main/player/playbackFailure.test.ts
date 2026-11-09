@@ -30,3 +30,12 @@ test('restart-required native failures retain their controlled recovery instruct
     assert.ok(!failure.message.includes('secret'))
   }
 })
+
+test('initialization expiry retains its distinct controlled message through the graphics bridge', () => {
+  const failure = playbackFailure(Object.assign(new Error('/private/runtime'), {
+    code: 'PLAYBACK_RESTART_REQUIRED', playbackFailureCode: 'HELPER_INITIALIZATION_TIMEOUT'
+  }), 'native')
+  assert.equal(failure.code, 'initializationTimeout')
+  assert.match(failure.message, /60 秒/)
+  assert.ok(!failure.message.includes('/private'))
+})

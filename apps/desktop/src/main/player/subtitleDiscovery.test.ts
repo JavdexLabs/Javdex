@@ -9,7 +9,9 @@ import type { PlaybackSource } from './playbackSource'
 import { createSubtitleDiscovery } from './subtitleDiscovery'
 
 async function fixture() {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'javdex-subtitle-discovery-'))
+  // Match PlaybackSourceResolver: sources use real paths, including Windows
+  // short temp names and macOS /var aliases.
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'javdex-subtitle-discovery-')))
   const file = path.join(root, 'ABC.zh.srt')
   await fs.writeFile(file, 'subtitle')
   let playback: PlaybackSnapshot | null = { sessionId: 'one', source: 'local', phase: 'playing', tracks: [] } as unknown as PlaybackSnapshot

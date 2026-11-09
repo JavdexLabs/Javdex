@@ -10,6 +10,7 @@ import type { AiRuntimePaths } from '../../services/localModels/runtimeInstaller
 import type { createOfflineSubtitleInference } from './offlineInference'
 import { subtitleOutputPath, publishSubtitleFile, discoverSubtitleFiles } from './subtitleFiles'
 import { createBackgroundSubtitleDisplay } from './backgroundSubtitleDisplay'
+import { renderSubtitleAss } from './subtitleDocument'
 import type { AiSubtitleSnapshot } from '@shared/desktop/aiSubtitles'
 import type { PlaybackSnapshot } from '@shared/desktop/playback'
 import type { NativePlayback } from '../nativePlayback'
@@ -63,14 +64,17 @@ test('finished bilingual jobs publish beside media, deduplicate, survive restart
   } finally { await f.cleanup() }
 })
 
-test('existing sidecars are not overwritten; save retry never reruns recognition', async () => {
+test('a byte-identical existing sidecar stays user-owned and save retry reuses recognition', async () => {
   const f = await fixture()
   try {
     const filename = subtitleOutputPath(f.source.locator, 'bilingual')
-    await fs.writeFile(filename, 'user subtitles')
+    const existing = renderSubtitleAss([{ start: 0, end: 15, japanese: '原文', chinese: '译文' }], 'bilingual')
+    await fs.writeFile(filename, existing)
     const id = await f.jobs.enqueue(f.source, 1, 15)
     await until(() => f.jobs.state(id)?.job.status === 'awaiting-save' && f.leases() === 0)
-    assert.equal(await fs.readFile(filename, 'utf8'), 'user subtitles')
+    assert.equal(await fs.readFile(filename, 'utf8'), existing)
+    await assert.rejects(f.jobs.action(id, 'delete-output'), /没有已保存的字幕/)
+    assert.equal(await fs.readFile(filename, 'utf8'), existing)
     await fs.unlink(filename)
     await f.jobs.action(id, 'retry-save')
     assert.equal(f.jobs.state(id)?.job.status, 'completed')
@@ -134,11 +138,12 @@ test('a new translation configuration reuses matching recognition while a new AS
     f.paths.translationVersion = 'tr2'
     const second = await f.jobs.enqueue(f.source, 1, 15)
     assert.notEqual(first, second)
-    await until(() => f.jobs.state(second)?.job.status === 'completed' && f.leases() === 0)
+    await until(() => f.jobs.state(second)?.job.status === 'awaiting-save' && f.leases() === 0)
+    await f.jobs.action(second, 'retry-save', { filename: path.join(f.root, 'new-translation.ass'), replace: false })
     assert.equal(f.recognizes(), 1); assert.equal(f.translations(), 2)
     f.paths.asrVersion = 'asr2'
     const third = await f.jobs.enqueue(f.source, 1, 15)
-    await until(() => f.jobs.state(third)?.job.status === 'completed')
+    await until(() => f.jobs.state(third)?.job.status === 'awaiting-save' && f.leases() === 0)
     assert.equal(f.recognizes(), 2)
   } finally { await f.cleanup() }
 })

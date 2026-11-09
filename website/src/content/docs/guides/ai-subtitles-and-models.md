@@ -9,7 +9,7 @@ description: 详解本地 AI 日中字幕推理流水线（Kotoba Whisper + HY-M
 
 ## 实时 AI 日中字幕是如何工作的？
 
-### 本机字幕与后台生成（开发版）
+### 本机字幕与后台生成
 
 - 播放本机影片时自动发现同目录的同名 SRT、ASS，例如 `ABC-123.zh-CN.srt`；播放器中可以刷新、选择或手动加载字幕，并记住明确选择和关闭状态。
 - 在影片资源行的“…”菜单中选择“字幕管理”，默认查看“字幕文件”：包含同目录自动发现和已手动关联的字幕，显示完整路径和可用状态。点击“关联字幕文件”可多选 SRT／ASS，不需要播放影片或准备 AI 模型。关联只记录原路径，不复制或移动文件；重启后仍会加载，已有选轨或关闭状态保持不变。
@@ -29,7 +29,7 @@ sequenceDiagram
   participant Audio as ffmpeg 音频提取 (pcm_s16le)
   participant ASR as Kotoba Whisper + Silero VAD
   participant LLM as 本地大模型翻译 (HY-MT2 7B / Qwen3)
-  participant Canvas as 渲染层 ASS 画布
+  participant Overlay as libmpv 字幕叠加层
 
   Player->>Scheduler: 报告当前播放时间戳 (如 00:15:20)
   Note over Scheduler: 动态锁定当前 30s 分片窗口<br/>[00:15:00 - 00:15:30]，附带 3s 前置上下文
@@ -39,8 +39,8 @@ sequenceDiagram
   ASR-->>Scheduler: 输出精准日语语句及时间点 (Cues)
   Scheduler->>LLM: llama-server 传入前序上下文进行中文翻译
   LLM-->>Scheduler: 逐句返回中文翻译结果
-  Scheduler->>Canvas: 挂载中日双语字幕并缓存该分片
-  Canvas->>Player: 实时呈现在画面下方
+  Scheduler->>Overlay: 更新中日双语字幕并缓存该分片
+  Overlay->>Player: 呈现在画面下方
 ```
 
 ### 核心架构亮点
@@ -108,9 +108,9 @@ Linux GPU 支持属于新增构建；已发布的旧 0.9.0 不会因为运行库
    - **`仅日语`**：纯日语听力字幕。
 3. **字号调节**：支持 `28 | 34 | 42 | 50 | 60` 五档字号微调。
 4. **一键导出字幕文件**：
-   - 影片播放一段时间后，点击“导出字幕”，可将当前已生成的全片字幕一键导出为标准的 **`.srt`** 或 **`.ass`** 文件，永久与视频存放在一起。
+   - 点击“导出已生成字幕”，可将已生成的片段保存为 **`.srt`** 或 **`.ass`** 文件。
 5. **缓存清理与重试**：
-   - 若某几个片段遇到偶发性识别跳字，可在抽屉中点击“重试未完成字幕”，或点击“清除本片字幕缓存”重新生成。
+   - 片段生成失败时，可在抽屉中点击“重试未完成字幕”。本机后台任务的中间结果在“任务中心 → 字幕”中随任务移除，远程资料库可在播放器中清除本片字幕缓存。
 
 ---
 

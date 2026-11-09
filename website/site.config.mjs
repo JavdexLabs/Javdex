@@ -2,7 +2,7 @@ export const site = {
   origin: 'https://javdexlabs.github.io',
   base: '/Javdex/',
   repository: 'JavdexLabs/Javdex',
-  contentVersion: '0.9.1',
+  contentVersion: '0.9.2',
 };
 
 export function sitePath(value = '') {

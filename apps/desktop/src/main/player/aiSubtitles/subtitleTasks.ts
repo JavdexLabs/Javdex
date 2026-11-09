@@ -115,9 +115,9 @@ export function createSubtitleTasks(deps: Dependencies) {
     if (normalized(filename) === normalized(source.locator) || path.extname(filename).toLowerCase() !== (selected?.srt ? '.srt' : '.ass'))
       throw new Error('请选择正确扩展名的字幕文件，不能覆盖影片资源')
     await deps.validate(source)
-    // A crash after publication but before manifest commit is safe to reconcile.
-    const identical = await fs.readFile(filename, 'utf8').then(value => value === body, () => false)
-    if (!identical) await publishSubtitleFile(filename, body, selected?.replace ?? false)
+    // Only record ownership after this task publishes the file. Matching
+    // contents alone do not prove that a pre-existing subtitle belongs to it.
+    await publishSubtitleFile(filename, body, selected?.replace ?? false)
     if (selected?.srt) return
     job.outputPath = filename; job.outputHash = hash(body); job.status = 'completed'; job.error = null
     await persist(); notify(); deps.saved?.(source, filename)

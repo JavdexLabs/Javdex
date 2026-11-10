@@ -50,7 +50,7 @@ const DOMAIN_ICON: Record<PendingDomain, JSX.Element> = {
 
 const FILTER_ORDER: PendingTypeFilter[] = ['all', 'scan', 'scrape', 'actress']
 
-export default function PendingCenterPage(): JSX.Element {
+export default function PendingCenterPage({ embedded = false }: { embedded?: boolean }): JSX.Element {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const videoDetailOpen = Boolean(useMatch({ path: ROUTE_MATCH.pendingVideoStack, end: false }))
@@ -283,7 +283,7 @@ export default function PendingCenterPage(): JSX.Element {
     <ListPage className={styles.page}>
       <header className={styles.topbar}>
         <div className={styles.titleRow}>
-          <h1 className={styles.title}>待确认</h1>
+          {embedded ? <span className={styles.count}>资料与资源归属</span> : <h1 className={styles.title}>待确认</h1>}
           <span className={styles.count}>{loading ? '读取中…' : `${total} 项待处理`}</span>
         </div>
         <div className={styles.filterRow}>

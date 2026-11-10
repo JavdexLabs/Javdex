@@ -209,10 +209,12 @@ export function createNativeSharedTextureBridge(native: SharedTextureProducer, w
   const poll = (): void => {
     if (stopped) return
     try {
-      probe.tick(shown, Date.now())
+      const initializing = native.inspect().initializing === true
+      probe.tick(shown && !initializing, Date.now())
       if (shown && pending.size >= 3 && [...pending.values()].every(p => Date.now() - p.since > 5000))
         throw graphicsPlaybackFailure('FRAME_RELEASE_TIMEOUT')
-      if (requested && (!binding || lastSequence === 0)) {
+      if (initializing) waitingSince = null
+      else if (requested && (!binding || lastSequence === 0)) {
         waitingSince ??= Date.now()
         if (Date.now() - waitingSince > 10000) throw graphicsPlaybackFailure('RECEIVER_NOT_READY')
       } else waitingSince = null

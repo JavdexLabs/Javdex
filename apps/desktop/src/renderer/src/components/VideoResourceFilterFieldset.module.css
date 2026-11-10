@@ -51,7 +51,7 @@
   background: var(--surface-selected);
 }
 
-.option:focus-within {
+.option:has(:focus-visible) {
   outline: var(--focus-outline);
   box-shadow: var(--focus-ring);
 }

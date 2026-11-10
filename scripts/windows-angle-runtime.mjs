@@ -7,9 +7,11 @@ import { createRequire } from 'node:module'
 import { pathToFileURL } from 'node:url'
 import path from 'node:path'
 import { inspectWindowsPlaybackBinary } from './playback-runtime.mjs'
+import { compactWindowsAngleNotices, restoreWindowsAngleNotices } from './windows-angle-notices.mjs'
 
 const pinFile = new URL('../build/windows-angle-runtime.json', import.meta.url)
 const digest = file => createHash('sha256').update(readFileSync(file)).digest('hex')
+const noticesHeading = '\n\nOriginal upstream third-party notices (HTML):\n'
 export const windowsAngleBinaries = ['libEGL.dll', 'libGLESv2.dll']
 export const windowsAngleMetadata = ['windows-angle.json', 'ANGLE-LICENSE.txt']
 
@@ -27,6 +29,17 @@ export function verifyWindowsAngleRuntime(directory, arch) {
   assert.equal(manifest.archiveSha256, pin.archives[arch]?.sha256)
   for (const [name, hash] of Object.entries(manifest.files))
     assert.equal(digest(path.join(directory, name)), hash, 'Private ANGLE digest mismatch: ' + name)
+  if (manifest.notices) {
+    assert.equal(manifest.notices.format, 'deduplicated-pre-v1', 'Unsupported ANGLE notice format')
+    const content = readFileSync(path.join(directory, 'ANGLE-LICENSE.txt'), 'utf8')
+    const start = content.indexOf(noticesHeading)
+    assert.ok(start >= 0 && content.indexOf(noticesHeading, start + noticesHeading.length) < 0, 'Missing or ambiguous ANGLE notice heading')
+    const restored = restoreWindowsAngleNotices(content.slice(start + noticesHeading.length))
+    assert.equal(createHash('sha256').update(restored.html, 'utf8').digest('hex'), manifest.notices.originalSha256, 'ANGLE supplier notices changed')
+    assert.equal(restored.blocks, manifest.notices.blocks, 'ANGLE notice count changed')
+    assert.equal(restored.unique, manifest.notices.unique, 'ANGLE unique notice count changed')
+    assert.equal(restored.references, manifest.notices.references, 'ANGLE notice reference count changed')
+  }
   const binaryFiles = windowsAngleBinaries.map(name => path.join(directory, name))
   for (const file of binaryFiles) inspectWindowsPlaybackBinary(file, { directory, archName: arch, binaryFiles })
   return manifest
@@ -56,10 +69,17 @@ export async function stageWindowsAngleRuntime(directory, arch, archive = proces
     const binaryFiles = windowsAngleBinaries.map(name => path.join(temporary, name))
     for (const file of binaryFiles) inspectWindowsPlaybackBinary(file, { directory: temporary, archName: arch, binaryFiles })
     for (const name of windowsAngleBinaries) copyFileSync(path.join(temporary, name), path.join(directory, name))
+    const supplierNotices = readFileSync(path.join(temporary, 'LICENSES.chromium.html'))
+    const html = supplierNotices.toString('utf8')
+    assert.ok(Buffer.from(html, 'utf8').equals(supplierNotices), 'Supplier notices are not valid UTF-8')
+    const notices = compactWindowsAngleNotices(html)
     writeFileSync(path.join(directory, 'ANGLE-LICENSE.txt'), readFileSync(path.join(temporary, 'LICENSE'), 'utf8')
-      + '\n\nOriginal upstream third-party notices (HTML):\n' + readFileSync(path.join(temporary, 'LICENSES.chromium.html'), 'utf8'))
+      + '\n\nIdentical third-party notices are reproduced once. Each reference names its full notice above; search for the ID in this file.\n'
+      + noticesHeading + notices.compact)
     const manifest = { schemaVersion: 1, arch, providerVersion: pin.providerVersion, angleRevision: pin.angleRevision,
       archiveSha256: input.sha256, provenanceSha256: digest(pinFile),
+      notices: { format: 'deduplicated-pre-v1', originalSha256: notices.originalSha256,
+        blocks: notices.blocks, unique: notices.unique, references: notices.references },
       files: Object.fromEntries([...windowsAngleBinaries, 'ANGLE-LICENSE.txt'].map(name => [name, digest(path.join(directory, name))])) }
     writeFileSync(path.join(directory, 'windows-angle.json'), JSON.stringify(manifest, null, 2) + '\n')
     return verifyWindowsAngleRuntime(directory, arch)

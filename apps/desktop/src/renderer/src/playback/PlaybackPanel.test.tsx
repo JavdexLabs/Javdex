@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { getEventListeners } from 'node:events'
 import { afterEach, test } from 'node:test'
 import React from 'react'
 import { MemoryRouter, useLocation } from 'react-router-dom'
@@ -117,6 +118,7 @@ function seekKey(key: string, modifiers: { shiftKey?: boolean; ctrlKey?: boolean
 }
 afterEach(async () => {
   await act(async () => renderer?.unmount())
+  assert.equal(getEventListeners(window, 'keydown').length, 0, 'unmount releases player keyboard listeners')
   renderer = undefined
   opened.length = external.length = controls.length = queried.length = viewports.length = 0
   getDetail = async () => detail(); open = openExternal = async () => ({ ok: true }); history.state = null
@@ -1071,6 +1073,116 @@ test('shared-texture pointer gestures distinguish single-click pause from double
   assert.deepEqual(controls, [{ id: 'replacement', command: { kind: 'presentation', value: 'expanded' } }], 'docked mouse activation remains immediate')
 })
 
+for (const presentation of ['expanded', 'fullscreen'] as const) test(`${presentation} seeks with arrows after focus falls outside the player without clicking video`, async () => {
+  await mount()
+  await act(async () => changed({ ...snapshot(), presentation }))
+  await act(async () => {
+    window.dispatchEvent(Object.assign(new Event('keydown', { cancelable: true }), {
+      key: 'ArrowRight', shiftKey: false, ctrlKey: false, metaKey: false, altKey: false, isComposing: false
+    }))
+  })
+  assert.deepEqual(controls, [{ id: 'first', command: { kind: 'seek', relative: true, seconds: 5 } }])
+})
+
+for (const presentation of ['expanded', 'fullscreen'] as const) test(`${presentation} owns transport, mute and volume shortcuts after focus falls onto the page`, async () => {
+  await mount()
+  await act(async () => changed({ ...snapshot(), presentation }))
+  const press = async (key: string): Promise<void> => {
+    await act(async () => { window.dispatchEvent(Object.assign(new Event('keydown', { cancelable: true }), {
+      key, shiftKey: false, ctrlKey: false, metaKey: false, altKey: false, isComposing: false, repeat: false
+    })) })
+  }
+  for (const key of [' ', 'f', 'm', 'ArrowUp', 'ArrowUp', 'ArrowDown']) await press(key)
+  assert.deepEqual(controls, [
+    { id: 'first', command: { kind: 'pause', paused: true } },
+    { id: 'first', command: { kind: 'presentation', value: presentation === 'fullscreen' ? 'expanded' : 'fullscreen' } },
+    { id: 'first', command: { kind: 'mute', muted: true } },
+    { id: 'first', command: { kind: 'volume', value: 55 } },
+    { id: 'first', command: { kind: 'volume', value: 60 } },
+    { id: 'first', command: { kind: 'volume', value: 55 } }
+  ])
+})
+
+test('page volume shortcuts clamp to 0–100 without sending duplicate boundary commands', async () => {
+  await mount()
+  const press = async (key: string): Promise<void> => {
+    await act(async () => { window.dispatchEvent(Object.assign(new Event('keydown', { cancelable: true }), {
+      key, shiftKey: false, ctrlKey: false, metaKey: false, altKey: false, isComposing: false
+    })) })
+  }
+  await act(async () => changed({ ...snapshot(), volume: 98 }))
+  await press('ArrowUp'); await press('ArrowUp'); await press('ArrowDown')
+  assert.deepEqual(controls.map(item => item.command), [{ kind: 'volume', value: 100 }, { kind: 'volume', value: 95 }])
+  controls.length = 0
+  await act(async () => changed({ ...snapshot('second'), volume: 2 }))
+  await press('ArrowDown'); await press('ArrowDown')
+  assert.deepEqual(controls.map(item => item.command), [{ kind: 'volume', value: 0 }])
+})
+
+test('page-level arrow shortcuts respect disabled seeking, modifiers and child overlays', async () => {
+  await mount()
+  const key = (overrides: Record<string, unknown> = {}) => Object.assign(new Event('keydown', { cancelable: true }), {
+    key: 'ArrowRight', shiftKey: false, ctrlKey: false, metaKey: false, altKey: false, isComposing: false, ...overrides
+  })
+  for (const current of [{ ...snapshot(), seekable: false }, { ...snapshot(), phase: 'opening' as const },
+    { ...snapshot(), resumePosition: 30 }]) {
+    await act(async () => changed(current))
+    await act(async () => { window.dispatchEvent(key()) })
+  }
+  await act(async () => changed(snapshot()))
+  for (const overrides of [{ ctrlKey: true }, { metaKey: true }, { altKey: true }, { isComposing: true }]) {
+    await act(async () => { window.dispatchEvent(key(overrides)) })
+  }
+  const removeChild = interactionLayers.register({ id: 'page-seek-child', root: () => null })
+  try { await act(async () => { window.dispatchEvent(key()) }) } finally { removeChild() }
+  assert.deepEqual(controls, [])
+})
+
+test('page-level playback shortcuts leave repeat toggles, modified keys, child layers and docked background alone', async () => {
+  await mount()
+  const press = async (key: string, overrides: Record<string, unknown> = {}): Promise<void> => {
+    await act(async () => { window.dispatchEvent(Object.assign(new Event('keydown', { cancelable: true }), {
+      key, shiftKey: false, ctrlKey: false, metaKey: false, altKey: false, isComposing: false, repeat: false, ...overrides
+    })) })
+  }
+  for (const key of [' ', 'f', 'm']) await press(key, { repeat: true })
+  for (const key of [' ', 'f', 'm', 'ArrowUp', 'ArrowDown']) {
+    await press(key, { ctrlKey: true }); await press(key, { metaKey: true }); await press(key, { altKey: true }); await press(key, { isComposing: true })
+  }
+  await press('ArrowUp', { shiftKey: true })
+  assert.deepEqual(controls, [{ id: 'first', command: { kind: 'volume', value: 55 } }],
+    'Shift does not disable the Up/Down volume shortcut')
+  controls.length = 0
+  await act(async () => changed({ ...snapshot(), resumePosition: 30 }))
+  await press(' '); await press('ArrowLeft'); await press('f')
+  await act(async () => changed(snapshot()))
+  const removeChild = interactionLayers.register({ id: 'page-shortcut-child', root: () => null })
+  try { for (const key of [' ', 'f', 'm', 'ArrowUp', 'ArrowDown']) await press(key) } finally { removeChild() }
+  await act(async () => changed({ ...snapshot(), presentation: 'docked' }))
+  for (const key of [' ', 'f', 'm', 'ArrowUp', 'ArrowDown']) await press(key)
+  assert.deepEqual(controls, [])
+})
+
+for (const [surface, presentation] of [
+  ['gpu-surface', 'expanded'], ['cpu:software-surface', 'fullscreen']
+] as const) test(`${presentation} video click closes playback settings without changing ${surface} playback`, async context => {
+  const timers = new Map<number, () => void>()
+  let nextId = 0
+  context.mock.method(window, 'setTimeout', (callback: () => void) => { const id = ++nextId; timers.set(id, callback); return id })
+  context.mock.method(window, 'clearTimeout', (id: number) => { timers.delete(id) })
+  await mount()
+  await act(async () => changed({ ...snapshot(), sharedTextureSurface: surface, presentation }))
+  const video = button('视频画面，单击播放或暂停，双击全屏')
+  if (presentation === 'expanded') await act(async () => video.props.onClick({ detail: 1 }))
+  await options()
+  assert.equal(button('播放设置').props['aria-expanded'], true)
+  assert.equal(video.props['aria-label'], '视频画面，关闭播放设置')
+  await act(async () => { video.props.onMouseDown({ button: 0, detail: 1 }); video.props.onClick({ detail: 1 }) })
+  assert.equal(button('播放设置').props['aria-expanded'], false, 'the first click closes settings immediately')
+  await act(async () => { for (const callback of [...timers.values()]) callback() })
+  assert.deepEqual(controls, [], 'closing settings never pauses, resumes or restarts playback')
+})
+
 for (const surface of ['gpu-surface', 'cpu:software-surface']) {
   for (const phase of ['playing', 'paused', 'ended'] as const) test(`${surface} slow double-click preserves ${phase} state, including a held second press`, async context => {
     const paused = phase !== 'playing'
@@ -1147,7 +1259,9 @@ for (const surface of ['gpu-surface', 'cpu:software-surface']) for (const paused
     const cases: Array<{ action(): Promise<void>; command: PlaybackControl }> = [
       { action: () => act(async () => button('静音').props.onClick()), command: { kind: 'mute', muted: true } },
       { action: () => act(async () => button('前进 5 秒').props.onClick()), command: { kind: 'seek', relative: true, seconds: 5 } },
-      { action: () => act(async () => renderer!.root.findByProps({ 'aria-label': '内置播放器' }).props.onKeyDown({ ...seekKey('m'), target: { closest: () => null } })), command: { kind: 'mute', muted: true } },
+      { action: () => act(async () => { window.dispatchEvent(Object.assign(new Event('keydown', { cancelable: true }), {
+        key: 'm', shiftKey: false, ctrlKey: false, metaKey: false, altKey: false, isComposing: false
+      })) }), command: { kind: 'mute', muted: true } },
       { action: async () => { await ensureOptions(); await act(async () => renderer!.root.findAllByType(Select).find(node => node.props['aria-label'] === '倍速')!.props.onChange({ target: { value: '1.5' } })) }, command: { kind: 'speed', value: 1.5 } },
       { action: () => act(async () => renderer!.root.findAllByType('input').find(node => node.props['aria-label'] === '音量')!.props.onChange({ target: { value: '25' } })), command: { kind: 'volume', value: 25 } },
       { action: async () => { await ensureOptions(); await act(async () => renderer!.root.findAllByType(Select).find(node => node.props['aria-label'] === '音轨')!.props.onChange({ target: { value: 'no' } })) }, command: { kind: 'track', type: 'audio', id: null } },
@@ -1158,6 +1272,7 @@ for (const surface of ['gpu-surface', 'cpu:software-surface']) for (const paused
       }, command: { kind: 'seek', seconds: 30 } }
     ]
     for (const item of cases) {
+      if (button('播放设置').props['aria-expanded']) await options()
       await act(async () => changed(current))
       controls.length = 0
       await act(async () => button('视频画面，单击播放或暂停，双击全屏').props.onClick({ detail: 1 }))

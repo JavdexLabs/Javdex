@@ -145,7 +145,7 @@ export function navigateToVideoDetail(
         pathname: actressVideoDetailPath(actress.actressId, videoId),
         search: location.search
       },
-      { replace: options?.replace }
+      { replace: options?.replace, state: options?.replace ? location.state : undefined }
     )
     return
   }
@@ -183,6 +183,26 @@ export function navigateToVideoDetail(
       search: location.search
     },
     { replace: options?.replace }
+  )
+}
+
+/** An actress's works use global detail scope regardless of the actress page's origin. */
+export function navigateToActressWork(
+  navigate: NavigateFunction,
+  location: Location,
+  actressId: number,
+  videoId: number,
+  offset: number
+): void {
+  const search = parseActressVideoPath(location.pathname)
+    ? stripVideoDetailSearchParams(new URLSearchParams(location.search))
+    : new URLSearchParams()
+  search.delete(LIST_PARAM.actressVideoOffset)
+  const nextSearch = patchSearchParams(search, { [LIST_PARAM.relatedVideoOffset]: offset ? String(offset) : null })
+  navigate(
+    { pathname: actressVideoDetailPath(actressId, videoId), search: nextSearch.toString() },
+    // The previous history entry owns the actress page's original route and filters.
+    { state: { actressWorkBack: true } }
   )
 }
 
@@ -282,6 +302,10 @@ export function navigateBackFromVideoDetail(
   }
   const actress = parseActressVideoPath(location.pathname)
   if (actress?.videoId != null) {
+    if (patch == null && location.state?.actressWorkBack === true) {
+      navigate(-1)
+      return
+    }
     const nextSearch = patch
       ? patchSearchParams(new URLSearchParams(location.search), patch)
       : new URLSearchParams(location.search)
@@ -333,11 +357,13 @@ export function navigateToVideoListSurface(
   )
 }
 
-/** Child actress pagination never owns the underlying list's works offset. */
-function stripActressVideoOffset(search: string): string {
+function stripWorksOffset(
+  search: string,
+  param: typeof LIST_PARAM.relatedVideoOffset | typeof LIST_PARAM.actressVideoOffset
+): string {
   const params = new URLSearchParams(search)
-  if (!params.has(LIST_PARAM.actressVideoOffset)) return search
-  params.delete(LIST_PARAM.actressVideoOffset)
+  if (!params.has(param)) return search
+  params.delete(param)
   const next = params.toString()
   return next ? `?${next}` : ''
 }
@@ -349,7 +375,7 @@ export function navigateToActressFromVideoDetail(
   videoId: number,
   actressId: number
 ): void {
-  location = { ...location, search: stripActressVideoOffset(location.search) }
+  location = { ...location, search: stripWorksOffset(location.search, LIST_PARAM.actressVideoOffset) }
   const mediaLibrary = parseMediaLibraryVideoPath(location.pathname)
   if (mediaLibrary) {
     navigate({
@@ -414,10 +440,10 @@ export function navigateToActressFromVideoDetail(
   }
   const actress = parseActressVideoPath(location.pathname)
   if (actress?.videoId != null) {
-    navigate({
-      pathname: actressVideoActressPath(actress.actressId, videoId, actressId),
-      search: location.search
-    })
+    navigate(
+      { pathname: actressVideoActressPath(actress.actressId, videoId, actressId), search: location.search },
+      { state: location.state?.actressWorkBack === true ? location.state : undefined }
+    )
     return
   }
   navigate({
@@ -431,7 +457,7 @@ export function navigateBackFromActressDetail(
   navigate: NavigateFunction,
   location: Location
 ): void {
-  location = { ...location, search: stripActressVideoOffset(location.search) }
+  location = { ...location, search: stripWorksOffset(location.search, LIST_PARAM.actressVideoOffset) }
   const mediaLibrary = parseMediaLibraryVideoPath(location.pathname)
   if (mediaLibrary?.actressId != null) {
     navigate({
@@ -503,6 +529,10 @@ export function navigateBackFromActressDetail(
   }
   const actress = parseActressVideoPath(location.pathname)
   if (actress?.videoId != null && actress.stackedActressId != null) {
+    if (location.state?.actressWorkBack === true) {
+      navigate(-1)
+      return
+    }
     navigate({
       pathname: actressVideoDetailPath(actress.actressId, actress.videoId),
       search: location.search
@@ -527,23 +557,24 @@ export function navigateToActressDetail(
   if (pendingVideo?.videoId != null) {
     navigate({
       pathname: pendingVideoActressPath(pendingVideo.videoId, actressId),
-      search: location.search
+      search: stripWorksOffset(location.search, LIST_PARAM.actressVideoOffset)
     })
     return
   }
+  const search = stripWorksOffset(location.search, LIST_PARAM.relatedVideoOffset)
   if (
     location.pathname === ROUTE_PATH.pending ||
     parsePendingActressDetailPath(location.pathname)
   ) {
     navigate({
       pathname: pendingActressDetailPath(actressId),
-      search: location.search
+      search
     })
     return
   }
   navigate({
     pathname: actressDetailPath(actressId),
-    search: location.search
+    search
   })
 }
 

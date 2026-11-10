@@ -87,7 +87,7 @@ export function useInteractionLayer({
         event.stopImmediatePropagation()
       }
     }
-    window.addEventListener('keydown', onCapture, true)
+    window.addEventListener('keydown', onCapture, { capture: true })
     // Test renderers have no DOM; the browser adapter starts once refs are attached.
     if (rootRef?.current) {
       syncBackground()
@@ -100,7 +100,7 @@ export function useInteractionLayer({
       const restoreFocus = modal || focused === document.body || !focused || layer.root()?.contains(focused)
       unregister()
       window.removeEventListener('keydown', onKey)
-      window.removeEventListener('keydown', onCapture, true)
+      window.removeEventListener('keydown', onCapture, { capture: true })
       if (modal && --locks === 0) document.body.style.overflow = previousOverflow
       if (typeof HTMLElement !== 'undefined') syncBackground()
       if (wasTop && restoreFocus && previousFocus?.isConnected && !previousFocus.matches(':disabled') && !previousFocus.closest('[inert]')) previousFocus.focus()

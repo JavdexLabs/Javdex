@@ -5,6 +5,8 @@ export type AiSubtitleCommand =
   | { action: 'display'; value: AiSubtitleDisplay }
   | { action: 'font-size'; value: number }
 export interface AiSubtitleSnapshot {
+  taskId?: string
+  taskStatus?: import('./subtitleTasks').SubtitleTaskStatus
   sessionId: string | null
   supported: boolean
   installed: boolean

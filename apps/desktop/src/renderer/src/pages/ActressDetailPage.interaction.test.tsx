@@ -3,11 +3,12 @@ import assert from 'node:assert/strict'
 import { afterEach, it } from 'node:test'
 import React from 'react'
 import TestRenderer, { act } from 'react-test-renderer'
-import { MemoryRouter, Outlet, Route, Routes, useLocation, useNavigate, type NavigateFunction } from 'react-router-dom'
+import { MemoryRouter, Outlet, Route, Routes, useLocation, useNavigate, useParams, type NavigateFunction } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ActressProfile, ActressVideoPageQuery } from '@shared/actressTypes'
 import type { ExpectedVersions } from '@shared/protocol/versions'
 import type { ElectronApi } from '../../../preload/index'
+import { navigateBackFromVideoDetail, navigateToActressFromVideoDetail } from '../listView/listNavigation'
 
 let metadataResponse: ((id: number) => Promise<ActressProfile>) | null = null
 let editResponse: (() => Promise<boolean>) | null = null
@@ -57,6 +58,16 @@ let client: QueryClient
 let navigate: NavigateFunction
 let url = ''
 function Nav() { navigate = useNavigate(); url = useLocation().pathname + useLocation().search; return null }
+function WorkDetail() {
+  const location = useLocation()
+  const navigate = useNavigate()
+  const { videoId } = useParams()
+  return <>
+    <button onClick={() => navigateBackFromVideoDetail(navigate, location)}>关闭作品详情</button>
+    <button onClick={() => navigateToActressFromVideoDetail(navigate, location, Number(videoId), 3)}>打开作品演员</button>
+    <Outlet />
+  </>
+}
 const text = (node: TestRenderer.ReactTestInstance): string => node.children.map(child => typeof child === 'string' ? child : text(child)).join('')
 async function click(label: string) {
   if(label==='下一页'){position+=60;await viewport.scroll(renderer!,position);return}
@@ -67,6 +78,12 @@ async function click(label: string) {
     button.props.onClick()
   })
 }
+async function openWork(videoId: number) {
+  const PosterCard = (await import('../components/PosterCard')).default
+  const card = renderer!.root.findAllByType(PosterCard).find(node => node.props.video.id === videoId)
+  assert.ok(card, `Work ${videoId} must be visible`)
+  await act(async () => card.findByProps({ 'data-video-card': true }).props.onClick())
+}
 async function mount(entry = '/actresses/1') {
   const Component = (await import('./ActressDetailPage')).default
   const { ImagePreviewOverlayProvider } = await import('../components/ImagePreviewOverlayContext')
@@ -75,7 +92,32 @@ async function mount(entry = '/actresses/1') {
   const { AgentMetadataCollectorProvider } = await import('../components/agentMetadata/AgentMetadataCollectorContext')
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   await act(async () => {
-    renderer = TestRenderer.create(<QueryClientProvider client={client}><MemoryRouter initialEntries={[entry]}><AppBackgroundProvider><OverlayHistoryProvider><ImagePreviewOverlayProvider><AgentMetadataCollectorProvider><Nav /><Routes><Route path="/actresses/:id" element={<Component />}><Route path=":videoId" element={<div>Nested video<Outlet /></div>}><Route path="actress/:actressId" element={<Component fromVideo />} /></Route></Route></Routes></AgentMetadataCollectorProvider></ImagePreviewOverlayProvider></OverlayHistoryProvider></AppBackgroundProvider></MemoryRouter></QueryClientProvider>, {createNodeMock:viewport.createNodeMock})
+    renderer = TestRenderer.create(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={[entry]}>
+          <AppBackgroundProvider>
+            <OverlayHistoryProvider>
+              <ImagePreviewOverlayProvider>
+                <AgentMetadataCollectorProvider>
+                  <Nav />
+                  <Routes>
+                    <Route path="/actresses/:id" element={<Component />}>
+                      <Route path=":videoId" element={<WorkDetail />}>
+                        <Route path="actress/:actressId" element={<Component fromVideo />} />
+                      </Route>
+                    </Route>
+                    <Route path="/libraries/:libraryId/video/:videoId" element={<Outlet />}>
+                      <Route path="actress/:actressId" element={<Component fromVideo />} />
+                    </Route>
+                  </Routes>
+                </AgentMetadataCollectorProvider>
+              </ImagePreviewOverlayProvider>
+            </OverlayHistoryProvider>
+          </AppBackgroundProvider>
+        </MemoryRouter>
+      </QueryClientProvider>,
+      { createNodeMock: viewport.createNodeMock }
+    )
   })
 }
 afterEach(async () => { await act(async () => renderer?.unmount()); client?.clear(); renderer = undefined;viewport=continuousViewport();position=0; url=''; calls.length = 0; metadataCalls.length = 0; editCalls.length = 0; actorTotals.clear(); total = 125; fail = false; hold = null; metadataResponse = null; editResponse = null })
@@ -110,6 +152,43 @@ it('keeps the leaf works offset when its parent has fewer works and drops only t
   const back = panes[1].findAllByType('button').find(node => text(node) === '返回')!
   await act(async () => back.props.onClick())
   assert.equal(url, '/actresses/1/1000')
+})
+
+it('opens works from a library actor page globally and restores its exact route and scroll page', async () => {
+  const origin = '/libraries/4/video/8/actress/1?prefix=TEST&actressVideoOffset=60'
+  await mount(origin)
+  await openWork(1060)
+  assert.equal(url, '/actresses/1/1060?relatedVideoOffset=60')
+  await click('关闭作品详情')
+  assert.equal(url, origin)
+  await openWork(1061)
+  await act(async () => navigate(-1))
+  assert.equal(url, origin)
+})
+
+it('keeps both actor pages when opening a leaf actor work and returning through another actor', async () => {
+  const origin = '/actresses/1/1000/actress/2?q=kept&relatedVideoOffset=60&actressVideoOffset=120'
+  await mount(origin)
+  await openWork(2120)
+  assert.equal(url, '/actresses/2/2120?q=kept&relatedVideoOffset=120')
+  await click('打开作品演员')
+  assert.equal(url, '/actresses/2/2120/actress/3?q=kept&relatedVideoOffset=120')
+  const ContinuousGrid = (await import('../components/ContinuousGrid')).default
+  const leafWorks = renderer!.root.findAllByType(ContinuousGrid).at(-1)!
+  await act(async () => leafWorks.props.onAnchor(60))
+  assert.equal(url, '/actresses/2/2120/actress/3?q=kept&relatedVideoOffset=120&actressVideoOffset=60')
+  const panes = renderer!.root.findAllByProps({ 'data-detail-pane': true })
+  const back = panes.at(-1)!.findAllByType('button').find(node => text(node) === '返回')!
+  await act(async () => back.props.onClick())
+  assert.equal(url, '/actresses/2/2120?q=kept&relatedVideoOffset=120')
+  await click('关闭作品详情')
+  assert.equal(url, origin)
+})
+
+it('returns a directly opened work link to its actor works', async () => {
+  await mount('/actresses/1/1060?relatedVideoOffset=60')
+  await click('关闭作品详情')
+  assert.equal(url, '/actresses/1?relatedVideoOffset=60')
 })
 
 it('loads metadata once while paging 60/60/5 works and preserving the full count', async () => {

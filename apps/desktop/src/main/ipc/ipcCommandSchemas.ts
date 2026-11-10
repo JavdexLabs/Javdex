@@ -12,7 +12,7 @@ import type { VideoIpcContract } from '@shared/videoIpcContract'
 import { ALL_VIDEO_SCRAPE_FIELDS } from '@shared/videoScrapeTypes'
 import type { IpcArgsSchemaMap } from './typedIpcAdapter'
 import { positiveSafeInteger, videoQueryIpcSchema } from './videoQueryIpcSchema'
-import { playbackTargetSchema, playbackSessionIdSchema, playbackControlSchema, playbackViewportSchema, playbackClearProgressSchema, aiSubtitleCommandSchema } from '../player/playbackSchemas'
+import { playbackTargetSchema, playbackSessionIdSchema, playbackControlSchema, playbackViewportSchema, playbackClearProgressSchema, aiSubtitleCommandSchema, subtitleTaskCommandSchema } from '../player/playbackSchemas'
 import { digestSchema, expectedVersionsSchema } from '@shared/manage/primitives'
 import { localModelVariant } from '../services/localModels/modelCatalog'
 import { LOCAL_MODEL_IDS, LOCAL_TRANSLATION_MODEL_IDS } from '@shared/desktop/localModels'
@@ -798,6 +798,7 @@ export const appIpcSchemas = {
       .optional()
   ]),
   [IPC.SCAN_CANCEL]: z.tuple([nonEmptyText]),
+  [IPC.SCAN_ACTIVE_GET]: z.tuple([]),
   [IPC.SCAN_LATEST_GET]: z.tuple([id]),
   [IPC.SCAN_AUDIT_GET]: z.tuple([id]),
   [IPC.SCAN_AUDIT_HEADER]: z.tuple([positiveSafeInteger]),
@@ -1022,6 +1023,12 @@ export const appIpcSchemas = {
   [IPC.PLAYBACK_VIEWPORT]: z.tuple([playbackViewportSchema]),
   [IPC.PLAYBACK_SUBTITLE]: z.tuple([playbackSessionIdSchema]),
   [IPC.PLAYBACK_AI_SUBTITLE_SNAPSHOT]: z.tuple([]),
+  [IPC.SUBTITLE_TASKS_SNAPSHOT]: z.tuple([]),
+  [IPC.SUBTITLE_TASKS_PREPARE]: z.tuple([playbackTargetSchema]),
+  [IPC.SUBTITLE_TASKS_COMMAND]: z.tuple([subtitleTaskCommandSchema]),
+  [IPC.SUBTITLE_FILES_LIST]: z.tuple([playbackTargetSchema]),
+  [IPC.SUBTITLE_FILES_ADD]: z.tuple([playbackTargetSchema]),
+  [IPC.PLAYBACK_SUBTITLE_REFRESH]: z.tuple([playbackSessionIdSchema]),
   [IPC.PLAYBACK_AI_SUBTITLE_COMMAND]: z.tuple([playbackSessionIdSchema, aiSubtitleCommandSchema]),
   [IPC.PLAYBACK_CLEAR_PROGRESS]: z.tuple([playbackClearProgressSchema]),
   [IPC.ASSET_CRYPTO_SET]: z.tuple([z.boolean()]),

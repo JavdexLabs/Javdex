@@ -36,6 +36,7 @@ const SEARCH_KEYS_BY_ROOT: Record<string, readonly string[]> = {
     LIST_PARAM.dir
   ],
   '/playlists': [LIST_PARAM.q],
+  '/tasks': ['tab', 'status'],
   '/pending': [LIST_PARAM.pendingType, LIST_PARAM.pendingItem, LIST_PARAM.pendingVideoId]
 }
 
@@ -48,6 +49,7 @@ function facetRoot(pathname: string): string | null {
 }
 
 export function primaryListRoot(pathname: string): string | null {
+  if (pathname === ROUTE_PATH.tasks) return ROUTE_PATH.tasks
   if (pathname === ROUTE_PATH.home || parseHomeVideoPath(pathname)) return ROUTE_PATH.home
   if (pathname === ROUTE_PATH.search || parseSearchVideoPath(pathname)) return ROUTE_PATH.search
   const mediaLibrary = parseMediaLibraryRoute(pathname)

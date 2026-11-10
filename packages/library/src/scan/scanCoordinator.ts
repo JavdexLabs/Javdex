@@ -226,6 +226,7 @@ function runCleanupTransaction<T>(operation: () => T): T {
 }
 
 export class ScanCoordinator {
+  private activeProgress: LibraryScanEvent | null = null
   private activeRun: { runId: string; controller: AbortController } | null = null
   private stopping = false
   private readonly pendingRuns = new Set<Promise<ScanCompletionResult>>()
@@ -239,6 +240,11 @@ export class ScanCoordinator {
 
   get activeRunId(): string | null {
     return this.activeRun?.runId ?? null
+  }
+
+  /** Snapshot for a renderer opened after the scan started; events alone are insufficient. */
+  getActiveProgress(): LibraryScanEvent | null {
+    return this.activeRun ? this.activeProgress : null
   }
 
   subscribe(listener: (event: LibraryScanEvent) => void): () => void {
@@ -285,6 +291,7 @@ export class ScanCoordinator {
     const runId = this.dependencies.createRunId()
     const controller = new AbortController()
     this.activeRun = { runId, controller }
+    this.activeProgress = { phase: 'started', libraryId: request.libraryId, runId, trigger }
     const useEntries = this.dependencies.auditStorage !== 'json'
     let result = this.emptyResult(request.libraryId, runId, useEntries)
     const offlineRoots: Readonly<MediaLibraryRoot>[] = []
@@ -770,6 +777,7 @@ export class ScanCoordinator {
   }
 
   private emit(event: LibraryScanEvent): void {
+    this.activeProgress = event.phase === 'started' || event.phase === 'progress' ? event : null
     for (const listener of this.listeners) {
       try {
         listener(event)

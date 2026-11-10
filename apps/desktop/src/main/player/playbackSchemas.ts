@@ -7,6 +7,10 @@ export const playbackClearProgressSchema = z.discriminatedUnion('scope', [
   z.object({ scope: z.literal('current'), sessionId: z.string().uuid() }).strict()
 ])
 export const playbackSessionIdSchema = z.string().uuid()
+export const subtitleTaskCommandSchema = z.discriminatedUnion('action', [
+  z.object({ action: z.literal('enqueue'), target: playbackTargetSchema, audioIndex: z.number().int().min(0).max(10000), output: z.enum(['bilingual', 'japanese']) }).strict(),
+  z.object({ action: z.enum(['resume', 'pause', 'cancel', 'retry-save', 'save-as', 'export-srt', 'remove', 'delete-output']), id: z.string().uuid() }).strict()
+])
 export const aiSubtitleCommandSchema = z.discriminatedUnion('action', [
   z.object({ action: z.enum(['start', 'stop', 'retry', 'clear-cache', 'export', 'view-log']) }).strict(),
   z.object({ action: z.literal('display'), value: z.enum(['bilingual', 'chinese', 'japanese']) }).strict(),

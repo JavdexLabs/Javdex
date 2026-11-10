@@ -15,7 +15,7 @@ function fixture(platform: 'darwin' | 'win32' = 'darwin', activate = true) {
   const code = transpileModule(readFileSync(new URL('./nativeSharedTexture.ts', import.meta.url), 'utf8'), {
     compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022 }
   }).outputText
-  let tick = () => {}, wake = () => {}, sequence = 0, timeline = 0, created = false, mainReleases = 0, sendFailure = false, flushFailure = false, now = 1000
+  let tick = () => {}, wake = () => {}, sequence = 0, timeline = 0, created = false, initializing = false, mainReleases = 0, sendFailure = false, flushFailure = false, now = 1000
   const ipc = new EventEmitter(), app = new EventEmitter(), mainFrame = {}
   const messages: Array<{ channel: string; value: Record<string, unknown> }> = []
   const contents = Object.assign(new EventEmitter(), { mainFrame, isDestroyed: () => false,
@@ -29,7 +29,7 @@ function fixture(platform: 'darwin' | 'win32' = 'darwin', activate = true) {
   const native = { create() { created = true }, destroy() { created = false }, setBounds() {}, setVisible() {},
     setWakeup(callback: (() => void) | null) { wake = callback ?? (() => {}) },
     resetTiming(value: number) { timeline = value }, setRenderBudget() {}, command() {}, generatedSubtitles() {},
-    inspect: () => ({ alive: created }), state: () => ({ alive: created }),
+    inspect: () => ({ alive: created, initializing }), state: () => ({ alive: created, initializing }),
     nextFrame() { if (held.size >= 3) return; held.add(++sequence); return { sequence, timeline, width: 640, height: 360, [platform === 'darwin' ? 'ioSurface' : 'ntHandle']: Buffer.alloc(8),
       producerComplete: true, pixelFormat: 'bgra', colorContract: 'bt709-srgb-rgb-full', renderStartUs: 1, targetTimeUs: 0 } },
     requestSelfTest() {}, releaseFrame(value: number) { releases.push(value); held.delete(value) } }
@@ -56,10 +56,22 @@ function fixture(platform: 'darwin' | 'win32' = 'darwin', activate = true) {
   if (activate) { ipc.emit('playback:shared-texture-ready', event, binding); bridge.setVisible(true) }
   return { bridge, native, ipc, app, event, binding, messages, imported, releases, failFlush: () => { flushFailure = true }, failTransfer: () => { sendFailure = true }, mainReleases: () => mainReleases,
     advance: (ms: number) => { now += ms },
+    initializing: (value: boolean) => { initializing = value },
     wake: async () => { wake(); await Promise.resolve(); await Promise.resolve() }, tick: async () => { tick(); await Promise.resolve(); await Promise.resolve() } }
 }
 
 for (const platform of ['win32', 'darwin'] as const) {
+  for (const bound of [false, true]) test(`${platform}: receiver/probe waiting starts after native initialization (bound: ${bound})`, async t => {
+    const f = fixture(platform, bound); t.after(f.bridge.destroy)
+    f.native.nextFrame = () => undefined
+    f.bridge.setVisible(true)
+    f.initializing(true); f.advance(35000); await f.tick()
+    assert.doesNotThrow(f.bridge.render)
+    f.initializing(false); await f.tick()
+    f.advance(bound ? 8000 : 10000); await f.tick(); assert.doesNotThrow(f.bridge.render)
+    f.advance(1); await f.tick()
+    assert.throws(f.bridge.render, { playbackFailureCode: bound ? 'DISPLAY_SELF_TEST_TIMEOUT' : 'RECEIVER_NOT_READY' })
+  })
   test(`${platform}: failed clock reply becomes a readable graphics fault`, t => {
     const f = fixture(platform); t.after(f.bridge.destroy)
     f.event.sender.send = () => { throw new Error('frame reply unavailable') }

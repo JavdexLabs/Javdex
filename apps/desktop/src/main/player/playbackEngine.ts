@@ -17,7 +17,7 @@ export function createPlaybackEngine(gpu: NativePlayback, cpu: NativePlayback,
   let last: NativePlaybackState = { alive: false }
   let recovery: { position: number; paused: boolean; started: number; seekRevision: number } | null = null
   let viewport: Parameters<NativePlayback['viewport']> | null = null
-  const controls = new Map<string, PlaybackControl>(), subtitles: string[] = []
+  const controls = new Map<string, PlaybackControl>(), subtitles: Array<{ file: string; select: boolean }> = []
   let generated: Parameters<NonNullable<NativePlayback['updateGeneratedSubtitle']>> | null = null
   const hideGpu = (): void => {
     if (viewport) { try { gpu.viewport(viewport[0], false, viewport[2]) } catch { /* Lost contexts can reject viewport work. */ } }
@@ -32,6 +32,7 @@ export function createPlaybackEngine(gpu: NativePlayback, cpu: NativePlayback,
     hideGpu(); current = cpu
     console.info(`[playback] ${platform} CPU recovery reason=` + reason)
     cpu.create()
+    saved.started = Date.now()
     if (source) { recovery = saved; cpu.load(source.locator, { paused: true }) }
     if (viewport) cpu.viewport(viewport[0], recovery ? false : viewport[1], viewport[2])
   }
@@ -53,12 +54,12 @@ export function createPlaybackEngine(gpu: NativePlayback, cpu: NativePlayback,
     }
   }
   const restore = (value: NativePlaybackState): void => {
-    if (!recovery || restoring || !value.loadedFiles || typeof value.seekable !== 'boolean') return
+    if (!recovery || restoring || value.initializing || !value.loadedFiles || typeof value.seekable !== 'boolean') return
     const saved = recovery, revision = epoch
     restoring = true
     const valid = (): boolean => active && epoch === revision && recovery === saved
     void (async () => {
-      for (const file of subtitles) cpu.addSubtitle(file)
+      for (const item of subtitles) cpu.addSubtitle(item.file, item.select)
       if (generated) {
         const savedGenerated = generated
         try { await cpu.updateGeneratedSubtitle?.(savedGenerated[0], savedGenerated[1], undefined, savedGenerated[3]) }
@@ -136,7 +137,6 @@ export function createPlaybackEngine(gpu: NativePlayback, cpu: NativePlayback,
     },
     read(): NativePlaybackState {
       if (restoreFailure) throw restoreFailure
-      if (recovery && Date.now() - recovery.started > 15000) throw new Error('CPU 回退恢复超时')
       let value = attempt(() => current.read())
       if (seekIntent !== undefined && !value.seeking && Math.abs((value['time-pos'] ?? -100) - seekIntent) < 1.5) seekIntent = undefined
       if (active && current === gpu && (!value.alive || value.error && ['native', 'video'].includes(value.errorKind ?? ''))) {
@@ -147,6 +147,8 @@ export function createPlaybackEngine(gpu: NativePlayback, cpu: NativePlayback,
         if (decoder && decoder !== 'no') hadHardwareDecoder = true
         if (decoder === 'no' && hadHardwareDecoder && !value.seeking && !value['eof-reached']) decoderFallback = true
       }
+      if (recovery && value.initializing) recovery.started = Date.now()
+      if (recovery && Date.now() - recovery.started > 15000) throw new Error('CPU 回退恢复超时')
       restore(value)
       last = recovery ? { ...value, pause: recovery.paused, 'time-pos': recovery.position } : value
       return { ...last, decoderFallback, playbackMode: current === cpu ? 'cpu' : 'gpu', playbackFallback: current === cpu && mode === 'auto' && gpuFailed,
@@ -158,13 +160,17 @@ export function createPlaybackEngine(gpu: NativePlayback, cpu: NativePlayback,
       else perform(() => current.viewport(...args))
     },
     render(): void { if (active) attempt(() => current.render()) },
-    addSubtitle(file): void {
-      if (!subtitles.includes(file)) subtitles.push(file)
-      if (generated) generated = [generated[0], false, generated[2], generated[3]]
-      controls.delete('track:sub')
+    addSubtitle(file, select = true): void {
+      const existing = subtitles.find(item => item.file === file)
+      if (existing) existing.select = select
+      else subtitles.push({ file, select })
+      if (select) {
+        if (generated) generated = [generated[0], false, generated[2], generated[3]]
+        controls.delete('track:sub')
+      }
       // Once restoration starts, the queued subtitles have already been sent.
       // A newly selected sidecar must reach CPU even while its seek is pending.
-      if (!recovery || restoring) perform(() => current.addSubtitle(file))
+      if (!recovery || restoring) perform(() => current.addSubtitle(file, select))
     },
     updateGeneratedSubtitle(...args) {
       // AI selects once; later select=false updates only replace its timeline.

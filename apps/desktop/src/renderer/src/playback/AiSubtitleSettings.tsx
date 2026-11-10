@@ -7,6 +7,7 @@ import SelectControl from '../components/SelectControl'
 import { playbackTime } from './playbackTime'
 import styles from './AiSubtitleSettings.module.css'
 import { useLocalModels } from '../components/settings/useLocalModels'
+import SubtitleTasksButton from './SubtitleTasksButton'
 
 export default function AiSubtitleSettings({ playback, onOpenModels, controller }: {
   playback: PlaybackSnapshot
@@ -36,6 +37,10 @@ export default function AiSubtitleSettings({ playback, onOpenModels, controller 
   }
   const status = !state ? '正在读取状态'
     : !enabled ? state.installed ? '字幕模型与运行依赖已就绪' : '请在字幕模型设置中选择模型并下载所需文件'
+      : state.taskStatus === 'queued' ? '任务排队中'
+        : state.taskStatus === 'paused' || state.taskStatus === 'cancelled' ? '生成已暂停，已生成部分仍可使用'
+          : state.taskStatus === 'saving' ? '正在保存完整字幕'
+            : state.taskStatus === 'completed' ? '完整字幕已保存'
       : state.phase === 'preparing' ? '正在准备当前音轨'
         : state.phase === 'recognizing' ? `正在识别 ${playbackTime(state.activeStart ?? 0)} 附近的日语`
           : state.phase === 'translating' ? `正在翻译 ${playbackTime(state.activeStart ?? 0)} 附近的对白`
@@ -52,6 +57,7 @@ export default function AiSubtitleSettings({ playback, onOpenModels, controller 
     <p className={styles.note}>音频与字幕文本留在本机。</p>
     <p className={styles.note}>首次生成需要等待，可先暂停预生成；识别与译文可能有误。</p>
     <div className={styles.actions}>
+      {playback.source === 'local' && <SubtitleTasksButton target={playback.target} label="字幕管理" />}
       <Button size="sm" disabled={busy} onClick={() => void openModels()}>字幕模型设置</Button>
       <Button size="sm" disabled={busy} onClick={() => void execute({ action: 'view-log' })}>查看日志</Button>
     </div>
@@ -59,10 +65,11 @@ export default function AiSubtitleSettings({ playback, onOpenModels, controller 
       <div className={styles.actions}>
         {state?.installed && <Button size="sm" variant={enabled ? 'default' : 'primary'}
           disabled={!enabled && (busy || !playback.seekable || playback.duration == null || playback.phase === 'error')}
-          onClick={() => void execute({ action: enabled ? 'stop' : 'start' })}>{enabled ? '停止 AI 字幕' : '开启 AI 字幕'}</Button>}
+          onClick={() => void execute({ action: enabled ? 'stop' : 'start' })}>{enabled ? playback.source === 'local' ? '关闭 AI 字幕显示' : '停止 AI 字幕' : '开启 AI 字幕'}</Button>}
         {enabled && state?.error && <Button size="sm" disabled={busy} onClick={() => void execute({ action: 'retry' })}>重试未完成字幕</Button>}
       </div>
       <p className={styles.status} role="status" aria-live="polite">{status}</p>
+      {state?.taskStatus && <p className={styles.note}>{state.taskStatus === 'completed' ? '字幕已保存，可在字幕管理中查看' : state.taskStatus === 'awaiting-save' ? '生成完成，等待保存，请打开字幕管理处理' : state.taskStatus === 'paused' || state.taskStatus === 'cancelled' ? '生成已暂停，可在任务中继续' : '后台任务已保留，可在字幕任务中暂停或取消'}</p>}
       {enabled && <p className={styles.note}>已识别 {playbackTime(state?.recognizedSeconds ?? 0)} · 已翻译 {playbackTime(state?.translatedSeconds ?? 0)} / {playbackTime(playback.duration ?? 0)}</p>}
       {state?.installed && <>
         <label className={styles.field}>AI 字幕显示<SelectControl value={state.display} aria-label="AI 字幕显示" disabled={busy}
@@ -75,9 +82,9 @@ export default function AiSubtitleSettings({ playback, onOpenModels, controller 
         </SelectControl></label>
         <div className={styles.actions}>
           <Button size="sm" disabled={busy || !enabled || !state.recognizedSeconds} onClick={() => void execute({ action: 'export' })}>导出已生成字幕</Button>
-          <Button size="sm" disabled={busy || !enabled || state.phase === 'preparing'} onClick={() => void execute({ action: 'clear-cache' })}>清除本片缓存</Button>
+          {playback.source !== 'local' && <Button size="sm" disabled={busy || !enabled || state.phase === 'preparing'} onClick={() => void execute({ action: 'clear-cache' })}>清除本片缓存</Button>}
         </div>
-        <p className={styles.note}>跳转后优先生成新位置，未译完时先显示日语；停止 AI 字幕后恢复此前字幕。</p>
+        <p className={styles.note}>{playback.source === 'local' ? '跳转后优先生成新位置；关闭显示或播放器会保留任务，生成完成后保存到影片目录。' : '跳转后优先生成新位置，未译完时先显示日语；停止 AI 字幕后恢复此前字幕。'}</p>
       </>}
     </>}
     {(error || state?.error) && <p className={styles.error} role="alert">{error || state?.error}</p>}

@@ -58,6 +58,7 @@ export interface PlaybackSnapshot {
   muted: boolean
   speed: number
   subtitleDelay: number | null
+  subtitleNotice?: string | null
   subtitleSize: number | null
   tracks: PlaybackTrack[]
   chapters: Array<{ title: string; time: number }>

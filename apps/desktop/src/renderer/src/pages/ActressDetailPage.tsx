@@ -5,7 +5,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { useQueryClient } from '@tanstack/react-query'
 import { Outlet, useLocation, useMatch, useNavigate, useParams } from 'react-router-dom'
 import { Bot, Inbox, Pencil, SearchCheck, SearchX } from 'lucide-react'
-import { navigateBackFromActressDetail } from '../listView/listNavigation'
+import { navigateBackFromActressDetail, navigateToActressWork } from '../listView/listNavigation'
 import { LIST_PARAM } from '../listView/listQueryParams'
 import { invalidateActressLibraryQueries } from '../query/invalidateLibraryQueries'
 import { useListSurfaceRefetch } from '../hooks/useListSurfaceRefetch'
@@ -60,7 +60,7 @@ export default function ActressDetailPage({ fromVideo = false }: { fromVideo?: b
   // Nested route params include descendant IDs; the route owns this instance's role.
   const actressId = Number(fromVideo ? actressIdParam : id ?? actressIdParam)
   const { offset: relatedOffset, move: moveRelated, align: alignRelated } = useRelatedVideoOffset(
-    String(actressId),
+    null,
     60,
     fromVideo ? LIST_PARAM.actressVideoOffset : LIST_PARAM.relatedVideoOffset
   )
@@ -470,7 +470,13 @@ export default function ActressDetailPage({ fromVideo = false }: { fromVideo?: b
             description="影片刮削后会自动建立关联。"
           />
         ) : (
-          <ContinuousPosterGrid window={works.window} initialIndex={relatedOffset} onAnchor={index => moveRelated(Math.floor(index / 60) * 60)} scope={`actress-works:${actressId}`} />
+          <ContinuousPosterGrid
+            window={works.window}
+            initialIndex={relatedOffset}
+            onAnchor={index => moveRelated(Math.floor(index / 60) * 60)}
+            onOpen={video => navigateToActressWork(navigate, location, actressId, video.id, relatedOffset)}
+            scope={`actress-works:${actressId}`}
+          />
         )
       ) : (
         <ActressGalleryPanel

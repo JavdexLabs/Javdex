@@ -25,6 +25,8 @@ import { isDismissExemptPortaledTarget } from '../lib/dismissLayerGuards'
 import { VIDEO_RESOURCE_KIND_LABELS } from './videoResourcePresentation'
 import ScrapeStatusBadge from './ScrapeStatusBadge'
 import styles from './VideoDetailMeta.module.css'
+import SubtitleTasksModal from '../playback/SubtitleTasksModal'
+import { useDesktopSession } from '../desktop/DesktopSessionContext'
 
 export type VideoPrimaryMetaItem =
   | { key: string; label: string; type: 'text'; value: string }
@@ -234,6 +236,8 @@ function VideoLocalResourceRow({
   onRemoveResource?: (resource: VideoResourceDetail) => void
 }): JSX.Element {
   const [menuOpen, setMenuOpen] = useState(false)
+  const [subtitlesOpen, setSubtitlesOpen] = useState(false)
+  const { session } = useDesktopSession()
   const menuRef = useRef<HTMLDivElement>(null)
   const path = resource.display_locator.trim()
   const title = localResourceDisplayName(resource, multiResources) ?? fileBaseName(path)
@@ -309,6 +313,12 @@ function VideoLocalResourceRow({
               {onOpenResource && <DetailMenuItem onClick={() => { setMenuOpen(false); onOpenResource(resource.id, 'external') }}>
                 外部播放
               </DetailMenuItem>}
+              {session.mode === 'local' && <DetailMenuItem onClick={() => {
+                // Keep a persistent focus target when the menu item unmounts.
+                menuRef.current?.querySelector<HTMLButtonElement>(':scope > button')?.focus()
+                setMenuOpen(false)
+                setSubtitlesOpen(true)
+              }}>字幕管理</DetailMenuItem>}
               <DetailMenuItem
                 onClick={() => {
                   setMenuOpen(false)
@@ -355,6 +365,7 @@ function VideoLocalResourceRow({
           ) : null}
         </DetailMenuAnchor>
       </div>
+      {subtitlesOpen && <SubtitleTasksModal target={{ libraryId: resource.library_id, videoId: resource.video_id, resourceId: resource.id }} onClose={() => setSubtitlesOpen(false)} />}
     </div>
   )
 }

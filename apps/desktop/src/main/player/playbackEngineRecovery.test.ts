@@ -36,6 +36,21 @@ for (const platform of ['darwin', 'win32', 'linux'] as const) {
     return { gpu, cpu, p: createPlaybackEngine(gpu.player, cpu.player, { mode: () => options.forceCpu() ? 'cpu' : 'auto', gpuAvailable: options.gpuAvailable }, platform) }
   }
 
+  test(`${platform}: CPU cold initialization does not exhaust the recovery budget`, async t => {
+    let time = Date.now()
+    t.mock.method(Date, 'now', () => time)
+    const { gpu, cpu, p } = pair(); t.after(p.destroy)
+    p.create(); p.load('/fixture.mkv'); p.read()
+    cpu.state({ loadedFiles: 0, initializing: true })
+    gpu.break(); assert.equal(p.read().playbackMode, 'cpu')
+    time += 35000
+    assert.doesNotThrow(() => p.read())
+    cpu.state({ loadedFiles: 1, initializing: false })
+    p.read(); await delay(50)
+    assert.equal(p.read().playbackMode, 'cpu')
+    assert.deepEqual(cpu.calls.at(-1), ['command', { kind: 'pause', paused: false }])
+  })
+
   test(`${platform}: unsupported graphics initializes CPU once and stays there across subsequent sessions`, () => {
     const { gpu, cpu, p } = pair(); gpu.break('OpenGL 3.2 core context is unavailable')
     p.create(); assert.equal(p.read().playbackFallbackReason, 'GPU_INITIALIZATION_FAILED')
@@ -132,7 +147,7 @@ for (const platform of ['darwin', 'win32', 'linux'] as const) {
     const mark = cpu.calls.length
     p.addSubtitle('/new.srt')
     await delay(50)
-    assert.deepEqual(cpu.calls.filter(c => c[0] === 'subtitle'), [['subtitle', '/new.srt']])
+    assert.deepEqual(cpu.calls.filter(c => c[0] === 'subtitle'), [['subtitle', '/new.srt', true]])
     assert(!cpu.calls.slice(mark).some(c => c[0] === 'command' && (c[1] as { kind: string }).kind === 'track'))
   })
   test(`${platform}: uncertain GPU cleanup does not block CPU recovery or force GPU resource reuse`, async t => {

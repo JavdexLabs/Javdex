@@ -27,6 +27,7 @@ export interface PosterCardProps<TVideo extends VideoCard = Video> {
   className?: string
   /** Active library for a card on home/search/global surfaces. */
   detailLibraryId?: number
+  onOpen?: (video: TVideo) => void
   /** Fixed thumbnail height from virtual grid layout (keeps portrait rows aligned). */
   thumbHeight?: number
   selected?: boolean
@@ -47,6 +48,7 @@ export default function PosterCard<TVideo extends VideoCard = Video>({
   video,
   className = '',
   detailLibraryId,
+  onOpen,
   thumbHeight,
   selected = false,
   selectionMode = false,
@@ -106,7 +108,8 @@ export default function PosterCard<TVideo extends VideoCard = Video>({
       onToggleSelect(video, event)
       return
     }
-    navigateToVideoDetail(navigate, location, video.id, { libraryId: detailLibraryId })
+    if (onOpen) onOpen(video)
+    else navigateToVideoDetail(navigate, location, video.id, { libraryId: detailLibraryId })
   }
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>): void => {

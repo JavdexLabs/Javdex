@@ -74,7 +74,7 @@ const recipeFiles = ['build/playback-sources.json', 'scripts/build-playback-runt
   'package.json', 'package-lock.json', 'LICENSE', 'NOTICE', 'LICENSES/Javdex-MIT.txt', 'LICENSES/node-gyp-MIT.txt',
   ...readdirSync(native).filter(name => /\.(cpp|mm|h)$|^CMakeLists.txt$/.test(name)).map(name => 'apps/desktop/src/main/player/native/' + name)]
 if (platform === 'win32') {
-  recipeFiles.push('build/windows-angle-runtime.json', 'scripts/windows-angle-runtime.mjs')
+  recipeFiles.push('build/windows-angle-runtime.json', 'scripts/windows-angle-runtime.mjs', 'scripts/windows-angle-notices.mjs')
   const headers = path.join(native, 'vendor/angle')
   for (const file of readdirSync(headers, { recursive: true, withFileTypes: true }).filter(entry => entry.isFile())) {
     const parent = file.parentPath ?? file.path

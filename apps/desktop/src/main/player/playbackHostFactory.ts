@@ -12,6 +12,8 @@ import { createNativeSharedTextureBridge } from './nativeSharedTexture'
 import { createSoftwarePlaybackBridge } from './softwarePlayback'
 import { createIsolatedPlaybackHost } from './isolatedPlaybackHost'
 import { graphicsPlaybackFailure } from './playbackGraphicsFailure'
+import { preloadPlaybackHost } from './playbackHostPreload'
+import { preloadWindowsPlaybackInterop } from './windowsPlaybackInterop'
 
 export interface PlaybackHostBridge {
   create(bounds: { x: number; y: number; width: number; height: number; scale?: number }): void
@@ -44,6 +46,14 @@ export function builtinPlaybackAvailability(backend = linuxPlaybackBackend()): P
     : { available: false, reason: app.isPackaged
       ? '安装包缺少内置播放运行库，请使用包含播放运行库的安装包。'
       : '未安装内置播放运行库；开发构建可运行 npm run playback:native:build' }
+}
+export function preloadBuiltinPlaybackRuntime(mode: 'gpu' | 'cpu'): void {
+  if (process.platform !== 'win32') return
+  const backend = mode === 'cpu' || !app.isHardwareAccelerationEnabled() ? 'software' : undefined
+  if (!builtinPlaybackAvailability(backend).available) return
+  const runtime = runtimePath(undefined, backend)
+  preloadPlaybackHost(runtime, backend === 'software' ? 'cpu' : 'gpu')
+  if (backend !== 'software') preloadWindowsPlaybackInterop(path.join(path.dirname(runtime), 'playback-interop.node'))
 }
 /** Only this factory selects operating-system resource transport. Product mode,
  * recovery, commands and subtitle ownership remain in the shared layers. */

@@ -1,0 +1,111 @@
+.root {
+  display: grid;
+  gap: var(--form-field-gap);
+  min-width: 0;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.count, .note {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.actions > button {
+  gap: 6px;
+}
+
+.list {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.file {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+  padding: 14px;
+}
+
+.file + .file {
+  border-top: 1px solid var(--border-subtle);
+}
+
+.icon {
+  margin-top: 2px;
+  color: var(--text-muted);
+}
+
+.content {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+}
+
+.fileHead {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+}
+
+.fileHead > strong {
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.source {
+  color: var(--text-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.path {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.availability {
+  margin-top: 2px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.availability[data-unavailable='true'] {
+  color: var(--text-warning);
+}
+
+.error, .message {
+  margin: 0;
+  color: var(--text-danger);
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.message {
+  color: var(--text-success);
+}

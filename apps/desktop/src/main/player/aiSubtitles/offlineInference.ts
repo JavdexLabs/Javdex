@@ -13,6 +13,16 @@ export { localModelProcessEnvironment } from '../../services/localModels/process
 export function translationPrompt(japanese: string, context: string[] = []): string {
   return localSubtitleTranslationPrompt('qwen3', japanese, context)
 }
+export async function inspectSubtitleMedia(paths: AiRuntimePaths, locator: string, signal: AbortSignal): Promise<{ duration: number; audio: Array<{ index: number; label: string }> }> {
+  const value = JSON.parse(await runLocalModelProcess(paths.ffprobe, ['-v', 'error', '-show_entries',
+    'format=duration:stream=index,codec_type:stream_tags=language,title', '-of', 'json', locator], { signal, timeoutMs: 30000 }))
+  const duration = Number(value.format?.duration)
+  if (!Number.isFinite(duration) || duration <= 0 || duration > 604800) throw new Error('无法读取有效的影片时长')
+  const audio = (Array.isArray(value.streams) ? value.streams : []).filter((s: { codec_type?: string }) => s.codec_type === 'audio')
+    .map((s: { index: number; tags?: { language?: string; title?: string } }) => ({ index: s.index, label: `音轨 ${s.index + 1} · ${s.tags?.title || s.tags?.language || '未知语言'}` }))
+  if (!audio.length) throw new Error('影片没有可识别的音轨')
+  return { duration, audio }
+}
 export function createOfflineSubtitleInference(paths: AiRuntimePaths, workRoot: string, options: LocalTextInferenceOptions & { run?: typeof runLocalModelProcess } = {}) {
   const model = paths.translationModelId ?? 'qwen3'
   const translator = createLocalTextInference(paths, options)

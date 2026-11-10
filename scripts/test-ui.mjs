@@ -19,6 +19,33 @@ try {
   await server.listen()
   browser = await chromium.launch({ ...(process.env.JAVDEX_BROWSER_EXECUTABLE
     ? { executablePath: process.env.JAVDEX_BROWSER_EXECUTABLE } : { channel: process.env.JAVDEX_BROWSER_CHANNEL || 'chrome' }), headless: true })
+  // Pointer selection stays quiet; Tab still exposes the real keyboard target.
+  for (const [file, className, focusProperty] of [
+    ['pages/PendingScrapePane.module.css', 'candidate', 'outlineStyle'],
+    ['pages/PendingScrapePane.module.css', 'directorOption', 'outlineStyle'],
+    ['components/PendingDecisionParts.module.css', 'choice', 'outlineStyle'],
+    ['components/VideoResourceFilterFieldset.module.css', 'option', 'outlineStyle'],
+    ['components/ScrapeFieldsModal.module.css', 'scrapeModalPill', 'boxShadow'],
+    ['components/ScrapeFieldsModal.module.css', 'scrapeModeOption', 'boxShadow']
+  ]) {
+    const focusPage = await browser.newPage()
+    try {
+      await focusPage.setContent(`<style>:root{--focus-outline:2px solid red;--focus-ring:0 0 0 2px red}</style>
+        <label class="${className}"><input type="checkbox">first</label>
+        <label class="${className}"><input type="checkbox">second</label>`)
+      await focusPage.addStyleTag({ path: path.join(repo, 'apps/desktop/src/renderer/src', file) })
+      const first = focusPage.locator(`.${className}`).first()
+      const second = focusPage.locator(`.${className}`).last()
+      await first.click()
+      assert.equal(await first.locator('input').evaluate(element => element.matches(':focus-visible')), false)
+      assert.equal(await first.evaluate((element, property) => getComputedStyle(element)[property], focusProperty), 'none')
+      await focusPage.keyboard.press('Tab')
+      assert.equal(await second.locator('input').evaluate(element => element.matches(':focus-visible')), true)
+      assert.notEqual(await second.evaluate((element, property) => getComputedStyle(element)[property], focusProperty), 'none')
+    } finally {
+      await focusPage.close()
+    }
+  }
   const page = await browser.newPage({ viewport: { width: 1000, height: 700 } })
   const errors = []
   page.on('pageerror', error => errors.push(error.message))

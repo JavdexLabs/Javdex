@@ -229,6 +229,7 @@ export interface AppIpcContract {
     result: ScanCompletionResult
   }
   [IPC.SCAN_CANCEL]: { args: [runId: string]; result: boolean }
+  [IPC.SCAN_ACTIVE_GET]: { args: []; result: LibraryScanProgressEvent[] }
   [IPC.SCAN_LATEST_GET]: {
     args: [libraryId: number]
     result: LibraryScanLatestSnapshot
@@ -466,6 +467,12 @@ export interface AppIpcContract {
   [IPC.PLAYBACK_VIEWPORT]: { args: [viewport: import('./desktop/playback').PlaybackViewport]; result: void }
   [IPC.PLAYBACK_SUBTITLE]: { args: [sessionId: string]; result: void }
   [IPC.PLAYBACK_AI_SUBTITLE_SNAPSHOT]: { args: []; result: import('./desktop/aiSubtitles').AiSubtitleSnapshot }
+  [IPC.SUBTITLE_TASKS_SNAPSHOT]: { args: []; result: import('./desktop/subtitleTasks').SubtitleTasksSnapshot }
+  [IPC.SUBTITLE_TASKS_PREPARE]: { args: [target: import('./desktop/playback').PlaybackTarget]; result: import('./desktop/subtitleTasks').SubtitlePreparation }
+  [IPC.SUBTITLE_TASKS_COMMAND]: { args: [command: import('./desktop/subtitleTasks').SubtitleTaskCommand]; result: import('./desktop/subtitleTasks').SubtitleTasksSnapshot }
+  [IPC.SUBTITLE_FILES_LIST]: { args: [target: import('./desktop/playback').PlaybackTarget]; result: import('./desktop/subtitleTasks').SubtitleFilesSnapshot }
+  [IPC.SUBTITLE_FILES_ADD]: { args: [target: import('./desktop/playback').PlaybackTarget]; result: import('./desktop/subtitleTasks').SubtitleFilesSnapshot | null }
+  [IPC.PLAYBACK_SUBTITLE_REFRESH]: { args: [sessionId: string]; result: string | null }
   [IPC.PLAYBACK_AI_SUBTITLE_COMMAND]: { args: [sessionId: string, command: import('./desktop/aiSubtitles').AiSubtitleCommand]; result: import('./desktop/aiSubtitles').AiSubtitleSnapshot }
   [IPC.PLAYBACK_CLEAR_PROGRESS]: { args: [input: import('./desktop/playback').PlaybackClearProgress]; result: void }
   [IPC.PLAYER_REVEAL]: {

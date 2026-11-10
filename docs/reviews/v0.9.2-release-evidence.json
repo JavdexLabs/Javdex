@@ -1,0 +1,352 @@
+{
+  "schemaVersion": 1,
+  "version": "0.9.2",
+  "baseline": {
+    "tag": "v0.9.1",
+    "source": "7591e21e99d2416fefa01635ec5ba6fc3e1900bd"
+  },
+  "release": {
+    "id": 439852081,
+    "tag_name": "v0.9.2",
+    "html_url": "https://github.com/JavdexLabs/Javdex/releases/tag/v0.9.2",
+    "draft": false,
+    "prerelease": false,
+    "published_at": "2026-11-10T01:48:23Z",
+    "target_commitish": "main"
+  },
+  "githubLatestReleaseId": 439852081,
+  "source": "fc82d07bd2fadd2eee259808bb5c6504cc0dd6da",
+  "tagObject": "0f6602cab859bec1119359be0b2e6bac138a09e7",
+  "sourceIdentityMethod": "Remote annotated tag peeled to commit matching the Release workflow head SHA.",
+  "publishedAsiaShanghai": "2026-11-10T09:48:23+08:00",
+  "workflow": {
+    "id": 42648518936,
+    "url": "https://github.com/JavdexLabs/Javdex/actions/runs/42648518936/attempts/2",
+    "event": "push",
+    "headSha": "fc82d07bd2fadd2eee259808bb5c6504cc0dd6da",
+    "attempt": 2,
+    "conclusion": "success",
+    "jobs": [
+      {
+        "id": 129558015109,
+        "name": "Package win-x64",
+        "conclusion": "success",
+        "url": "https://github.com/JavdexLabs/Javdex/actions/runs/42648518936/job/129558015109"
+      },
+      {
+        "id": 129558015234,
+        "name": "resume-server",
+        "conclusion": "skipped",
+        "url": "https://github.com/JavdexLabs/Javdex/actions/runs/42648518936/job/129558015234"
+      },
+      {
+        "id": 129558016624,
+        "name": "metadata",
+        "conclusion": "success",
+        "url": "https://github.com/JavdexLabs/Javdex/actions/runs/42648518936/job/129558016624"
+      },
+      {
+        "id": 129558017150,
+        "name": "Package linux-x64",
+        "conclusion": "success",
+        "url": "https://github.com/JavdexLabs/Javdex/actions/runs/42648518936/job/129558017150"
+      },
+      {
+        "id": 129558017704,
+        "name": "Package mac-x64",
+        "conclusion": "success",
+        "url": "https://github.com/JavdexLabs/Javdex/actions/runs/42648518936/job/129558017704"
+      },
+      {
+        "id": 129558017753,
+        "name": "Package mac-arm64",
+        "conclusion": "success",
+        "url": "https://github.com/JavdexLabs/Javdex/actions/runs/42648518936/job/129558017753"
+      },
+      {
+        "id": 129558071825,
+        "name": "Typecheck and test",
+        "conclusion": "success",
+        "url": "https://github.com/JavdexLabs/Javdex/actions/runs/42648518936/job/129558071825"
+      },
+      {
+        "id": 129569785440,
+        "name": "Aggregate corresponding playback sources",
+        "conclusion": "success",
+        "url": "https://github.com/JavdexLabs/Javdex/actions/runs/42648518936/job/129569785440"
+      },
+      {
+        "id": 129570731130,
+        "name": "Server image (amd64)",
+        "conclusion": "success",
+        "url": "https://github.com/JavdexLabs/Javdex/actions/runs/42648518936/job/129570731130"
+      },
+      {
+        "id": 129570731311,
+        "name": "Server image (arm64)",
+        "conclusion": "success",
+        "url": "https://github.com/JavdexLabs/Javdex/actions/runs/42648518936/job/129570731311"
+      },
+      {
+        "id": 129572186188,
+        "name": "server-manifest",
+        "conclusion": "success",
+        "url": "https://github.com/JavdexLabs/Javdex/actions/runs/42648518936/job/129572186188"
+      },
+      {
+        "id": 129572311356,
+        "name": "Publish GitHub release",
+        "conclusion": "success",
+        "url": "https://github.com/JavdexLabs/Javdex/actions/runs/42648518936/job/129572311356"
+      }
+    ],
+    "attempt1": {
+      "conclusion": "failure",
+      "jobs": [
+        {
+          "id": 129268225752,
+          "name": "metadata",
+          "conclusion": "success",
+          "url": "https://github.com/JavdexLabs/Javdex/actions/runs/42648518936/job/129268225752"
+        },
+        {
+          "id": 129268227771,
+          "name": "resume-server",
+          "conclusion": "skipped",
+          "url": "https://github.com/JavdexLabs/Javdex/actions/runs/42648518936/job/129268227771"
+        },
+        {
+          "id": 129268364703,
+          "name": "Typecheck and test",
+          "conclusion": "success",
+          "url": "https://github.com/JavdexLabs/Javdex/actions/runs/42648518936/job/129268364703"
+        },
+        {
+          "id": 129286767653,
+          "name": "Package mac-x64",
+          "conclusion": "success",
+          "url": "https://github.com/JavdexLabs/Javdex/actions/runs/42648518936/job/129286767653"
+        },
+        {
+          "id": 129286767712,
+          "name": "Package linux-x64",
+          "conclusion": "success",
+          "url": "https://github.com/JavdexLabs/Javdex/actions/runs/42648518936/job/129286767712"
+        },
+        {
+          "id": 129286767776,
+          "name": "Package mac-arm64",
+          "conclusion": "success",
+          "url": "https://github.com/JavdexLabs/Javdex/actions/runs/42648518936/job/129286767776"
+        },
+        {
+          "id": 129286767939,
+          "name": "Package win-x64",
+          "conclusion": "failure",
+          "url": "https://github.com/JavdexLabs/Javdex/actions/runs/42648518936/job/129286767939"
+        },
+        {
+          "id": 129311428205,
+          "name": "Aggregate corresponding playback sources",
+          "conclusion": "skipped",
+          "url": "https://github.com/JavdexLabs/Javdex/actions/runs/42648518936/job/129311428205"
+        },
+        {
+          "id": 129311429825,
+          "name": "Server image (${{ matrix.arch }})",
+          "conclusion": "skipped",
+          "url": "https://github.com/JavdexLabs/Javdex/actions/runs/42648518936/job/129311429825"
+        },
+        {
+          "id": 129311431636,
+          "name": "server-manifest",
+          "conclusion": "skipped",
+          "url": "https://github.com/JavdexLabs/Javdex/actions/runs/42648518936/job/129311431636"
+        },
+        {
+          "id": 129311432598,
+          "name": "Publish GitHub release",
+          "conclusion": "skipped",
+          "url": "https://github.com/JavdexLabs/Javdex/actions/runs/42648518936/job/129311432598"
+        }
+      ]
+    },
+    "retry": {
+      "method": "rerun single Windows packaging job and downstream dependencies",
+      "originalJobId": 129286767939,
+      "successfulJobId": 129558015109,
+      "cause": "Pinned Lua source download connect timeout"
+    }
+  },
+  "initialCandidate": {
+    "source": "a2791e0d4f51cb8ce165de44aeb8b8956f5ed775",
+    "run": 42643333599,
+    "windowsJobId": 129249995336,
+    "conclusion": "failure",
+    "cause": "subtitleDiscovery fixture used noncanonical temp paths; actual source resolver already canonicalizes physical paths",
+    "published": false,
+    "unpublishedTagObject": "3445091e750f17bdc3d320f17df16ff8b93533cf"
+  },
+  "fixes": [
+    {
+      "commit": "a2791e0d4f51cb8ce165de44aeb8b8956f5ed775",
+      "change": "Changed 462 npm lockfile tarball URLs to the official registry without changing versions or integrity."
+    },
+    {
+      "commit": "fc82d07bd2fadd2eee259808bb5c6504cc0dd6da",
+      "change": "Canonicalized the temporary subtitle discovery test fixture root to match production playback source resolution."
+    }
+  ],
+  "tests": {
+    "linuxPrElectron": {
+      "tests": 4779,
+      "pass": 4750,
+      "fail": 0,
+      "skipped": 29
+    },
+    "windowsReleaseElectron": {
+      "tests": 4779,
+      "pass": 4746,
+      "fail": 0,
+      "skipped": 33,
+      "batches": [
+        {
+          "tests": 2989,
+          "pass": 2957,
+          "fail": 0,
+          "skipped": 32
+        },
+        {
+          "tests": 1790,
+          "pass": 1789,
+          "fail": 0,
+          "skipped": 1
+        }
+      ],
+      "separatePlayAuthorization": {
+        "tests": 8,
+        "pass": 8,
+        "fail": 0,
+        "skipped": 0
+      }
+    },
+    "releaseServerUpdaterPerArchitecture": {
+      "tests": 153,
+      "pass": 152,
+      "fail": 0,
+      "skipped": 1
+    },
+    "releaseLinuxRootGroupsPerArchitecture": {
+      "tests": 1,
+      "pass": 1,
+      "fail": 0,
+      "skipped": 0
+    }
+  },
+  "sourcePrRuns": {
+    "server": 42648408670,
+    "native": 42648408612,
+    "docs": 42648408607
+  },
+  "assets": [
+    {
+      "id": 729706277,
+      "name": "Javdex-0.9.2-amd64.deb",
+      "size": 171938664,
+      "digest": "sha256:7361048ca4b46eb80f190512afa784678c79783a998581acf78b6582d59965cc",
+      "browser_download_url": "https://github.com/JavdexLabs/Javdex/releases/download/v0.9.2/Javdex-0.9.2-amd64.deb",
+      "content_type": "application/x-debian-package",
+      "state": "uploaded"
+    },
+    {
+      "id": 729706276,
+      "name": "Javdex-0.9.2-arm64.dmg",
+      "size": 172846090,
+      "digest": "sha256:7e5e8fe108be93282e4c76b81f14486340826898651aaca1d9c9463152a6ebaa",
+      "browser_download_url": "https://github.com/JavdexLabs/Javdex/releases/download/v0.9.2/Javdex-0.9.2-arm64.dmg",
+      "content_type": "application/x-apple-diskimage",
+      "state": "uploaded"
+    },
+    {
+      "id": 729706279,
+      "name": "Javdex-0.9.2-x64.dmg",
+      "size": 181054105,
+      "digest": "sha256:f13e3137ba9987a0ef94d6831eb3eb8e25316e4712864ee9034a3492c3367206",
+      "browser_download_url": "https://github.com/JavdexLabs/Javdex/releases/download/v0.9.2/Javdex-0.9.2-x64.dmg",
+      "content_type": "application/x-apple-diskimage",
+      "state": "uploaded"
+    },
+    {
+      "id": 729706275,
+      "name": "Javdex-0.9.2-x86_64.AppImage",
+      "size": 195734678,
+      "digest": "sha256:82199671fbbac10e090b587a73d21bf84b5b4f4283bbe6e58f48f7ef4ecc7a27",
+      "browser_download_url": "https://github.com/JavdexLabs/Javdex/releases/download/v0.9.2/Javdex-0.9.2-x86_64.AppImage",
+      "content_type": "application/octet-stream",
+      "state": "uploaded"
+    },
+    {
+      "id": 729706288,
+      "name": "Javdex-Playback-Sources-0.9.2.tar.gz",
+      "size": 672760665,
+      "digest": "sha256:124cbf78855b25adb05de3227bc6e972766f6f4a84a15d451bbe268da53c1dea",
+      "browser_download_url": "https://github.com/JavdexLabs/Javdex/releases/download/v0.9.2/Javdex-Playback-Sources-0.9.2.tar.gz",
+      "content_type": "application/gzip",
+      "state": "uploaded"
+    },
+    {
+      "id": 729706285,
+      "name": "Javdex-server-0.9.2-linux-amd64.javdex-update",
+      "size": 24928874,
+      "digest": "sha256:b897c27197c2722e1802beaf308ca25219c33cb76b00febff9c40bd16d84c9dc",
+      "browser_download_url": "https://github.com/JavdexLabs/Javdex/releases/download/v0.9.2/Javdex-server-0.9.2-linux-amd64.javdex-update",
+      "content_type": "application/octet-stream",
+      "state": "uploaded"
+    },
+    {
+      "id": 729706286,
+      "name": "Javdex-server-0.9.2-linux-arm64.javdex-update",
+      "size": 25183876,
+      "digest": "sha256:3fcb391dc7bc31cc6db77e89ea9a10ecfa71b33ad9b9478fc84d4184251cc53f",
+      "browser_download_url": "https://github.com/JavdexLabs/Javdex/releases/download/v0.9.2/Javdex-server-0.9.2-linux-arm64.javdex-update",
+      "content_type": "application/octet-stream",
+      "state": "uploaded"
+    },
+    {
+      "id": 729706278,
+      "name": "Javdex-Setup-0.9.2-x64.exe",
+      "size": 150398735,
+      "digest": "sha256:862824c2b094b6ac982d508d634285a78eb7286a5f5ae6914ece78b6d520613b",
+      "browser_download_url": "https://github.com/JavdexLabs/Javdex/releases/download/v0.9.2/Javdex-Setup-0.9.2-x64.exe",
+      "content_type": "application/x-msdos-program",
+      "state": "uploaded"
+    },
+    {
+      "id": 729706283,
+      "name": "Javdex-Setup-0.9.2-x64.zip",
+      "size": 202735096,
+      "digest": "sha256:da45e9df3b122506fabe307771c3329f72ce1fd54cb91b26e1e07033463f865a",
+      "browser_download_url": "https://github.com/JavdexLabs/Javdex/releases/download/v0.9.2/Javdex-Setup-0.9.2-x64.zip",
+      "content_type": "application/zip",
+      "state": "uploaded"
+    },
+    {
+      "id": 729706280,
+      "name": "SHA256SUMS.txt",
+      "size": 873,
+      "digest": "sha256:3e21284e5f4d89ca7d05c0a84c8710cafc6a1654c8c18a57810238ef490f49cc",
+      "browser_download_url": "https://github.com/JavdexLabs/Javdex/releases/download/v0.9.2/SHA256SUMS.txt",
+      "content_type": "text/plain",
+      "state": "uploaded"
+    }
+  ],
+  "registry": {
+    "image": "ghcr.io/javdexlabs/javdex-server:0.9.2",
+    "method": "HEAD",
+    "anonymous": true,
+    "status": 200,
+    "contentType": "application/vnd.oci.image.index.v1+json",
+    "digest": "sha256:d6f11f8900244c3f2dd900a0d280b268aa5934b6c6fd840f762ac1c71da4a439"
+  },
+  "independentPublicArtifactAcceptance": "not performed per user instruction"
+}

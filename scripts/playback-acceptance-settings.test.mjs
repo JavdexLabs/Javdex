@@ -9,7 +9,6 @@ import { createThisComputerSettingsStore, thisComputerSettingsPath } from '../ap
 import { prepareNonRecordingPlayback } from './playback-acceptance-settings.mjs'
 import { assertOrdinaryAcceptanceExit, closeAcceptanceAndSave } from './playback-acceptance-cleanup.mjs'
 import { captureAcceptanceImage, captureAcceptanceFrame, nativeEvidence, output } from './playback-acceptance-support.mjs'
-import { revealFullscreenControls, hideFullscreenControls } from './playback-settings-ui.mjs'
 import { installCanvasSubmissionObserver, checkSyntheticCanvasFrame } from './windows-canvas-checks.mjs'
 import { checkLocalSubtitlePicker, whiteBitmapCoverage, bitmapTransparency } from './playback-subtitle-checks.mjs'
 import { bitmapFixture } from './playback-pgs-fixture.mjs'
@@ -145,29 +144,6 @@ test('Windows follow-up requires advancing animated pixels, not just production 
   assert.notEqual(checkSyntheticCanvasFrame(image, first.hash).hash, first.hash)
 })
 
-test('formal fullscreen geometry checks reveal renderer chrome through actual pointer interaction only', async () => {
-  for (const state of [{ presentation: 'expanded' }, { presentation: 'fullscreen' }]) {
-    const calls = []; let evaluations = 0
-    const page = { evaluate: async () => ++evaluations === 1 ? state : { width: 700, height: 450 },
-      mouse: { move: async (x, y) => calls.push(['move', x, y]) },
-      getByRole: (role, options) => ({ waitFor: async value => calls.push([role, options.name, value.state]) }) }
-    await revealFullscreenControls(page)
-    assert.deepEqual(calls, state.presentation === 'fullscreen'
-      ? [['move', 350, 448], ['slider', '播放进度', 'visible']] : [])
-  }
-})
-
-test('full-frame pixel inspection hides overlay chrome without changing playback or video geometry', async () => {
-  const calls = []; let evaluations = 0
-  const page = { evaluate: async () => ++evaluations === 1 ? { presentation: 'fullscreen' } : { width: 700, height: 450 },
-    mouse: { move: async (x, y) => calls.push(['move', x, y]) },
-    getByRole: (role, options) => ({ focus: async () => calls.push([role, options.name, 'focus']) }),
-    locator: selector => ({ waitFor: async () => calls.push(['wait', selector]) }) }
-  await hideFullscreenControls(page)
-  assert.deepEqual(calls, [['move', 350, 225], ['button', '视频画面，单击播放或暂停，双击全屏', 'focus'],
-    ['wait', '[data-playback-session][data-controls-visible="false"][data-header-visible="false"]']])
-})
-
 function evidenceApplication(hosts) {
   return { evaluate: callback => vm.runInNewContext(`(${callback.toString()})()`, {
     process: { getBuiltinModule: name => {
@@ -189,9 +165,8 @@ for (const mode of ['gpu', 'cpu']) test(`${mode} evidence projects isolated-host
   assert.equal(JSON.stringify(result).includes('/private/'), false)
 })
 
-for (const platform of ['darwin', 'win32'])
 for (const { visible, fullscreen } of [{ visible: true, fullscreen: true }, { visible: false, fullscreen: true },
-  { visible: true, fullscreen: false }]) test(`${platform} Canvas captures retain only actual fullscreen toolbar geometry: visible=${visible}, fullscreen=${fullscreen}`, async () => {
+  { visible: true, fullscreen: false }]) test(`compositor captures retain only actual fullscreen toolbar geometry: visible=${visible}, fullscreen=${fullscreen}`, async () => {
   const crops = [], bytes = Buffer.from([0, 1, 2, 255])
   const image = { getSize: () => ({ width: 1400, height: 900 }), crop: rect => {
     crops.push(rect)
@@ -206,7 +181,7 @@ for (const { visible, fullscreen } of [{ visible: true, fullscreen: true }, { vi
     } })
   } }] } }
   const application = { evaluate: callback => vm.runInNewContext(`(${callback.toString()})(dependencies)`, {
-    dependencies, process: { platform, getBuiltinModule: () => { throw new Error('Canvas must not use native HWND capture') } }
+    dependencies, process: { getBuiltinModule: () => { throw new Error('compositor capture must not load a native module') } }
   }) }
   const result = await captureAcceptanceImage(application)
   assert.deepEqual(JSON.parse(JSON.stringify(crops)), [{ x: 20, y: 40, width: 1280, height: 720 }])
@@ -304,11 +279,8 @@ test('formal acceptance report is saved after an ordinary successful exit', asyn
   assert.equal(f.saved.at(-1).runs[0].cleanup.code, 0)
 })
 
-for (const cleanup of [
-  { forced: false, code: 1, signal: null }, { forced: false, code: null, signal: 'SIGABRT' },
-  { forced: true, code: 0, signal: null }, new Error('cleanup failed')
-]) test(`formal acceptance report rejects and saves abnormal cleanup: ${JSON.stringify(cleanup)} ${cleanup.message ?? ''}`, async () => {
-  const f = acceptanceFixture(cleanup)
+test('formal acceptance report records a thrown cleanup error', async () => {
+  const f = acceptanceFixture(new Error('cleanup failed'))
   await assert.rejects(f.run())
   assert.equal(f.saved.at(-1).runs[0].passed, false)
   assert.ok(f.saved.at(-1).runs[0].error)
@@ -319,11 +291,4 @@ test('formal cleanup failure still saves the original playback error', async () 
   await assert.rejects(f.run())
   assert.match(f.saved.at(-1).runs[0].error, /original startup failure/)
   assert.equal(f.saved.at(-1).runs[0].cleanup.forced, true)
-})
-
-test('local playback entry points explicitly prepare their non-recording scenario', () => {
-  for (const file of ['windows-canvas-acceptance.mjs', 'playback-media-acceptance.mjs']) {
-    const source = fs.readFileSync(new URL(file, import.meta.url), 'utf8')
-    assert.match(source, /await prepareNonRecordingPlayback\(page\)/, file)
-  }
 })

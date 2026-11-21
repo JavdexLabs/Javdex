@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { afterEach, it } from 'node:test'
 import React from 'react'
 import TestRenderer, { act } from 'react-test-renderer'
-import { ThemeChoice, ThemeSwatch } from './ThemePreview'
+import { ThemeChoice } from './ThemePreview'
 
 Object.defineProperty(globalThis, 'React', { configurable: true, value: React })
 let renderer: TestRenderer.ReactTestRenderer | null = null
@@ -42,15 +42,4 @@ it('keeps each palette choice semantic and forwards its keyboard and selection e
   })
   assert.equal(radio.props['aria-checked'], false)
   assert.equal(radio.props.tabIndex, -1)
-})
-
-it('keeps the shared swatch decorative and exposes only an explicit layout class', () => {
-  act(() => {
-    renderer = TestRenderer.create(<ThemeSwatch theme="light" className="overview-layout" />)
-  })
-  const swatch = renderer!.root.findByType('span')
-  assert.equal(swatch.props['data-theme'], 'light')
-  assert.equal(swatch.props['aria-hidden'], true)
-  assert.match(swatch.props.className, /overview-layout/)
-  assert.doesNotMatch(swatch.props.className, /theme-swatch/)
 })

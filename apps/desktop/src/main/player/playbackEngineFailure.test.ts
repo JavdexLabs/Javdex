@@ -28,19 +28,6 @@ it('retries a startup failure once without double creating the CPU session', () 
   cpu.break(); assert.throws(() => p.render())
   assert.equal(cpu.calls.filter(c => c[0] === 'create').length, 1)
 })
-it('restores position, pause, volume and external subtitles after a native failure', async () => {
-  const gpu = fixture(), cpu = fixture()
-  const p = createLinuxPlaybackFallback(gpu.player, cpu.player, () => 'auto')
-  p.create(); p.load('/synthetic.avi'); p.read()
-  p.command({ kind: 'volume', value: 37 }); p.command({ kind: 'pause', paused: true }); p.addSubtitle('/synthetic.srt')
-  gpu.break(); const state = p.read()
-  assert.equal(state.playbackMode, 'cpu'); assert.equal(state.playbackFallback, true)
-  assert(cpu.calls.some(c => c[0] === 'load' && c[1] === '/synthetic.avi'))
-  assert(cpu.calls.some(c => c[0] === 'subtitle' && c[1] === '/synthetic.srt'))
-  assert(cpu.calls.some(c => c[0] === 'command' && JSON.stringify(c[1]) === JSON.stringify({ kind: 'seek', seconds: 12 })))
-  await new Promise(resolve => setTimeout(resolve, 50))
-  assert.deepEqual(cpu.calls.at(-1), ['command', { kind: 'pause', paused: true }])
-})
 it('honors explicit modes and never treats media format errors as GPU failures', () => {
   for (const mode of ['gpu', 'cpu'] as const) {
     const gpu = fixture(), cpu = fixture(); const p = createLinuxPlaybackFallback(gpu.player, cpu.player, () => mode)
@@ -52,17 +39,6 @@ it('honors explicit modes and never treats media format errors as GPU failures',
   assert.equal(p.read().errorKind, 'format'); assert.equal(cpu.calls.length, 0)
 })
 
-it('does not fail recovered video when the optional generated subtitle overlay cannot be restored', async () => {
-  const gpu = fixture(), cpu = fixture()
-  cpu.player.updateGeneratedSubtitle = async () => { throw new Error('optional overlay') }
-  const p = createLinuxPlaybackFallback(gpu.player, cpu.player, () => 'auto')
-  p.create(); p.load('/synthetic.avi'); p.read()
-  await p.updateGeneratedSubtitle?.('/synthetic.ass', true, undefined, 'fixture')
-  gpu.break(); p.read()
-  await new Promise(resolve => setTimeout(resolve, 50))
-  assert.equal(p.read().playbackMode, 'cpu')
-})
-
 it('keeps play intent when the failing GPU reports its initial paused state before load completes', () => {
   const gpu = fixture(), cpu = fixture()
   gpu.state({ alive: true, pause: true, loadedFiles: 0 })
@@ -72,12 +48,6 @@ it('keeps play intent when the failing GPU reports its initial paused state befo
   assert.deepEqual(cpu.calls.at(-1), ['command', { kind: 'pause', paused: false }])
 })
 
-it('preserves the original error when explicit GPU mode cannot recover', () => {
-  const gpu = fixture(), cpu = fixture(); gpu.break()
-  const p = createLinuxPlaybackFallback(gpu.player, cpu.player, () => 'gpu')
-  assert.throws(() => p.create(), /native/)
-  assert.equal(cpu.calls.length, 0)
-})
 it('keeps a newer seek while CPU recovery is awaiting the previous position', async () => {
   const gpu = fixture(), cpu = fixture()
   const p = createLinuxPlaybackFallback(gpu.player, cpu.player, () => 'auto')

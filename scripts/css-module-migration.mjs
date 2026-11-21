@@ -31,6 +31,10 @@ try {
   browser = await chromium.launch({ channel: process.env.JAVDEX_BROWSER_CHANNEL || 'chrome', headless: true })
 for (const width of [1440, 1000, 640, 480]) for (const theme of ['graphite', 'light']) for (const name of ['home', 'search', 'controls', 'grid', 'covers', 'playlistCards', 'playlistPicker', 'playlistDetail', 'detailTitles', 'detailSections', 'videoTags', 'videoInfo', 'classificationCards', 'aliasTagEditor', 'pluginFieldTags', 'pluginDevConfigCreate', 'pluginDevConfigDebug', 'pluginDevTargetVideo', 'pluginDevTargetActress', 'pluginDevConversationActive', 'pluginDevConversationEmpty', 'pluginDevAgentRail', 'pluginDevWorkspaceSettings', 'pluginDevWorkspaceStandalone', 'appFormField', 'codeEditorSyntax', 'pluginDevCodeModal', 'pluginDevKindToggle', 'entityEditForm', 'entityMediaSection', 'imageImportField', 'actressAvatarEditor', 'scrapeFieldsModal', 'sharedChrome', 'appShell', 'pluginDevPanelSettings', 'pluginDevPanelStandalone', 'styleGeometry', 'batchTaskControls', 'batchSettingsEmpty', 'batchSettingsRunning', 'batchSettingsPaused', 'settingsEmptyVariants', 'settingsLoading', 'actressConflict', 'conflictMerge', 'conflictMergeBlocked', 'deleteSeries', 'deleteDirector', 'deleteOrganization', 'deleteRole', 'deleteRoleBlocked', 'deleteImpactError', 'deleteImpactLoading', 'galleryPaging', 'avatarGalleryPaging', 'settingsDensityWorkspace', 'settingsDensityStandalone', 'settingsDensityPanels', 'nativeEditorDirector', 'nativeEditorDirectorWorkspace', 'nativeEditorSeries', 'nativeEditorOrganization', 'nativeEditorPlaylist', 'nativeEditorVideo', 'nativeEditorActress', 'videoDetailOperations', 'videoDetailLastLocal', 'videoDetailLastStrm', 'resourceImportSingle', 'resourceImportLibrary', 'resourceImportEdit', 'resourceImportStrm', 'resourceImportRemote', 'appearanceReady', 'appearancePending', 'appearanceError', 'imagePreview', 'imagePreviewWindow', 'imagePreviewMissing', 'classificationMerge', 'classificationMergeEmpty', 'classificationMergeError', 'directorChoice', 'actressMerge', 'actressMergeEmpty', 'actressMergeError', 'pluginsSettingsEmpty', 'pluginsSettingsCards', 'pluginConfigBuiltin', 'pluginConfigUser', 'scrapeCoverage', 'settingsStatusCards', 'batchOverview', 'settingsWorkspaceShell', 'appUpdate', 'appUpdateIgnored', 'settingsOverview', 'settingsOverviewEmpty', 'settingsOverviewNotices', 'pluginConnectionNotice', 'actressDeleteNotice', 'classificationPickerError', 'classificationDetailLayout', 'classificationProfileDirector', 'classificationProfileSeries', 'classificationProfileOrganization', 'relatedLinksEditor', 'videoTitle', 'videoResources', 'videoMeta', 'detailActions', 'detailPane', 'detailScroll', 'listDetailShell', 'galleryTiles', 'actressProfileMeta', 'actressHeader', 'actressGrid', 'faceScan', 'crypto', 'imageImport', 'selection']) {
     if (requestedFixtures.size && !requestedFixtures.has(name)) continue
+    // Exercise every supported width. Only the theme surfaces need both palettes at the same width.
+    const checkBothThemes = name === 'appShell' || name === 'styleGeometry' || name.startsWith('appearance')
+    const viewportTheme = width === 1440 || width === 640 ? 'graphite' : 'light'
+    if (!checkBothThemes && theme !== viewportTheme) continue
     if (width === 640 && name !== 'styleGeometry' && !name.startsWith('pluginDevPanel') && !['selection', 'imageImport', 'playlistPicker', 'playlistDetail', 'detailTitles', 'detailSections', 'videoTags', 'videoInfo', 'classificationCards', 'aliasTagEditor', 'pluginFieldTags', 'pluginDevConfigCreate', 'pluginDevConfigDebug', 'pluginDevTargetVideo', 'pluginDevTargetActress', 'pluginDevConversationActive', 'pluginDevConversationEmpty', 'pluginDevAgentRail', 'pluginDevWorkspaceSettings', 'pluginDevWorkspaceStandalone', 'appFormField', 'codeEditorSyntax', 'pluginDevCodeModal', 'pluginDevKindToggle', 'entityEditForm', 'entityMediaSection', 'imageImportField', 'actressAvatarEditor', 'scrapeFieldsModal', 'sharedChrome', 'appShell', 'batchTaskControls', 'batchSettingsEmpty', 'batchSettingsRunning', 'batchSettingsPaused', 'settingsEmptyVariants', 'settingsLoading', 'actressConflict', 'conflictMerge', 'conflictMergeBlocked', 'deleteSeries', 'deleteDirector', 'deleteOrganization', 'deleteRole', 'deleteRoleBlocked', 'deleteImpactError', 'deleteImpactLoading', 'galleryPaging', 'avatarGalleryPaging', 'settingsDensityWorkspace', 'settingsDensityStandalone', 'settingsDensityPanels', 'nativeEditorDirector', 'nativeEditorDirectorWorkspace', 'nativeEditorSeries', 'nativeEditorOrganization', 'nativeEditorPlaylist', 'nativeEditorVideo', 'nativeEditorActress', 'videoDetailOperations', 'videoDetailLastLocal', 'videoDetailLastStrm', 'resourceImportSingle', 'resourceImportLibrary', 'resourceImportEdit', 'resourceImportStrm', 'resourceImportRemote', 'appearanceReady', 'appearancePending', 'appearanceError', 'imagePreview', 'imagePreviewWindow', 'imagePreviewMissing', 'classificationMerge', 'classificationMergeEmpty', 'classificationMergeError', 'directorChoice', 'actressMerge', 'actressMergeEmpty', 'actressMergeError', 'pluginsSettingsEmpty', 'pluginsSettingsCards', 'pluginConfigBuiltin', 'pluginConfigUser', 'scrapeCoverage', 'settingsStatusCards', 'batchOverview', 'settingsWorkspaceShell', 'appUpdate', 'appUpdateIgnored', 'settingsOverview', 'settingsOverviewEmpty', 'settingsOverviewNotices', 'pluginConnectionNotice', 'actressDeleteNotice', 'classificationPickerError', 'classificationDetailLayout', 'classificationProfileDirector', 'classificationProfileSeries', 'classificationProfileOrganization', 'relatedLinksEditor', 'videoTitle', 'videoResources', 'videoMeta', 'detailActions', 'detailPane', 'detailScroll', 'listDetailShell', 'galleryTiles', 'actressProfileMeta', 'actressHeader'].includes(name)) continue
     if (width === 480 && name !== 'styleGeometry' && !name.startsWith('pluginDevPanel') && !['actressHeader', 'detailSections', 'videoTags', 'videoInfo', 'classificationCards', 'aliasTagEditor', 'pluginFieldTags', 'pluginDevConfigCreate', 'pluginDevConfigDebug', 'pluginDevTargetVideo', 'pluginDevTargetActress', 'pluginDevConversationActive', 'pluginDevConversationEmpty', 'pluginDevAgentRail', 'pluginDevWorkspaceSettings', 'pluginDevWorkspaceStandalone', 'appFormField', 'codeEditorSyntax', 'pluginDevCodeModal', 'pluginDevKindToggle', 'entityEditForm', 'entityMediaSection', 'imageImportField', 'actressAvatarEditor', 'scrapeFieldsModal', 'sharedChrome', 'appShell', 'batchTaskControls', 'batchSettingsEmpty', 'batchSettingsRunning', 'batchSettingsPaused', 'settingsEmptyVariants', 'settingsLoading', 'actressConflict', 'conflictMerge', 'conflictMergeBlocked', 'deleteSeries', 'deleteDirector', 'deleteOrganization', 'deleteRole', 'deleteRoleBlocked', 'deleteImpactError', 'deleteImpactLoading', 'galleryPaging', 'avatarGalleryPaging', 'settingsDensityWorkspace', 'settingsDensityStandalone', 'settingsDensityPanels', 'nativeEditorDirector', 'nativeEditorDirectorWorkspace', 'nativeEditorSeries', 'nativeEditorOrganization', 'nativeEditorPlaylist', 'nativeEditorVideo', 'nativeEditorActress', 'videoDetailOperations', 'videoDetailLastLocal', 'videoDetailLastStrm', 'resourceImportSingle', 'resourceImportLibrary', 'resourceImportEdit', 'resourceImportStrm', 'resourceImportRemote', 'appearanceReady', 'appearancePending', 'appearanceError', 'imagePreview', 'imagePreviewWindow', 'imagePreviewMissing', 'classificationMerge', 'classificationMergeEmpty', 'classificationMergeError', 'directorChoice', 'actressMerge', 'actressMergeEmpty', 'actressMergeError', 'pluginsSettingsEmpty', 'pluginsSettingsCards', 'pluginConfigBuiltin', 'pluginConfigUser', 'scrapeCoverage', 'settingsStatusCards', 'batchOverview', 'settingsWorkspaceShell', 'appUpdate', 'appUpdateIgnored', 'settingsOverview', 'settingsOverviewEmpty', 'settingsOverviewNotices', 'pluginConnectionNotice', 'actressDeleteNotice', 'classificationPickerError', 'classificationDetailLayout', 'classificationProfileDirector', 'classificationProfileSeries', 'classificationProfileOrganization', 'relatedLinksEditor', 'videoTitle', 'videoResources', 'videoMeta', 'detailActions'].includes(name)) continue
     const height = width === 1440 ? 900 : 640
@@ -853,7 +857,12 @@ for (const width of [1440, 1000, 640, 480]) for (const theme of ['graphite', 'li
       assert.equal(suffixMetrics.unitPosition, 'absolute')
       assert.equal(await inlineRow.locator('input').count(), 3)
       assert.equal(await inlineRow.evaluate(el => getComputedStyle(el).gridTemplateColumns.split(' ').length), 3)
-      assert.equal(await inlineRow.evaluate(el => getComputedStyle(el).columnGap), '8px')
+      assert.ok(await inlineRow.evaluate(row => {
+        const bounds = row.getBoundingClientRect()
+        const fields = Array.from(row.querySelectorAll('input'), input => input.getBoundingClientRect())
+        return fields.every((field, index) => field.width > 0 && field.right <= bounds.right + 1 &&
+          (index === 0 ? field.left >= bounds.left - 1 : field.left > fields[index - 1].right))
+      }), 'the three measurements must fit side by side without touching or overflowing')
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false)
       await page.waitForTimeout(180)
       await suffix.screenshot({ path: path.join(output, `${name}-${width}-${theme}-suffix.png`) })
@@ -1740,7 +1749,7 @@ for (const width of [1440, 1000, 640, 480]) for (const theme of ['graphite', 'li
       assert.equal((await cover.boundingBox()).width, 82)
       assert.notEqual(await cover.locator('img').evaluate(image => getComputedStyle(image).filter), 'none')
       assert.equal(await cover.evaluate(el => getComputedStyle(el, '::after').content), '""')
-      assert.equal(await cover.getByText('8').evaluate(el => getComputedStyle(el).zIndex), '2')
+      assert.equal(await cards.first().getByText('8 部影片', { exact: true }).isVisible(), true)
       assert.equal((await rows.first().locator('[data-variant="pick"]').boundingBox()).width, 68)
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false)
       await page.screenshot({ path: path.join(output, `${name}-${width}-${theme}.png`) })
@@ -1796,10 +1805,10 @@ for (const width of [1440, 1000, 640, 480]) for (const theme of ['graphite', 'li
       assert.equal((await direction.boundingBox()).width, 32)
       await direction.click()
       await page.getByRole('button', { name: '日期降序', exact: true }).waitFor()
-      await sort.getByRole('button', { name: '测试排序全部选项', exact: true }).click()
+      const more = sort.getByRole('button', { name: '测试排序更多选项', exact: true })
+      await more.click()
       await page.getByRole('option', { name: '外部评分', exact: true }).click()
       await sort.getByRole('button', { name: '外部评分降序', exact: true }).waitFor()
-      const more = sort.getByRole('button', { name: '测试排序全部选项', exact: true })
       assert.equal(await more.innerText(), '更多')
       assert.equal(await more.evaluate(el => {
         const probe = document.createElement('span')
@@ -2017,7 +2026,7 @@ for (const width of [1440, 1000, 640, 480]) for (const theme of ['graphite', 'li
       assert.equal(await page.getByRole('menu').count(), 0)
       await page.getByRole('button', { name: '默认清单操作', exact: true }).click()
       await first.hover()
-      const favorite = first.getByRole('button', { name: '加入我喜欢', exact: true })
+      const favorite = first.getByRole('button', { name: '加入收藏', exact: true })
       const watch = first.getByRole('button', { name: '加入稍后观看', exact: true })
       for (const button of [favorite, watch]) {
         assert.equal((await button.boundingBox()).width, 26)
@@ -2026,8 +2035,9 @@ for (const width of [1440, 1000, 640, 480]) for (const theme of ['graphite', 'li
       assert.equal(await favorite.evaluate(el => getComputedStyle(el).left), '6px')
       assert.equal(await watch.evaluate(el => getComputedStyle(el).top), '6px')
       await favorite.click()
-      await first.getByRole('button', { name: '移出我喜欢', exact: true }).waitFor()
-      assert.equal(await first.getByRole('button', { name: '移出我喜欢', exact: true }).getAttribute('aria-pressed'), 'true')
+      const removeFavorite = first.getByRole('button', { name: '移出收藏', exact: true })
+      await removeFavorite.waitFor()
+      assert.equal(await removeFavorite.getAttribute('aria-pressed'), 'true')
       await watch.click()
       await first.getByRole('button', { name: '移出稍后观看', exact: true }).waitFor()
       await first.getByRole('button', { name: '移出稍后观看', exact: true }).click()

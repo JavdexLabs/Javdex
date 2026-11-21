@@ -82,24 +82,6 @@ describe('classification picker', () => {
     assert.equal(alert?.children.join(''), '系列候选加载失败，请稍后重试。')
   })
 
-  it('keeps candidates hidden until the field is used', () => {
-    renderPicker()
-
-    assert.equal(listbox(), null)
-    assert.equal(input().props['aria-expanded'], false)
-  })
-
-  it('shows candidates once the user types', () => {
-    renderPicker()
-
-    act(() => {
-      input().props.onChange({ target: { value: 'Coll' } })
-    })
-
-    assert.ok(listbox())
-    assert.equal(input().props['aria-expanded'], true)
-  })
-
   it('walks candidates with the arrow keys and commits with Enter', () => {
     renderPicker()
 
@@ -116,17 +98,6 @@ describe('classification picker', () => {
     assert.equal(listbox(), null)
   })
 
-  it('shows candidates once the field is focused', () => {
-    renderPicker()
-
-    act(() => {
-      input().props.onFocus()
-    })
-
-    assert.ok(listbox())
-    assert.equal(input().props['aria-expanded'], true)
-  })
-
   it('shows candidates on focus even when the field is empty', () => {
     renderPicker('')
 
@@ -137,14 +108,17 @@ describe('classification picker', () => {
     assert.ok(listbox())
   })
 
-  it('does not commit a candidate with Enter until one is active', () => {
+  it('opens when typing but does not commit until a candidate is active', () => {
     renderPicker()
+    assert.equal(listbox(), null)
+    assert.equal(input().props['aria-expanded'], false)
 
     act(() => {
       input().props.onChange({ target: { value: 'Coll' } })
     })
+    assert.ok(listbox())
+    assert.equal(input().props['aria-expanded'], true)
     const enter = keyDown('Enter')
-
     assert.equal(enter.defaultPrevented, false)
     assert.equal(selected, null)
   })
@@ -173,24 +147,16 @@ describe('classification picker', () => {
     assert.equal(listbox(), null)
   })
 
-  it('keeps candidates open when the pointer is in the list', () => {
+  it('keeps candidates available through pointer blur and closes after selection', () => {
     renderPicker()
     keyDown('ArrowDown')
 
     act(() => {
-      listbox()?.props.onMouseDown({ button: 0 })
+      listbox()!.props.onMouseDown({ button: 0 })
       input().props.onBlur()
     })
-
-    assert.ok(listbox())
-  })
-
-  it('closes candidates after picking one with the pointer', () => {
-    renderPicker()
-    keyDown('ArrowDown')
-
     act(() => {
-      renderer?.root.findAllByProps({ role: 'option' })[1].props.onClick()
+      renderer!.root.findAllByProps({ role: 'option' })[1].props.onClick()
     })
 
     assert.deepEqual(selected, options[1])

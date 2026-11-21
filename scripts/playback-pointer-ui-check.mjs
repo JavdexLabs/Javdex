@@ -12,6 +12,15 @@ const repo = process.cwd()
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-playback-pointer-'))
 let server, browser
 const results = []
+let crossControlCases = 0
+// PlaybackPanel.test.tsx covers the timing boundaries with a fake clock. Exercise
+// every pair of surface, play state and presentation with real browser events here.
+const scenarios = [
+  { surface: 'gpu', paused: true, fullscreen: false, gap: 100, hold: 0 },
+  { surface: 'gpu', paused: false, fullscreen: true, gap: 450, hold: 800 },
+  { surface: 'cpu', paused: true, fullscreen: true, gap: 450, hold: 0 },
+  { surface: 'cpu', paused: false, fullscreen: false, gap: 350, hold: 0 }
+]
 try {
   server = await createServer({ configFile: false, root: path.join(repo, 'scripts/ui-regression'),
     cacheDir: path.join(temporary, '.vite'), plugins: [react()],
@@ -20,7 +29,7 @@ try {
   await server.listen()
   browser = await chromium.launch({ ...(process.env.JAVDEX_BROWSER_EXECUTABLE
     ? { executablePath: process.env.JAVDEX_BROWSER_EXECUTABLE } : { channel: process.env.JAVDEX_BROWSER_CHANNEL || 'chrome' }), headless: true })
-  for (const surface of ['gpu', 'cpu']) for (const paused of [true, false]) for (const fullscreen of [false, true]) {
+  for (const { surface, paused, fullscreen, gap, hold } of scenarios) {
     console.log(`Checking ${surface}, ${paused ? 'paused' : 'playing'}, ${fullscreen ? 'fullscreen' : 'expanded'}`)
     const page = await browser.newPage({ viewport: { width: 1280, height: 800 } })
     const errors = []
@@ -45,23 +54,21 @@ try {
       await page.mouse.move(rect.x + rect.width / 2, rect.y + rect.height / 2)
       await page.getByRole('button', { name, exact: true }).click()
     }
-    for (const [gap, hold] of [[100, 0], [350, 0], [450, 0], [450, 800]]) {
-      await reset()
-      const { x, y } = await center()
-      await page.mouse.click(x, y, { clickCount: 1 })
-      await page.waitForTimeout(gap)
-      assert.deepEqual(await page.evaluate(() => window.fixtureCommands), [], 'no single-click command within the double-click window')
-      await page.mouse.down({ clickCount: 2 })
-      if (hold) {
-        await page.waitForTimeout(hold)
-        assert.deepEqual(await page.evaluate(() => window.fixtureCommands), [], 'holding a second press must cancel the pending single click')
-      }
-      await page.mouse.up({ clickCount: 2 })
-      await page.waitForTimeout(650)
-      assert.deepEqual(await page.evaluate(() => window.fixtureCommands), [{ kind: 'presentation', value: fullscreen ? 'expanded' : 'fullscreen' }],
-        'double click only changes presentation, without a transient pause, resume or restart')
-      results.push({ surface, paused, fullscreen, gap, hold })
+    await reset()
+    const { x, y } = await center()
+    await page.mouse.click(x, y, { clickCount: 1 })
+    await page.waitForTimeout(gap)
+    assert.deepEqual(await page.evaluate(() => window.fixtureCommands), [], 'no single-click command within the double-click window')
+    await page.mouse.down({ clickCount: 2 })
+    if (hold) {
+      await page.waitForTimeout(hold)
+      assert.deepEqual(await page.evaluate(() => window.fixtureCommands), [], 'holding a second press must cancel the pending single click')
     }
+    await page.mouse.up({ clickCount: 2 })
+    await page.waitForTimeout(650)
+    assert.deepEqual(await page.evaluate(() => window.fixtureCommands), [{ kind: 'presentation', value: fullscreen ? 'expanded' : 'fullscreen' }],
+      'double click only changes presentation, without a transient pause, resume or restart')
+    results.push({ surface, paused, fullscreen, gap, hold })
     await reset()
     const single = await center()
     await page.mouse.click(single.x, single.y)
@@ -92,6 +99,7 @@ try {
       await clickControl(label)
       await page.waitForTimeout(650)
       assert.deepEqual(await page.evaluate(() => window.fixtureCommands), [command, { kind: 'pause', paused: !paused }], `${label} must not discard the earlier independent pause/play intent`)
+      crossControlCases++
     }
     assert.deepEqual(errors, [])
     await page.close()
@@ -111,7 +119,7 @@ try {
     assert.deepEqual(await page.evaluate(() => window.fixtureCommands), [{ kind: 'presentation', value: 'fullscreen' }])
     await page.close()
   }
-  fs.writeFileSync(path.join(temporary, 'report.json'), JSON.stringify({ results, crossControlCases: 16, customTimingCases: 2, passed: true }, null, 2))
-  console.log(`Playback pointer UI: ${results.length} double-click, 16 cross-control and 2 custom-timing cases plus single/independent clicks, keyboard and explicit-control checks PASS`)
+  fs.writeFileSync(path.join(temporary, 'report.json'), JSON.stringify({ results, crossControlCases, customTimingCases: 2, passed: true }, null, 2))
+  console.log(`Playback pointer UI: ${results.length} double-click, ${crossControlCases} cross-control and 2 custom-timing cases plus single/independent clicks, keyboard and explicit-control checks PASS`)
   console.log(`Evidence: ${temporary}`)
 } finally { await browser?.close(); await server?.close() }

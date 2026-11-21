@@ -3,37 +3,11 @@ import assert from 'node:assert/strict'
 import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import TestRenderer, { act } from 'react-test-renderer'
-import styles from './Workbench.module.css'
-import {
-  WorkbenchMain,
-  WorkbenchRail,
-  WorkbenchRailHeader,
-  WorkbenchShell,
-  WorkbenchStatusPill,
-  WorkbenchTabs,
-  WorkbenchToolbar
-} from './Workbench'
+import { WorkbenchTabs } from './Workbench'
 
 Object.defineProperty(globalThis, 'React', { configurable: true, value: React })
 
 describe('shared workbench primitives', () => {
-  it('composes feature classes without replacing the neutral structure', () => {
-    const markup = renderToStaticMarkup(
-      <WorkbenchShell className="feature-shell">
-        <WorkbenchToolbar className="feature-toolbar">Toolbar</WorkbenchToolbar>
-        <WorkbenchMain className="feature-main">
-          <WorkbenchRail className="feature-rail">Rail</WorkbenchRail>
-        </WorkbenchMain>
-      </WorkbenchShell>
-    )
-
-    for (const part of ['shell', 'toolbar', 'main', 'rail'] as const) {
-      assert.match(markup, new RegExp(`class="${styles[part]} feature-${part}"`))
-      assert.match(markup, new RegExp(`data-workbench-part="${part}"`))
-    }
-    assert.doesNotMatch(markup, /class="workbench-/)
-  })
-
   it('connects tabs to their panels with a single keyboard tab stop', () => {
     const markup = renderToStaticMarkup(
       <WorkbenchTabs
@@ -58,21 +32,6 @@ describe('shared workbench primitives', () => {
       /id="review-tab-source"[^>]*aria-selected="false"[^>]*aria-controls="review-panel-source"[^>]*tabindex="-1"/
     )
     assert.doesNotMatch(markup, /workbench-tab|is-active/)
-  })
-
-  it('preserves the native header and tone attributes without exposing global classes', () => {
-    const markup = renderToStaticMarkup(
-      <WorkbenchRail aria-label="队列">
-        <WorkbenchRailHeader className="feature-header">资料</WorkbenchRailHeader>
-        <WorkbenchStatusPill tone="waiting" aria-label="正在等待">待处理</WorkbenchStatusPill>
-        <WorkbenchStatusPill tone="ok">已完成</WorkbenchStatusPill>
-      </WorkbenchRail>
-    )
-    assert.match(markup, /aria-label="队列"/)
-    assert.match(markup, /feature-header/)
-    assert.match(markup, /data-tone="waiting" aria-label="正在等待"/)
-    assert.match(markup, /data-tone="ok"/)
-    assert.doesNotMatch(markup, /class="workbench-/)
   })
 
   it('keeps arrow, Home and End navigation skipping disabled tabs and focuses by stable ID', () => {

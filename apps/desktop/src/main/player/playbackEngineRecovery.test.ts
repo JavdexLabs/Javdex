@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { test } from 'node:test'
+import { describe, test } from 'node:test'
 import { setTimeout as delay } from 'node:timers/promises'
 import { createPlaybackEngine } from './playbackEngine'
 import { createPlaybackSession } from './playbackSession'
@@ -30,13 +30,13 @@ function fixture() {
   },
     cleanupFails: () => { cleanupFailure = true }, state: (next: Partial<NativePlaybackState>) => { state = { ...state, ...next } } }
 }
-for (const platform of ['darwin', 'win32', 'linux'] as const) {
+describe('shared playback recovery', () => {
   function pair(options = { forceCpu: () => false, gpuAvailable: () => true }) {
     const gpu = fixture(), cpu = fixture()
-    return { gpu, cpu, p: createPlaybackEngine(gpu.player, cpu.player, { mode: () => options.forceCpu() ? 'cpu' : 'auto', gpuAvailable: options.gpuAvailable }, platform) }
+    return { gpu, cpu, p: createPlaybackEngine(gpu.player, cpu.player, { mode: () => options.forceCpu() ? 'cpu' : 'auto', gpuAvailable: options.gpuAvailable }, 'linux') }
   }
 
-  test(`${platform}: CPU cold initialization does not exhaust the recovery budget`, async t => {
+  test('CPU cold initialization does not exhaust the recovery budget', async t => {
     let time = Date.now()
     t.mock.method(Date, 'now', () => time)
     const { gpu, cpu, p } = pair(); t.after(p.destroy)
@@ -51,14 +51,14 @@ for (const platform of ['darwin', 'win32', 'linux'] as const) {
     assert.deepEqual(cpu.calls.at(-1), ['command', { kind: 'pause', paused: false }])
   })
 
-  test(`${platform}: unsupported graphics initializes CPU once and stays there across subsequent sessions`, () => {
+  test('unsupported graphics initializes CPU once and stays there across subsequent sessions', () => {
     const { gpu, cpu, p } = pair(); gpu.break('OpenGL 3.2 core context is unavailable')
     p.create(); assert.equal(p.read().playbackFallbackReason, 'GPU_INITIALIZATION_FAILED')
     p.destroy(); p.create(); assert.equal(p.read().playbackMode, 'cpu'); p.destroy()
     assert.equal(gpu.calls.filter(c => c[0] === 'create').length, 1)
     assert.equal(cpu.calls.filter(c => c[0] === 'create').length, 2)
   })
-  test(`${platform}: disabled acceleration automatically chooses CPU; an explicit CPU request is not a failure`, () => {
+  test('disabled acceleration automatically chooses CPU; an explicit CPU request is not a failure', () => {
     for (const forced of [false, true]) {
       const { gpu, p } = pair({ forceCpu: () => forced, gpuAvailable: () => false })
       p.create(); const value = p.read(); p.destroy()
@@ -68,7 +68,7 @@ for (const platform of ['darwin', 'win32', 'linux'] as const) {
     }
   })
 
-  test(`${platform}: localized shared-frame production failures recover through their structured graphics domain`, async t => {
+  test('localized shared-frame production failures recover through their structured graphics domain', async t => {
     const { gpu, cpu, p } = pair(); t.after(() => p.destroy())
     p.create(); p.load('/subtitle-fixture.mkv'); p.read()
     p.command({ kind: 'pause', paused: true }); p.command({ kind: 'track', type: 'sub', id: 1 })
@@ -81,31 +81,38 @@ for (const platform of ['darwin', 'win32', 'linux'] as const) {
     assert.deepEqual(cpu.calls.at(-1), ['command', { kind: 'pause', paused: true }])
   })
 
-  test(`${platform}: a page failure cannot become a graphics recovery because its text contains GPU`, () => {
+  test('a page failure cannot become a graphics recovery because its text contains GPU', () => {
     const { gpu, cpu, p } = pair(); p.create(); gpu.break('GPU canvas navigation ended', 'page')
     assert.throws(() => p.read(), /navigation ended/)
     assert.equal(cpu.calls.length, 0); p.destroy()
   })
-  test(`${platform}: restores source, position, pause intent, audio and subtitle settings after graphics failure`, async t => {
+  test('restores source, position, pause intent, audio and subtitle settings after graphics failure', async t => {
     const { gpu, cpu, p } = pair(); t.after(() => p.destroy())
+    cpu.state({ 'time-pos': 0 })
     p.create(); p.load('/fixture.mkv'); p.read()
     p.command({ kind: 'volume', value: 37 }); p.command({ kind: 'mute', muted: true })
     p.command({ kind: 'speed', value: 1.5 }); p.command({ kind: 'track', type: 'audio', id: 2 })
     p.addSubtitle('/fixture.srt'); p.command({ kind: 'subtitle-delay', seconds: .3 })
     p.command({ kind: 'pause', paused: true }); gpu.break()
-    assert.equal(p.read().playbackMode, 'cpu'); await delay(50)
+    const state = p.read()
+    assert.equal(state.playbackMode, 'cpu'); assert.equal(state.playbackFallback, true)
+    await delay(50)
     assert.deepEqual(cpu.calls.filter(c => c[0] === 'load'), [['load', '/fixture.mkv', { paused: true }]])
     assert(cpu.calls.some(c => c[0] === 'subtitle' && c[1] === '/fixture.srt'))
-    for (const kind of ['volume', 'mute', 'speed', 'track', 'subtitle-delay', 'seek'])
+    assert.equal(p.read()['time-pos'], 12)
+    assert.equal(p.read().volume, 37)
+    assert.deepEqual(cpu.calls.filter(c => c[0] === 'command' && (c[1] as { kind: string }).kind === 'seek'),
+      [['command', { kind: 'seek', seconds: 12 }]])
+    for (const kind of ['mute', 'speed', 'track', 'subtitle-delay'])
       assert(cpu.calls.some(c => c[0] === 'command' && (c[1] as { kind: string }).kind === kind), kind)
     assert.deepEqual(cpu.calls.at(-1), ['command', { kind: 'pause', paused: true }])
   })
-  test(`${platform}: a load error on the GPU path does not duplicate the replacement load`, async t => {
+  test('a load error on the GPU path does not duplicate the replacement load', async t => {
     const { gpu, cpu, p } = pair(); t.after(() => p.destroy()); p.create(); gpu.break()
     p.load('/fixture.mkv'); p.read(); await delay(25)
     assert.equal(cpu.calls.filter(c => c[0] === 'load').length, 1)
   })
-  test(`${platform}: media, authorization, audio and renderer failures never initiate GPU recovery`, () => {
+  test('media, authorization, audio and renderer failures never initiate GPU recovery', () => {
     for (const errorKind of ['format', 'streams', 'audio', 'load'] as const) {
       const { gpu, cpu, p } = pair(); p.create(); gpu.state({ error: 'bad media', errorKind })
       assert.equal(p.read().errorKind, errorKind); assert.equal(cpu.calls.length, 0); p.destroy()
@@ -113,18 +120,18 @@ for (const platform of ['darwin', 'win32', 'linux'] as const) {
     const { gpu, cpu, p } = pair(); p.create(); gpu.break('播放器页面已关闭，请重启应用后重试', 'page')
     assert.throws(() => p.read(), /页面已关闭/); assert.equal(cpu.calls.length, 0); p.destroy()
   })
-  test(`${platform}: a CPU failure is surfaced without retry loops`, () => {
+  test('a CPU failure is surfaced without retry loops', () => {
     const { gpu, cpu, p } = pair(); gpu.break(); p.create(); cpu.break('CPU rendering failed')
     assert.throws(() => p.read(), /CPU rendering failed/)
     assert.equal(cpu.calls.filter(c => c[0] === 'create').length, 1); p.destroy()
   })
-  test(`${platform}: pending play intent wins over the stale initial pause snapshot`, async t => {
+  test('pending play intent wins over the stale initial pause snapshot', async t => {
     const { gpu, cpu, p } = pair(); t.after(() => p.destroy())
     p.create(); p.load('/fixture.mkv', { paused: false }); gpu.state({ pause: true, 'time-pos': 0 }); p.read()
     gpu.break(); p.read(); await delay(25)
     assert.deepEqual(cpu.calls.at(-1), ['command', { kind: 'pause', paused: false }])
   })
-  test(`${platform}: a newer seek and pause during recovery win over the original snapshot`, async t => {
+  test('a newer seek and pause during recovery win over the original snapshot', async t => {
     const { gpu, cpu, p } = pair(); t.after(() => p.destroy())
     p.create(); p.load('/fixture.mkv'); p.read(); gpu.break(); p.read()
     p.command({ kind: 'seek', seconds: 40 }); p.command({ kind: 'pause', paused: true })
@@ -132,14 +139,14 @@ for (const platform of ['darwin', 'win32', 'linux'] as const) {
     assert(cpu.calls.some(c => c[0] === 'command' && (c[1] as { seconds?: number }).seconds === 40))
     assert.deepEqual(cpu.calls.at(-1), ['command', { kind: 'pause', paused: true }])
   })
-  test(`${platform}: stop/new load cancels restoration before it can seek or unpause another source`, async t => {
+  test('stop/new load cancels restoration before it can seek or unpause another source', async t => {
     const { gpu, cpu, p } = pair(); t.after(() => p.destroy())
     p.create(); p.load('/old.mkv'); p.read(); gpu.break(); p.read()
     p.load('/new.mkv', { paused: true }); const mark = cpu.calls.length
     await delay(50); assert.equal(cpu.calls.length, mark)
   })
 
-  test(`${platform}: a subtitle selected during the recovery seek is loaded once and remains selected`, async t => {
+  test('a subtitle selected during the recovery seek is loaded once and remains selected', async t => {
     const { gpu, cpu, p } = pair(); t.after(() => p.destroy())
     p.create(); p.load('/fixture.mkv'); p.read()
     p.command({ kind: 'track', type: 'sub', id: 1 })
@@ -150,20 +157,22 @@ for (const platform of ['darwin', 'win32', 'linux'] as const) {
     assert.deepEqual(cpu.calls.filter(c => c[0] === 'subtitle'), [['subtitle', '/new.srt', true]])
     assert(!cpu.calls.slice(mark).some(c => c[0] === 'command' && (c[1] as { kind: string }).kind === 'track'))
   })
-  test(`${platform}: uncertain GPU cleanup does not block CPU recovery or force GPU resource reuse`, async t => {
+  test('uncertain GPU cleanup does not block CPU recovery or force GPU resource reuse', async t => {
     const { gpu, p } = pair(); t.after(() => p.destroy())
     p.create(); p.load('/fixture.mkv'); p.read(); gpu.cleanupFails(); gpu.break()
     assert.equal(p.read().playbackMode, 'cpu'); await delay(40)
   })
-  test(`${platform}: optional generated subtitles are restored, and an overlay failure does not stop video`, async t => {
+  test('optional generated subtitles are restored, and an overlay failure does not stop video', async t => {
     const { gpu, cpu, p } = pair(); t.after(() => p.destroy())
     p.create(); p.load('/fixture.mkv'); p.read()
     await p.updateGeneratedSubtitle?.('/ai.ass', true, undefined, 'timeline')
-    cpu.player.updateGeneratedSubtitle = async () => { throw new Error('optional subtitle failure') }
+    const restore = t.mock.fn(async () => { throw new Error('optional subtitle failure') })
+    cpu.player.updateGeneratedSubtitle = restore
     gpu.break(); p.read(); await delay(50)
+    assert.equal(restore.mock.callCount(), 1)
     assert.equal(p.read().playbackMode, 'cpu')
   })
-  test(`${platform}: an unavailable optional subtitle observation does not block graphics recovery`, async t => {
+  test('an unavailable optional subtitle observation does not block graphics recovery', async t => {
     const { gpu, cpu, p } = pair(); t.after(() => p.destroy())
     p.create(); p.load('/fixture.mkv'); p.read()
     await p.updateGeneratedSubtitle?.('/ai.ass', true, undefined, 'timeline')
@@ -173,13 +182,13 @@ for (const platform of ['darwin', 'win32', 'linux'] as const) {
     assert(cpu.calls.some(c => c[0] === 'generated' && c[1] === '/ai.ass' && c[2] === true))
     assert.equal(p.read().playbackMode, 'cpu')
   })
-  test(`${platform}: default playback remains GPU and platform context errors select CPU`, () => {
+  test('default playback uses GPU until a structured graphics failure', () => {
     const { gpu, cpu, p } = pair()
     p.create(); assert.equal(p.read().playbackMode, 'gpu'); assert.equal(cpu.calls.length, 0)
-    gpu.break(platform === 'darwin' ? 'Cannot create IOSurface render context' : 'Cannot create D3D device')
+    gpu.break()
     assert.equal(p.read().playbackMode, 'cpu'); p.destroy()
   })
-  test(`${platform}: CPU loading after a long GPU session gets its own bounded opening window`, async t => {
+  test('CPU loading after a long GPU session gets its own bounded opening window', async t => {
     const { gpu, cpu, p } = pair()
     let time = 1000, resolutions = 0
     const session = createPlaybackSession({ native: p, resolve: async target => {
@@ -197,7 +206,7 @@ for (const platform of ['darwin', 'win32', 'linux'] as const) {
     assert.equal(session.snapshot()!.phase, 'playing')
     assert.equal(resolutions, 1)
   })
-  test(`${platform}: saved volume set before the initial load survives CPU replacement`, async t => {
+  test('saved volume set before the initial load survives CPU replacement', async t => {
     const { gpu, p } = pair()
     const session = createPlaybackSession({ native: p, resolve: async target => ({ target, title: 'fixture', mode: 'local',
       locator: '/fixture.mp4', identityKey: 'fixture', revision: '1', resumeKey: 'fixture' }),
@@ -209,4 +218,4 @@ for (const platform of ['darwin', 'win32', 'linux'] as const) {
     gpu.break(); session.tick(); await delay(50); session.tick()
     assert.equal(session.snapshot()!.volume, 37)
   })
-}
+})

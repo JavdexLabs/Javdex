@@ -33,9 +33,8 @@ export async function checkNativeEditor({ page, name, width, theme, output }) {
   await snapshot('long')
   await summary.fill('简介草稿\n保留第二行')
   if (name === 'nativeEditorVideo') {
-    const selected = dialog.getByRole('button', { name: '将 来源甲 设为默认外部评分', exact: true })
-    assert.equal(await selected.getAttribute('aria-pressed'), 'true')
-    await dialog.getByRole('button', { name: '将 来源乙 设为默认外部评分', exact: true }).click()
+    assert.equal(await dialog.getByRole('radio', { name: '将 来源甲 设为默认外部评分', exact: true }).isChecked(), true)
+    await dialog.getByRole('radio', { name: '将 来源乙 设为默认外部评分', exact: true }).check()
     await dialog.getByRole('button', { name: '删除 来源甲 评分', exact: true }).click()
     await dialog.getByRole('button', { name: '撤销删除 来源甲 评分', exact: true }).click()
     await snapshot('ratings')
@@ -46,8 +45,8 @@ export async function checkNativeEditor({ page, name, width, theme, output }) {
   assert.equal(await dialog.getAttribute('aria-busy'), 'true')
   assert.equal(await page.evaluate(() => window.nativeEditorSaveCount), 1)
   if (name === 'nativeEditorVideo') {
-    assert.deepEqual(await page.evaluate(() => window.nativeEditorInput.externalRatings), { deletedSources: [], defaultSource: '来源乙' })
-    assert.equal(await dialog.getByRole('button', { name: '将 来源乙 设为默认外部评分', exact: true }).isDisabled(), true)
+    assert.deepEqual(await page.evaluate(() => window.nativeEditorInput.externalRatings), { deletedSources: [], defaultSource: '来源乙', entries: [] })
+    assert.equal(await dialog.getByRole('radio', { name: '将 来源乙 设为默认外部评分', exact: true }).isDisabled(), true)
   }
   await snapshot('busy')
   await page.evaluate(() => window.rejectNativeEditor(new Error('保存失败：/fixture/很长的资料路径/暂时不可用，请重试。')))

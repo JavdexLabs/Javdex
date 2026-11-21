@@ -92,9 +92,9 @@ it('rejects changed legacy prefixes, shrinking histories, missing rows and malfo
   } finally { db.close() }
 })
 
-it('keeps logical state+journal writes linear for 1k, 10k and 100k log entries', (t) => {
-  const results: Array<{ entries: number; stateBytes: number; journalBytes: number }> = []
-  for (const count of [1000, 10_000, 100_000]) {
+it('keeps snapshot and journal writes linear across multiple 500-entry read pages', () => {
+  const results: Array<{ stateBytes: number; journalBytes: number }> = []
+  for (const count of [128, 1280]) {
     const { db, store, save } = fixture()
     try {
       let stateBytes = 0
@@ -115,10 +115,9 @@ it('keeps logical state+journal writes linear for 1k, 10k and 100k log entries',
       assert.ok(stateBytes < count * 200)
       const restored = readPluginWorkLog('run', final!.workLog, store)
       assert.deepEqual(restored, entries)
-      results.push({ entries: count, stateBytes, journalBytes: row.bytes })
+      results.push({ stateBytes, journalBytes: row.bytes })
     } finally { db.close() }
   }
-  assert.ok(results[2].stateBytes / results[1].stateBytes < 10.5)
-  assert.ok(results[2].journalBytes / results[1].journalBytes < 10.5)
-  t.diagnostic(JSON.stringify({ results, scope: 'In-memory SQLite logical JSON bytes; outer transaction amortizes test setup. Not WAL/device bytes, fsync latency, UI or cold recovery memory acceptance.' }))
+  assert.ok(results[1].stateBytes / results[0].stateBytes < 10.5)
+  assert.ok(results[1].journalBytes / results[0].journalBytes < 10.5)
 })

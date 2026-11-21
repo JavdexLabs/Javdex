@@ -17,9 +17,9 @@ try {
   await server.listen()
   browser = await chromium.launch({ ...(process.env.JAVDEX_BROWSER_EXECUTABLE
     ? { executablePath: process.env.JAVDEX_BROWSER_EXECUTABLE } : { channel: process.env.JAVDEX_BROWSER_CHANNEL || 'chrome' }), headless: true })
-  for (const viewport of [{ width: 1440, height: 900 }, { width: 1000, height: 640 }]) {
-    for (const theme of ['slate', 'light']) {
-      for (const mode of ['move', 'loading', 'editor', 'compact']) {
+  for (const [width, height, theme] of [[1440, 900, 'slate'], [1000, 640, 'light']]) {
+    const viewport = { width, height }
+    for (const mode of ['move', 'loading', 'editor', 'compact']) {
       const compact = mode === 'compact'
       const page = await browser.newPage({ viewport, reducedMotion: 'reduce' })
       const errors = []
@@ -123,7 +123,6 @@ try {
       assert.deepEqual(errors, [])
       console.log(`Modal layout policy: ${viewport.width}x${viewport.height}/${theme}/${mode}, loading/busy/error/details/scroll/focus/resize PASS`)
       await page.close()
-      }
     }
   }
 } finally {

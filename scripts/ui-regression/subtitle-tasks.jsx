@@ -44,11 +44,10 @@ window.api = { playback: {
   }
 } }
 applyTheme(new URLSearchParams(location.search).get('theme') || 'slate')
-const { default: SubtitleTasksButton } = await import('../../apps/desktop/src/renderer/src/playback/SubtitleTasksButton')
 const { VideoDetailSecondaryMeta } = await import('../../apps/desktop/src/renderer/src/components/VideoDetailMeta')
 createRoot(document.getElementById('root')).render(
   <div className={layout.shell}><div className={layout.root}>
-    <aside className={layout.sidebar}><nav className={layout.nav}><SubtitleTasksButton /></nav></aside>
+    <aside className={layout.sidebar} aria-hidden="true" />
     <main className={layout.main}><VideoDetailSecondaryMeta video={{ resources: [resource] }} onAddResource={() => {}} /></main>
   </div></div>
 )

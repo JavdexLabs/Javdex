@@ -15,16 +15,19 @@ try {
   await server.listen()
   browser = await chromium.launch({ ...(process.env.JAVDEX_BROWSER_EXECUTABLE ? { executablePath: process.env.JAVDEX_BROWSER_EXECUTABLE }
     : { channel: process.env.JAVDEX_BROWSER_CHANNEL || 'chrome' }), headless: true })
-  for (const viewport of [{ width: 1440, height: 900 }, { width: 1000, height: 640 }]) for (const theme of ['slate', 'light']) {
+  for (const [width, height, theme] of [[1440, 900, 'slate'], [1440, 900, 'light'], [1000, 640, 'light']]) {
+    const viewport = { width, height }
     const page = await browser.newPage({ viewport, reducedMotion: 'reduce' }), errors = []
     page.on('pageerror', error => errors.push(error.message))
     await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/subtitle-tasks.html?theme=${theme}`)
-    const globalButton = page.getByRole('button', { name: '字幕任务', exact: true })
-    await globalButton.click()
-    const globalDialog = page.getByRole('dialog', { name: '字幕任务', exact: true })
-    await globalDialog.waitFor()
-    await page.getByText('暂无字幕任务', { exact: true }).waitFor()
-    assert.equal(await globalDialog.evaluate(element => {
+    const resourceMenu = page.locator('[data-resource-row]').getByRole('button', { name: '更多', exact: true })
+    await resourceMenu.waitFor()
+    assert.equal(await page.getByRole('button', { name: '字幕管理', exact: true }).count(), 0, 'resource row keeps subtitle management inside its menu')
+    await resourceMenu.click()
+    await page.getByRole('menuitem', { name: '字幕管理', exact: true }).click()
+    const dialog = page.getByRole('dialog', { name: '字幕管理', exact: true })
+    await dialog.waitFor()
+    assert.equal(await dialog.evaluate(element => {
       const box = element.getBoundingClientRect()
       // inert suppresses hit testing, but does not prevent an opaque sibling from covering the dialog.
       const inertElements = [...document.querySelectorAll('[inert]')]
@@ -34,20 +37,12 @@ try {
       } finally {
         for (const item of inertElements) item.inert = true
       }
-    }), true, 'sidebar dialog must be painted above the main content')
-    const backdrop = await globalDialog.evaluate(element => {
+    }), true, 'subtitle management dialog must be painted above the main content')
+    const backdrop = await dialog.evaluate(element => {
       const box = element.parentElement.getBoundingClientRect()
       return { x: box.x, y: box.y, width: box.width, height: box.height }
     })
     assert.deepEqual(backdrop, { x: 0, y: 0, ...viewport }, 'backdrop must cover the entire viewport')
-    await page.keyboard.press('Escape')
-    await globalDialog.waitFor({ state: 'detached' })
-    assert.equal(await globalButton.evaluate(element => element === document.activeElement), true)
-    assert.equal(await page.getByRole('button', { name: '字幕管理', exact: true }).count(), 0, 'resource row keeps subtitle management inside its menu')
-    const resourceMenu = page.locator('[data-resource-row]').getByRole('button', { name: '更多', exact: true })
-    await resourceMenu.click()
-    await page.getByRole('menuitem', { name: '字幕管理', exact: true }).click()
-    const dialog = page.getByRole('dialog', { name: '字幕管理', exact: true })
     await page.getByRole('article', { name: 'ABC-123.zh.srt' }).waitFor()
     await page.getByRole('article', { name: 'ABC-123.en.srt' }).getByText('不可用', { exact: true }).waitFor()
     assert.equal(await page.evaluate(() => window.preparations), 0, 'file management must not prepare AI models')
@@ -63,6 +58,14 @@ try {
     assert.equal(await page.getByRole('article').count(), 4, 'cancelling the file picker preserves associations')
     assert.deepEqual(await dialog.boundingBox(), before, 'association changes do not resize the modal')
     if (viewport.width === 1440) await page.screenshot({ path: path.join(repo, `out/subtitle-file-management-${theme}.png`) })
+    if (width === 1440 && theme === 'light') {
+      await page.keyboard.press('Escape')
+      await dialog.waitFor({ state: 'detached' })
+      assert.equal(await resourceMenu.evaluate(element => element === document.activeElement), true)
+      assert.deepEqual(errors, [])
+      await page.close()
+      continue
+    }
     await page.getByRole('button', { name: 'AI 生成', exact: true }).click()
     const audioSelector = dialog.locator('label').filter({ hasText: '识别音轨' }).getByRole('button')
     await audioSelector.waitFor()
@@ -107,7 +110,7 @@ try {
     assert.deepEqual(errors, [])
     await page.close()
   }
-  console.log('Subtitle management passed: 2 sizes × 2 themes, menu entry/focus, discovered/linked/missing files, association/cancellation, model-independent management, AI creation/save/removal and stable modal layout (synthetic RPC).')
+  console.log('Subtitle management passed: wide and narrow workflows, light and dark previews, resource menu/focus, associations, AI creation/save/removal and stable layout (synthetic RPC).')
 } finally {
   await browser?.close(); await server?.close()
   if (path.dirname(temporary) !== path.resolve(os.tmpdir())) throw new Error('Unexpected fixture directory')

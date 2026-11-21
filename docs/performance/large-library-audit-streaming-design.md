@@ -50,7 +50,7 @@ E. 300k/600k记录的内存、最长主线程段、写批次字节/时长、并�
 
 ## CJ 原型验证结果
 
-运行：`node scripts/run-electron-tests.mjs scripts/performance/scan-audit-staging-prototype.ts`。原型代码在 `scripts/performance/prototypes/`，没有生产导入或正式schema变更，临时库用后删除。
+本阶段使用独立的临时数据库验证设计。[原型及测试源码](large-library-results/implementation/batch-cj-prototype.patch)已归档。现行实现的回归入口见 [审计写入测试](../../packages/library/src/db/scanAuditWriter.test.ts)和[事务发布测试](../../packages/library/src/db/scanAuditPublication.test.ts)。
 
 四组验证全部通过：
 

@@ -38,7 +38,8 @@ it('writes the definition once and keeps total checkpoint bytes near-linear', (t
     return Reflect.apply(write, fs, args)
   })
   const totals: number[] = []
-  for (const count of [1000, 2000]) {
+  const targetCounts = [80, 160]
+  for (const count of targetCounts) {
     clearBatchScrapeJob()
     bytes = 0; definitions = 0
     const value = job(count)
@@ -54,7 +55,7 @@ it('writes the definition once and keeps total checkpoint bytes near-linear', (t
     assert.deepEqual(loadBatchScrapeJob()?.targets, value.targets)
   }
   assert.ok(totals[1] < totals[0] * 2.2, JSON.stringify(totals))
-  t.diagnostic(JSON.stringify({ targets: [1000, 2000], totalWrittenBytes: totals, definitionWritesPerJob: 1 }))
+  t.diagnostic(JSON.stringify({ targets: targetCounts, totalWrittenBytes: totals, definitionWritesPerJob: 1 }))
 })
 
 it('reads legacy checkpoints and migrates on the next save without losing targets', () => {

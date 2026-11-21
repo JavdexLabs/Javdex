@@ -59,7 +59,7 @@ npm run check:encoding  # 检查可疑编码字符
 npm test                # 完整检查与测试
 npm run test:ui         # 小型真实浏览器交互回归（PR CI）
 npm run test:playback:pointer:native # GNOME/Mutter 原生多击计数；会临时移动指针并打开自有测试窗口
-npm run test:ui:matrix   # 完整主题/尺寸/页面矩阵（独立入口）
+npm run test:ui:matrix   # 响应式页面与主题矩阵（独立入口）
 npm run build           # 生产构建与运行时资源校验
 npm run measure:renderer # 已构建 renderer 的静态闭包体积与选择性加载检查
 npm start               # 预览生产构建
@@ -73,7 +73,7 @@ Fetch HTTP 测试夹具可使用 `scripts/test-http.ts` 的 `listenFetchServer`�
 
 `npm run server:updater:test` 包含真实目录 fsync 与 Linux 进程组检查，应在 Linux 宿主或 Linux 容器中运行。Windows 的目录 fsync 会返回 `EPERM`，不能通过忽略持久化错误替代 Linux 验证；HTTP、协议隔离及 Renderer 用例可另在 Windows 验证。
 
-`test:ui` 是独立的真实浏览器交互回归，不由 `npm test` 隐式启动；PR CI 提供稳定版 Chrome。默认使用本机 Chrome，可用 `JAVDEX_BROWSER_EXECUTABLE` 指定可执行文件，或用 `JAVDEX_BROWSER_CHANNEL` 选择已安装通道。完整矩阵默认使用 Chrome，支持后者；`JAVDEX_CSS_FIXTURE` 可传入逗号分隔的场景名运行定向检查。两个入口使用合成资料，不读取个人媒体库；完整矩阵记录截图和几何/行为断言，不是像素差异或完整 Electron GUI 验收。
+`test:ui` 是独立的真实浏览器交互回归，不由 `npm test` 隐式启动；PR CI 提供稳定版 Chrome。默认使用本机 Chrome，可用 `JAVDEX_BROWSER_EXECUTABLE` 指定可执行文件，或用 `JAVDEX_BROWSER_CHANNEL` 选择已安装通道。页面矩阵在各场景支持的宽度之间交替抽查石墨和浅色主题，应用壳、主题设置和样式几何场景在每个支持宽度均检查两种主题。矩阵默认使用 Chrome，也支持 `JAVDEX_BROWSER_CHANNEL`。`JAVDEX_CSS_FIXTURE` 可传入逗号分隔的场景名运行定向检查。两个入口使用合成资料，不读取个人媒体库；完整矩阵记录截图和几何/行为断言，不是像素差异或完整 Electron GUI 验收。
 
 需要运行特定 Electron 测试文件时：
 

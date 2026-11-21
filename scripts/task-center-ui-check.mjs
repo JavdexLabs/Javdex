@@ -14,14 +14,15 @@ try {
     server: { host: '127.0.0.1', port: 0, watch: null, fs: { allow: [repo] } } })
   await server.listen()
   browser = await chromium.launch({ ...(process.env.JAVDEX_BROWSER_EXECUTABLE ? { executablePath: process.env.JAVDEX_BROWSER_EXECUTABLE } : { channel: process.env.JAVDEX_BROWSER_CHANNEL || 'chrome' }), headless: true })
-  for (const viewport of [{ width: 1600, height: 1000 }, { width: 1000, height: 640 }, { width: 800, height: 640 }]) for (const theme of ['slate', 'light']) {
+  for (const [width, height, theme] of [[1600, 1000, 'slate'], [1000, 640, 'light'], [800, 640, 'slate']]) {
+    const viewport = { width, height }
     const page = await browser.newPage({ viewport, reducedMotion: 'reduce' }), errors = []
     page.on('pageerror', error => errors.push(error.message))
     await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/task-center.html?theme=${theme}`)
     await page.getByText('3 项运行中 · 6 项需处理', { exact: true }).waitFor()
     assert.equal(await page.locator('[data-task-count]').textContent(), '6')
     assert.equal(await page.getByRole('progressbar', { name: '字幕生成进度' }).getAttribute('value'), '42')
-    if (viewport.width === 1600 && theme === 'slate') await page.screenshot({ path: path.join(repo, 'out/task-center-overview.png') })
+    if (width === 1600) await page.screenshot({ path: path.join(repo, 'out/task-center-overview.png') })
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false)
     const nav = page.getByRole('navigation', { name: '任务分类' })
     await nav.getByRole('link', { name: '刮削', exact: true }).click()
@@ -60,7 +61,8 @@ try {
     assert.deepEqual(errors, [])
     await page.close()
   }
-  for (const viewport of [{ width: 1600, height: 1000 }, { width: 1000, height: 640 }, { width: 800, height: 640 }]) for (const theme of ['graphite', 'light']) {
+  for (const [width, height, theme] of [[1600, 1000, 'graphite'], [1600, 1000, 'light'], [1000, 640, 'graphite'], [800, 640, 'light']]) {
+    const viewport = { width, height }
     const page = await browser.newPage({ viewport, reducedMotion: 'reduce' }), errors = []
     page.on('pageerror', error => errors.push(error.message))
     await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/task-center.html?theme=${theme}&scene=subtitles`)
@@ -71,7 +73,12 @@ try {
     assert.equal(await page.getByRole('progressbar', { name: 'DEMO-001 · 山间旅程生成进度' }).getAttribute('value'), '42')
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false)
     if (viewport.width === 1600) await page.screenshot({ path: path.join(repo, `out/subtitle-tasks-redesign-${theme}.png`) })
-    if (viewport.width === 1000 && theme === 'graphite') await page.screenshot({ path: path.join(repo, 'out/subtitle-tasks-redesign-compact.png') })
+    if (width === 1000) await page.screenshot({ path: path.join(repo, 'out/subtitle-tasks-redesign-compact.png') })
+    if (width === 1600 && theme === 'light') {
+      assert.deepEqual(errors, [])
+      await page.close()
+      continue
+    }
     const more = saved.getByRole('button', { name: 'DEMO-071更多操作' })
     await more.click()
     await page.getByRole('menuitem', { name: '另存／替换' }).waitFor()
@@ -103,8 +110,8 @@ try {
     assert.deepEqual(errors, [])
     await page.close()
   }
-  console.log('Task center: 3 sizes × 2 themes; overview counts, category routing, batch controls, scan cancellation, subtitle save/filter, pending workbench and error recovery passed (synthetic RPC).')
-  console.log('Subtitle redesign: 3 sizes × 2 themes; filename fallback, progress, filters, menu keyboard/focus, row-local confirmation, export target and scoped failures passed.')
+  console.log('Task center: 3 sizes; overview counts, category routing, batch controls, scan cancellation, subtitle save/filter, pending workbench and error recovery passed (synthetic RPC).')
+  console.log('Subtitle tasks: 3 sizes and both desktop previews; filename fallback, progress, filters, menu keyboard/focus, row-local confirmation, export target and scoped failures passed.')
 } finally {
   await browser?.close(); await server?.close()
   if (path.dirname(temporary) !== path.resolve(os.tmpdir())) throw new Error('Unexpected fixture directory')

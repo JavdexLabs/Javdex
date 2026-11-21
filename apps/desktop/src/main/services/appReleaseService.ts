@@ -4,7 +4,8 @@ import path from 'node:path'
 import axios from 'axios'
 import { createHttpClient } from '../utils/http'
 import { getSettings } from '../settings/settingsStore'
-import { resolveScrapeProxyUrl } from '@shared/settingsTypes'
+import { networkProxyRoute, networkProxySettings } from '@shared/networkProxy'
+import { fetchWithNetworkProxy } from '../utils/networkProxyTransport'
 import { isExperimentalLinuxBuild } from '../experimentalLinuxBuild'
 import type {
   AppReleaseInfo,
@@ -13,7 +14,7 @@ import type {
   UpdateCheckState
 } from '@shared/updateTypes'
 
-const RELEASES_API_URL = 'https://api.github.com/repos/JavdexLabs/Javdex/releases/latest'
+export const RELEASES_API_URL = 'https://api.github.com/repos/JavdexLabs/Javdex/releases/latest'
 const RELEASE_URL_PREFIX = 'https://github.com/JavdexLabs/Javdex/releases/'
 const PROJECT_URLS = {
   project: 'https://github.com/JavdexLabs/Javdex',
@@ -198,9 +199,11 @@ export async function checkForLatestRelease(): Promise<UpdateCheckState> {
     const previous = getUpdateCheckState()
     publish({ ...previous, status: 'checking', errorCode: undefined })
     try {
-      const proxyUrl = resolveScrapeProxyUrl(getSettings())
-      const client = createHttpClient(proxyUrl)
+      const route = networkProxyRoute(networkProxySettings(getSettings()), 'updates')
+      const client = createHttpClient()
       const response = await client.get<GitHubReleaseResponse>(RELEASES_API_URL, {
+        adapter: 'fetch',
+        env: { fetch: (input, init) => fetchWithNetworkProxy('updates', route, input, init) },
         timeout: 10_000,
         maxContentLength: 256 * 1024,
         headers: {

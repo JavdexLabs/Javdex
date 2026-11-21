@@ -130,6 +130,11 @@ describe('C1-C7 catalog manage handlers', () => {
 
     assert.deepEqual(dispatch('pendingVideoScrapes.existingIds', { scrapeIds: [8, 99, 8] }), [8])
     assert.deepEqual(dispatch('pendingVideoScrapes.existingIds', { videoIds: [12, 11, 99] }), [11, 12])
+    assert.deepEqual(dispatch('videos.existingIds', { videoIds: [12, 99, 11] }), [11, 12])
+    db.prepare('INSERT INTO videos(id, code) VALUES(13, ?)').run('NO-RESOURCES')
+    assert.deepEqual(dispatch('videos.existingIds', { videoIds: [13] }), [13])
+    db.prepare('DELETE FROM videos WHERE id = 13').run()
+    assert.deepEqual(dispatch('videos.existingIds', { videoIds: [11, 13] }), [11])
 
     const scrapePage = dispatch('pendingVideoScrapes.page', { videoId: 12, limit: 50, offset: 0 }) as {
       total: number

@@ -2,10 +2,11 @@ import assert from 'node:assert/strict'
 import { afterEach, describe, it } from 'node:test'
 import React from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { MemoryRouter, useLocation } from 'react-router-dom'
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import TestRenderer, { act } from 'react-test-renderer'
 import type { ElectronApi } from '../../../preload/index'
 import type { GlobalSearchInput, HomeSnapshot, ScopedVideo } from '@shared/catalogTypes'
+import type { PlaylistListQuery } from '@shared/playlistTypes'
 
 Object.defineProperty(globalThis, 'React', { configurable: true, value: React })
 
@@ -14,6 +15,8 @@ let queryClient: QueryClient | null = null
 let currentLocation = ''
 let searchInputs: GlobalSearchInput[] = []
 let homeLoadSeeds: string[] = []
+let favoritesCount = 1
+let recentCount = 1
 
 function fakeScopedVideo(id: number): ScopedVideo {
   const addedAt = '2026-08-29T00:00:00.000Z'
@@ -54,6 +57,19 @@ function fakeScopedVideo(id: number): ScopedVideo {
 }
 
 const fakeApi = {
+  playlists: {
+    listPage: async ({ kind }: PlaylistListQuery) => {
+      assert.equal(kind, 'builtin')
+      return { total: 2, items: [
+        { id: 27, system_kind: 'watch_later', name: '稍后观看', video_count: 2 },
+        { id: 48, system_kind: 'favorites', name: '我喜欢', video_count: favoritesCount }
+      ] }
+    }
+  },
+  recentPlayback: {
+    metadata: async () => ({ id: 0, local_kind: 'recently_played', name: '最近播放', video_count: recentCount }),
+    onChanged: () => () => {}
+  },
   home: {
     load: async ({ seed }: { seed: string }) => {
       homeLoadSeeds.push(seed)
@@ -92,6 +108,11 @@ function LocationProbe(): null {
   return null
 }
 
+function PlaylistDestination(): JSX.Element {
+  const navigate = useNavigate()
+  return <button onClick={() => navigate(-1)}>返回首页</button>
+}
+
 function nodeText(node: TestRenderer.ReactTestInstance): string {
   return node.children
     .map((child) => (typeof child === 'string' ? child : nodeText(child)))
@@ -116,9 +137,46 @@ afterEach(async () => {
   currentLocation = ''
   searchInputs = []
   homeLoadSeeds = []
+  favoritesCount = 1
+  recentCount = 1
 })
 
 describe('HomePage', () => {
+  it('opens the shared builtin playlists from the home footer and updates their counts', async () => {
+    const HomePage = (await import('./HomePage')).default
+    queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    await act(async () => {
+      renderer = TestRenderer.create(
+        <QueryClientProvider client={queryClient!}>
+          <MemoryRouter initialEntries={['/']}>
+            <LocationProbe />
+            <Routes>
+              <Route path="/" element={<HomePage />} />
+              <Route path="/playlists/:playlistId" element={<PlaylistDestination />} />
+            </Routes>
+          </MemoryRouter>
+        </QueryClientProvider>
+      )
+    })
+    const cards = () => renderer!.root.findByProps({ 'aria-label': '内置清单' }).findAllByProps({ 'data-playlist-card': true })
+    await waitFor(() => cards().length === 3)
+    assert.deepEqual(cards().map(nodeText), ['收藏1 部影片', '稍后观看2 部影片', '最近播放1 部影片 · 仅此设备'])
+    assert.equal(renderer!.root.findAllByType('section').at(-1)!.props['aria-label'], '内置清单')
+    favoritesCount = 2
+    await act(async () => { windowEvents.dispatchEvent(new CustomEvent('builtin-playlist-changed', { detail: { videoId: 1, kind: 'favorites', selected: true } })) })
+    await waitFor(() => nodeText(cards()[0]) === '收藏2 部影片')
+    recentCount = 0
+    const { invalidateVideoLibraryQueries } = await import('../query/invalidateLibraryQueries')
+    await act(async () => invalidateVideoLibraryQueries(queryClient!))
+    await waitFor(() => nodeText(cards()[2]) === '最近播放0 部影片 · 仅此设备')
+    for (const [index, id] of [48, 27, 0].entries()) {
+      await act(async () => cards()[index].props.onClick())
+      assert.equal(currentLocation, `/playlists/${id}`)
+      await act(async () => renderer!.root.findByType(PlaylistDestination).findByType('button').props.onClick())
+      await waitFor(() => currentLocation === '/' && cards().length === 3)
+    }
+  })
+
   it('searches in place while typing and restores discovery when cleared', async () => {
     const HomePage = (await import('./HomePage')).default
     queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -149,6 +207,7 @@ describe('HomePage', () => {
 
     assert.equal(currentLocation, '/')
     assert.match(nodeText(renderer.root), /搜索中…/)
+    assert.equal(renderer.root.findAllByProps({ 'aria-label': '内置清单' }).length, 0)
 
     await waitFor(() => searchInputs.length === 1 && currentLocation === '/?q=ABC-123')
     assert.deepEqual(searchInputs, [{ search: 'ABC-123', limit: 120, offset: 0 }])

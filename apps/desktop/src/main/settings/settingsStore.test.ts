@@ -102,6 +102,40 @@ describe('settingsStore video card preferences', () => {
     resetSettingsCacheForTests()
     assert.equal(getSettings().coverDisplayMode, 'landscape')
   })
+
+  it('defaults cover size preset and list paging preferences and normalizes invalid values', () => {
+    writeSettings({})
+    assert.equal(getSettings().coverSizePreset, 'md')
+    assert.equal(getSettings().listLoadMode, 'scroll')
+    assert.equal(getSettings().listPageSize, 100)
+
+    writeSettings({
+      coverSizePreset: 'xl',
+      listLoadMode: 'paged',
+      listPageSize: 20
+    })
+    assert.equal(getSettings().coverSizePreset, 'xl')
+    assert.equal(getSettings().listLoadMode, 'paged')
+    assert.equal(getSettings().listPageSize, 20)
+
+    writeSettings({
+      coverSizePreset: 'sm',
+      listLoadMode: 'paged',
+      listPageSize: 200
+    })
+    assert.equal(getSettings().coverSizePreset, 'sm')
+    assert.equal(getSettings().listLoadMode, 'paged')
+    assert.equal(getSettings().listPageSize, 200)
+
+    writeSettings({
+      coverSizePreset: 'invalid',
+      listLoadMode: 'invalid',
+      listPageSize: 75
+    })
+    assert.equal(getSettings().coverSizePreset, 'md')
+    assert.equal(getSettings().listLoadMode, 'scroll')
+    assert.equal(getSettings().listPageSize, 100)
+  })
 })
 
 describe('settingsStore NFO export preferences', () => {

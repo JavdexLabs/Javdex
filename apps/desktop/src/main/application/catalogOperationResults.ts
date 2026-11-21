@@ -145,6 +145,7 @@ export interface CatalogOperationResults {
   }
   'home.load': HomeSnapshot
   'home.search': GlobalSearchResult
+  'videos.existingIds': number[]
   'videos.list': ScopedVideoListResult
   'videos.get': ScopedVideoDetail | null
   'videos.years': number[]

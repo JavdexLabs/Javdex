@@ -1,5 +1,6 @@
-import type { ReactNode, Ref } from 'react'
+import { useState, type ReactNode, type Ref } from 'react'
 import ListSurface from './ListSurface'
+import { DetailFooterContext } from './DetailFooterContext'
 import styles from './ClassificationDetailSurface.module.css'
 
 interface Props {
@@ -15,16 +16,22 @@ export default function ClassificationDetailSurface({
   showScrollToTop,
   onScrollToTop
 }: Props): JSX.Element {
+  const [footerHost, setFooterHost] = useState<HTMLDivElement | null>(null)
   return (
-    <ListSurface
-      variant="scroll"
-      scrollRef={scrollRef}
-      innerClassName={styles.inner}
-      showScrollToTop={showScrollToTop}
-      onScrollToTop={onScrollToTop}
-    >
-      {children}
-    </ListSurface>
+    <DetailFooterContext.Provider value={footerHost}>
+      <div className={styles.shell}>
+        <ListSurface
+          variant="scroll"
+          scrollRef={scrollRef}
+          innerClassName={styles.inner}
+          showScrollToTop={showScrollToTop}
+          onScrollToTop={onScrollToTop}
+        >
+          {children}
+        </ListSurface>
+        <div ref={setFooterHost} className={styles.footer} />
+      </div>
+    </DetailFooterContext.Provider>
   )
 }
 

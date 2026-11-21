@@ -7,6 +7,7 @@ import layout from '../../apps/desktop/src/renderer/src/components/Layout.module
 window.React = React
 window.subtitleCommands = []
 window.preparations = 0
+window.audioTracks = [{ index: 1, label: '日语音轨' }, { index: 2, label: '第二音轨' }]
 window.associations = []
 window.cancelAssociation = false
 window.modelUnavailable = false
@@ -30,7 +31,7 @@ window.api = { playback: {
   prepareSubtitles: async () => {
     window.preparations++
     if (window.modelUnavailable) throw new Error('AI 模型尚未准备，请先安装模型')
-    return { duration: 90, audio: [{ index: 1, label: '日语音轨' }, { index: 2, label: '第二音轨' }], subtitles: ['ABC-123.zh.srt'], error: null }
+    return { duration: 90, audio: window.audioTracks, subtitles: ['ABC-123.zh.srt'], existingFiles: window.existingOutputs ?? {}, error: null }
   },
   subtitleTaskCommand: async command => {
     window.subtitleCommands.push(command)

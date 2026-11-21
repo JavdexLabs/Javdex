@@ -4,6 +4,7 @@ import type { SubtitlePreparation, SubtitleTaskCommand, SubtitleTasksSnapshot } 
 import { Captions, Info } from 'lucide-react'
 import { api } from '../api'
 import Button from '../components/Button'
+import Checkbox from '../../../../../../packages/ui/src/Checkbox'
 import Modal from '../components/Modal'
 import SelectControl from '../components/SelectControl'
 import EmptyState from '../components/EmptyState'
@@ -29,6 +30,7 @@ export default function SubtitleTasksDialog({ target, onClose, embedded = false,
   const [view, setView] = useState<'files' | 'generate'>('files')
   const [audioIndex, setAudio] = useState(0)
   const [output, setOutput] = useState<'bilingual' | 'japanese'>('bilingual')
+  const [replaceRevision, setReplaceRevision] = useState<string>()
   const [busy, setBusy] = useState(false), [preparing, setPreparing] = useState(!!target)
   const [error, setError] = useState<string | null>(null)
   const [commandError, setCommandError] = useState<{ id: string; message: string } | null>(null)
@@ -49,7 +51,7 @@ export default function SubtitleTasksDialog({ target, onClose, embedded = false,
   }, [])
   const prepare = useCallback(async (): Promise<void> => {
     if (!target) return
-    setPreparing(true); setPrepared(null); setError(null)
+    setPreparing(true); setPrepared(null); setError(null); setReplaceRevision(undefined)
     try {
       const value = await api.playback.prepareSubtitles(target)
       if (mounted.current) { setPrepared(value); setAudio(value.audio[0]?.index ?? 0) }
@@ -76,6 +78,8 @@ export default function SubtitleTasksDialog({ target, onClose, embedded = false,
   }
   const sourceTasks = snapshot.tasks.filter(job => !target || job.target.libraryId === target.libraryId && job.target.videoId === target.videoId && job.target.resourceId === target.resourceId)
   const tasks = sourceTasks.filter(job => matchesSubtitleFilter(job, filter))
+  const existing = prepared?.existingFiles[output]
+  const replacing = !!existing?.revision && existing.revision === replaceRevision
   const content =
     <div className={styles.root}>
       {target && <div className={styles.managementTabs}>
@@ -92,13 +96,19 @@ export default function SubtitleTasksDialog({ target, onClose, embedded = false,
         </div>
         {prepared && <>
           {prepared.error && <p className={styles.error}>{prepared.error}</p>}
-          <div className={styles.fields}><label className={styles.field}>识别音轨<SelectControl value={audioIndex} disabled={busy || preparing} onChange={event => setAudio(Number(event.target.value))}>
+          <div className={styles.fields}>
+          {prepared.audio.length > 1 && <label className={styles.field}>识别音轨<SelectControl value={audioIndex} disabled={busy || preparing} onChange={event => setAudio(Number(event.target.value))}>
             {prepared.audio.map(audio => <option key={audio.index} value={audio.index}>{audio.label}</option>)}
-          </SelectControl></label>
-          <label className={styles.field}>生成内容<SelectControl value={output} disabled={busy} onChange={event => setOutput(event.target.value as typeof output)}>
+          </SelectControl></label>}
+          <label className={styles.field}>生成内容<SelectControl value={output} disabled={busy} onChange={event => { setOutput(event.target.value as typeof output); setReplaceRevision(undefined) }}>
             <option value="bilingual">日中双语</option><option value="japanese">仅日语</option>
           </SelectControl></label></div>
-          <div className={styles.createAction}><Button size="sm" variant="primary" disabled={busy || preparing || prepared.duration == null || !prepared.audio.length} onClick={() => void execute({ action: 'enqueue', target, audioIndex, output })}>生成 AI 字幕</Button></div>
+          {existing && (existing.revision ? <label className={styles.overwrite}>
+            <Checkbox checked={replacing} disabled={busy || preparing} onChange={e => setReplaceRevision(e.target.checked ? existing.revision! : undefined)} />
+            覆盖并重新生成 {existing.name}
+          </label> : <p className={styles.note}>{existing.name} 不是可替换的普通文件</p>)}
+          <div className={styles.createAction}><Button size="sm" variant="primary" disabled={busy || preparing || prepared.duration == null || !prepared.audio.length || (!!existing && !replacing)}
+            onClick={() => void execute({ action: 'enqueue', target, audioIndex, output, replaceRevision: replacing ? replaceRevision : undefined }).then(ok => { if (ok) setReplaceRevision(undefined) })}>生成 AI 字幕</Button></div>
         </>}
       </section>}
       {error && <p className={styles.loadError} role="alert">{error}</p>}

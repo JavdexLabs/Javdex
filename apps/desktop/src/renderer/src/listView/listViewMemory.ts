@@ -6,6 +6,7 @@ import { ROUTE_PATH } from './routePaths'
 export interface ListScrollSnapshot {
   scrollTop: number
   visibleRowIndex: number
+  page?: number
 }
 
 const scrollByKey = new Map<string, ListScrollSnapshot>()
@@ -81,8 +82,21 @@ export function resolveScrollTopForKey(
   memoryKey: string
 ): number {
   if (prevKey !== undefined && prevKey !== memoryKey) {
-    setListScroll(memoryKey, { scrollTop: 0, visibleRowIndex: 0 })
+    setListScroll(memoryKey, { scrollTop: 0, visibleRowIndex: 0, page: 1 })
     return 0
   }
   return getListScroll(memoryKey)?.scrollTop ?? 0
+}
+
+export function resolvePageForKey(
+  prevKey: string | undefined,
+  memoryKey: string | undefined
+): number {
+  if (!memoryKey) return 1
+  if (prevKey !== undefined && prevKey !== memoryKey) {
+    setListScroll(memoryKey, { scrollTop: 0, visibleRowIndex: 0, page: 1 })
+    return 1
+  }
+  const saved = getListScroll(memoryKey)?.page
+  return saved && Number.isSafeInteger(saved) && saved >= 1 ? saved : 1
 }

@@ -26,6 +26,27 @@ describe('scraperPluginSandbox', () => {
     await validateUserPluginCode('video', 'cheerio-test', CHEERIO_PLUGIN)
   })
 
+  it('keeps proxy credentials on the host when a plugin fetches a page', async () => {
+    const proxy = 'http://user:fixture@proxy.test:8123'
+    let hostProxy: string | undefined
+    setSandboxPageFetcherForTests(async (_url, proxyUrl) => {
+      hostProxy = proxyUrl
+      return 'ok'
+    })
+    try {
+      const result = await runUserActressPlugin('proxy-test', `module.exports = {
+        async parseActress(ctx) {
+          await ctx.fetchPage('https://example.test/profile');
+          return { profileSummary: ctx.proxyUrl };
+        }
+      }`, 'Test Actress', [], proxy)
+      assert.equal(hostProxy, proxy)
+      assert.equal(result?.profileSummary, 'http://proxy.test:8123')
+    } finally {
+      setSandboxPageFetcherForTests()
+    }
+  })
+
   it('terminates a non-returning plugin worker when the caller aborts', async () => {
     const controller = new AbortController()
     const startedAt = Date.now()

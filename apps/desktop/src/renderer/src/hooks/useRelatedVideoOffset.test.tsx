@@ -23,6 +23,15 @@ async function mount(initial = '/actresses/1') {
 }
 afterEach(async () => { await act(async () => renderer?.unmount()); renderer = undefined })
 
+it('keeps page offsets independent of the 60-item data fetch size', async () => {
+  await mount('/actresses/1?relatedVideoOffset=20')
+  assert.equal(offset.offset, 20)
+  await act(async () => offset.move(50))
+  await act(async () => offset.align(true, 145))
+  assert.equal(location.search, '?relatedVideoOffset=50')
+  assert.equal(offset.offset, 50)
+})
+
 it('does not create a navigation for an unchanged scroll page', async () => {
   await mount()
   const key = location.key

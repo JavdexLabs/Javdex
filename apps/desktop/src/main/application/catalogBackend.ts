@@ -35,6 +35,7 @@ export interface CatalogQueries {
   homeLoad: Query<'home.load'>
   homeSearch: Query<'home.search'>
   listVideos: Query<'videos.list'>
+  existingVideoIds: Query<'videos.existingIds'>
   getVideo: Query<'videos.get'>
   listVideoYears: Query<'videos.years'>
   resolveScrapeFields: Query<'scrape.fields'>

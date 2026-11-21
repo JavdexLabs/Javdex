@@ -12,7 +12,7 @@ import {
 } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { LibraryBig, RefreshCw, SearchX } from 'lucide-react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { useMatch, useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../api'
 import Button from '../components/Button'
 import EmptyState from '../components/EmptyState'
@@ -20,52 +20,29 @@ import ListToolbar from '../components/ListToolbar'
 import ListSurface from '../components/ListSurface'
 import PosterCard from '../components/PosterCard'
 import VirtualPosterGrid from '../components/VirtualPosterGrid'
-import { NavIcon } from '../components/NavIcons'
+import { useDisplayMode } from '../components/DisplayModeContext'
+import BuiltinPlaylistSection from '../components/BuiltinPlaylistSection'
 import { UI_ICON_SM } from '../components/iconDefaults'
 import { useScrollContainerMemory } from '../hooks/useScrollContainerMemory'
 import { useDebounce } from '../hooks/useDebounce'
 import { LIST_PARAM, patchSearchParams } from '../listView/listQueryParams'
-import { mediaLibraryPath } from '../listView/mediaLibraryRoutes'
+import { playlistDetailPath } from '../listView/playlistRoutes'
+import { ROUTE_MATCH } from '../listView/routePaths'
+import { useBuiltinPlaylists } from '../hooks/usePlaylistBrowsePage'
+import { useListSurfaceRefetch } from '../hooks/useListSurfaceRefetch'
 import styles from './HomePage.module.css'
 import { homeKeys } from '../query/queryKeys'
 import { HOME_GLOBAL_SEARCH_ID } from '../globalSearchShortcut'
-import { mediaLibraryIdentityStyle } from '../components/mediaLibraryIdentity'
 import type { HomeSnapshot } from '@shared/catalogTypes'
 
 const HOME_SEARCH_PAGE_SIZE = 120
 
-const HOME_SCAN_STATUS_LABEL = {
-  queued: '等待扫描',
-  running: '扫描中',
-  completed: '扫描完成',
-  failed: '扫描失败',
-  cancelled: '扫描已取消',
-  unavailable: '来源不可用'
-} as const
-const HOME_SCAN_TIME_FORMATTER = new Intl.DateTimeFormat('zh-CN', {
-  month: '2-digit',
-  day: '2-digit',
-  hour: '2-digit',
-  minute: '2-digit'
-})
-
-function rootAvailabilityLabel(input: {
-  activeRootCount: number
-  lastScanOfflineRootCount: number | null
-}): string {
-  if (input.activeRootCount === 0) return '无已启用来源'
-  if (input.lastScanOfflineRootCount === null) return '来源可用性未检测'
-  if (input.lastScanOfflineRootCount > 0) {
-    return `最近扫描离线 ${input.lastScanOfflineRootCount} 个`
-  }
-  return '最近扫描未发现离线来源'
-}
-
-function formatScanTime(value: string | null): string | null {
-  if (!value) return null
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return null
-  return HOME_SCAN_TIME_FORMATTER.format(date)
+function HomeBuiltinPlaylists(): JSX.Element {
+  const lists = useBuiltinPlaylists()
+  const navigate = useNavigate()
+  const detailOpen = Boolean(useMatch(ROUTE_MATCH.homeVideoOpen))
+  useListSurfaceRefetch(detailOpen, lists.reload)
+  return <BuiltinPlaylistSection lists={lists} onOpen={id => navigate(playlistDetailPath(id))} />
 }
 
 function createDiscoverySeed(): string {
@@ -93,6 +70,7 @@ async function loadHomeSnapshot(seed: string): Promise<HomeSnapshot> {
 }
 
 export default function HomePage(): JSX.Element {
+  const { mode, coverSize } = useDisplayMode()
   const [searchParams, setSearchParams] = useSearchParams()
   const searchRef = useRef<HTMLInputElement>(null)
   const urlSearch = searchParams.get(LIST_PARAM.q) ?? ''
@@ -238,7 +216,7 @@ export default function HomePage(): JSX.Element {
               </Button>
             </EmptyState>
           ) : snapshot ? (
-            <div className={styles.sections}>
+            <>
             <section className={styles.section} aria-labelledby="home-discovery-title">
               <div className={styles.sectionHeader}>
                 <div>
@@ -253,7 +231,11 @@ export default function HomePage(): JSX.Element {
                 </Button>
               </div>
               {snapshot.discovery.length > 0 ? (
-                <div className={styles.posterGrid}>
+                <div
+                  className={styles.posterGrid}
+                  data-cover-mode={mode}
+                  data-cover-size={coverSize}
+                >
                   {snapshot.discovery.map((video) => (
                     <PosterCard
                       builtinActions="watch"
@@ -280,7 +262,11 @@ export default function HomePage(): JSX.Element {
                 </div>
               </div>
               {snapshot.recent.length > 0 ? (
-                <div className={styles.posterGrid}>
+                <div
+                  className={styles.posterGrid}
+                  data-cover-mode={mode}
+                  data-cover-size={coverSize}
+                >
                   {snapshot.recent.map((video) => (
                     <PosterCard
                       builtinActions="watch"
@@ -295,100 +281,9 @@ export default function HomePage(): JSX.Element {
               )}
             </section>
 
-            <section className={styles.section} aria-labelledby="home-libraries-title">
-              <div className={styles.sectionHeader}>
-                <div>
-                  <h2 className={styles.sectionTitle} id="home-libraries-title">媒体库</h2>
-                  <p className={styles.sectionDescription}>快速查看来源配置状态并进入独立媒体库。</p>
-                </div>
-              </div>
-              {snapshot.libraries.length > 0 ? (
-                <div className={styles.libraryGrid}>
-                  {snapshot.libraries.map((library) => {
-                    const lastScanTime = formatScanTime(
-                      library.lastScanFinishedAt ?? library.lastScanStartedAt
-                    )
-                    return (
-                      <Link
-                        draggable={false}
-                        key={library.id}
-                        className={styles.libraryCard}
-                        to={mediaLibraryPath(library.id)}
-                      >
-                        <span
-                          className={styles.libraryIcon}
-                          style={mediaLibraryIdentityStyle(library.color)}
-                          aria-hidden
-                        >
-                          <NavIcon name={library.icon} />
-                        </span>
-                        <span className={styles.libraryInfo}>
-                          <strong className={styles.libraryName}>{library.name}</strong>
-                          <span className={styles.libraryMeta}>
-                            {library.membershipCount} 部影片 · {library.resourceCount} 个资源 ·{' '}
-                            {library.activeRootCount}/{library.rootCount} 个来源启用
-                            {library.pendingRemovalRootCount > 0
-                              ? ` · ${library.pendingRemovalRootCount} 个待移除`
-                              : ''}
-                          </span>
-                          <span className={styles.libraryActivity}>
-                            {library.lastScanStatus ? (
-                              <span
-                                className={styles.scanStatus}
-                                data-tone={
-                                  library.lastScanStatus === 'failed' ||
-                                  library.lastScanStatus === 'unavailable'
-                                    ? 'danger'
-                                    : library.lastScanStatus === 'running' ||
-                                        library.lastScanStatus === 'queued'
-                                      ? 'active'
-                                      : 'neutral'
-                                }
-                              >
-                                {HOME_SCAN_STATUS_LABEL[library.lastScanStatus]}
-                                {lastScanTime ? ` · ${lastScanTime}` : ''}
-                              </span>
-                            ) : (
-                              <span>尚未扫描</span>
-                            )}
-                            <span
-                              className={styles.rootAvailability}
-                              data-tone={
-                                library.lastScanOfflineRootCount !== null &&
-                                library.lastScanOfflineRootCount > 0
-                                  ? 'warning'
-                                  : 'neutral'
-                              }
-                              title="基于最近一次已保存的扫描结果，不会实时访问目录"
-                            >
-                              {rootAvailabilityLabel(library)}
-                            </span>
-                            {library.pendingScanResourceCount > 0 ? (
-                              <span>{library.pendingScanResourceCount} 条待确认</span>
-                            ) : null}
-                            {library.pendingCleanupJobCount > 0 ? (
-                              <span>{library.pendingCleanupJobCount} 项待清理</span>
-                            ) : null}
-                            {library.unrecognizedFileCount > 0 ? (
-                              <span>{library.unrecognizedFileCount} 个未识别</span>
-                            ) : null}
-                          </span>
-                        </span>
-                        <span className={styles.libraryStatus}>进入</span>
-                      </Link>
-                    )
-                  })}
-                </div>
-              ) : (
-                <EmptyState
-                  variant="compact"
-                  title="尚未配置媒体库"
-                  description="创建媒体库并添加来源目录后即可开始使用。"
-                />
-              )}
-            </section>
-            </div>
+            </>
           ) : null}
+          <HomeBuiltinPlaylists />
         </ListSurface>
       )}
     </ListPage>

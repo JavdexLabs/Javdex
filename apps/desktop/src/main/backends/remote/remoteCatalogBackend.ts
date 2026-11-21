@@ -477,6 +477,7 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
       homeLoad: q('home.load'),
       homeSearch: q('home.search'),
       listVideos: q('videos.list'),
+      existingVideoIds: q('videos.existingIds'),
       getVideo: q('videos.get'),
       listVideoYears: q('videos.years'),
       resolveScrapeFields: q('scrape.fields'),

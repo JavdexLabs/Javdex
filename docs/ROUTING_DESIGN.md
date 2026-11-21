@@ -183,7 +183,7 @@ Linux 专用键盘 `BrowserBack`／`BrowserForward` 在 `before-input-event` 接
 
 卡片数据在进入查询缓存前投影并检查单页1 MiB JSON编码预算；宽详情仍由GET读取。仅选中ID独立于卡片缓存。Shift采用半开绝对范围，逐页获取ID并比较读取修订、总数和端点；取消或结果变化不提交部分范围。只读返回仅刷新活动且过期的查询，不遍历已淘汰历史页。
 
-导演、系列、机构、演员作品和清单详情的关联影片使用独立 `relatedVideoOffset`（每页60），滚动 replace URL，筛选或排序变化归零，非法参数规范化、总数缩小后回到有效页。导航到嵌套影片时保留该参数。该偏移不参与外层分类的 `facetOffset` 或清单主列表的 `playlistOffset`，避免混用列表位置。实现及验收见 [DG报告](performance/large-library-window-selection-results.md)。
+导演、系列、机构、演员作品和清单详情的关联影片使用独立 `relatedVideoOffset` 保存条目位置。连续滚动按 60 项更新 URL，分页按所选页大小记录页首偏移。筛选或排序变化归零，非法参数规范化、总数缩小后回到有效页。导航到嵌套影片时保留该参数。该偏移不参与外层分类的 `facetOffset` 或清单主列表的 `playlistOffset`，避免混用列表位置。实现及验收见 [DG报告](performance/large-library-window-selection-results.md)。
 
 影片内打开的末层演员使用 `actressVideoOffset`，不读取或校正父层的 `relatedVideoOffset`。两人的作品总数不同时，末层归零不能重置父层位置，父层也不能裁切末层偏移。打开另一位末层演员或关闭末层时只清除 `actressVideoOffset`，保留父层关联影片位置与其余筛选。
 

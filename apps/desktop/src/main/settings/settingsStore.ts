@@ -1,8 +1,9 @@
 import { app } from 'electron'
+import { normalizeNetworkProxy } from '@shared/networkProxy'
 import path from 'node:path'
 import fs from 'node:fs'
 import process from 'node:process'
-import { DEFAULT_SETTINGS, normalizeAutoScanIntervalMinutes, normalizeCoverDisplayMode, normalizePluginDevAgentMaxContextTokens, normalizePluginDevAgentMaxTurns, normalizePrivacyModeScopes, normalizeTheme, normalizeMinScanImportDurationMinutes, type AppSettings, type SettingsRecoveryNotice } from '@shared/settingsTypes'
+import { DEFAULT_SETTINGS, normalizeAutoScanIntervalMinutes, normalizeCoverDisplayMode, normalizeCoverSizePreset, normalizeListLoadMode, normalizeListPageSize, normalizePluginDevAgentMaxContextTokens, normalizePluginDevAgentMaxTurns, normalizePrivacyModeScopes, normalizeTheme, normalizeMinScanImportDurationMinutes, type AppSettings, type SettingsRecoveryNotice } from '@shared/settingsTypes'
 import {
   expandActressScrapeFields,
   type CompositeScraperDefinition,
@@ -395,6 +396,9 @@ function normalizeSettings(parsed: ParsedSettings): AppSettings {
       DEFAULT_SETTINGS.showVideoResourceTypeBadges
     ),
     coverDisplayMode: normalizeCoverDisplayMode(parsed.coverDisplayMode),
+    coverSizePreset: normalizeCoverSizePreset(parsed.coverSizePreset),
+    listLoadMode: normalizeListLoadMode(parsed.listLoadMode),
+    listPageSize: normalizeListPageSize(parsed.listPageSize),
     pendingLibraryPathCleanups: normalizeStringList(parsed.pendingLibraryPathCleanups),
     autoDeleteResourceLessVideos: normalizeBooleanSetting(
       parsed.autoDeleteResourceLessVideos,
@@ -431,6 +435,7 @@ function normalizeSettings(parsed: ParsedSettings): AppSettings {
         : DEFAULT_SETTINGS.proxyUrlEnabled
     ),
     llmProxyUrl: typeof parsed.llmProxyUrl === 'string' ? parsed.llmProxyUrl.trim() : '',
+    networkProxy: normalizeNetworkProxy(parsed.networkProxy),
     llmProxyUrlEnabled: normalizeBooleanSetting(
       parsed.llmProxyUrlEnabled,
       typeof parsed.llmProxyUrl === 'string' && parsed.llmProxyUrl.trim()

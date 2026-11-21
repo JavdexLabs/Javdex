@@ -6,6 +6,7 @@ import type {
   ScraperPluginPreLoginSettings
 } from './scraperPluginTypes'
 import type { LibraryScanSummary } from './libraryTypes'
+import { networkProxyRoute, networkProxySettings, type NetworkProxySettings } from './networkProxy'
 import {
   DEFAULT_SCRAPER_SERVICE_CONFIGS,
   type ScraperServiceConfigs
@@ -30,6 +31,31 @@ export type CoverDisplayMode = (typeof COVER_DISPLAY_MODES)[number]
 
 export function normalizeCoverDisplayMode(value: unknown): CoverDisplayMode {
   return value === 'landscape' ? 'landscape' : 'portrait'
+}
+
+export const COVER_SIZE_PRESETS = ['sm', 'md', 'lg', 'xl'] as const
+
+export type CoverSizePreset = (typeof COVER_SIZE_PRESETS)[number]
+
+export function normalizeCoverSizePreset(value: unknown): CoverSizePreset {
+  return COVER_SIZE_PRESETS.includes(value as CoverSizePreset) ? (value as CoverSizePreset) : 'md'
+}
+
+export const LIST_LOAD_MODES = ['scroll', 'paged'] as const
+
+export type ListLoadMode = (typeof LIST_LOAD_MODES)[number]
+
+export function normalizeListLoadMode(value: unknown): ListLoadMode {
+  return value === 'paged' ? 'paged' : 'scroll'
+}
+
+export const LIST_PAGE_SIZES = [20, 50, 100, 200] as const
+
+export type ListPageSize = (typeof LIST_PAGE_SIZES)[number]
+
+export function normalizeListPageSize(value: unknown): ListPageSize {
+  const parsed = typeof value === 'number' ? value : Number(value)
+  return LIST_PAGE_SIZES.includes(parsed as ListPageSize) ? (parsed as ListPageSize) : 100
 }
 
 export const PRIVACY_MODE_SCOPES = [
@@ -94,6 +120,7 @@ export interface AppSettings {
   llmProxyUrl: string
   /** When false, LLM requests use a direct connection even if llmProxyUrl is set. */
   llmProxyUrlEnabled: boolean
+  networkProxy?: NetworkProxySettings
   /** Default video metadata scraper plugin name. */
   defaultScraper: string
   /** Default actress profile scraper plugin name. */
@@ -123,6 +150,12 @@ export interface AppSettings {
   showVideoResourceTypeBadges: boolean
   /** Media-library video cards use portrait posters or landscape covers. */
   coverDisplayMode: CoverDisplayMode
+  /** Preset card/cover width across library, search, actress, and related-video grids. */
+  coverSizePreset: CoverSizePreset
+  /** Browse grids continuously by scrolling or by explicit pagination. */
+  listLoadMode: ListLoadMode
+  /** Number of items displayed per page when listLoadMode is 'paged'. */
+  listPageSize: ListPageSize
   /** Encrypt cover/avatar files on disk as .enc blobs. */
   assetEncryption: boolean
   /** Custom folder for cover/avatar storage; empty uses default userData/media_assets. */
@@ -280,6 +313,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   actressDetailUseFirstGalleryBackground: true,
   showVideoResourceTypeBadges: false,
   coverDisplayMode: 'portrait',
+  coverSizePreset: 'md',
+  listLoadMode: 'scroll',
+  listPageSize: 100,
   assetEncryption: false,
   mediaAssetsPath: '',
   scraperPluginDelays: {
@@ -308,13 +344,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
 }
 
 export function resolveScrapeProxyUrl(
-  settings: Pick<AppSettings, 'proxyUrl' | 'proxyUrlEnabled'>
+  settings: Pick<AppSettings, 'networkProxy' | 'proxyUrl' | 'proxyUrlEnabled'>
 ): string {
-  return settings.proxyUrlEnabled && settings.proxyUrl.trim() ? settings.proxyUrl.trim() : ''
-}
-
-export function resolveLlmProxyUrl(
-  settings: Pick<AppSettings, 'llmProxyUrl' | 'llmProxyUrlEnabled'>
-): string {
-  return settings.llmProxyUrlEnabled && settings.llmProxyUrl.trim() ? settings.llmProxyUrl.trim() : ''
+  const route = networkProxyRoute(networkProxySettings(settings), 'scrape')
+  if (route.mode === 'manual') return route.url
+  return route.mode === 'direct' ? 'direct://' : ''
 }

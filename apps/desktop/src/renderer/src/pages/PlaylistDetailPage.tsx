@@ -386,7 +386,7 @@ export default function PlaylistDetailPage(): JSX.Element {
                 <Button size="sm" onClick={() => setResourceFilters([])}>清除筛选</Button>
               </EmptyState>
             ) : (
-              <ContinuousPosterGrid window={videos.window} initialIndex={relatedOffset} onAnchor={index => moveRelated(Math.floor(index / 60) * 60)} scope={`playlist-videos:${playlistId}:${videoSortBy}:${videoSortDir}:${resourceFilterKey}`} onRemove={setVideoRemoveTarget} removeDisabled={removingVideoId !== null} />
+              <ContinuousPosterGrid window={videos.window} initialIndex={relatedOffset} onAnchor={moveRelated} scope={`playlist-videos:${playlistId}:${videoSortBy}:${videoSortDir}:${resourceFilterKey}`} onRemove={setVideoRemoveTarget} removeDisabled={removingVideoId !== null} />
             )}
             {recent && loadError && <NoticeBanner tone="warning" role="alert">
               <NoticeBannerCopy title="最近播放更新失败" body={`正在显示上次读取的记录。${loadError}`} />

@@ -9,11 +9,13 @@ import type { VideoCard } from '@shared/videoTypes'
 import Spinner from './Spinner'
 import { useElementSize } from '../hooks/useElementSize'
 import { useLayoutSpacing } from '../hooks/useLayoutSpacing'
-import { resolveScrollTopForKey, setListScroll } from '../listView/listViewMemory'
+import { resolvePageForKey, resolveScrollTopForKey, setListScroll } from '../listView/listViewMemory'
 import ScrollToTopButton, { SCROLL_TO_TOP_THRESHOLD } from './ScrollToTopButton'
 import PosterCard from './PosterCard'
 import ScopedPosterCard from './ScopedPosterCard'
+import ListPagination from './ListPagination'
 import type { ScopedVideoCard } from '@shared/cardProjection'
+import type { ListPageSize } from '@shared/settingsTypes'
 import { useDisplayMode } from './DisplayModeContext'
 import {
   computePosterGridLayout,
@@ -56,6 +58,8 @@ interface VirtualPosterGridProps<TVideo extends VideoCard> {
 }
 
 interface PosterGridData<TVideo extends VideoCard> extends VirtualPosterGridProps<TVideo> {
+  pageOffset: number
+  renderedItemCount: number
   columnCount: number
   columnWidth: number
   widthRemainder: number
@@ -80,9 +84,11 @@ function PosterGridCell<TVideo extends VideoCard>({ columnIndex, rowIndex, style
   const { videos, catalogWindow, detailLibraryId, detailLibraryIds, selectedIds = new Set<number>(),
     selectionMode, onToggleSelect, onEdit, builtinActions, onAddToPlaylist, onScrape,
     onMarkScrapeSuccess, onDelete, deleteLabel, showLibraryBadges, loadingMore,
-    columnCount, columnWidth, widthRemainder, posterHeight, rowHeight, stride,
+    pageOffset, renderedItemCount, columnCount, columnWidth, widthRemainder, posterHeight, rowHeight, stride,
     cardAreaPadTop, pagePadX } = data
-  const index = rowIndex * columnCount + columnIndex
+  const localIndex = rowIndex * columnCount + columnIndex
+  if (localIndex >= renderedItemCount) return null
+  const index = pageOffset + localIndex
   const windowVideo = catalogWindow?.getItem(index)
   if (catalogWindow && !windowVideo) {
     if (index >= catalogWindow.total) return null
@@ -203,21 +209,25 @@ export default function VirtualPosterGrid<TVideo extends VideoCard>({
 }: VirtualPosterGridProps<TVideo>): JSX.Element {
   const { pagePadX, cardAreaPadTop, cardAreaPadBottom } = useLayoutSpacing()
   const { ref, width, height } = useElementSize<HTMLDivElement>()
-  const { mode } = useDisplayMode()
+  const { mode, coverSize, listLoadMode, listPageSize, persistListPageSize } = useDisplayMode()
   const lastSize = useRef({ width: 0, height: 0 })
   const gridRef = useRef<FixedSizeGrid>(null)
   const outerRef = useRef<HTMLDivElement>(null)
   const prevMemoryKeyRef = useRef<string | undefined>(undefined)
   const scrollTopRef = useRef(0)
+  const [page, setPageState] = useState(() => resolvePageForKey(undefined, scrollMemoryKey))
   const [showScrollToTop, setShowScrollToTop] = useState(false)
 
   useLayoutEffect(() => {
     if (!scrollMemoryKey) {
       scrollTopRef.current = 0
       prevMemoryKeyRef.current = undefined
+      setPageState(1)
       return
     }
-    scrollTopRef.current = resolveScrollTopForKey(prevMemoryKeyRef.current, scrollMemoryKey)
+    const previousKey = prevMemoryKeyRef.current
+    scrollTopRef.current = resolveScrollTopForKey(previousKey, scrollMemoryKey)
+    setPageState(resolvePageForKey(previousKey, scrollMemoryKey))
     prevMemoryKeyRef.current = scrollMemoryKey
     setShowScrollToTop(scrollTopRef.current > SCROLL_TO_TOP_THRESHOLD)
     gridRef.current?.scrollTo({ scrollTop: scrollTopRef.current })
@@ -233,18 +243,25 @@ export default function VirtualPosterGrid<TVideo extends VideoCard>({
   const { columnCount, columnWidth, widthRemainder, posterHeight } = computePosterGridLayout(
     layoutWidth,
     mode,
-    GAP
+    GAP,
+    coverSize
   )
   const rowHeight = computePosterGridRowHeight(posterHeight, {
     gap: GAP,
     showLibraryBadges
   })
-  const renderedItemCount = catalogWindow?.total ?? (videos.length + (hasMore ? columnCount : 0))
+  const totalCount = catalogWindow?.total ?? videos.length
+  const isPaged = listLoadMode === 'paged'
+  const totalPages = Math.max(1, Math.ceil(totalCount / listPageSize))
+  const activePage = isPaged ? Math.min(Math.max(1, page), totalPages) : 1
+  const pageOffset = isPaged ? (activePage - 1) * listPageSize : 0
+  const renderedItemCount = isPaged
+    ? Math.max(0, Math.min(listPageSize, totalCount - pageOffset))
+    : catalogWindow?.total ?? (videos.length + (hasMore ? columnCount : 0))
   const rowCount = Math.ceil(renderedItemCount / columnCount)
   const stride = columnWidth + GAP
   const gridHeight = layoutHeight
   const innerHeight = cardAreaPadTop + rowCount * rowHeight + cardAreaPadBottom
-
 
   useLayoutEffect(() => {
     if (gridWidth > 0 && gridHeight > 0) {
@@ -252,7 +269,16 @@ export default function VirtualPosterGrid<TVideo extends VideoCard>({
     }
   }, [gridWidth, gridHeight])
 
-  const persistScroll = (scrollTop: number, visibleRowIndex?: number): void => {
+  const onVisibleRange = catalogWindow?.onVisibleRange
+  useLayoutEffect(() => {
+    if (!isPaged || !onVisibleRange || renderedItemCount <= 0) return
+    const visibleRows = Math.max(1, Math.ceil((gridHeight || 600) / rowHeight) + 1)
+    const start = Math.min(renderedItemCount - 1, Math.floor(scrollTopRef.current / rowHeight) * columnCount)
+    const end = Math.min(renderedItemCount - 1, start + visibleRows * columnCount - 1)
+    onVisibleRange(pageOffset + start, pageOffset + end)
+  }, [isPaged, onVisibleRange, pageOffset, renderedItemCount, gridHeight, rowHeight, columnCount])
+
+  const persistScroll = (scrollTop: number, visibleRowIndex?: number, nextPage?: number): void => {
     scrollTopRef.current = scrollTop
     setShowScrollToTop((prev) => {
       const next = scrollTop > SCROLL_TO_TOP_THRESHOLD
@@ -261,8 +287,28 @@ export default function VirtualPosterGrid<TVideo extends VideoCard>({
     if (!scrollMemoryKey) return
     setListScroll(scrollMemoryKey, {
       scrollTop,
-      ...(visibleRowIndex !== undefined ? { visibleRowIndex } : {})
+      ...(visibleRowIndex !== undefined ? { visibleRowIndex } : {}),
+      ...(nextPage !== undefined ? { page: nextPage } : {})
     })
+  }
+
+  const changePage = (nextPage: number): void => {
+    const clamped = Math.min(totalPages, Math.max(1, nextPage))
+    setPageState(clamped)
+    setShowScrollToTop(false)
+    outerRef.current?.scrollTo({ top: 0 })
+    gridRef.current?.scrollTo({ scrollTop: 0 })
+    persistScroll(0, 0, clamped)
+  }
+
+  const changePageSize = (nextSize: ListPageSize): void => {
+    const nextPage = Math.floor(pageOffset / nextSize) + 1
+    setPageState(nextPage)
+    setShowScrollToTop(false)
+    outerRef.current?.scrollTo({ top: 0 })
+    gridRef.current?.scrollTo({ scrollTop: 0 })
+    persistScroll(0, 0, nextPage)
+    void persistListPageSize(nextSize)
   }
 
   const scrollToTop = (): void => {
@@ -279,54 +325,71 @@ export default function VirtualPosterGrid<TVideo extends VideoCard>({
   const cellData: PosterGridData<TVideo> = {
     videos, catalogWindow, detailLibraryId, detailLibraryIds, selectedIds, selectionMode,
     onToggleSelect, onEdit, builtinActions, onAddToPlaylist, onScrape, onMarkScrapeSuccess,
-    onDelete, deleteLabel, showLibraryBadges, loadingMore, columnCount, columnWidth,
-    widthRemainder, posterHeight, rowHeight, stride, cardAreaPadTop, pagePadX
+    onDelete, deleteLabel, showLibraryBadges, loadingMore, pageOffset, renderedItemCount,
+    columnCount, columnWidth, widthRemainder, posterHeight, rowHeight, stride, cardAreaPadTop, pagePadX
   }
 
   const renderWidth = gridWidth > 0 ? gridWidth : lastSize.current.width
   const renderHeight = gridHeight > 0 ? gridHeight : lastSize.current.height
 
   return (
-    <ScrollRegion
-      ref={ref}
-      className={styles.root}
-    >
-      {renderWidth > 0 && renderHeight > 0 && (
-        <InnerHeightContext.Provider value={innerHeight}>
-          <FixedSizeGrid<PosterGridData<TVideo>>
-            ref={gridRef}
-            outerRef={outerRef}
-            outerElementType={VirtualGridViewport}
-            columnCount={columnCount}
-            columnWidth={stride}
-            rowCount={rowCount}
-            rowHeight={rowHeight}
-            width={renderWidth}
-            height={renderHeight}
-            innerElementType={GridInner}
-            itemData={cellData}
-            itemKey={({ columnIndex, rowIndex, data }) => {
-              const index = rowIndex * data.columnCount + columnIndex
-              const video = data.catalogWindow ? data.catalogWindow.getItem(index) : data.videos[index]
-              return video ? `video:${video.id}` : `placeholder:${index}`
-            }}
-            initialScrollTop={scrollTopRef.current}
-            onScroll={({ scrollTop }) => {
-              persistScroll(scrollTop)
-            }}
-            onItemsRendered={({ overscanRowStartIndex, overscanRowStopIndex }) => {
-              persistScroll(scrollTopRef.current, overscanRowStopIndex)
-              catalogWindow?.onVisibleRange(overscanRowStartIndex * columnCount, Math.min(renderedItemCount - 1, (overscanRowStopIndex + 1) * columnCount - 1))
-              if (!catalogWindow && hasMore && overscanRowStopIndex >= rowCount - 3) {
-                onLoadMore?.()
-              }
-            }}
-          >
-            {PosterGridCell}
-          </FixedSizeGrid>
-        </InnerHeightContext.Provider>
-      )}
-      <ScrollToTopButton visible={showScrollToTop} onClick={scrollToTop} />
-    </ScrollRegion>
+    <div className={styles.shell}>
+      <ScrollRegion
+        ref={ref}
+        className={styles.root}
+      >
+        {renderWidth > 0 && renderHeight > 0 && (
+          <InnerHeightContext.Provider value={innerHeight}>
+            <FixedSizeGrid<PosterGridData<TVideo>>
+              ref={gridRef}
+              outerRef={outerRef}
+              outerElementType={VirtualGridViewport}
+              columnCount={columnCount}
+              columnWidth={stride}
+              rowCount={rowCount}
+              rowHeight={rowHeight}
+              width={renderWidth}
+              height={renderHeight}
+              innerElementType={GridInner}
+              itemData={cellData}
+              itemKey={({ columnIndex, rowIndex, data }) => {
+                const index = data.pageOffset + rowIndex * data.columnCount + columnIndex
+                const video = data.catalogWindow ? data.catalogWindow.getItem(index) : data.videos[index]
+                return video ? `video:${video.id}` : `placeholder:${index}`
+              }}
+              initialScrollTop={scrollTopRef.current}
+              onScroll={({ scrollTop }) => {
+                persistScroll(scrollTop)
+              }}
+              onItemsRendered={({ overscanRowStartIndex, overscanRowStopIndex }) => {
+                persistScroll(scrollTopRef.current, overscanRowStopIndex)
+                if (renderedItemCount > 0) {
+                  catalogWindow?.onVisibleRange(
+                    pageOffset + overscanRowStartIndex * columnCount,
+                    pageOffset + Math.min(renderedItemCount - 1, (overscanRowStopIndex + 1) * columnCount - 1)
+                  )
+                }
+                if (!isPaged && !catalogWindow && hasMore && overscanRowStopIndex >= rowCount - 3) {
+                  onLoadMore?.()
+                }
+              }}
+            >
+              {PosterGridCell}
+            </FixedSizeGrid>
+          </InnerHeightContext.Provider>
+        )}
+        <ScrollToTopButton visible={showScrollToTop} onClick={scrollToTop} />
+      </ScrollRegion>
+      {isPaged && totalCount > 0 ? (
+        <ListPagination
+          label="影片列表分页"
+          page={activePage}
+          pageSize={listPageSize}
+          total={totalCount}
+          onPageChange={changePage}
+          onPageSizeChange={changePageSize}
+        />
+      ) : null}
+    </div>
   )
 }

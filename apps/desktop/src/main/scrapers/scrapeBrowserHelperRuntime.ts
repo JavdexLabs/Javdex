@@ -18,6 +18,7 @@ import {
   normalizeNetworkUrl
 } from './scrapeBrowserImageCache'
 import { cleanUserAgent, getScrapeUaProfile } from './scrapeUaProfile'
+import { electronProxyConfig, proxyCredentials } from '../utils/networkProxyTransport'
 import { resolveFetchReferer } from './scrapeBrowserReferer'
 import { ActionNetworkCapture } from './scrapeBrowserActionNetwork'
 import {
@@ -287,6 +288,7 @@ export class ScrapeBrowserHelperRuntime {
   private helperToolbarView: WebContentsView | null = null
   private toolbarReady: Promise<void> = Promise.resolve()
   private ses: Session | null = null
+  private proxySetting?: string
   private manualPass = false
   private preLoginMode = false
   private preLoginDone = false
@@ -351,6 +353,13 @@ export class ScrapeBrowserHelperRuntime {
       this.ses = session.defaultSession
       this.ses.setUserAgent(cleanUserAgent())
       this.installHeaderStealth(this.ses)
+      app.on('login', (event, webContents, _details, auth, callback) => {
+        if (webContents?.session !== this.ses) return
+        const credentials = proxyCredentials(this.proxySetting, auth)
+        if (!credentials.length) return
+        event.preventDefault()
+        callback(...credentials)
+      })
     }
     return this.ses
   }
@@ -415,11 +424,12 @@ export class ScrapeBrowserHelperRuntime {
   /** Apply (or clear) a proxy for the scraper session. */
   async setProxy(proxyUrl: string | undefined, signal?: AbortSignal): Promise<void> {
     signal?.throwIfAborted()
-    const ses = this.getSession()
-    if (proxyUrl && proxyUrl.trim()) {
-      await ses.setProxy({ proxyRules: proxyUrl.trim() })
-    } else {
-      await ses.setProxy({ mode: 'direct' })
+    const setting = proxyUrl?.trim() ?? ''
+    if (setting !== this.proxySetting) {
+      const ses = this.getSession()
+      await ses.setProxy(electronProxyConfig(setting))
+      await ses.closeAllConnections()
+      this.proxySetting = setting
     }
     signal?.throwIfAborted()
   }
@@ -1709,6 +1719,10 @@ export class ScrapeBrowserHelperRuntime {
         session: ses,
         useSessionCookies: true,
         redirect: options?.redirect ?? 'follow'
+      })
+      request.on('login', (auth, callback) => {
+        const [username, password] = proxyCredentials(this.proxySetting, auth)
+        callback(username, password)
       })
       let settled = false
       let onAbort = (): void => {}

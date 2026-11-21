@@ -570,6 +570,7 @@ export const MANAGE_OPERATION_INPUTS = {
       query: videoQuerySchema.optional()
     })
     .strict(),
+  'videos.existingIds': z.object({ videoIds: idListSchema }).strict(),
   'videos.get': z.object({ scope: catalogScopeSchema, videoId: idSchema }).strict(),
   'videos.sources': videoSourceQuerySchema,
   'videos.years': z.object({ scope: catalogScopeSchema }).strict(),

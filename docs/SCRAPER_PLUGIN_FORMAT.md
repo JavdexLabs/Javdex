@@ -62,7 +62,7 @@ app.getPath('userData')/scraper_plugins/{video|actress}/{plugin-name}/
 | 成员 | 说明 |
 |------|------|
 | `ctx.code` | 待刮削番号 |
-| `ctx.proxyUrl` | 当前刮削代理（可能为空） |
+| `ctx.proxyUrl` | 手动代理的协议、主机和端口。跟随系统或直连时为空，代理认证由宿主处理。 |
 | `ctx.fetchPage(url, options?): Promise<string>` | 拉取并直接返回页面 HTML 字符串，不返回 `{ html, url }` 对象，也不包含最终 URL。`url` 必须是绝对 `http:` / `https:`；相对路径和 `//host/...` 须先用 `ctx.helpers.absoluteUrl(href, base)` 解析，否则会抛 `Invalid URL`。`options`: `readySelector`、`timeoutMs`、`settleWhenText`（`RegExp`）。`timeoutMs` 只计算正常页面加载时间；Cloudflare 人工验证暂停该计时，并使用独立的 3 分钟验证上限。 |
 | `ctx.fetchBuffer(url, options?)` | 拉取二进制（如图片）；持久缓存选项见下文 |
 | `ctx.cheerio` | Cheerio 模块；**每个 HTML 须先 `const $ = ctx.cheerio.load(html)`**，沙箱内无全局 `$` |

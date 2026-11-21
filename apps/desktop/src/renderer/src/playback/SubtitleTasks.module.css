@@ -362,6 +362,13 @@
   gap: var(--form-field-gap);
 }
 
+.overwrite {
+  display: flex;
+  align-items: center;
+  gap: var(--form-label-gap);
+  overflow-wrap: anywhere;
+}
+
 .field {
   display: grid;
   min-width: 0;

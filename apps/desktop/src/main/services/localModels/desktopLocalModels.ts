@@ -3,7 +3,10 @@ import path from 'node:path'
 import { existsSync } from 'node:fs'
 import { IPC } from '@shared/ipc-channels'
 import type { LocalTranslationMode } from '@shared/desktop/localModels'
+import { networkProxyRoute, networkProxySettings } from '@shared/networkProxy'
 import { appEventAdapter } from '../../ipc/appContractAdapter'
+import { getSettings } from '../../settings/settingsStore'
+import { fetchWithNetworkProxy } from '../../utils/networkProxyTransport'
 import { createLocalModelManager } from './localModelManager'
 
 let manager: ReturnType<typeof createLocalModelManager> | null = null
@@ -18,7 +21,8 @@ export function getLocalModels(): ReturnType<typeof createLocalModelManager> {
   if (!manager) {
     captureInitialLocalModelMode()
     const instance = createLocalModelManager(app.getPath('userData'), {
-      initialTextTranslationMode
+      initialTextTranslationMode,
+      download: (input, init) => fetchWithNetworkProxy('downloads', networkProxyRoute(networkProxySettings(getSettings()), 'downloads'), input, init)
     })
     manager = instance
     let notificationFailed = false

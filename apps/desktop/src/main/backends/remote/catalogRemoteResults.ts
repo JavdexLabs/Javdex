@@ -1,3 +1,4 @@
+import { idListSchema } from '@shared/manage/primitives'
 import { playlistApplyImportResultSchema } from '@shared/playlistImportCommit'
 import { catalogVideoSourcePageSchema } from '@shared/catalogVideoSourceSchemas'
 import { videoLifecycleImpactSchema, videoLifecycleResultSchema } from '@shared/videoLifecycleSchemas'
@@ -52,6 +53,7 @@ const complexResultSchemas: CatalogResultSchemas = {
   'videos.removeFromLibrary': videoLifecycleResultSchema,
   'videos.moveResource': videoLifecycleResultSchema,
   'videos.deleteGlobal': videoLifecycleResultSchema,
+  'videos.existingIds': idListSchema,
   'videos.get': scopedVideoDetailSchema.nullable(),
   'actresses.get': actressDetailSchema.nullable(),
   'actresses.profile': actressProfileSchema.nullable(),

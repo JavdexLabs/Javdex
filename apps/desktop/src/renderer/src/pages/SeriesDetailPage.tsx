@@ -289,7 +289,7 @@ export default function SeriesDetailPage(): JSX.Element {
             />
           ) : (
             <>
-              <ContinuousPosterGrid window={videoPage.window} initialIndex={videoPage.offset} onAnchor={index => videoPage.move(Math.floor(index / 60) * 60)} scope={hash} />
+              <ContinuousPosterGrid window={videoPage.window} initialIndex={videoPage.offset} onAnchor={videoPage.move} scope={hash} />
             </>
           )}
         </ClassificationDetailSurface>

@@ -8,6 +8,7 @@ import {
   request as undiciRequest
 } from 'undici'
 import { SocksClient } from 'socks'
+import { httpProxyOptions } from './httpProxyOptions'
 import {
   resolvePublicHttpUrl,
   type PublicLookupAddress,
@@ -24,6 +25,7 @@ interface PublicHttpOptions {
   validateUrl?: PublicHttpUrlValidator
   maxRedirects?: number
   proxyUrl?: string
+  resolveProxyUrls?: (url: URL) => Promise<string[]>
   timeoutMs?: number
 }
 
@@ -202,7 +204,7 @@ function createPinnedDispatcher(
     throw new Error('不支持的代理协议')
   }
   return new ProxyAgent({
-    uri: proxyUrl,
+    ...httpProxyOptions(proxy),
     requestTls: { servername: target.url.hostname }
   })
 }
@@ -273,12 +275,20 @@ async function requestTarget(
       close: async () => undefined
     }
   }
-  return requestPinnedTarget(
-    target,
-    init,
-    options.proxyUrl ?? '',
-    options.timeoutMs ?? (init.method === 'HEAD' ? 8_000 : 20_000)
-  )
+  const timeoutMs = options.timeoutMs ?? (init.method === 'HEAD' ? 8_000 : 20_000)
+  if (!options.resolveProxyUrls) return requestPinnedTarget(target, init, options.proxyUrl ?? '', timeoutMs)
+  const deadline = Date.now() + timeoutMs
+  const proxyUrls = await withinDeadline(options.resolveProxyUrls(target.url), deadline)
+  let lastError: unknown = new Error('系统代理未提供可用的代理协议')
+  for (const proxyUrl of proxyUrls) {
+    try {
+      return await requestPinnedTarget(target, init, proxyUrl, remainingDeadlineMs(deadline))
+    } catch (error) {
+      lastError = error
+      if (init.signal?.aborted) break
+    }
+  }
+  throw lastError
 }
 
 async function cancelResponseBody(response: Response): Promise<void> {

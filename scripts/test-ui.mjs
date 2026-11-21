@@ -283,6 +283,13 @@ try {
     await page.setViewportSize(viewport)
     for (const theme of ['light', 'graphite']) {
       await page.evaluate(value => window.setConnectionTheme(value), theme)
+      const playerPreference = await page.getByRole('group', { name: '默认播放方式', exact: true }).boundingBox()
+      const renderModes = page.getByRole('group', { name: '内置播放模式', exact: true })
+      const group = await renderModes.boundingBox()
+      const lastOption = await renderModes.getByRole('button', { name: 'CPU 兼容', exact: true }).boundingBox()
+      assert.equal(group.x, playerPreference.x, 'both player selectors share the same leading edge')
+      assert.equal(group.height, playerPreference.height, 'both player selectors use the same control height')
+      assert.ok(Math.abs(group.x + group.width - lastOption.x - lastOption.width) <= 2, 'the group border ends at the final option')
       const probe = connectionCard.getByRole('button', { name: '测试连接', exact: true })
       const before = await connectionCard.boundingBox()
       await probe.click()

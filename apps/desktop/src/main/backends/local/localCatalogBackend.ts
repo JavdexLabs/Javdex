@@ -14,6 +14,7 @@ import {
 } from '@library/catalog/catalogScrapeCommands'
 import { resolveCatalogScrapeFields } from '@library/catalog/catalogScrapeFields'
 import { createCatalogVideoCommands } from '@library/catalog/catalogVideoCommands'
+import { existingVideoIds } from '@library/db/videoRepo'
 import { getDb } from '@library/db/database'
 import { recordActressScrapeFailure } from '@library/db/actressRepo'
 import {
@@ -280,6 +281,9 @@ export function createLocalCatalogBackend(
     },
     async listVideos(input, _ctx?: CatalogQueryContext) {
       return queries.list(input.scope, input.query)
+    },
+    async existingVideoIds(input) {
+      return existingVideoIds(input.videoIds)
     },
     async getVideo(input) {
       return queries.get(input.scope, input.videoId)

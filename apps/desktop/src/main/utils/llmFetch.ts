@@ -1,40 +1,13 @@
-import { fetch as undiciFetch, ProxyAgent, type RequestInit as UndiciRequestInit } from 'undici'
+import { networkProxyRoute, networkProxySettings } from '@shared/networkProxy'
 import { getSettings } from '../settings/settingsStore'
-import { resolveLlmProxyUrl } from '@shared/settingsTypes'
+import { fetchWithNetworkProxy } from './networkProxyTransport'
 
-let cachedProxyUrl = ''
-let cachedDispatcher: ProxyAgent | undefined
+let transport = fetchWithNetworkProxy
 
-function resolveLlmDispatcher(): ProxyAgent | undefined {
-  const proxyUrl = resolveLlmProxyUrl(getSettings())
-  if (!proxyUrl) {
-    cachedProxyUrl = ''
-    cachedDispatcher = undefined
-    return undefined
-  }
-  if (proxyUrl === cachedProxyUrl && cachedDispatcher) return cachedDispatcher
-  cachedProxyUrl = proxyUrl
-  cachedDispatcher = new ProxyAgent(proxyUrl)
-  return cachedDispatcher
+export function setLlmFetchTransportForTests(next?: typeof fetchWithNetworkProxy): void {
+  transport = next ?? fetchWithNetworkProxy
 }
 
-/** Reset cached proxy dispatcher (tests). */
-export function resetLlmFetchProxyCacheForTests(): void {
-  cachedProxyUrl = ''
-  cachedDispatcher = undefined
-}
-
-/** Fetch for LLM provider APIs; routes through settings.llmProxyUrl when set. */
-export async function llmFetch(input: string | URL | Request, init?: RequestInit): Promise<Response> {
-  const dispatcher = resolveLlmDispatcher()
-  if (!dispatcher) {
-    return fetch(input, init)
-  }
-
-  const undiciInit: UndiciRequestInit = {
-    ...(init as UndiciRequestInit),
-    dispatcher
-  }
-  const response = await undiciFetch(input as string | URL, undiciInit)
-  return response as unknown as Response
+export function llmFetch(input: string | URL | Request, init?: RequestInit): Promise<Response> {
+  return transport('llm', networkProxyRoute(networkProxySettings(getSettings()), 'llm'), input, init)
 }

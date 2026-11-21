@@ -3,6 +3,8 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { test, type TestContext } from 'node:test'
+import type { CatalogIdentity } from '@shared/protocol/identity'
+import { DIRECT_ID_BATCH_MAX } from '@shared/protocol/limits'
 import type { ScopedVideoDetail } from '@shared/catalogTypes'
 import { createRecentPlayback, recentPlaybackCatalogKey } from './recentPlayback'
 
@@ -14,8 +16,8 @@ function fixture(t: TestContext) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-recent-'))
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }))
   const filename = path.join(directory, 'history.json')
-  const backend = { identity: { mode: 'local' as const, catalogId: 'catalog-a' }, generation: 1,
-    queries: { getVideo: async ({ videoId }: { videoId: number }) => video(videoId) } }
+  const backend = { identity: { mode: 'local', catalogId: 'catalog-a' } as CatalogIdentity, generation: 1,
+    queries: { existingVideoIds: async ({ videoIds }: { videoIds: number[] }) => videoIds, getVideo: async ({ videoId }: { videoId: number }) => video(videoId) } }
   let time = 1000, events = 0
   const history = createRecentPlayback(backend, filename, () => events++, () => time)
   return { backend, filename, history, time: (next: number) => { time = next }, events: () => events }
@@ -23,29 +25,29 @@ function fixture(t: TestContext) {
 
 test('records device-only narrow snapshots, deduplicates and promotes a repeated play', async t => {
   const f = fixture(t)
-  assert.equal(f.history.metadata().video_count, 0)
+  assert.equal((await f.history.metadata()).video_count, 0)
   await f.history.started(1); await f.history.started(2); await f.history.started(1)
-  assert.deepEqual(f.history.page({}).videos.map(item => item.id), [1, 2])
-  assert.equal(f.history.metadata().local_kind, 'recently_played')
-  assert.equal(f.history.metadata().id, 0)
+  assert.deepEqual((await f.history.page({})).videos.map(item => item.id), [1, 2])
+  assert.equal((await f.history.metadata()).local_kind, 'recently_played')
+  assert.equal((await f.history.metadata()).id, 0)
   assert.equal(f.events(), 3)
   const text = fs.readFileSync(f.filename, 'utf8')
   assert.ok(!/secret|locator|grant|summary|catalog-a/.test(text))
   if (process.platform !== 'win32') assert.equal(fs.statSync(f.filename).mode & 0o777, 0o600)
   f.history.remove(1)
-  assert.deepEqual(f.history.page({}).videos.map(item => item.id), [2])
+  assert.deepEqual((await f.history.page({})).videos.map(item => item.id), [2])
 })
 
 test('isolates local/remote catalogs and servers and clears only the current catalog', async t => {
   const f = fixture(t)
   await f.history.started(1)
   f.backend.identity.catalogId = 'catalog-b'
-  assert.equal(f.history.metadata().video_count, 0)
+  assert.equal((await f.history.metadata()).video_count, 0)
   await f.history.started(2)
   f.history.clear()
-  assert.equal(f.history.metadata().video_count, 0)
+  assert.equal((await f.history.metadata()).video_count, 0)
   f.backend.identity.catalogId = 'catalog-a'
-  assert.equal(f.history.metadata().video_count, 1)
+  assert.equal((await f.history.metadata()).video_count, 1)
   const local = recentPlaybackCatalogKey(f.backend.identity)
   assert.notEqual(local, recentPlaybackCatalogKey({ ...f.backend.identity, mode: 'remote', serverId: 'server-a' }))
   assert.notEqual(recentPlaybackCatalogKey({ mode: 'remote', catalogId: 'c', serverId: 'a' }), recentPlaybackCatalogKey({ mode: 'remote', catalogId: 'c', serverId: 'b' }))
@@ -59,30 +61,92 @@ test('late reads cannot undo clear/remove, cross catalog generation or replace a
   const newer = f.history.started(1)
   requests[1](video(1)); await newer
   requests[0]({ ...video(1), title: 'old' }); await old
-  assert.equal(f.history.page({}).videos[0].title, '播放资料')
+  assert.equal((await f.history.page({})).videos[0].title, '播放资料')
   const pending = f.history.started(2)
   f.history.clear(); requests[2](video(2)); await pending
-  assert.equal(f.history.metadata().video_count, 0)
+  assert.equal((await f.history.metadata()).video_count, 0)
   const changed = f.history.started(3)
   f.backend.generation++; requests[3](video(3)); await changed
-  assert.equal(f.history.metadata().video_count, 0)
+  assert.equal((await f.history.metadata()).video_count, 0)
   const unrelated = f.history.started(4)
   f.history.remove(3)
   requests[4](video(4)); await unrelated
-  assert.deepEqual(f.history.page({}).videos.map(item => item.id), [4])
+  assert.deepEqual((await f.history.page({})).videos.map(item => item.id), [4])
 })
 
-test('bounds storage and filters/pages snapshots without catalog queries or remote writes', async t => {
+test('bounds storage and filters/pages snapshots with bounded ID lookups and no detail reads or remote writes', async t => {
   const f = fixture(t)
   const entries = Array.from({ length: 1000 }, (_, index) => ({ catalog: recentPlaybackCatalogKey(f.backend.identity), playedAt: index,
     video: { id: index + 1, code: `V-${index}`, title: null, cover_path: null, scraped_status: 1, resource_kinds: index % 2 ? ['local'] : ['web'] } }))
   fs.writeFileSync(f.filename, JSON.stringify({ version: 1, entries }))
   await f.history.started(1001)
-  assert.equal(f.history.metadata().video_count, 1000)
-  const page = f.history.page({ limit: 2, offset: 1, resourceKinds: ['local'] })
+  f.backend.queries.getVideo = async () => assert.fail('reading history should not load video details')
+  const lookups = t.mock.method(f.backend.queries, 'existingVideoIds')
+  assert.equal((await f.history.metadata()).video_count, 1000)
+  assert.equal(lookups.mock.callCount(), Math.ceil(1000 / DIRECT_ID_BATCH_MAX))
+  assert.ok(lookups.mock.calls.every(call => call.arguments[0].videoIds.length <= DIRECT_ID_BATCH_MAX))
+  const page = await f.history.page({ limit: 2, offset: 1, resourceKinds: ['local'] })
   assert.equal(page.total, 1000); assert.equal(page.filteredTotal, 501); assert.equal(page.videos.length, 2)
-  for (const query of [{ limit: 101 }, { offset: -1 }, { limit: 0 }]) assert.throws(() => f.history.page(query))
-  assert.equal(f.history.page({ resourceKinds: ['none'] }).videos.length, 0)
+  for (const query of [{ limit: 101 }, { offset: -1 }, { limit: 0 }]) await assert.rejects(f.history.page(query))
+  assert.equal((await f.history.page({ resourceKinds: ['none'] })).videos.length, 0)
+})
+
+test('prunes deleted films from saved snapshots before counting, filtering and paging', async t => {
+  const f = fixture(t)
+  f.backend.identity.catalogId = 'other'
+  await f.history.started(2)
+  f.backend.identity.catalogId = 'catalog-a'
+  for (const id of [1, 2, 3, 4]) await f.history.started(id)
+  f.backend.queries.existingVideoIds = async ({ videoIds }) => videoIds.filter(id => id % 2 === 1)
+  const page = await f.history.page({ resourceKinds: ['local'], limit: 1, offset: 1 })
+  assert.deepEqual(page.videos.map(item => item.id), [1])
+  assert.equal(page.total, 2)
+  assert.equal(page.filteredTotal, 2)
+  assert.equal(f.events(), 6)
+  assert.equal((await f.history.metadata()).video_count, 2)
+  assert.equal(f.events(), 6, 'a second read should not rewrite history')
+  const saved = JSON.parse(fs.readFileSync(f.filename, 'utf8'))
+  assert.deepEqual(saved.entries.map((entry: { video: { id: number } }) => entry.video.id), [3, 1, 2])
+})
+
+test('an outstanding presence check respects a replay, a clear and a catalog switch', async t => {
+  const f = fixture(t)
+  await f.history.started(1)
+  let finish!: (found: number[]) => void
+  f.backend.queries.existingVideoIds = () => new Promise(resolve => { finish = resolve })
+  const beforeReplay = f.history.page({})
+  await f.history.started(1)
+  finish([])
+  assert.deepEqual((await beforeReplay).videos.map(item => item.id), [1])
+  const beforeClear = f.history.metadata()
+  f.history.clear()
+  finish([1])
+  assert.equal((await beforeClear).video_count, 0)
+
+  await f.history.started(2)
+  const beforeSwitch = f.history.page({})
+  f.backend.generation++
+  finish([])
+  await assert.rejects(beforeSwitch, /资料库已切换/)
+  assert.equal(f.events(), 4)
+})
+
+test('a failed remote batch preserves the entire local history until deletion can be confirmed', async t => {
+  const f = fixture(t)
+  f.backend.identity = { mode: 'remote', catalogId: 'catalog-a', serverId: 'server-a' }
+  const catalog = recentPlaybackCatalogKey(f.backend.identity)
+  const entries = Array.from({ length: DIRECT_ID_BATCH_MAX + 1 }, (_, i) => ({ catalog, playedAt: i,
+    video: { id: i + 1, code: 'V', title: null, cover_path: null, scraped_status: 1 } }))
+  const serialized = JSON.stringify({ version: 1, entries })
+  fs.writeFileSync(f.filename, serialized)
+  f.backend.queries.existingVideoIds = async ({ videoIds }) => {
+    if (videoIds.includes(entries.length)) throw new Error('unavailable')
+    return []
+  }
+  assert.equal((await f.history.metadata()).video_count, entries.length)
+  assert.equal(fs.readFileSync(f.filename, 'utf8'), serialized)
+  f.backend.queries.existingVideoIds = async () => []
+  assert.equal((await f.history.metadata()).video_count, 0)
 })
 
 test('does not overwrite corrupt/newer files or an existing file when atomic replacement fails', async t => {
@@ -113,6 +177,6 @@ test('evicts oldest snapshots before a write exceeds the readable UTF-8 byte bud
   f.backend.queries.getVideo = async () => ({ ...video(1001), cover_path: '封'.repeat(4096), title: '字'.repeat(1024) })
   await f.history.started(1001)
   assert.ok(fs.statSync(f.filename).size <= byteLimit, 'a successful write must remain readable')
-  assert.equal(f.history.page({}).videos[0].id, 1001)
-  assert.ok(f.history.metadata().video_count < entries.length + 1)
+  assert.equal((await f.history.page({})).videos[0].id, 1001)
+  assert.ok((await f.history.metadata()).video_count < entries.length + 1)
 })

@@ -40,6 +40,7 @@ import {
 import { getSettings } from '../settings/settingsStore'
 import { createScraperPreLoginSession, type ScraperPreLoginSession } from './scraperPreLogin'
 import { isScrapeBrowserBusyError, scrapeBrowser } from './scrapeBrowser'
+import { fetchDirectMetaTubeImage } from './configuredScraperService'
 import { mediaAssetStore } from '@library/mediaAssetStore'
 import { runVideoCandidateWorkflow } from '../services/scrapeCandidateWorkflow'
 
@@ -143,6 +144,10 @@ export function listScraperPlugins(): ScraperPluginDescriptor[] {
 export function listVideoMetadataSources() {
   const settings = getSettings()
   return buildSourceRegistry(resolveScrapeProxyUrl(settings)).list()
+}
+
+export async function fetchVideoScrapeImage(url: string, sourceUrl?: string): Promise<Buffer> {
+  return (await fetchDirectMetaTubeImage(url)) ?? scrapeBrowser.fetchBuffer(url, { referer: sourceUrl || 'omit' })
 }
 
 function assertVideoScraperRunnable(name: string): ScraperPluginDescriptor {
@@ -468,7 +473,7 @@ export async function scrapeVideo(
         const { collected } = collectedRun
         const persisted = await mediaAssetStore.coordinateDatabaseChange(async () => {
           const candidateStager = createVideoMetadataCandidateStager({
-            fetchRemote: (url, sourceUrl) => scrapeBrowser.fetchBuffer(url, { referer: sourceUrl || 'omit' }),
+            fetchRemote: fetchVideoScrapeImage,
             readManagedRootFile: async (capability) =>
               getDefaultNfoFileStore().readBytes(capability, 64 * 1024 * 1024)
           })
@@ -545,7 +550,7 @@ export async function scrapeVideo(
         const previousPending = getPendingVideoScrapeForVideo(videoId)
         let replacedPendingStagedPaths: string[] = []
         const candidateStager = createVideoMetadataCandidateStager({
-          fetchRemote: (url, sourceUrl) => scrapeBrowser.fetchBuffer(url, { referer: sourceUrl || 'omit' }),
+          fetchRemote: fetchVideoScrapeImage,
           readManagedRootFile: async (capability) =>
             getDefaultNfoFileStore().readBytes(capability, 64 * 1024 * 1024)
         })

@@ -5,6 +5,7 @@ import { z } from 'zod'
 import { toVideoCard } from '@shared/cardProjection'
 import { videoCardSchema } from '@shared/catalogDetailSchemas'
 import type { CatalogIdentity } from '@shared/protocol/identity'
+import { DIRECT_ID_BATCH_MAX } from '@shared/protocol/limits'
 import { RECENT_PLAYBACK_LIST_ID, type RecentPlaybackMetadata, type RecentPlaybackPageQuery } from '@shared/desktop/recentPlayback'
 import type { PlaylistVideosPage } from '@shared/playlistTypes'
 import type { CatalogBackend } from '../application/catalogBackend'
@@ -34,10 +35,11 @@ export function recentPlaybackCatalogKey(identity: CatalogIdentity): string {
 }
 
 /** Device-only snapshots: no resource locators, playback grants, or catalog mutations. */
-export function createRecentPlayback(backend: Pick<CatalogBackend, 'identity' | 'generation'> & { queries: Pick<CatalogBackend['queries'], 'getVideo'> },
+export function createRecentPlayback(backend: Pick<CatalogBackend, 'identity' | 'generation'> & { queries: Pick<CatalogBackend['queries'], 'getVideo' | 'existingVideoIds'> },
   filename: string, changed: () => void = () => {}, now = Date.now) {
   const pending = new Set<{ catalog: string; videoId: number; cancelled: boolean }>()
   let lastStartedAt = 0
+  let revision = 0
   function read(): Entry[] {
     try {
       if (fs.statSync(filename).size > MAX_FILE_BYTES) throw new Error('History file too large')
@@ -63,10 +65,48 @@ export function createRecentPlayback(backend: Pick<CatalogBackend, 'identity' | 
       fs.renameSync(temporary, filename)
     } catch { throw new Error('无法保存本机最近播放记录') }
     finally { try { fs.unlinkSync(temporary) } catch { /* Consumed by atomic rename. */ } }
+    revision++
     changed()
   }
-  const current = () => read().filter(entry => entry.catalog === recentPlaybackCatalogKey(backend.identity))
-    .sort((a, b) => b.playedAt - a.playedAt || b.video.id - a.video.id)
+  async function current(): Promise<Entry[]> {
+    const catalog = recentPlaybackCatalogKey(backend.identity), generation = backend.generation
+    const initialRevision = revision
+    const all = read()
+    const entries = all.filter(entry => entry.catalog === catalog)
+    if (!entries.length) return []
+    const assertCurrent = (): void => {
+      if (generation !== backend.generation || catalog !== recentPlaybackCatalogKey(backend.identity)) {
+        throw new Error('资料库已切换，请刷新最近播放')
+      }
+    }
+    // Never send playback order, timestamps or snapshots to the catalog.
+    entries.sort((a, b) => a.video.id - b.video.id)
+    const missing = new Map<number, number>()
+    for (let offset = 0; offset < entries.length; offset += DIRECT_ID_BATCH_MAX) {
+      const batch = entries.slice(offset, offset + DIRECT_ID_BATCH_MAX)
+      let found: number[]
+      try {
+        found = await backend.queries.existingVideoIds({ videoIds: batch.map(entry => entry.video.id) })
+      } catch (error) {
+        assertCurrent()
+        if (backend.identity.mode !== 'remote') throw error
+        // Offline or older servers cannot confirm deletion. Keep the device history.
+        missing.clear()
+        break
+      }
+      assertCurrent()
+      const present = new Set(found)
+      for (const entry of batch) {
+        if (!present.has(entry.video.id)) missing.set(entry.video.id, entry.playedAt)
+      }
+    }
+    // Merge with fresh history: a concurrent replay, clear or another catalog's
+    // write may have happened while a batch was in flight.
+    const latest = initialRevision === revision ? all : read()
+    const retained = latest.filter(entry => entry.catalog !== catalog || missing.get(entry.video.id) !== entry.playedAt)
+    if (retained.length !== latest.length) write(retained)
+    return retained.filter(entry => entry.catalog === catalog).sort((a, b) => b.playedAt - a.playedAt || b.video.id - a.video.id)
+  }
   return {
     async started(videoId: number): Promise<void> {
       const catalog = recentPlaybackCatalogKey(backend.identity), generation = backend.generation
@@ -85,17 +125,17 @@ export function createRecentPlayback(backend: Pick<CatalogBackend, 'identity' | 
         write([...entries.filter(old => old.catalog !== catalog || old.video.id !== videoId), entry])
       } finally { pending.delete(ticket) }
     },
-    metadata(): RecentPlaybackMetadata {
-      const entries = current()
-      return { id: RECENT_PLAYBACK_LIST_ID, name: '最近播放', description: '仅此设备 · 按最近一次播放倒序，保存播放时的影片资料',
+    async metadata(): Promise<RecentPlaybackMetadata> {
+      const entries = await current()
+      return { id: RECENT_PLAYBACK_LIST_ID, name: '最近播放', description: '仅此设备 · 按最近一次播放倒序',
         local_kind: 'recently_played', system_kind: null, cover_path: null, preview_cover_path: null,
         created_at: '', updated_at: entries[0] ? new Date(entries[0].playedAt).toISOString() : null,
         links: [], video_count: entries.length, contains_video: false }
     },
-    page(query: RecentPlaybackPageQuery): PlaylistVideosPage {
+    async page(query: RecentPlaybackPageQuery): Promise<PlaylistVideosPage> {
       const { limit = 60, offset = 0, resourceKinds = [] } = query
       if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100 || !Number.isSafeInteger(offset) || offset < 0) throw new Error('历史分页参数无效')
-      const entries = current()
+      const entries = await current()
       const filtered = entries.filter(entry => !resourceKinds.length || resourceKinds.some(kind =>
         kind === 'none' ? !entry.video.resource_kinds?.length : entry.video.resource_kinds?.includes(kind)))
       return { videos: filtered.slice(offset, offset + limit).map(entry => entry.video),

@@ -398,6 +398,12 @@ export function getLocalVideoResourceById(resourceId: number): LocalVideoResourc
   )
 }
 
+export function existingVideoIds(videoIds: number[], database: Database.Database = getDb()): number[] {
+  if (!videoIds.length) return []
+  return database.prepare('SELECT id FROM videos WHERE id IN (SELECT value FROM json_each(?))')
+    .pluck().all(JSON.stringify(videoIds)) as number[]
+}
+
 export function getVideoResourceInLibrary(
   libraryId: number,
   resourceId: number,

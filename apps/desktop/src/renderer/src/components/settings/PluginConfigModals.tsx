@@ -24,6 +24,7 @@ import { useSettingsFormGuard } from '../../settings/SettingsLeaveGuard'
 import { SettingsDisclosure, SettingsNumberStepper } from './SettingsPrimitives'
 import { defaultPluginDelay, pluginSourceLabel } from '../../settings/settingsDisplay'
 import Button from '../Button'
+import SelectControl from '../SelectControl'
 import SettingsFeedback from './SettingsFeedback'
 import PluginSourceBadge from '../PluginSourceBadge'
 import styles from './PluginConfigModals.module.css'
@@ -362,13 +363,20 @@ export function PluginConfigModal({
                   )}
                 </div>
 
-                <label className={styles.checkboxField}>
-                  <Switch
-                    checked={useScrapeProxy}
+                <label className={styles.fullField}>
+                  <span>服务连接方式</span>
+                  <SelectControl
+                    value={useScrapeProxy ? 'scrape' : 'direct'}
                     disabled={saving}
-                    onChange={(event) => setUseScrapeProxy(event.target.checked)}
-                  />
-                  <span>使用 Javdex 刮削代理连接此服务</span>
+                    onChange={(event) => {
+                      setUseScrapeProxy(event.target.value === 'scrape')
+                      setTestResult(null)
+                      setTestError(null)
+                    }}
+                  >
+                    <option value="direct">直接连接</option>
+                    <option value="scrape">使用刮削连接设置</option>
+                  </SelectControl>
                 </label>
                 <div className={styles.switchBlock}>
                   <label className={styles.checkboxField}>

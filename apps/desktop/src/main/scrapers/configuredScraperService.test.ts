@@ -14,6 +14,7 @@ import {
 import {
   clearScraperServiceConfig,
   createConfiguredScraperServiceClient,
+  fetchDirectMetaTubeImage,
   getScraperServicePublicConfig,
   saveScraperServiceConfig,
   ScraperServiceError,
@@ -175,6 +176,27 @@ describe('configuredScraperService', () => {
     assert.equal(requests.every((request) => request.headers.Authorization === 'Bearer secret-token'), true)
     assert.equal(requests.every((request) => request.proxyUrl === 'http://127.0.0.1:7890'), true)
     assert.equal(requests.every((request) => request.maxBytes === 2 * 1024 * 1024), true)
+  })
+
+  it('keeps MetaTube images on its direct connection and limits the exception to its image path', async () => {
+    saveScraperServiceConfig('metatube', {
+      serverUrl: 'https://service.test/prefix',
+      useScrapeProxy: false,
+      tokenUpdate: { mode: 'set', value: 'fixture-token' }
+    })
+    updateSettings({ networkProxy: { default: { mode: 'manual', url: 'http://proxy.test:8080' }, overrides: {} } })
+    const requests: ScraperServiceTransportRequest[] = []
+    setScraperServiceTransportForTests(async (request) => {
+      requests.push(request)
+      return { statusCode: 200, headers: {}, body: Buffer.from('fixture') }
+    })
+    assert.equal(await fetchDirectMetaTubeImage('https://other.test/prefix/v1/images/example'), undefined)
+    assert.equal(await fetchDirectMetaTubeImage('https://service.test/v1/images/example'), undefined)
+    const image = await fetchDirectMetaTubeImage('https://service.test/prefix/v1/images/example')
+    assert.equal(image?.toString(), 'fixture')
+    assert.equal(requests.length, 1)
+    assert.equal(requests[0].proxyUrl, undefined)
+    assert.equal(requests[0].headers.Authorization, undefined)
   })
 
   it('snapshots the address, proxy choice, and token for an in-flight scrape', async () => {

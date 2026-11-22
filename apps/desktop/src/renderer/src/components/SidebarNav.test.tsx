@@ -5,7 +5,6 @@ import TestRenderer, { act } from 'react-test-renderer'
 import { MemoryRouter } from 'react-router-dom'
 import { SidebarNavIcon, SidebarNavLabel, SidebarNavLink, SidebarNavRow } from './SidebarNav'
 import { NavIcon } from './NavIcons'
-import AppBrand from './AppBrand'
 
 Object.defineProperty(globalThis, 'React', { configurable: true, value: React })
 let renderer: TestRenderer.ReactTestRenderer | undefined
@@ -50,13 +49,4 @@ test('sidebar native matching and caller-active presentation remain distinct', (
   assert.doesNotMatch(playlists.props.className, /(?:^| )active(?: |$)/)
   assert.equal(playlists.props['data-with-badge'], undefined)
   assert.equal(renderer!.root.findAllByType('button').length, 0)
-})
-
-test('brand and navigation glyphs own presentation without the legacy chrome classes', () => {
-  act(() => { renderer = TestRenderer.create(<><AppBrand /><NavIcon name="pending" /></>) })
-  const brand = renderer!.root.findByProps({ 'aria-label': 'Javdex' })
-  assert.equal(brand.findByProps({ 'aria-hidden': 'true' }).findAllByType('span').slice(1).map(span => span.children.join('')).join(''), 'Javdex')
-  for (const node of renderer!.root.findAll(node => typeof node.type === 'string' && typeof node.props.className === 'string')) {
-    assert.doesNotMatch(node.props.className, /(?:^| )(?:brand(?:-[\w-]+)?|nav-svg)(?: |$)/)
-  }
 })

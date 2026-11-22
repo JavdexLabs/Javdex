@@ -4,6 +4,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { resetSettingsCacheForTests } from '../../settings/settingsStore'
+import { setLlmFetchTransportForTests } from '../../utils/llmFetch'
 import { requestResponsesJson, requestResponsesText } from './adapters/openaiResponsesAdapter'
 import { requestGoogleJson, requestGoogleText } from './adapters/googleGenerativeAdapter'
 import { requestAnthropicJson } from './adapters/anthropicMessagesAdapter'
@@ -23,6 +24,7 @@ beforeEach(() => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-native-protocols-'))
   process.env.JAVDEX_TEST_USER_DATA = root
   resetSettingsCacheForTests()
+  setLlmFetchTransportForTests((_scope, _route, input, init) => fetch(input, init))
   requests.length = 0
   respond = () => Response.json({})
   mock.method(globalThis, 'fetch', async (url: string | URL | Request, init?: RequestInit) => {
@@ -34,6 +36,7 @@ beforeEach(() => {
 
 afterEach(() => {
   mock.restoreAll()
+  setLlmFetchTransportForTests()
   resetSettingsCacheForTests()
   if (previousUserData === undefined) delete process.env.JAVDEX_TEST_USER_DATA
   else process.env.JAVDEX_TEST_USER_DATA = previousUserData

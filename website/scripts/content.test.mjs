@@ -32,7 +32,7 @@ test('public documents are explicit and do not include engineering archives', as
     assert.match(body, /^---\r?\ntitle: /, `Missing title: ${file}`);
     assert.doesNotMatch(body, /^import\s+\{[^}]+\}\s+from\s+['"]@astrojs\/starlight\/components['"]/m, `Raw MDX import in .md file: ${file}`);
     assert.doesNotMatch(body, /<(?:Steps|Tabs|TabItem)\b/, `Raw MDX component tag in .md file: ${file}`);
-    assert.doesNotMatch(body, /SenseVoice|Sherpa-ONNX|Marian|rollback --config/, `Hallucinated technical term in: ${file}`);
+    assert.doesNotMatch(body, /\brollback --config\b/, `Unsupported rollback command in: ${file}`);
   }
 });
 

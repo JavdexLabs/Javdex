@@ -1,13 +1,3 @@
-.builtinSection {
-  margin-bottom: var(--form-section-gap);
-}
-
-.builtinGrid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: var(--form-field-gap);
-}
-
 .sectionTitle {
   display: flex;
   align-items: center;
@@ -31,8 +21,6 @@
   padding-top: var(--form-section-gap);
 }
 
-@media (width <= 800px) {
-  .builtinGrid {
-    grid-template-columns: 1fr;
-  }
+section + .customSection {
+  margin-top: var(--form-section-gap);
 }

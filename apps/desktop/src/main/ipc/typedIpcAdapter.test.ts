@@ -208,16 +208,12 @@ describe('typed IPC adapter', () => {
     }]).success, true, 'cross-protocol rejection belongs to PluginDeveloper, not IPC shape validation')
   })
 
-  it('accepts plugin history clearing only without renderer-supplied run ids', () => {
-    const schema = appIpcSchemas[IPC.PLUGIN_DEV_AGENT_CLEAR_HISTORY]
-    assert.equal(schema.safeParse([]).success, true)
-    assert.equal(schema.safeParse(['run-1']).success, false)
-  })
-
-  it('accepts unrecoverable plugin-session discard only without renderer-supplied run ids', () => {
-    const schema = appIpcSchemas[IPC.PLUGIN_DEV_AGENT_DISCARD_UNRECOVERABLE]
-    assert.equal(schema.safeParse([]).success, true)
-    assert.equal(schema.safeParse(['run-1']).success, false)
+  it('rejects renderer-supplied run ids for plugin session cleanup', () => {
+    for (const channel of [IPC.PLUGIN_DEV_AGENT_CLEAR_HISTORY, IPC.PLUGIN_DEV_AGENT_DISCARD_UNRECOVERABLE]) {
+      const schema = appIpcSchemas[channel]
+      assert.equal(schema.safeParse([]).success, true, channel)
+      assert.equal(schema.safeParse(['run-1']).success, false, channel)
+    }
   })
 
   it('keeps legacy model limits out of the generic settings mutation contract', () => {
@@ -391,19 +387,13 @@ it('validates merge candidate paging and keep identity', () => {
 })
 
 
-it('accepts only zero arguments for avatar crop count', () => {
-  const schema = actressIpcSchemas[IPC.ACTRESS_AVATAR_CROP_COUNT]
-  assert.equal(schema.safeParse([]).success, true)
-  assert.equal(schema.safeParse([1]).success, false)
+it('accepts only zero arguments when counting or enumerating avatar crop targets', () => {
+  for (const channel of [IPC.ACTRESS_AVATAR_CROP_COUNT, IPC.ACTRESS_AVATAR_CROP_TARGETS]) {
+    const schema = actressIpcSchemas[channel]
+    assert.equal(schema.safeParse([]).success, true, channel)
+    assert.equal(schema.safeParse([1]).success, false, channel)
+  }
 })
-
-
-it('accepts only zero arguments for avatar crop target enumeration', () => {
-  const schema = actressIpcSchemas[IPC.ACTRESS_AVATAR_CROP_TARGETS]
-  assert.equal(schema.safeParse([]).success, true)
-  assert.equal(schema.safeParse([1]).success, false)
-})
-
 
 it('validates plugin actress test picker bounds and identities', () => {
   const page=actressIpcSchemas[IPC.ACTRESS_TEST_TARGET_PAGE]

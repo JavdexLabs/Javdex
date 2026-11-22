@@ -284,11 +284,7 @@ export function registerSettingsHandlers(ctx: IpcContext, backend: CatalogBacken
 
   appCommandAdapter.register(
     IPC.SETTINGS_PROXY_TEST,
-    async (kind, proxyUrl): Promise<string> => {
-      if (kind !== 'scrape' && kind !== 'llm') throw new Error('无效的代理类型')
-      if (typeof proxyUrl !== 'string') throw new Error('请填写代理地址')
-      return testProxyConnection(kind, proxyUrl)
-    }
+    testProxyConnection
   )
 
   appCommandAdapter.register(IPC.LLM_TRANSLATE_TO_CHINESE, async (text): Promise<string> => {

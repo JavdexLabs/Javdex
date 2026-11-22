@@ -1,3 +1,5 @@
+import type { CoverSizePreset } from '@shared/settingsTypes'
+
 /**
  * Standard cover aspect ratios used across the library grid and detail page.
  *
@@ -58,6 +60,33 @@ export const DETAIL_LANDSCAPE_MIN_COL_WIDTH = Math.round(
   DETAIL_POSTER_MIN_COL_WIDTH * (PORTRAIT_HEIGHT_PER_WIDTH / LANDSCAPE_HEIGHT_PER_WIDTH)
 )
 
+export const PORTRAIT_MIN_COL_WIDTH_BY_SIZE: Record<CoverSizePreset, number> = {
+  sm: 112,
+  md: MIN_PORTRAIT_COL_WIDTH,
+  lg: 168,
+  xl: 210
+}
+
+export const DETAIL_PORTRAIT_MIN_COL_WIDTH_BY_SIZE: Record<CoverSizePreset, number> = {
+  sm: 106,
+  md: DETAIL_POSTER_MIN_COL_WIDTH,
+  lg: 158,
+  xl: 196
+}
+
+export function getPosterMinColWidth(
+  mode: 'portrait' | 'landscape',
+  size: CoverSizePreset = 'md',
+  surface: 'main' | 'detail' = 'main'
+): number {
+  const portraitWidth =
+    surface === 'detail'
+      ? (DETAIL_PORTRAIT_MIN_COL_WIDTH_BY_SIZE[size] ?? DETAIL_POSTER_MIN_COL_WIDTH)
+      : (PORTRAIT_MIN_COL_WIDTH_BY_SIZE[size] ?? MIN_PORTRAIT_COL_WIDTH)
+  if (mode === 'portrait') return portraitWidth
+  return Math.round(portraitWidth * (PORTRAIT_HEIGHT_PER_WIDTH / LANDSCAPE_HEIGHT_PER_WIDTH))
+}
+
 /**
  * Landscape column width that yields the same thumbnail height as a portrait
  * column at `portraitColWidth`, preserving 800:538 aspect via CSS only.
@@ -77,9 +106,10 @@ export interface PosterGridLayout {
 export function computePosterGridLayout(
   layoutWidth: number,
   mode: 'portrait' | 'landscape',
-  gap = 12
+  gap = 12,
+  size: CoverSizePreset = 'md'
 ): PosterGridLayout {
-  const minColWidth = mode === 'portrait' ? MIN_PORTRAIT_COL_WIDTH : MIN_LANDSCAPE_COL_WIDTH
+  const minColWidth = getPosterMinColWidth(mode, size, 'main')
   const heightPerWidth =
     mode === 'portrait' ? PORTRAIT_HEIGHT_PER_WIDTH : LANDSCAPE_HEIGHT_PER_WIDTH
 

@@ -17,6 +17,7 @@ import type { CatalogVideoSourcePage } from '@shared/catalogVideoSourceSchemas'
 import type {
   CorrectImportResult,
   VideoAsset,
+  VideoCard,
   VideoMergeResult,
   VideoResource,
   VideoResourceImportResult,
@@ -145,6 +146,7 @@ export interface CatalogOperationResults {
   }
   'home.load': HomeSnapshot
   'home.search': GlobalSearchResult
+  'videos.cardsByIds': VideoCard[]
   'videos.list': ScopedVideoListResult
   'videos.get': ScopedVideoDetail | null
   'videos.years': number[]

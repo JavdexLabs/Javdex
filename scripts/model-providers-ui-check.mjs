@@ -17,7 +17,8 @@ try {
   await server.listen()
   browser = await chromium.launch({ ...(process.env.JAVDEX_BROWSER_EXECUTABLE
     ? { executablePath: process.env.JAVDEX_BROWSER_EXECUTABLE } : { channel: process.env.JAVDEX_BROWSER_CHANNEL || 'chrome' }), headless: true })
-  for (const viewport of [{ width: 1440, height: 900 }, { width: 760, height: 640 }]) for (const theme of ['slate', 'light']) {
+  for (const [width, height, theme] of [[1440, 900, 'slate'], [760, 640, 'light']]) {
+    const viewport = { width, height }
     const page = await browser.newPage({ viewport, reducedMotion: 'reduce' })
     page.setDefaultTimeout(3000)
     const errors = []

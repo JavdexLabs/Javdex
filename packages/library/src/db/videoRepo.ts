@@ -5,6 +5,7 @@ import type Database from 'better-sqlite3'
 import {
   VIDEO_FIELD_UPDATE_KEYS,
   type Video,
+  type VideoCard,
   type LocalVideoResource,
   type VideoResource,
   type VideoResourceImportResult,
@@ -30,9 +31,12 @@ import { actressOwnedNameVideoIdsSql } from './actressSearchSql'
 import { ensureTag, pruneTagIfUnused } from './tagRepo'
 import { collectVideoLibraryCleanupHints, runLibraryCleanup } from './libraryCleanup'
 import {
+  hydrateVideoCardRows,
   hydrateVideoListRows,
+  videoCardSelect,
   videoClassificationSelectExtras,
   videoListSelectExtras,
+  type VideoCardProjectionRow,
   type VideoListProjectionRow
 } from './videoListProjection'
 import { normalizeVideoCode } from '@shared/videoCode'
@@ -396,6 +400,13 @@ export function getLocalVideoResourceById(resourceId: number): LocalVideoResourc
       .prepare("SELECT * FROM video_resources WHERE id = ? AND kind = 'local'")
       .get(resourceId) as LocalVideoResource | undefined) ?? null
   )
+}
+
+export function videoCardsByIds(videoIds: number[], database: Database.Database = getDb()): VideoCard[] {
+  if (!videoIds.length) return []
+  const rows = database.prepare(`SELECT ${videoCardSelect()} FROM videos v WHERE v.id IN (SELECT value FROM json_each(?))`)
+    .all(JSON.stringify(videoIds)) as VideoCardProjectionRow[]
+  return hydrateVideoCardRows(rows)
 }
 
 export function getVideoResourceInLibrary(

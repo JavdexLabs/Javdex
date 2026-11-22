@@ -1,56 +1,50 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import {
-  canResolveScrapePage,
-  canResolveScrapeSelector,
-  ScrapeBrowserWaitBudget
-} from './scrapeBrowserWaitBudget'
+import { ScrapeBrowserWaitBudget } from './scrapeBrowserWaitBudget'
 
-describe('scrape browser readiness', () => {
-  it('does not resolve an intermediate verification page even when it has matching content', () => {
-    assert.equal(canResolveScrapePage(true, true), false)
-    assert.equal(canResolveScrapePage(false, false), false)
-    assert.equal(canResolveScrapePage(false, true), true)
-  })
-
-  it('does not accept selectors found on a verification page', () => {
-    assert.equal(canResolveScrapeSelector(true, true), false)
-    assert.equal(canResolveScrapeSelector(false, true), true)
-  })
-})
+const clear = { detected: false }
+const strictChallenge = { detected: true }
+const relaxedChallenge = { detected: true, relaxed: true }
 
 describe('ScrapeBrowserWaitBudget', () => {
-  it('does not consume the page timeout while Cloudflare verification is active', () => {
+  it('holds a strict challenge even when an expected selector is visible', () => {
     const budget = new ScrapeBrowserWaitBudget(0, 2500, 180_000)
-
-    assert.equal(budget.update(0, true), 'active')
-    assert.equal(budget.update(1200, false), 'active')
-    assert.equal(budget.update(2800, false), 'active')
-    assert.equal(budget.update(3700, false), 'page-timeout')
+    assert.equal(budget.update(0, { ...strictChallenge, expectedContent: true }), 'waiting-for-verification')
+    assert.equal(budget.update(1200, clear), 'active')
+    assert.equal(budget.update(2800, clear), 'active')
+    assert.equal(budget.update(3700, clear), 'page-timeout')
   })
 
   it('still enforces the page timeout while no challenge is active', () => {
     const budget = new ScrapeBrowserWaitBudget(0, 2500, 180_000)
+    assert.equal(budget.update(2499, clear), 'active')
+    assert.equal(budget.update(2500, clear), 'page-timeout')
+  })
 
-    assert.equal(budget.update(2499, false), 'active')
-    assert.equal(budget.update(2500, false), 'page-timeout')
+  it('defers a relaxed challenge while looking for the expected content', () => {
+    const budget = new ScrapeBrowserWaitBudget(0, 2500, 3000)
+    assert.equal(budget.update(2499, relaxedChallenge), 'active')
+    assert.equal(budget.update(2500, { ...relaxedChallenge, expectedContent: true }), 'page-timeout')
+    assert.equal(budget.update(2510, relaxedChallenge), 'waiting-for-verification')
+    assert.equal(budget.update(3000, { ...relaxedChallenge, confirmed: true }), 'active')
+    assert.equal(budget.update(5499, relaxedChallenge), 'active')
+    assert.equal(budget.update(5500, relaxedChallenge), 'waiting-for-verification')
+    assert.equal(budget.update(8010, relaxedChallenge), 'verification-timeout')
+  })
+
+  it('switches from strict waiting to relaxed checks on manual confirmation', () => {
+    const budget = new ScrapeBrowserWaitBudget(0, 1000, 3000)
+    assert.equal(budget.update(100, strictChallenge), 'waiting-for-verification')
+    assert.equal(budget.update(1000, { ...relaxedChallenge, confirmed: true }), 'active')
+    assert.equal(budget.update(1899, relaxedChallenge), 'active')
+    assert.equal(budget.update(1900, relaxedChallenge), 'waiting-for-verification')
+    assert.equal(budget.update(4000, relaxedChallenge), 'verification-timeout')
   })
 
   it('caps manual verification independently from the page timeout', () => {
     const budget = new ScrapeBrowserWaitBudget(0, 2500, 3000)
-
-    assert.equal(budget.update(0, true), 'active')
-    assert.equal(budget.update(2999, true), 'active')
-    assert.equal(budget.update(3000, true), 'verification-timeout')
-  })
-
-  it('accumulates the verification cap across repeated challenge periods', () => {
-    const budget = new ScrapeBrowserWaitBudget(0, 1000, 3000)
-
-    assert.equal(budget.update(0, true), 'active')
-    assert.equal(budget.update(1000, false), 'active')
-    assert.equal(budget.update(1500, true), 'active')
-    assert.equal(budget.update(3499, true), 'active')
-    assert.equal(budget.update(3500, true), 'verification-timeout')
+    assert.equal(budget.update(0, strictChallenge), 'waiting-for-verification')
+    assert.equal(budget.update(2999, strictChallenge), 'waiting-for-verification')
+    assert.equal(budget.update(3000, strictChallenge), 'verification-timeout')
   })
 })

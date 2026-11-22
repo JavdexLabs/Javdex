@@ -1,15 +1,24 @@
 import { z } from 'zod'
+import { MAX_SUBTITLE_TASKS, subtitleBulkOperations } from '@shared/desktop/subtitleTasks'
 const id = z.number().int().positive().max(Number.MAX_SAFE_INTEGER)
 const presentation = z.enum(['expanded', 'docked', 'fullscreen'])
 export const playbackTargetSchema = z.object({ libraryId: id, videoId: id, resourceId: id }).strict()
+const signature = z.string().regex(/^[a-f0-9]{64}$/)
+export const batchSubtitlePreviewArgs = z.tuple([signature, id, id, id.nullable()])
+export const batchSubtitleSubmitArgs = z.tuple([signature, id, z.enum(['bilingual', 'japanese']), z.array(
+  z.object({ videoId: id, resourceId: id, signature, audioIndex: z.number().int().min(0).max(10000),
+    resumeId: z.string().uuid().optional(), replaceRevision: signature.optional() }).strict()
+    .refine(item => !(item.resumeId && item.replaceRevision))
+).min(1).max(16)])
 export const playbackClearProgressSchema = z.discriminatedUnion('scope', [
   z.object({ scope: z.literal('all') }).strict(),
   z.object({ scope: z.literal('current'), sessionId: z.string().uuid() }).strict()
 ])
 export const playbackSessionIdSchema = z.string().uuid()
 export const subtitleTaskCommandSchema = z.discriminatedUnion('action', [
-  z.object({ action: z.literal('enqueue'), target: playbackTargetSchema, audioIndex: z.number().int().min(0).max(10000), output: z.enum(['bilingual', 'japanese']) }).strict(),
-  z.object({ action: z.enum(['resume', 'pause', 'cancel', 'retry-save', 'save-as', 'export-srt', 'remove', 'delete-output']), id: z.string().uuid() }).strict()
+  z.object({ action: z.literal('bulk'), operation: z.enum(subtitleBulkOperations), ids: z.array(z.string().uuid()).min(1).max(MAX_SUBTITLE_TASKS) }).strict(),
+  z.object({ action: z.literal('enqueue'), target: playbackTargetSchema, audioIndex: z.number().int().min(0).max(10000), output: z.enum(['bilingual', 'japanese']), replaceRevision: signature.optional() }).strict(),
+  z.object({ action: z.enum(['resume', 'pause', 'retry-save', 'save-as', 'export-srt', 'remove', 'delete-output']), id: z.string().uuid() }).strict()
 ])
 export const aiSubtitleCommandSchema = z.discriminatedUnion('action', [
   z.object({ action: z.enum(['start', 'stop', 'retry', 'clear-cache', 'export', 'view-log']) }).strict(),

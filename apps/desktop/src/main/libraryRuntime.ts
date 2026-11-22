@@ -7,6 +7,7 @@ import { configureLibraryHost } from '@library/runtime/host'
 import { createElectronImageCodec } from './nativeImageCodec'
 import { configureCatalogReadWorkerEntry } from './services/catalogReadService'
 import { getSettings } from './settings/settingsStore'
+import { networkProxySession, proxyCandidates } from './utils/networkProxyTransport'
 
 function desktopAssetSettings() {
   return {
@@ -17,7 +18,13 @@ function desktopAssetSettings() {
 
 function desktopHttpSettings() {
   return {
-    scrapeProxyUrl: () => resolveScrapeProxyUrl(getSettings())
+    scrapeProxyUrl: () => resolveScrapeProxyUrl(getSettings()),
+    resolveScrapeProxyUrls: async (url: URL) => {
+      const setting = resolveScrapeProxyUrl(getSettings())
+      if (setting) return [setting === 'direct://' ? '' : setting]
+      const network = await networkProxySession('scrape-assets', { mode: 'system' })
+      return proxyCandidates(await network.resolveProxy(url.href))
+    }
   }
 }
 

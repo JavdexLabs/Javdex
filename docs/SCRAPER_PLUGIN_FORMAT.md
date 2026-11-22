@@ -62,7 +62,7 @@ app.getPath('userData')/scraper_plugins/{video|actress}/{plugin-name}/
 | 成员 | 说明 |
 |------|------|
 | `ctx.code` | 待刮削番号 |
-| `ctx.proxyUrl` | 当前刮削代理（可能为空） |
+| `ctx.proxyUrl` | 手动代理的协议、主机和端口。跟随系统或直连时为空，代理认证由宿主处理。 |
 | `ctx.fetchPage(url, options?): Promise<string>` | 拉取并直接返回页面 HTML 字符串，不返回 `{ html, url }` 对象，也不包含最终 URL。`url` 必须是绝对 `http:` / `https:`；相对路径和 `//host/...` 须先用 `ctx.helpers.absoluteUrl(href, base)` 解析，否则会抛 `Invalid URL`。`options`: `readySelector`、`timeoutMs`、`settleWhenText`（`RegExp`）。`timeoutMs` 只计算正常页面加载时间；Cloudflare 人工验证暂停该计时，并使用独立的 3 分钟验证上限。 |
 | `ctx.fetchBuffer(url, options?)` | 拉取二进制（如图片）；持久缓存选项见下文 |
 | `ctx.cheerio` | Cheerio 模块；**每个 HTML 须先 `const $ = ctx.cheerio.load(html)`**，沙箱内无全局 `$` |
@@ -124,6 +124,8 @@ helper 启动与建立租约时不显示窗口；实际加载网页或显式展�
 `ctx.fetchPage` 与 `ctx.browser.*` 共用独立 Electron scraper helper 里的唯一页面。一次刮削从解析到图片下载持有同一独占租约，代理在租约建立时冻结；Cookie、Cloudflare clearance、本地存储和图片响应缓存不会被其他任务串扰。跨任务冲突立即返回 `SCRAPE_BROWSER_BUSY`，不会排队或改写当前页面。
 
 租约内部的 `fetchPage` 与宿主预登入共用同一页面队列，按顺序执行，因此 `Promise.all(urls.map(ctx.fetchPage))` 不会让单页 target 并发导航，也不会在登入未完成时抢走当前页；总耗时仍接近各页之和。helper 使用 Electron 内置 Chromium和既有 `Partitions/scraper` profile，不要求系统浏览器或 Playwright 浏览器下载。
+
+用户点击工具栏「验证通过」后，当前域名在本次刮削中进入宽松检测。出现疑似验证信号时，`fetchPage` 优先等待插件指定的 `readySelector` 或 `settleWhenText`，`waitForSelector` 优先等待目标元素。验收条件应指向站点正文或真实空结果容器。收到疑似挑战时，通用页面加载完成仅表示文档已载入。等待预期内容超时且仍有验证信号时，显示人工验证横幅，验证后继续等待同一页面。不同主机名以及下一次刮削默认使用普通检测。
 
 `ctx.browser.*` 保持既有返回契约，但一串 `click` / `type` / `snapshot` 仍依赖页面在调用之间保持不动，所以动作序列必须顺序 `await`，且不可与 `fetchPage` 交叉。
 

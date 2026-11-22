@@ -8,7 +8,7 @@ import { insertTestVideoWithFile } from '@library/db/testVideoFixtures'
 import { createMediaLibrary, archiveMediaLibrary } from '@library/db/mediaLibraryRepo'
 import { ensureVideoMembership } from '@library/db/libraryMembershipRepo'
 import { addManualVideoTag, getVideoDetail } from '@library/db/videoRepo'
-import type { ScrapeResult, VideoScrapeField, VideoScrapeUpdateMode } from '@shared/videoScrapeTypes'
+import { ALL_VIDEO_SCRAPE_FIELDS, type ScrapeResult, type VideoScrapeField } from '@shared/videoScrapeTypes'
 import {
   applyScrapeResult,
   planVideoScrapeResult,
@@ -77,53 +77,6 @@ afterEach(() => {
     tempRoot = null
   }
 })
-
-const MATRIX_FIELDS: VideoScrapeField[] = [
-  'title',
-  'summary',
-  'cover',
-  'releaseDate',
-  'maker',
-  'publisher',
-  'series',
-  'director',
-  'duration',
-  'actressesFemale',
-  'actressesMale',
-  'tags',
-  'source',
-  'rating',
-  'samples'
-]
-
-function expectedMatrixImpact(
-  mode: VideoScrapeUpdateMode,
-  currentPresent: boolean,
-  scrapedPresent: boolean
-): { action: 'preserve' | 'set' | 'replace' | 'clear'; reason: string; applied: boolean } {
-  if (mode === 'replace') {
-    return {
-      action: scrapedPresent ? 'replace' : 'clear',
-      reason: 'replace',
-      applied: true
-    }
-  }
-  if (mode === 'replaceIfPresent') {
-    return {
-      action: scrapedPresent ? 'replace' : 'preserve',
-      reason: scrapedPresent ? 'replaceIfPresent' : 'noValue',
-      applied: scrapedPresent
-    }
-  }
-  if (currentPresent) {
-    return { action: 'preserve', reason: 'existingValue', applied: false }
-  }
-  return {
-    action: scrapedPresent ? 'set' : 'preserve',
-    reason: scrapedPresent ? 'fillEmpty' : 'noValue',
-    applied: scrapedPresent
-  }
-}
 
 describe('videoScrapeApplyService.resolveEffectiveScrapeFields', () => {
   it('fillEmpty keeps only empty scalar fields', () => {
@@ -319,37 +272,41 @@ function matrixScrapeValue(field: VideoScrapeField): {
   return { result, coverPath, samplePaths }
 }
 
-describe('videoScrapeApplyService.planVideoScrapeResult update matrix', () => {
-  const modes: VideoScrapeUpdateMode[] = ['fillEmpty', 'replaceIfPresent', 'replace']
-  for (const field of MATRIX_FIELDS) {
-    for (const mode of modes) {
-      it(`${field} follows ${mode} semantics for every current and scraped value state`, () => {
-        setupDb()
-        const prepared = matrixScrapeValue(field)
-        for (const currentPresent of [false, true]) {
-          for (const scrapedPresent of [false, true]) {
-            configureMatrixCurrent(field, 1, currentPresent)
-            const plan = planVideoScrapeResult(
-              1,
-              scrapedPresent ? prepared.result : { code: 'MATRIX-EMPTY' },
-              scrapedPresent ? prepared.coverPath : null,
-              scrapedPresent ? prepared.samplePaths : [],
-              [field],
-              'Matrix',
-              mode,
-              'Matrix'
-            )
-            const impact = plan.impacts[0]
-            const expected = expectedMatrixImpact(mode, currentPresent, scrapedPresent)
-            assert.deepEqual(
-              { action: impact.action, reason: impact.reason, applied: plan.shouldApply },
-              expected,
-              `currentPresent=${currentPresent}, scrapedPresent=${scrapedPresent}`
-            )
-          }
-        }
-      })
-    }
+describe('videoScrapeApplyService.planVideoScrapeResult update policies', () => {
+  for (const field of ALL_VIDEO_SCRAPE_FIELDS) {
+    it(`plans filling, replacing and clearing ${field}`, () => {
+      setupDb()
+      const emptyVideo = 1
+      const populatedVideo = 2
+      configureMatrixCurrent(field, emptyVideo, false)
+      configureMatrixCurrent(field, populatedVideo, true)
+      const incoming = matrixScrapeValue(field)
+      const missing = { result: { code: 'MATRIX-EMPTY' }, coverPath: null, samplePaths: [] }
+      // fillEmpty depends on both values. Replacement policies depend on the incoming value.
+      const cases = [
+        [emptyVideo, missing, 'fillEmpty', 'preserve', 'noValue'],
+        [emptyVideo, incoming, 'fillEmpty', 'set', 'fillEmpty'],
+        [populatedVideo, missing, 'fillEmpty', 'preserve', 'existingValue'],
+        [populatedVideo, incoming, 'fillEmpty', 'preserve', 'existingValue'],
+        [emptyVideo, missing, 'replaceIfPresent', 'preserve', 'noValue'],
+        [emptyVideo, incoming, 'replaceIfPresent', 'replace', 'replaceIfPresent'],
+        [populatedVideo, missing, 'replaceIfPresent', 'preserve', 'noValue'],
+        [populatedVideo, incoming, 'replaceIfPresent', 'replace', 'replaceIfPresent'],
+        [emptyVideo, missing, 'replace', 'clear', 'replace'],
+        [emptyVideo, incoming, 'replace', 'replace', 'replace'],
+        [populatedVideo, missing, 'replace', 'clear', 'replace'],
+        [populatedVideo, incoming, 'replace', 'replace', 'replace']
+      ] as const
+      for (const [video, value, mode, action, reason] of cases) {
+        const plan = planVideoScrapeResult(video, value.result, value.coverPath, value.samplePaths, [field], 'Matrix', mode, 'Matrix')
+        const impact = plan.impacts[0]
+        assert.deepEqual(
+          [impact.field, impact.action, impact.reason, plan.shouldApply],
+          [field, action, reason, action !== 'preserve'],
+          `${field}: ${mode}, current=${video === populatedVideo}, incoming=${value === incoming}`
+        )
+      }
+    })
   }
 })
 
@@ -773,30 +730,6 @@ describe('videoScrapeApplyService.applyScrapeResult', () => {
       (db.prepare('SELECT COUNT(*) AS n FROM video_actress').get() as { n: number }).n,
       0
     )
-  })
-
-  it('replaceIfPresent updates existing scalars when scrape has values and keeps null scrape values', () => {
-    setupDb()
-    const db = getDb()
-    db.prepare('UPDATE videos SET summary = ? WHERE id = ?').run('Keep me', 1)
-
-    applyScrapeResult(
-      1,
-      { code: 'IPX-535', title: 'Updated Title', summary: undefined },
-      null,
-      new Map(),
-      [],
-      ['title', 'summary'],
-      undefined,
-      'replaceIfPresent'
-    )
-
-    const row = db.prepare('SELECT title, summary FROM videos WHERE id = ?').get(1) as {
-      title: string | null
-      summary: string | null
-    }
-    assert.equal(row.title, 'Updated Title')
-    assert.equal(row.summary, 'Keep me')
   })
 
   it('stores external stats under ratingSourceName when provided', () => {

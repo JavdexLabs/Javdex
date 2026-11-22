@@ -8,20 +8,16 @@ export function useElementSize<T extends HTMLElement>(): {
 } {
   const [size, setSize] = useState({ width: 0, height: 0 })
   const observerRef = useRef<ResizeObserver | null>(null)
+  const nodeRef = useRef<T | null>(null)
 
   const disconnect = useCallback(() => {
     observerRef.current?.disconnect()
     observerRef.current = null
   }, [])
 
-  const ref = useCallback(
-    (node: T | null) => {
+  const observeNode = useCallback(
+    (node: T) => {
       disconnect()
-      if (!node) {
-        setSize({ width: 0, height: 0 })
-        return
-      }
-
       const measure = (entry?: ResizeObserverEntry) => {
         const width = entry
           ? Math.floor(entry.contentRect.width)
@@ -44,7 +40,25 @@ export function useElementSize<T extends HTMLElement>(): {
     [disconnect]
   )
 
-  useEffect(() => disconnect, [disconnect])
+  const ref = useCallback(
+    (node: T | null) => {
+      nodeRef.current = node
+      if (!node) {
+        disconnect()
+        setSize({ width: 0, height: 0 })
+        return
+      }
+      observeNode(node)
+    },
+    [disconnect, observeNode]
+  )
+
+  useEffect(() => {
+    if (nodeRef.current && !observerRef.current) {
+      observeNode(nodeRef.current)
+    }
+    return disconnect
+  }, [disconnect, observeNode])
 
   return { ref, width: size.width, height: size.height }
 }

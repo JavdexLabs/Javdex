@@ -25,8 +25,9 @@ import { schedulePlaybackRuntimePreload } from './playbackRuntimePreload'
 import { preloadBuiltinPlaybackRuntime } from './playbackHostFactory'
 import { disposeWindowsPlaybackInterop } from './windowsPlaybackInterop'
 import { createSubtitleTasks } from './aiSubtitles/subtitleTasks'
+import { createBatchSubtitles } from './aiSubtitles/batchSubtitles'
 import { inspectSubtitleMedia } from './aiSubtitles/offlineInference'
-import { discoverSubtitleFiles } from './aiSubtitles/subtitleFiles'
+import { discoverSubtitleFiles, inspectSubtitleOutputs } from './aiSubtitles/subtitleFiles'
 import { createSubtitleDiscovery } from './subtitleDiscovery'
 import { createSubtitleFileManagement } from './subtitleFileManagement'
 
@@ -236,6 +237,11 @@ export function registerBuiltinPlayback(backend: CatalogBackend, getWindow: () =
     return aiSubtitles.command(id, command)
   })
   appCommandAdapter.register(IPC.SUBTITLE_TASKS_SNAPSHOT, subtitleTasks.snapshot)
+  const batch = createBatchSubtitles({ backend, resolver, queue: subtitleTasks,
+    paths: () => getLocalModels().subtitleRuntime().paths(), acquire: () => getLocalModels().acquireSubtitleRuntime() })
+  appCommandAdapter.register(IPC.SUBTITLE_BATCH_CONTEXT, batch.start)
+  appCommandAdapter.register(IPC.SUBTITLE_BATCH_PREVIEW, batch.preview)
+  appCommandAdapter.register(IPC.SUBTITLE_BATCH_SUBMIT, batch.submit)
   const subtitleFiles = createSubtitleFileManagement({
     resolve: async target => {
       if (backend.mode !== 'local') throw new Error('字幕文件管理目前仅支持本机资源')
@@ -265,21 +271,24 @@ export function registerBuiltinPlayback(backend: CatalogBackend, getWindow: () =
       release = await getLocalModels().acquireSubtitleRuntime()
       const metadata = await inspectSubtitleMedia(getLocalModels().subtitleRuntime().paths(), source.locator, AbortSignal.timeout(35000))
       await resolver.validate(source)
-      return { source, ...metadata, subtitles, error: null }
+      return { source, ...metadata, subtitles, existingFiles: await inspectSubtitleOutputs(source.locator), error: null }
     } catch (cause) {
-      return { source, duration: null, audio: [], subtitles, error: cause instanceof Error ? cause.message : '无法读取音轨，请检查模型运行环境' }
+      return { source, duration: null, audio: [], subtitles, existingFiles: {}, error: cause instanceof Error ? cause.message : '无法读取音轨，请检查模型运行环境' }
     } finally { release?.() }
   }
   appCommandAdapter.register(IPC.SUBTITLE_TASKS_PREPARE, async target => {
-    const { duration, audio, subtitles, error } = await prepareSubtitles(target)
-    return { duration, audio, subtitles, error }
+    const { duration, audio, subtitles, existingFiles, error } = await prepareSubtitles(target)
+    return { duration, audio, subtitles, existingFiles, error }
   })
   appCommandAdapter.register(IPC.SUBTITLE_TASKS_COMMAND, async command => {
     if (command.action === 'enqueue') {
       const prepared = await prepareSubtitles(command.target)
       if (prepared.duration == null) throw new Error(prepared.error ?? '无法读取影片时长')
       if (!prepared.audio.some(audio => audio.index === command.audioIndex)) throw new Error('所选音轨已变化，请刷新后重试')
-      await subtitleTasks.enqueue(prepared.source, command.audioIndex, prepared.duration, command.output)
+      if (!command.replaceRevision && prepared.existingFiles[command.output]) throw new Error('同名字幕已存在，请刷新后选择是否覆盖')
+      await subtitleTasks.enqueue(prepared.source, command.audioIndex, prepared.duration, command.output, command.replaceRevision)
+    } else if (command.action === 'bulk') {
+      await subtitleTasks.bulkAction(command.operation, command.ids)
     } else if (command.action === 'save-as' || command.action === 'export-srt') {
       const job = (await subtitleTasks.snapshot()).tasks.find(job => job.id === command.id)
       if (!job) throw new Error('字幕任务不存在')

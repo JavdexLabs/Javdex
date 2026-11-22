@@ -8,7 +8,7 @@ import { createSubtitleTasks } from './subtitleTasks'
 import type { PlaybackSource } from '../playbackSource'
 import type { AiRuntimePaths } from '../../services/localModels/runtimeInstaller'
 import type { createOfflineSubtitleInference } from './offlineInference'
-import { subtitleOutputPath, publishSubtitleFile, discoverSubtitleFiles } from './subtitleFiles'
+import { subtitleOutputPath, publishSubtitleFile, discoverSubtitleFiles, inspectSubtitleOutput } from './subtitleFiles'
 import { createBackgroundSubtitleDisplay } from './backgroundSubtitleDisplay'
 import { renderSubtitleAss } from './subtitleDocument'
 import type { AiSubtitleSnapshot } from '@shared/desktop/aiSubtitles'
@@ -43,9 +43,172 @@ async function fixture() {
   let jobs = createSubtitleTasks(dependencies)
   return { root, source, paths, get jobs() { return jobs }, recognizes: () => recognizes, translations: () => translations, leases: () => leases,
     waitRecognition: (fn: typeof recognizeWait) => { recognizeWait = fn }, failTranslation: (value: boolean) => { failTranslation = value },
-    changeSource: () => { changed = true }, restart: async () => { await jobs.close(); jobs = createSubtitleTasks(dependencies); await jobs.ready },
+    changeSource: () => { changed = true }, restart: async (beforeOpen?: () => Promise<void>) => {
+      await jobs.close(); await beforeOpen?.(); jobs = createSubtitleTasks(dependencies); await jobs.ready
+    },
     cleanup: async () => { await jobs.close(); await fs.rm(root, { recursive: true, force: true }) } }
 }
+
+test('batch joins the device queue exactly once, respects user pauses and never replaces an existing sidecar', async () => {
+  const f = await fixture()
+  try {
+    f.jobs.observe(true, null, 0)
+    const add = (resumeId?: string) => f.jobs.enqueueBatchItem(f.source, 1, 42, 'bilingual', 'ABC-123 · ABC-123.mp4', resumeId)
+    const destination = subtitleOutputPath(f.source.locator, 'bilingual')
+    await fs.writeFile(destination, 'user-owned')
+    assert.equal((await add()).outcome, 'skipped')
+    assert.equal((await f.jobs.snapshot()).tasks.length, 0)
+    assert.equal(await fs.readFile(destination, 'utf8'), 'user-owned')
+    await fs.unlink(destination)
+    await fs.writeFile(path.join(f.root, 'ABC-123.zh.srt'), 'existing translation')
+    const [first, duplicate] = await Promise.all([add(), add()])
+    assert.equal(first.outcome, 'queued')
+    assert.equal(duplicate.outcome, 'skipped')
+    assert.equal(await f.jobs.enqueue(f.source, 1, 42), first.id)
+    assert.equal((await f.jobs.snapshot()).tasks.length, 1)
+    const [job] = await f.jobs.matchingJobs(f.source)
+    assert.equal(job.status, 'queued')
+    await f.jobs.action(job.id, 'pause')
+    assert.equal((await add()).outcome, 'skipped')
+    assert.equal((await add('stale-id')).outcome, 'skipped')
+    assert.equal((await add(job.id)).outcome, 'resumed')
+    await f.jobs.action(job.id, 'remove')
+    assert.equal((await add(job.id)).outcome, 'skipped')
+    assert.deepEqual(await f.jobs.matchingJobs(f.source), [])
+    assert.equal(f.recognizes(), 0)
+  } finally { await f.cleanup() }
+})
+
+test('bulk shortcuts stop the active worker, respect changed states and keep published subtitles on clear', async t => {
+  const f = await fixture()
+  try {
+    const file = subtitleOutputPath(f.source.locator, 'japanese')
+    let finishSave!: () => void
+    const saving = new Promise<void>(resolve => { finishSave = resolve })
+    const link = fs.link
+    t.mock.method(fs, 'link', async (...args: Parameters<typeof fs.link>) => {
+      if (args[1] === file) await saving
+      return link(...args)
+    })
+    const saved = await f.jobs.enqueue(f.source, 1, 15, 'japanese')
+    try {
+      await until(() => f.jobs.state(saved)?.job.status === 'saving')
+      await f.jobs.bulkAction('remove-active', [saved])
+      await f.jobs.bulkAction('clear-completed', [saved])
+      await assert.rejects(f.jobs.action(saved, 'remove'), /字幕正在保存/)
+    } finally { finishSave() }
+    await until(() => f.jobs.state(saved)?.job.status === 'completed' && f.leases() === 0)
+    const original = await fs.readFile(file, 'utf8')
+    f.jobs.observe(true, null, 0)
+    const running = await f.jobs.enqueue(f.source, 1, 60)
+    const waiting = await f.jobs.enqueue(f.source, 2, 60)
+    f.waitRecognition(signal => new Promise((_, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true })))
+    f.jobs.observe(false, null, 0)
+    await until(() => f.jobs.state(running)?.job.status === 'running' && f.leases() === 1)
+    const both = [running, waiting]
+    const states = () => both.map(id => f.jobs.state(id)?.job.status)
+    await f.jobs.bulkAction('pause', [saved, ...both])
+    assert.deepEqual(states(), ['paused', 'paused'])
+    assert.equal(f.leases(), 0)
+    f.jobs.observe(true, null, 0)
+    const later = await f.jobs.enqueue(f.source, 3, 60)
+    await f.jobs.bulkAction('resume', both)
+    assert.deepEqual(states(), ['queued', 'queued'])
+    f.jobs.observe(true, running, 0)
+    await until(() => f.jobs.state(running)?.job.status === 'running' && f.leases() === 1)
+    await f.jobs.bulkAction('remove-active', [saved, ...both])
+    assert.equal(f.leases(), 0)
+    assert.deepEqual(states(), [undefined, undefined])
+    assert.equal(f.jobs.state(saved)?.job.status, 'completed')
+    assert.equal(f.jobs.state(later)?.job.status, 'queued')
+    await f.jobs.bulkAction('clear-completed', [saved, later])
+    assert.equal(f.jobs.state(saved), null)
+    await f.restart(async () => {
+      const filename = path.join(f.root, 'tasks', 'tasks.json')
+      const manifest = JSON.parse(await fs.readFile(filename, 'utf8'))
+      assert.deepEqual(manifest.jobs.map((job: { id: string }) => job.id), [later])
+      Object.assign(manifest.jobs[0], { status: 'cancelled', recognizedSeconds: 30 })
+      await fs.writeFile(filename, JSON.stringify(manifest))
+    })
+    assert.equal(f.jobs.state(later)?.job.status, 'paused')
+    assert.equal(f.jobs.state(later)?.job.recognizedSeconds, 30)
+    assert.equal(await fs.readFile(file, 'utf8'), original)
+  } finally { await f.cleanup() }
+})
+
+test('explicit regeneration from a completed job recognizes and translates again, preserving its destination until success', async () => {
+  const f = await fixture()
+  try {
+    const original = await f.jobs.enqueue(f.source, 1, 15)
+    await until(() => f.jobs.state(original)?.job.status === 'completed' && f.leases() === 0)
+    const japanese = await f.jobs.enqueue(f.source, 1, 15, 'japanese')
+    await until(() => f.jobs.state(japanese)?.job.status === 'completed' && f.leases() === 0)
+    assert.equal(f.recognizes(), 1, 'ordinary jobs can share the original recognition')
+    const dest = subtitleOutputPath(f.source.locator, 'bilingual')
+    await fs.writeFile(dest, 'previous edit')
+    const revision = (await inspectSubtitleOutput(dest))?.revision
+    assert.ok(revision)
+    f.jobs.observe(true, null, 0)
+    const add = () => f.jobs.enqueueBatchItem(f.source, 1, 15, 'bilingual', 'fixture', undefined, revision)
+    const [first, duplicate] = await Promise.all([add(), add()])
+    assert.equal(first.outcome, 'queued'); assert.equal(duplicate.outcome, 'skipped')
+    assert.deepEqual((await f.jobs.snapshot()).tasks.map(job => job.id), [japanese, first.id])
+    const id = first.id!
+    assert.notEqual(id, original)
+    await f.restart()
+    assert.equal(f.jobs.state(id)?.job.status, 'paused')
+    f.failTranslation(true)
+    await f.jobs.action(id, 'resume')
+    await until(() => f.jobs.state(id)?.job.status === 'failed' && f.leases() === 0)
+    assert.equal(await fs.readFile(dest, 'utf8'), 'previous edit')
+    assert.equal(f.recognizes(), 2)
+    f.failTranslation(false)
+    await f.jobs.action(id, 'resume')
+    await until(() => f.jobs.state(id)?.job.status === 'completed')
+    assert.match(await fs.readFile(dest, 'utf8'), /译文/)
+    assert.equal(f.recognizes(), 2)
+    assert.equal(f.translations(), 3)
+    await assert.rejects(add(), /覆盖目标已变化/)
+  } finally { await f.cleanup() }
+})
+
+test('replacing from another audio track transfers ownership even when the output bytes match', async () => {
+  const f = await fixture()
+  try {
+    const old = await f.jobs.enqueue(f.source, 1, 15, 'japanese')
+    await until(() => f.jobs.state(old)?.job.status === 'completed' && f.leases() === 0)
+    const dest = subtitleOutputPath(f.source.locator, 'japanese')
+    const previous = await fs.readFile(dest, 'utf8')
+    const revision = (await inspectSubtitleOutput(dest))?.revision
+    assert.ok(revision)
+    const next = await f.jobs.enqueue(f.source, 2, 15, 'japanese', revision)
+    await until(() => f.jobs.state(next)?.job.status === 'completed')
+    assert.equal(f.jobs.state(old)?.job.outputName, null)
+    await assert.rejects(f.jobs.action(old, 'delete-output'), /没有已保存的字幕/)
+    assert.equal(await fs.readFile(dest, 'utf8'), previous)
+  } finally { await f.cleanup() }
+})
+
+test('an edit during generation goes to awaiting-save; retry never overwrites the edit without new consent', async () => {
+  const f = await fixture()
+  try {
+    const dest = subtitleOutputPath(f.source.locator, 'japanese')
+    await fs.writeFile(dest, 'old subtitles')
+    const revision = (await inspectSubtitleOutput(dest))?.revision
+    assert.ok(revision)
+    f.jobs.observe(true, null, 0)
+    const id = await f.jobs.enqueue(f.source, 1, 15, 'japanese', revision)
+    await fs.writeFile(dest, 'edited after submission')
+    f.jobs.observe(false, null, 0)
+    await until(() => f.jobs.state(id)?.job.status === 'awaiting-save')
+    await assert.rejects(f.jobs.action(id, 'retry-save'), /原字幕已变化/)
+    assert.equal(await fs.readFile(dest, 'utf8'), 'edited after submission')
+    const copy = path.join(f.root, 'saved-as.ass')
+    await f.jobs.action(id, 'retry-save', { filename: copy, replace: false })
+    assert.match(await fs.readFile(copy, 'utf8'), /原文/)
+    assert.equal(await fs.readFile(dest, 'utf8'), 'edited after submission')
+  } finally { await f.cleanup() }
+})
 
 test('finished bilingual jobs publish beside media, deduplicate, survive restart and task removal keeps output', async () => {
   const f = await fixture()

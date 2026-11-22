@@ -1,7 +1,7 @@
 import path from 'node:path'
 import { mediaAssetStore } from '@library/mediaAssetStore'
 import { fetchPublicHttpBuffer } from '@library/net/publicHttpFetch'
-import { resolveLibraryScrapeProxyUrl } from '@library/runtime/host'
+import { libraryScrapeProxyResolver, resolveLibraryScrapeProxyUrl } from '@library/runtime/host'
 
 function isValidImageBuffer(buf: Buffer): boolean {
   return buf.length > 0 && mediaAssetStore.readImageDimensions(buf) != null
@@ -13,7 +13,8 @@ function isValidImageBuffer(buf: Buffer): boolean {
  */
 export async function fetchRemoteImageBuffer(url: string): Promise<Buffer> {
   const buf = await fetchPublicHttpBuffer(url, {
-    proxyUrl: resolveLibraryScrapeProxyUrl()
+    proxyUrl: resolveLibraryScrapeProxyUrl(),
+    resolveProxyUrls: libraryScrapeProxyResolver()
   })
   if (!isValidImageBuffer(buf)) throw new Error('图片链接返回的内容不是有效图片')
   return buf

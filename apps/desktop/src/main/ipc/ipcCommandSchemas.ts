@@ -13,9 +13,11 @@ import { ALL_VIDEO_SCRAPE_FIELDS } from '@shared/videoScrapeTypes'
 import type { IpcArgsSchemaMap } from './typedIpcAdapter'
 import { positiveSafeInteger, videoQueryIpcSchema } from './videoQueryIpcSchema'
 import { playbackTargetSchema, playbackSessionIdSchema, playbackControlSchema, playbackViewportSchema, playbackClearProgressSchema, aiSubtitleCommandSchema, subtitleTaskCommandSchema } from '../player/playbackSchemas'
+import { batchSubtitlePreviewArgs, batchSubtitleSubmitArgs } from '../player/playbackSchemas'
 import { digestSchema, expectedVersionsSchema } from '@shared/manage/primitives'
 import { localModelVariant } from '../services/localModels/modelCatalog'
 import { LOCAL_MODEL_IDS, LOCAL_TRANSLATION_MODEL_IDS } from '@shared/desktop/localModels'
+import { isManualProxyUrl, NETWORK_PROXY_FEATURES } from '@shared/networkProxy'
 
 const scanAuditSnapshot = z.object({libraryId:positiveSafeInteger,runId:z.string().min(1).max(256),finishedAt:z.string().min(1).max(100)}).strict()
 const scanAuditViewQuery = z.object({
@@ -210,6 +212,19 @@ const replacementMainName = z
   .object({ actressId: id, mainName: nonEmptyText })
   .strict()
 
+const networkProxyRoute = z.discriminatedUnion('mode', [
+  z.object({ mode: z.literal('system') }).strict(),
+  z.object({ mode: z.literal('direct') }).strict(),
+  z.object({
+    mode: z.literal('manual'),
+    url: z.string().trim().max(2048).refine(isManualProxyUrl, '请输入有效的 HTTP、HTTPS 或无认证的 SOCKS 代理地址')
+  }).strict()
+])
+const networkProxySettings = z.object({
+  default: networkProxyRoute,
+  overrides: z.partialRecord(z.enum(NETWORK_PROXY_FEATURES), networkProxyRoute)
+}).strict()
+
 const settingsPatch = z
   .object({
     closeToTray: z.boolean().optional(),
@@ -217,6 +232,7 @@ const settingsPatch = z
     proxyUrlEnabled: z.boolean().optional(),
     llmProxyUrl: text.optional(),
     llmProxyUrlEnabled: z.boolean().optional(),
+    networkProxy: networkProxySettings.optional(),
     defaultScraper: text.optional(),
     defaultActressScraper: text.optional(),
     batchDelayMinMs: finiteNumber.nonnegative().optional(),
@@ -240,6 +256,9 @@ const settingsPatch = z
     actressDetailUseFirstGalleryBackground: z.boolean().optional(),
     showVideoResourceTypeBadges: z.boolean().optional(),
     coverDisplayMode: z.enum(['portrait', 'landscape']).optional(),
+    coverSizePreset: z.enum(['sm', 'md', 'lg', 'xl']).optional(),
+    listLoadMode: z.enum(['scroll', 'paged']).optional(),
+    listPageSize: z.union([z.literal(20), z.literal(50), z.literal(100), z.literal(200)]).optional(),
     scraperPluginDelays: object.optional(),
     scraperPluginPreLogin: object.optional(),
     compositeScrapers: object.optional()
@@ -780,7 +799,7 @@ export const appIpcSchemas = {
   [IPC.SETTINGS_MODEL_MANAGEMENT_DISCOVER_MODELS]: z.tuple([nonEmptyText]),
   [IPC.SETTINGS_MODEL_MANAGEMENT_TEST_MODEL]: z.tuple([nonEmptyText]),
   [IPC.SETTINGS_RECOVERY_REVEAL_BACKUP]: noArgs,
-  [IPC.SETTINGS_PROXY_TEST]: z.tuple([z.enum(['scrape', 'llm']), text]),
+  [IPC.SETTINGS_PROXY_TEST]: z.tuple([z.enum(NETWORK_PROXY_FEATURES), networkProxyRoute]),
   [IPC.SETTINGS_OVERVIEW_STATS]: noArgs,
   [IPC.APP_UPDATE_GET_STATE]: noArgs,
   [IPC.SERVER_UPDATE_CONTROL]: z.tuple([serverUpdateCommandSchema]),
@@ -1024,6 +1043,9 @@ export const appIpcSchemas = {
   [IPC.PLAYBACK_SUBTITLE]: z.tuple([playbackSessionIdSchema]),
   [IPC.PLAYBACK_AI_SUBTITLE_SNAPSHOT]: z.tuple([]),
   [IPC.SUBTITLE_TASKS_SNAPSHOT]: z.tuple([]),
+  [IPC.SUBTITLE_BATCH_CONTEXT]: z.tuple([]),
+  [IPC.SUBTITLE_BATCH_PREVIEW]: batchSubtitlePreviewArgs,
+  [IPC.SUBTITLE_BATCH_SUBMIT]: batchSubtitleSubmitArgs,
   [IPC.SUBTITLE_TASKS_PREPARE]: z.tuple([playbackTargetSchema]),
   [IPC.SUBTITLE_TASKS_COMMAND]: z.tuple([subtitleTaskCommandSchema]),
   [IPC.SUBTITLE_FILES_LIST]: z.tuple([playbackTargetSchema]),

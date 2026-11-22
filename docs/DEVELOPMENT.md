@@ -28,7 +28,9 @@ Linux Electron 图片元数据读取和缩略图使用 Sharp 官方 WASM 后端�
 
 ## 数据格式与数据库迁移
 
-桌面本机“最近播放”不增加数据库表：`player/recentPlayback.ts` 在 Electron `userData/recent-playback.json` 中原子保存最多 1,000 个窄影片快照，同时限制 UTF-8 文件为 8 MiB，超出任一限制均从最旧记录开始淘汰，确保写入后仍可读取。按 mode／catalogId／serverId 的摘要隔离，不保存播放 URL、授权或资源路径。独立 `recentPlayback:*` IPC 读取／分页／移除／清空；桌面 `/playlists/0` 是虚拟入口，不能传给资料库清单接口。自动记录复用内置播放的真实启动信号与外部系统接受打开信号，晚到的资料读取不能跨资料库写入、覆盖较新播放或撤销已确认的清空／单条移除。资料库备份、服务器与 Web 不包含此数据。
+桌面本机“最近播放”通过 `player/recentPlayback.ts` 在 Electron `userData/recent-playback.json` 中原子保存最多 1,000 条记录。每条只含 mode／catalogId／serverId 的摘要、影片 ID 和最后播放时间。旧版卡片快照在读取时转换为对应记录，保留播放时间和顺序。独立 `recentPlayback:*` IPC 处理读取、分页、移除和清空。桌面 `/playlists/0` 是本机历史的虚拟入口。自动记录复用内置播放的真实启动信号和外部系统接受打开信号。资料库备份、服务器和 Web 不保存播放历史。
+
+读取时用 `videos.cardsByIds` 分批获取当前卡片字段，再按本机播放时间排序、筛选和分页。资料库确认影片已删除时清理对应记录。远程查询只传按 ID 排序的编号。服务端离线或查询失败时保留本机记录，恢复连接后再读取卡片。
 
 历史版本中，v0.6.2 使用 schema 15，v0.7.x 使用 schema 16，v0.8.0 使用 schema 19：17 引入 catalog 身份、写入凭据和操作回执；18 引入图片上传及关联实体版本保护；19 引入持久任务表。0.7.x 升级至 0.8.0 时执行 16 → 19，已有相同结构不重复升级。当前 0.9.0 使用 **schema 21**；从旧版升级会继续执行至 21，具体迁移以 [migrations.ts](../packages/library/src/db/migrations.ts) 为准。
 
@@ -57,7 +59,7 @@ npm run check:encoding  # 检查可疑编码字符
 npm test                # 完整检查与测试
 npm run test:ui         # 小型真实浏览器交互回归（PR CI）
 npm run test:playback:pointer:native # GNOME/Mutter 原生多击计数；会临时移动指针并打开自有测试窗口
-npm run test:ui:matrix   # 完整主题/尺寸/页面矩阵（独立入口）
+npm run test:ui:matrix   # 响应式页面与主题矩阵（独立入口）
 npm run build           # 生产构建与运行时资源校验
 npm run measure:renderer # 已构建 renderer 的静态闭包体积与选择性加载检查
 npm start               # 预览生产构建
@@ -71,7 +73,7 @@ Fetch HTTP 测试夹具可使用 `scripts/test-http.ts` 的 `listenFetchServer`�
 
 `npm run server:updater:test` 包含真实目录 fsync 与 Linux 进程组检查，应在 Linux 宿主或 Linux 容器中运行。Windows 的目录 fsync 会返回 `EPERM`，不能通过忽略持久化错误替代 Linux 验证；HTTP、协议隔离及 Renderer 用例可另在 Windows 验证。
 
-`test:ui` 是独立的真实浏览器交互回归，不由 `npm test` 隐式启动；PR CI 提供稳定版 Chrome。默认使用本机 Chrome，可用 `JAVDEX_BROWSER_EXECUTABLE` 指定可执行文件，或用 `JAVDEX_BROWSER_CHANNEL` 选择已安装通道。完整矩阵默认使用 Chrome，支持后者；`JAVDEX_CSS_FIXTURE` 可传入逗号分隔的场景名运行定向检查。两个入口使用合成资料，不读取个人媒体库；完整矩阵记录截图和几何/行为断言，不是像素差异或完整 Electron GUI 验收。
+`test:ui` 是独立的真实浏览器交互回归，不由 `npm test` 隐式启动；PR CI 提供稳定版 Chrome。默认使用本机 Chrome，可用 `JAVDEX_BROWSER_EXECUTABLE` 指定可执行文件，或用 `JAVDEX_BROWSER_CHANNEL` 选择已安装通道。页面矩阵在各场景支持的宽度之间交替抽查石墨和浅色主题，应用壳、主题设置和样式几何场景在每个支持宽度均检查两种主题。矩阵默认使用 Chrome，也支持 `JAVDEX_BROWSER_CHANNEL`。`JAVDEX_CSS_FIXTURE` 可传入逗号分隔的场景名运行定向检查。两个入口使用合成资料，不读取个人媒体库；完整矩阵记录截图和几何/行为断言，不是像素差异或完整 Electron GUI 验收。
 
 需要运行特定 Electron 测试文件时：
 

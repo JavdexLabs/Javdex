@@ -4,24 +4,29 @@ import type { SubtitlePreparation, SubtitleTaskCommand, SubtitleTasksSnapshot } 
 import { Captions, Info } from 'lucide-react'
 import { api } from '../api'
 import Button from '../components/Button'
+import Checkbox from '../../../../../../packages/ui/src/Checkbox'
 import Modal from '../components/Modal'
 import SelectControl from '../components/SelectControl'
 import EmptyState from '../components/EmptyState'
+import ScrollViewport from '../components/ScrollViewport'
 import { SegmentedControl, SegmentedOption } from '../components/SegmentedControl'
 import { playbackTime } from './playbackTime'
 import SubtitleTaskRow from './SubtitleTaskRow'
+import SubtitleTaskBulkActions from './SubtitleTaskBulkActions'
 import SubtitleFilesPanel from './SubtitleFilesPanel'
 import styles from './SubtitleTasks.module.css'
 import { matchesSubtitleFilter, type SubtitleTaskFilter } from '../tasks/taskCenterState'
 
 const filters: Array<{ value: SubtitleTaskFilter; label: string; accessible: string }> = [
-  { value: 'all', label: '全部', accessible: '全部任务' }, { value: 'active', label: '进行中 / 暂停', accessible: '进行中与已暂停' },
-  { value: 'attention', label: '需处理', accessible: '需要处理' }, { value: 'finished', label: '已结束', accessible: '已完成与已取消' }
+  { value: 'active', label: '进行中 / 暂停', accessible: '进行中与已暂停' },
+  { value: 'attention', label: '需处理', accessible: '需要处理' }, { value: 'finished', label: '已完成', accessible: '已完成' }
 ]
 
-export default function SubtitleTasksDialog({ target, onClose, embedded = false, filter = 'all', onFilterChange }: {
-  target?: PlaybackTarget; onClose(): void; embedded?: boolean; filter?: SubtitleTaskFilter; onFilterChange?(filter: SubtitleTaskFilter): void
-}): JSX.Element {
+type Props =
+  | { target?: PlaybackTarget; onClose(): void; filter?: never; onFilterChange?: never }
+  | { target?: never; onClose?: never; filter: SubtitleTaskFilter; onFilterChange(filter: SubtitleTaskFilter): void }
+
+export default function SubtitleTasksDialog({ target, onClose, filter, onFilterChange }: Props): JSX.Element {
   const [snapshot, setSnapshot] = useState<SubtitleTasksSnapshot>({ tasks: [], error: null })
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -29,9 +34,10 @@ export default function SubtitleTasksDialog({ target, onClose, embedded = false,
   const [view, setView] = useState<'files' | 'generate'>('files')
   const [audioIndex, setAudio] = useState(0)
   const [output, setOutput] = useState<'bilingual' | 'japanese'>('bilingual')
+  const [replaceRevision, setReplaceRevision] = useState<string>()
   const [busy, setBusy] = useState(false), [preparing, setPreparing] = useState(!!target)
   const [error, setError] = useState<string | null>(null)
-  const [commandError, setCommandError] = useState<{ id: string; message: string } | null>(null)
+  const [commandError, setCommandError] = useState<{ id?: string; filter?: SubtitleTaskFilter; message: string } | null>(null)
   const mounted = useRef(true), sequence = useRef(0), locked = useRef(false)
   useEffect(() => {
     mounted.current = true
@@ -49,7 +55,7 @@ export default function SubtitleTasksDialog({ target, onClose, embedded = false,
   }, [])
   const prepare = useCallback(async (): Promise<void> => {
     if (!target) return
-    setPreparing(true); setPrepared(null); setError(null)
+    setPreparing(true); setPrepared(null); setError(null); setReplaceRevision(undefined)
     try {
       const value = await api.playback.prepareSubtitles(target)
       if (mounted.current) { setPrepared(value); setAudio(value.audio[0]?.index ?? 0) }
@@ -68,14 +74,43 @@ export default function SubtitleTasksDialog({ target, onClose, embedded = false,
       if (mounted.current) {
         const message = cause instanceof Error ? cause.message : '字幕任务操作失败'
         if (command.action === 'enqueue') setError(message)
-        else setCommandError({ id: command.id, message })
+        else setCommandError({ id: command.action === 'bulk' ? undefined : command.id, filter, message })
       }
       return false
     }
     finally { locked.current = false; if (mounted.current) setBusy(false) }
   }
   const sourceTasks = snapshot.tasks.filter(job => !target || job.target.libraryId === target.libraryId && job.target.videoId === target.videoId && job.target.resourceId === target.resourceId)
-  const tasks = sourceTasks.filter(job => matchesSubtitleFilter(job, filter))
+  const tasks = filter ? sourceTasks.filter(job => matchesSubtitleFilter(job, filter)) : sourceTasks
+  const visibleError = commandError?.filter === filter ? commandError : null
+  const listAlert = visibleError && !tasks.some(job => job.id === visibleError.id)
+    ? <p className={styles.loadError} role="alert">{visibleError.message}</p> : null
+  const taskList = <>
+    {(loadError || snapshot.error) && <p className={styles.loadError} role="alert">{loadError || snapshot.error}</p>}
+    <div className={styles.list} aria-label="字幕任务列表">
+      {tasks.length > 0 && <div className={styles.columns} aria-hidden="true"><span>影片</span><span>生成进度</span><span>状态</span><span>操作</span></div>}
+      {loading && <EmptyState variant="compact" loading title="正在读取字幕任务…" />}
+      {!loading && !loadError && !snapshot.error && !tasks.length && <EmptyState variant="compact" icon={<Captions size={24} />} title={sourceTasks.length ? '没有符合筛选条件的字幕任务' : '暂无字幕任务'}
+        description={sourceTasks.length ? '可切换其他分类查看任务。' : '在影片资源的「…」菜单中选择「字幕管理」，即可关联字幕或创建生成任务。'} />}
+      {tasks.map(job => <SubtitleTaskRow key={job.id} job={job} busy={busy} error={visibleError?.id === job.id ? visibleError.message : undefined} execute={execute} />)}
+    </div>
+    <p className={styles.footnote}><Info size={13} /><span>字幕默认保存到影片目录。关闭播放器后继续生成；退出应用会暂停，下次可手动继续。</span></p>
+  </>
+  if (filter) return <div className={`${styles.root} ${styles.workspace}`}>
+    <div className={styles.toolbar}>
+      <SegmentedControl variant="subtle" aria-label="筛选字幕任务">
+        {filters.map(item => <SegmentedOption key={item.value} selected={filter === item.value} aria-label={item.accessible} onClick={() => onFilterChange(item.value)}>
+          {item.label}<span className={styles.filterCount}>{loading ? '—' : sourceTasks.filter(job => matchesSubtitleFilter(job, item.value)).length}</span>
+        </SegmentedOption>)}
+      </SegmentedControl>
+      <span className={styles.count}>{loading ? '读取中…' : `${tasks.length} 项任务`}</span>
+      <SubtitleTaskBulkActions key={filter} filter={filter} tasks={tasks} disabled={busy || loading || !!loadError || !!snapshot.error} execute={execute} />
+    </div>
+    {listAlert}
+    <ScrollViewport key={filter} variant="scroll" role="region" aria-label="字幕任务内容">{taskList}</ScrollViewport>
+  </div>
+  const existing = prepared?.existingFiles[output]
+  const replacing = !!existing?.revision && existing.revision === replaceRevision
   const content =
     <div className={styles.root}>
       {target && <div className={styles.managementTabs}>
@@ -92,34 +127,25 @@ export default function SubtitleTasksDialog({ target, onClose, embedded = false,
         </div>
         {prepared && <>
           {prepared.error && <p className={styles.error}>{prepared.error}</p>}
-          <div className={styles.fields}><label className={styles.field}>识别音轨<SelectControl value={audioIndex} disabled={busy || preparing} onChange={event => setAudio(Number(event.target.value))}>
+          <div className={styles.fields}>
+          {prepared.audio.length > 1 && <label className={styles.field}>识别音轨<SelectControl value={audioIndex} disabled={busy || preparing} onChange={event => setAudio(Number(event.target.value))}>
             {prepared.audio.map(audio => <option key={audio.index} value={audio.index}>{audio.label}</option>)}
-          </SelectControl></label>
-          <label className={styles.field}>生成内容<SelectControl value={output} disabled={busy} onChange={event => setOutput(event.target.value as typeof output)}>
+          </SelectControl></label>}
+          <label className={styles.field}>生成内容<SelectControl value={output} disabled={busy} onChange={event => { setOutput(event.target.value as typeof output); setReplaceRevision(undefined) }}>
             <option value="bilingual">日中双语</option><option value="japanese">仅日语</option>
           </SelectControl></label></div>
-          <div className={styles.createAction}><Button size="sm" variant="primary" disabled={busy || preparing || prepared.duration == null || !prepared.audio.length} onClick={() => void execute({ action: 'enqueue', target, audioIndex, output })}>生成 AI 字幕</Button></div>
+          {existing && (existing.revision ? <label className={styles.overwrite}>
+            <Checkbox checked={replacing} disabled={busy || preparing} onChange={e => setReplaceRevision(e.target.checked ? existing.revision! : undefined)} />
+            覆盖并重新生成 {existing.name}
+          </label> : <p className={styles.note}>{existing.name} 不是可替换的普通文件</p>)}
+          <div className={styles.createAction}><Button size="sm" variant="primary" disabled={busy || preparing || prepared.duration == null || !prepared.audio.length || (!!existing && !replacing)}
+            onClick={() => void execute({ action: 'enqueue', target, audioIndex, output, replaceRevision: replacing ? replaceRevision : undefined }).then(ok => { if (ok) setReplaceRevision(undefined) })}>生成 AI 字幕</Button></div>
         </>}
       </section>}
       {error && <p className={styles.loadError} role="alert">{error}</p>}
-      {embedded && onFilterChange && <div className={styles.toolbar}>
-        <SegmentedControl variant="subtle" aria-label="筛选字幕任务">
-          {filters.map(item => <SegmentedOption key={item.value} selected={filter === item.value} aria-label={item.accessible} onClick={() => onFilterChange(item.value)}>
-            {item.label}<span className={styles.filterCount}>{loading ? '—' : sourceTasks.filter(job => matchesSubtitleFilter(job, item.value)).length}</span>
-          </SegmentedOption>)}
-        </SegmentedControl>
-        <span className={styles.count}>{loading ? '读取中…' : `${tasks.length} 项任务`}</span>
-      </div>}
-      {(loadError || snapshot.error) && <p className={styles.loadError} role="alert">{loadError || snapshot.error}</p>}
-      <div className={styles.list} aria-label="字幕任务列表">
-        {tasks.length > 0 && <div className={styles.columns} aria-hidden="true"><span>影片</span><span>生成进度</span><span>状态</span><span>操作</span></div>}
-        {loading && <EmptyState variant="compact" loading title="正在读取字幕任务…" />}
-        {!loading && !loadError && !snapshot.error && !tasks.length && <EmptyState variant="compact" icon={<Captions size={24} />} title={filter === 'all' ? '暂无字幕任务' : '没有符合筛选条件的字幕任务'}
-          description={filter === 'all' ? '在影片资源的「…」菜单中选择「字幕管理」，即可关联字幕或创建生成任务。' : '可切换其他分类查看任务。'} />}
-        {tasks.map(job => <SubtitleTaskRow key={job.id} job={job} busy={busy} error={commandError?.id === job.id ? commandError.message : undefined} execute={execute} />)}
-      </div>
-      <p className={styles.footnote}><Info size={13} /><span>字幕默认保存到影片目录。关闭播放器后继续生成；退出应用会暂停，下次可手动继续。</span></p>
+      {listAlert}
+      {taskList}
       </>}
     </div>
-  return embedded ? content : <Modal title={target ? '字幕管理' : '字幕任务'} size="lg" layout="form" onCancel={onClose} hideActions>{content}</Modal>
+  return <Modal title={target ? '字幕管理' : '字幕任务'} size="lg" layout="form" onCancel={onClose} hideActions>{content}</Modal>
 }

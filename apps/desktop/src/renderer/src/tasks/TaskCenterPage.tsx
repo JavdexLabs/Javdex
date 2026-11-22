@@ -55,9 +55,9 @@ export default function TaskCenterPage(): JSX.Element {
   const subtitleError = data.subtitles.isError ? '读取失败' : !data.subtitles.data ? '读取中…' : null
   const pendingText = typeof data.pending === 'number' ? `${data.pending} 项待处理` : data.pending === 'error' ? '读取失败' : '读取中…'
   const rawFilter = new URLSearchParams(location.search).get('status')
-  const filter: SubtitleTaskFilter = rawFilter === 'attention' || rawFilter === 'active' || rawFilter === 'finished' ? rawFilter : 'all'
+  const filter: SubtitleTaskFilter = rawFilter === 'attention' || rawFilter === 'finished' ? rawFilter : 'active'
   return <TaskCenterFrame tab={tab} onRefresh={() => void refresh()} refreshing={refreshing}>
-    <ScrollViewport key={tab} variant="scroll" className={styles.body}>
+    <ScrollViewport key={tab} variant={tab === 'subtitles' && data.local ? 'fill' : 'scroll'} className={styles.body}>
       {tab === 'overview' && <>
         <div className={styles.overview}>
           <div className={styles.overviewHead}><span>任务概览</span><span>
@@ -90,7 +90,7 @@ export default function TaskCenterPage(): JSX.Element {
       </>}
       {tab === 'scan' && <ScanTaskList libraries={data.libraries.data ?? []} loading={data.libraries.isPending} error={data.libraries.isError || scans.isError} active={scans.data ?? []} refresh={refresh} />}
       {tab === 'scrape' && <ScrapeTaskList />}
-      {tab === 'subtitles' && (data.local ? <SubtitleTasksDialog embedded filter={filter} onFilterChange={value => navigate(taskCenterPath('subtitles', value))} onClose={() => {}} />
+      {tab === 'subtitles' && (data.local ? <SubtitleTasksDialog filter={filter} onFilterChange={value => navigate(taskCenterPath('subtitles', value))} />
         : <EmptyState title="字幕任务在本机资料库中管理">远程影片播放时的实时字幕仍在播放器内使用。</EmptyState>)}
     </ScrollViewport>
   </TaskCenterFrame>

@@ -4,8 +4,13 @@ import Switch from '../Switch'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronDown, RectangleHorizontal, RectangleVertical } from 'lucide-react'
 import {
+  LIST_PAGE_SIZES,
   PRIVACY_MODE_SCOPES,
+  normalizeListPageSize,
   type CoverDisplayMode,
+  type CoverSizePreset,
+  type ListLoadMode,
+  type ListPageSize,
   type PrivacyModeScope,
   type SettingsSnapshot,
   type ThemeId
@@ -35,6 +40,8 @@ import { useToast } from '../Toast'
 import { UI_ICON_SM } from '../iconDefaults'
 import { SettingsCard, SettingsHeaderSwitch } from './SettingsPrimitives'
 import { useDisplayMode } from '../DisplayModeContext'
+import CoverSizeSwitch from '../CoverSizeSwitch'
+import SelectControl from '../SelectControl'
 import Button from '../Button'
 import SettingsToggleList from '../SettingsToggleList'
 import { ThemeChoice } from './ThemePreview'
@@ -108,6 +115,9 @@ type AppearanceSettingsPatch = Partial<Pick<
   | 'actressDetailUseFirstGalleryBackground'
   | 'showVideoResourceTypeBadges'
   | 'coverDisplayMode'
+  | 'coverSizePreset'
+  | 'listLoadMode'
+  | 'listPageSize'
   | 'closeToTray'
   | 'privacyModeEnabled'
   | 'privacyModeScopes'
@@ -285,7 +295,17 @@ export default function AppearanceSettingsPanel({
 }): JSX.Element {
   const toast = useToast()
   const { syncPrivacyMode } = useTheme()
-  const { mode, setMode, syncResourceTypeBadges } = useDisplayMode()
+  const {
+    mode,
+    setMode,
+    coverSize,
+    setCoverSize,
+    listLoadMode,
+    setListLoadMode,
+    listPageSize,
+    setListPageSize,
+    syncResourceTypeBadges
+  } = useDisplayMode()
   const avatarAutoCropBatch = useAvatarAutoCropBatch()
   const [isSavingAvatarComposition, setIsSavingAvatarComposition] = useState(false)
   const [avatarSaveError, setAvatarSaveError] = useState<string | null>(null)
@@ -446,6 +466,30 @@ export default function AppearanceSettingsPanel({
     if (saved === false) setMode(previous)
   }
 
+  const changeCoverSizePreset = async (next: CoverSizePreset): Promise<void> => {
+    if (next === coverSize) return
+    const previous = coverSize
+    setCoverSize(next)
+    const saved = await onPatchSettings({ coverSizePreset: next })
+    if (saved === false) setCoverSize(previous)
+  }
+
+  const changeListLoadMode = async (next: ListLoadMode): Promise<void> => {
+    if (next === listLoadMode) return
+    const previous = listLoadMode
+    setListLoadMode(next)
+    const saved = await onPatchSettings({ listLoadMode: next })
+    if (saved === false) setListLoadMode(previous)
+  }
+
+  const changeListPageSize = async (next: ListPageSize): Promise<void> => {
+    if (next === listPageSize) return
+    const previous = listPageSize
+    setListPageSize(next)
+    const saved = await onPatchSettings({ listPageSize: next })
+    if (saved === false) setListPageSize(previous)
+  }
+
   return (
     <>
       <SettingsCard title="主题" hint="界面配色，立即生效。">
@@ -506,6 +550,65 @@ export default function AppearanceSettingsPanel({
                 <span>横版</span>
               </SegmentedOption>
             </SegmentedControl>
+          </div>
+          <div className={styles.coverRow}>
+            <span className={styles.coverCopy}>
+              <span className={styles.coverTitle}>封面大小</span>
+              <span className={styles.coverDescription}>
+                调整首页、媒体库、搜索结果和详情页中的影片卡片大小
+              </span>
+            </span>
+            <CoverSizeSwitch
+              variant="default"
+              value={coverSize}
+              onChange={(next) => void changeCoverSizePreset(next)}
+            />
+          </div>
+          <div className={styles.coverRow}>
+            <span className={styles.coverCopy}>
+              <span className={styles.coverTitle}>列表加载方式</span>
+              <span className={styles.coverDescription}>
+                切换媒体库、搜索、演员列表及详情页关联影片使用滚动加载或翻页浏览
+              </span>
+            </span>
+            <SegmentedControl variant="default" title="列表加载方式" role="group" aria-label="列表加载方式">
+              <SegmentedOption
+                type="button"
+                selected={listLoadMode === 'scroll'}
+                onClick={() => void changeListLoadMode('scroll')}
+              >
+                <span>滚动加载</span>
+              </SegmentedOption>
+              <SegmentedOption
+                type="button"
+                selected={listLoadMode === 'paged'}
+                onClick={() => void changeListLoadMode('paged')}
+              >
+                <span>翻页加载</span>
+              </SegmentedOption>
+            </SegmentedControl>
+          </div>
+          <div className={styles.coverRow}>
+            <span className={styles.coverCopy}>
+              <span className={styles.coverTitle}>每页显示数量</span>
+              <span className={styles.coverDescription}>
+                翻页加载模式下单页展示的条目数量
+              </span>
+            </span>
+            <SelectControl
+              className={styles.pageSizeSelect}
+              buttonClassName={styles.pageSizeSelectButton}
+              title="每页显示数量"
+              aria-label="每页显示数量"
+              value={listPageSize}
+              onChange={(event) => void changeListPageSize(normalizeListPageSize(event.target.value))}
+            >
+              {LIST_PAGE_SIZES.map((size) => (
+                <option key={size} value={size}>
+                  {size} 条/页
+                </option>
+              ))}
+            </SelectControl>
           </div>
         </SettingsToggleList>
       </SettingsCard>

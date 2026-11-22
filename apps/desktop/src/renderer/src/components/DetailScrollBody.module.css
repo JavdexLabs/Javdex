@@ -1,3 +1,16 @@
+.shell {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.footer {
+  flex-shrink: 0;
+}
+
 .content {
   --empty-compact-background: transparent;
   --empty-compact-border-color: color-mix(in srgb, var(--border-subtle) 58%, transparent);

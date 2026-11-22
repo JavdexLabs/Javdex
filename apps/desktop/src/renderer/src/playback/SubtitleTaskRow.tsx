@@ -11,7 +11,7 @@ import styles from './SubtitleTasks.module.css'
 
 const labels: Record<SubtitleTaskStatus, string> = {
   queued: '排队中', running: '生成中', paused: '已暂停', failed: '需处理', saving: '保存中',
-  'awaiting-save': '待保存', completed: '已保存', cancelled: '已取消'
+  'awaiting-save': '待保存', completed: '已保存'
 }
 
 function taskName(job: SubtitleTaskView): string {
@@ -32,13 +32,13 @@ export default function SubtitleTaskRow({ job, busy, error, execute }: {
   const statusTone = attention ? 'warning' : job.status === 'completed' ? 'success' : ['running', 'saving'].includes(job.status) ? 'accent' : 'neutral'
   const progress = subtitleProgress(job)
   const canExport = job.status === 'completed' || job.status === 'awaiting-save'
-  const canCancel = !['completed', 'cancelled', 'saving'].includes(job.status)
-  const canRemove = !['running', 'saving'].includes(job.status)
-  const primary = ['paused', 'failed', 'cancelled'].includes(job.status) ? { action: 'resume', label: '继续', icon: <Play size={14} /> }
+  const replaced = job.status === 'completed' && !job.outputName
+  const canRemove = job.status !== 'saving'
+  const primary = ['paused', 'failed'].includes(job.status) ? { action: 'resume', label: '继续', icon: <Play size={14} /> }
     : ['queued', 'running'].includes(job.status) ? { action: 'pause', label: '暂停', icon: <Pause size={14} /> }
       : job.status === 'awaiting-save' ? { action: 'retry-save', label: '重试保存', icon: null }
         : null
-  const command = (action: Exclude<SubtitleTaskCommand['action'], 'enqueue'>): void => {
+  const command = (action: Extract<SubtitleTaskCommand, { id: string }>['action']): void => {
     setMenu(false)
     void execute({ action, id: job.id })
   }
@@ -55,10 +55,10 @@ export default function SubtitleTaskRow({ job, busy, error, execute }: {
       <div className={styles.progressColumn}>
         <div className={styles.progressLabel}><span>{job.status === 'completed' ? '生成完成' : job.status === 'queued' ? '等待执行' : '生成进度'}</span><span>{progress == null ? '—' : `${progress}%`}</span></div>
         {progress != null && <progress className={styles.progress} max={100} value={progress} aria-label={`${name}生成进度`} />}
-        <p className={styles.progressHint}>{job.status === 'completed' ? '字幕文件已保存' : job.output === 'bilingual' ? `已译 ${playbackTime(job.translatedSeconds)}` : `已识别 ${playbackTime(job.recognizedSeconds)}`}</p>
+        <p className={styles.progressHint}>{replaced ? '可另存本次结果' : job.status === 'completed' ? '字幕文件已保存' : job.output === 'bilingual' ? `已译 ${playbackTime(job.translatedSeconds)}` : `已识别 ${playbackTime(job.recognizedSeconds)}`}</p>
       </div>
       <span className={styles.status} data-tone={statusTone}>
-        {attention ? <CircleAlert size={13} /> : job.status === 'completed' ? <Check size={13} /> : <span className={styles.dot} />}{labels[job.status]}
+        {attention ? <CircleAlert size={13} /> : job.status === 'completed' ? <Check size={13} /> : <span className={styles.dot} />}{replaced ? '已替换' : labels[job.status]}
       </span>
       <div className={styles.actions}>
         {primary ? <Button size="sm" disabled={busy} onClick={() => command(primary.action as 'resume' | 'pause' | 'retry-save')}>{primary.icon}{primary.label}</Button>
@@ -78,9 +78,8 @@ export default function SubtitleTaskRow({ job, busy, error, execute }: {
           }}>
             <DetailMenuItem ref={firstMenuItem} onClick={() => { setMenu(false); setExpanded(!expanded) }}>{expanded ? '收起详情' : '查看详情'}</DetailMenuItem>
             {canExport && <><DetailMenuItem disabled={busy} onClick={() => command('save-as')}>另存／替换</DetailMenuItem><DetailMenuItem disabled={busy} onClick={() => command('export-srt')}>导出 SRT</DetailMenuItem></>}
-            {(canCancel || canRemove) && <DetailMenuSeparator />}
-            {canCancel && <DetailMenuItem disabled={busy} onClick={() => command('cancel')}>取消任务</DetailMenuItem>}
-            {job.status === 'completed' && <DetailMenuItem danger disabled={busy} onClick={() => requestRemoval('delete-output')}>删除生成字幕</DetailMenuItem>}
+            {canRemove && <DetailMenuSeparator />}
+            {job.status === 'completed' && job.outputName && <DetailMenuItem danger disabled={busy} onClick={() => requestRemoval('delete-output')}>删除生成字幕</DetailMenuItem>}
             {canRemove && <DetailMenuItem danger disabled={busy} onClick={() => requestRemoval('remove')}>移除任务</DetailMenuItem>}
           </div>
         </FloatingLayer>
@@ -93,10 +92,9 @@ export default function SubtitleTaskRow({ job, busy, error, execute }: {
     {expanded && <div id={detailId} className={styles.details}>
       <dl className={styles.detailGrid}>
         <div><dt>影片</dt><dd>{name}</dd></div>
-        <div><dt>输出文件</dt><dd>{job.outputName || '保存后显示文件名'}</dd></div>
+        <div><dt>输出文件</dt><dd>{job.outputName ?? (replaced ? '已由其他任务替换' : '保存后显示文件名')}</dd></div>
         <div><dt>处理进度</dt><dd>识别 {playbackTime(job.recognizedSeconds)}{job.output === 'bilingual' && ` · 翻译 ${playbackTime(job.translatedSeconds)}`} / {playbackTime(job.duration)}</dd></div>
         {job.status === 'queued' && <div><dt>排队说明</dt><dd>等待前面的任务，或等待其他影片播放结束。</dd></div>}
-        {job.status === 'cancelled' && <div><dt>任务说明</dt><dd>已取消，断点保留，可继续未完成部分。</dd></div>}
         {(error || job.error) && <div><dt>问题详情</dt><dd className={styles.error}>{error || job.error}</dd></div>}
       </dl>
     </div>}
@@ -104,7 +102,7 @@ export default function SubtitleTaskRow({ job, busy, error, execute }: {
       <div><strong>{confirm === 'remove' ? '移除这个任务？' : '删除生成的字幕文件？'}</strong><p className={styles.confirmText}>{confirm === 'remove' ? '移除任务及中间结果，已保存的字幕文件保留。' : `将删除 ${job.outputName ?? name}，生成结果保留，可重新保存。`}</p></div>
       <div className={styles.confirmActions}>
         <Button size="sm" disabled={busy} onClick={() => { setConfirm(null); menuButton.current?.focus() }}>返回</Button>
-        <Button size="sm" variant="danger" disabled={busy} onClick={() => { void execute({ action: confirm, id: job.id }).then(ok => { if (ok) setConfirm(null) }) }}>确认{confirm === 'remove' ? '移除' : '删除'}</Button>
+        <Button size="sm" variant="danger" disabled={busy || (confirm === 'remove' && !canRemove)} onClick={() => { void execute({ action: confirm, id: job.id }).then(ok => { if (ok) setConfirm(null) }) }}>确认{confirm === 'remove' ? '移除' : '删除'}</Button>
       </div>
     </div>}
   </section>

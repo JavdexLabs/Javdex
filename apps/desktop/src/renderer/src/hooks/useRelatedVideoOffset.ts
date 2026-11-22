@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useLocation, useSearchParams } from 'react-router-dom'
+import { useDisplayMode } from '../components/DisplayModeContext'
 import { LIST_PARAM, patchSearchParams } from '../listView/listQueryParams'
 
 const PAGE_SIZE = 60
@@ -11,13 +12,15 @@ export function useRelatedVideoOffset(
   param: typeof LIST_PARAM.relatedVideoOffset | typeof LIST_PARAM.actressVideoOffset = LIST_PARAM.relatedVideoOffset
 ) {
   const [params, setParams] = useSearchParams()
+  const { listLoadMode, listPageSize } = useDisplayMode()
+  const pageStep = listLoadMode === 'paged' ? listPageSize : pageSize
   const { state } = useLocation()
   const currentWriter = useRef(setParams)
   currentWriter.current = setParams
   const live = useRef(false)
   useLayoutEffect(() => { live.current = true; return () => { live.current = false } }, [])
   const raw = params.get(param), value = Number(raw)
-  const parsedOffset = raw && /^\d+$/.test(raw) && Number.isSafeInteger(value) ? Math.floor(value / pageSize) * pageSize : 0
+  const parsedOffset = raw && /^\d+$/.test(raw) && Number.isSafeInteger(value) ? value : 0
   const previousHash = useRef(sessionHash)
   const [clearing, setClearing] = useState(false)
   const resetting = previousHash.current !== sessionHash || clearing
@@ -27,18 +30,17 @@ export function useRelatedVideoOffset(
   const move = useCallback((next: number) => {
     if (!live.current || currentWriter.current !== setParams || blockAnchor.current) return
     if (!Number.isSafeInteger(next) || next < 0) return
-    const page = Math.floor(next / pageSize) * pageSize
-    const normalized = page ? String(page) : null
+    const normalized = next ? String(next) : null
     if (raw === normalized) return
     setParams(current => patchSearchParams(current, { [param]: normalized }), { replace: true, state })
-  }, [raw, pageSize, param, setParams, state])
+  }, [raw, param, setParams, state])
   const align = useCallback((known: boolean, total: number) => {
     if (!live.current || currentWriter.current !== setParams || resetting) return
-    const next = known && offset >= total ? Math.max(0, Math.floor((total - 1) / pageSize) * pageSize) : offset
+    const next = known && offset >= total ? Math.max(0, Math.floor((total - 1) / pageStep) * pageStep) : offset
     if (raw !== (next ? String(next) : null)) {
       setParams(current => patchSearchParams(current, { [param]: next ? String(next) : null }), { replace: true, state })
     }
-  }, [resetting, offset, raw, pageSize, param, setParams, state])
+  }, [resetting, offset, raw, pageStep, param, setParams, state])
   useEffect(() => {
     const changed = previousHash.current !== sessionHash
     previousHash.current = sessionHash

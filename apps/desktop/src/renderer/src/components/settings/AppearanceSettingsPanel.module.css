@@ -386,6 +386,20 @@
   line-height: var(--settings-lh, 1.45);
 }
 
+.pageSizeSelect {
+  width: 112px;
+  flex-shrink: 0;
+}
+
+.pageSizeSelectButton {
+  --select-control-font-size: var(--settings-fs-secondary, 12px);
+
+  height: var(--control-h-sm);
+  min-height: var(--control-h-sm);
+  padding: 0 28px 0 12px;
+  font-variant-numeric: tabular-nums;
+}
+
 .privacyCard {
   overflow: hidden;
 }

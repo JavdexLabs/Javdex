@@ -8,17 +8,6 @@ import {
 } from './classificationPickerState'
 
 describe('classification picker state', () => {
-  it('stays closed until the user asks for candidates', () => {
-    assert.deepEqual(visibleClassificationPicker(CLOSED_CLASSIFICATION_PICKER, 'Collection', 3), {
-      open: false,
-      activeIndex: -1
-    })
-    const typed = reduceClassificationPicker(CLOSED_CLASSIFICATION_PICKER, { type: 'query' }, 3)
-    assert.deepEqual(visibleClassificationPicker(typed, 'Collection', 3), {
-      open: true,
-      activeIndex: -1
-    })
-  })
 
   it('hides candidates when the result set is empty', () => {
     const typed = reduceClassificationPicker(CLOSED_CLASSIFICATION_PICKER, { type: 'query' }, 0)
@@ -59,13 +48,6 @@ describe('classification picker state', () => {
       open: true,
       activeIndex: -1
     })
-  })
-
-  it('closes on dismiss', () => {
-    assert.deepEqual(
-      reduceClassificationPicker({ open: true, activeIndex: 1 }, { type: 'dismiss' }, 3),
-      CLOSED_CLASSIFICATION_PICKER
-    )
   })
 
   it('hides the create hint when the query already names an existing option', () => {

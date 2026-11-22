@@ -16,7 +16,7 @@ export function registerRecentPlaybackHandlers(ctx: IpcContext, backend: Catalog
   appCommandAdapter.register(IPC.RECENT_PLAYBACK_REMOVE, history.remove)
   appCommandAdapter.register(IPC.RECENT_PLAYBACK_CLEAR, history.clear)
   return async (videoId: number): Promise<void> => {
-    try { await history.started(videoId) }
+    try { history.started(videoId) }
     catch { console.warn('[playback] unable to save device recent-playback history') }
   }
 }

@@ -49,6 +49,7 @@ export default function CatalogConnectionPanel(): JSX.Element {
   const { session, reconnect } = useDesktopSession()
   const playerHintId = useId()
   const playerModeHintId = useId()
+  const renderModeHintId = useId()
   const playerProgramHintId = useId()
   const playerPathId = useId()
   const serverAddressId = useId()
@@ -546,13 +547,13 @@ export default function CatalogConnectionPanel(): JSX.Element {
           <div className={styles.playerRow}>
             <span className={styles.playerFieldLabel}>内置播放模式</span>
             <div className={styles.playerRowContent}>
-              <SegmentedControl variant="subtle" aria-label="内置播放模式">
+              <SegmentedControl variant="subtle" className={styles.playerModes} aria-label="内置播放模式" aria-describedby={renderModeHintId}>
                 {([['auto', '自动'], ['gpu', 'GPU'], ['cpu', 'CPU 兼容']] as const).map(([value, label]) =>
-                  <SegmentedOption key={value} selected={playerForm.draft.playbackRenderMode === value}
+                  <SegmentedOption key={value} className={styles.playerModeOption} selected={playerForm.draft.playbackRenderMode === value}
                     disabled={savingPlayer || connectionBusy || !savedSettings}
                     onClick={() => playerForm.setDraft(current => ({ ...current, playbackRenderMode: value }))}>{label}</SegmentedOption>)}
               </SegmentedControl>
-              <p className={styles.playerNote}>自动模式检查 GPU 画面通路，失败时切换到 CPU；GPU 模式失败时报告原因，CPU 兼容使用软件解码和绘制。保存后重开影片生效。</p>
+              <p id={renderModeHintId} className={styles.playerNote}>自动模式检查 GPU 画面通路，失败时切换到 CPU；GPU 模式失败时报告原因，CPU 兼容使用软件解码和绘制。保存后重开影片生效。</p>
             </div>
           </div>
           <div className={styles.playerRow}>

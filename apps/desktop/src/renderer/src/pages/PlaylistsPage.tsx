@@ -6,7 +6,7 @@ import { useLocation, useMatch, useNavigate, useSearchParams } from 'react-route
 import { ListVideo, SearchX } from 'lucide-react'
 import type { PlaylistCreateInput } from '@shared/playlistTypes'
 import { api } from '../api'
-import { usePlaylistBrowsePage } from '../hooks/usePlaylistBrowsePage'
+import { useBuiltinPlaylists, usePlaylistBrowsePage } from '../hooks/usePlaylistBrowsePage'
 import ContinuousGrid from '../components/ContinuousGrid'
 import { LIST_PARAM, PLAYLIST_PAGE_SIZE, parsePlaylistOffset, patchSearchParams } from '../listView/listQueryParams'
 import { navigateToPlaylistDetail } from '../listView/listNavigation'
@@ -22,9 +22,9 @@ import ListSurface from '../components/ListSurface'
 import { UI_ICON_SM } from '../components/iconDefaults'
 import Button from '../components/Button'
 import PlaylistCard from '../components/PlaylistCard'
+import BuiltinPlaylistSection from '../components/BuiltinPlaylistSection'
 import { usePlaylistImport } from '../components/playlistImport/PlaylistImportContext'
 import { onPlaylistImportCompleted } from '../components/playlistImport/events'
-import { useRecentPlayback } from '../hooks/useRecentPlayback'
 import styles from './PlaylistsPage.module.css'
 
 export default function PlaylistsPage(): JSX.Element {
@@ -45,8 +45,6 @@ export default function PlaylistsPage(): JSX.Element {
   useDismissOverlaysOnNavigate(dismissOverlays, location.pathname)
 
   const urlQ = searchParams.get(LIST_PARAM.q) ?? ''
-  const recent = useRecentPlayback()
-  const showRecent = Boolean(recent.metadata && `${recent.metadata.name} ${recent.metadata.description}`.toLowerCase().includes(urlQ.trim().toLowerCase()))
   const context = `${location.key}:${location.pathname}:${location.search}`
   const [draft,setDraft] = useState<{context:string;value:string}>()
   const searchInput = draft?.context === context ? draft.value : urlQ
@@ -61,9 +59,8 @@ export default function PlaylistsPage(): JSX.Element {
   },[context,draft,urlQ,setSearchParams])
   const offset=parsePlaylistOffset(searchParams.get(LIST_PARAM.playlistOffset))
   const page=usePlaylistBrowsePage({search:urlQ,offset,limit:PLAYLIST_PAGE_SIZE,kind:'custom'})
-  const builtins=usePlaylistBrowsePage({search:urlQ,offset:0,limit:2,kind:'builtin'})
-  const builtinItems = [...builtins.items].sort((a, b) => Number(b.system_kind === 'favorites') - Number(a.system_kind === 'favorites'))
-  const hasBuiltins = builtinItems.length > 0 || showRecent
+  const builtins = useBuiltinPlaylists(urlQ)
+  const hasBuiltins = builtins.items.length > 0
   const loading=page.loading
   const reloadCustom=page.reload, reloadBuiltins=builtins.reload
   const loadList=useCallback(() => { reloadCustom(); reloadBuiltins() }, [reloadCustom, reloadBuiltins])
@@ -173,7 +170,7 @@ export default function PlaylistsPage(): JSX.Element {
           }
           resultCount={
             <ResultCount  aria-live="polite">
-              共 {page.known && builtins.known ? page.total + builtins.total + (showRecent ? 1 : 0) : '…'} 个
+              共 {page.known && builtins.total !== undefined ? page.total + builtins.total : '…'} 个
             </ResultCount>
           }
         />
@@ -185,21 +182,8 @@ export default function PlaylistsPage(): JSX.Element {
         showScrollToTop={showScrollToTop}
         onScrollToTop={scrollToTop}
       >
-        {hasBuiltins && <section className={styles.builtinSection} aria-label="内置清单">
-          <h2 className={styles.sectionTitle}>内置清单</h2>
-          <div className={styles.builtinGrid}>
-            {builtinItems.map(item => <PlaylistCard key={item.id} item={item} compact active={activeId === item.id}
-              onOpen={() => navigateToPlaylistDetail(navigate, location, item.id)} />)}
-            {showRecent && recent.metadata && <PlaylistCard item={recent.metadata} compact active={activeId === recent.metadata.id}
-              onOpen={() => navigateToPlaylistDetail(navigate, location, recent.metadata!.id)} />}
-          </div>
-        </section>}
-        {builtins.error && <EmptyState variant="compact" title="内置清单读取失败" description={builtins.error}>
-          <Button onClick={() => builtins.reload()}>重试</Button>
-        </EmptyState>}
-        {recent.error && <EmptyState variant="compact" title="本机最近播放读取失败" description={recent.error}>
-          <Button onClick={() => void recent.reload()}>重试</Button>
-        </EmptyState>}
+        {(hasBuiltins || builtins.error || builtins.recentError) && <BuiltinPlaylistSection lists={builtins} activeId={activeId}
+          onOpen={id => navigateToPlaylistDetail(navigate, location, id)} />}
         <section className={styles.customSection} aria-label="我的清单">
           <h2 className={styles.sectionTitle}>我的清单 <span className={styles.sectionCount}>{page.known ? `共 ${page.total} 个` : '…'}</span></h2>
           {renderList()}

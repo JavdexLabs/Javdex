@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { it } from 'node:test'
 import React from 'react'
 import TestRenderer, { act } from 'react-test-renderer'
+import { DEFAULT_SETTINGS, type SettingsSnapshot } from '@shared/settingsTypes'
 import { renderedText } from '../../test/renderedText'
 
 Object.defineProperty(globalThis, 'React', { configurable: true, value: React })
@@ -27,23 +28,47 @@ it('saves proxy address and mode only on explicit commit; testing stays independ
       }
     }
   })
-  const { ProxyConfigRow } = await import('./NetworkSettingsPanel')
+  const { default: NetworkSettingsPanel } = await import('./NetworkSettingsPanel')
   const { default: SelectControl } = await import('../SelectControl')
+  const settings: SettingsSnapshot = {
+    ...DEFAULT_SETTINGS,
+    mediaAssetsResolvedPath: '',
+    recoveryNotice: null,
+    llmSecretStorage: { protection: 'unavailable', backend: 'test' }
+  }
   let renderer!: TestRenderer.ReactTestRenderer
   try {
     act(() => {
       renderer = TestRenderer.create(
-        <ProxyConfigRow kind="scrape" savedValue="" enabled={false} onSaved={() => {}} />
+        <NetworkSettingsPanel settings={settings} onSaved={() => {}} />
       )
     })
+    const selectedMode = renderer.root.findAllByType('button').find((button) => button.props['aria-pressed'])
+    assert.equal(selectedMode && visibleText(selectedMode), '跟随系统')
+    const features = renderer.root.findByType('section')
+    assert.equal(features.findAllByType('details').length, 0)
+    assert.equal(features.findAllByType(SelectControl).length, 4)
+    assert.equal(renderer.root.findAllByType('input').length, 0)
+    const manualMode = renderer.root.findAllByType('button').find((button) => visibleText(button) === '手动代理')!
+    act(() => manualMode.props.onClick())
     act(() =>
       renderer.root
         .findByType('input')
         .props.onChange({ target: { value: 'http://127.0.0.1:7890' } })
     )
-    act(() =>
-      renderer.root.findByType(SelectControl).props.onChange({ target: { value: 'proxy' } })
-    )
+    const downloadsSelect = renderer.root.findAllByType(SelectControl).at(-1)!
+    assert.equal(downloadsSelect.props.value, 'inherit')
+    act(() => downloadsSelect.props.onChange({ target: { value: 'manual' } }))
+    const downloadAddress = features.findByType('input')
+    assert.equal(downloadAddress.props['aria-label'], '模型与运行库下载代理地址')
+    act(() => downloadAddress.props.onChange({ target: { value: 'invalid' } }))
+    const save = renderer.root.findAllByType('button').find((button) => renderedText(button) === '保存')!
+    await act(async () => { save.props.onClick() })
+    assert.equal(downloadAddress.props['aria-invalid'], true)
+    const localFeedback = features.findByProps({ id: downloadAddress.props['aria-describedby'] })
+    assert.match(visibleText(localFeedback), /有效的 HTTP/)
+    act(() => downloadsSelect.props.onChange({ target: { value: 'direct' } }))
+    assert.equal(features.findAllByType('input').length, 0)
     assert.deepEqual(updates, [])
     const test = renderer.root
       .findAllByType('button')
@@ -51,15 +76,15 @@ it('saves proxy address and mode only on explicit commit; testing stays independ
     await act(async () => {
       test.props.onClick()
     })
-    assert.deepEqual(tested, [['scrape', 'http://127.0.0.1:7890']])
+    assert.deepEqual(tested, [['updates', { mode: 'manual', url: 'http://127.0.0.1:7890' }]])
     assert.deepEqual(updates, [])
-    const save = renderer.root
-      .findAllByType('button')
-      .find((button) => renderedText(button) === '保存')!
     await act(async () => {
       save.props.onClick()
     })
-    assert.deepEqual(updates, [{ proxyUrl: 'http://127.0.0.1:7890', proxyUrlEnabled: true }])
+    assert.deepEqual(updates, [{ networkProxy: {
+      default: { mode: 'manual', url: 'http://127.0.0.1:7890' },
+      overrides: { downloads: { mode: 'direct' } }
+    } }])
   } finally {
     act(() => renderer?.unmount())
     Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })

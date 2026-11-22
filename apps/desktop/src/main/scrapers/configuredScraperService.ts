@@ -16,6 +16,7 @@ import {
 } from '@shared/scraperServiceTypes'
 import { resolveScrapeProxyUrl } from '@shared/settingsTypes'
 import { getSettings, updateSettings } from '../settings/settingsStore'
+import { electronProxyConfig, proxyCredentials } from '../utils/networkProxyTransport'
 import {
   deleteScraperServiceToken,
   getScraperServiceSecretStorageState,
@@ -59,6 +60,7 @@ export interface ScraperServiceTransportRequest {
   url: string
   headers: Readonly<Record<string, string>>
   proxyUrl?: string
+  followRedirects?: boolean
   timeoutMs: number
   maxBytes: number
 }
@@ -85,7 +87,7 @@ interface ScraperServiceSnapshot {
   serviceId: ScraperServiceId
   baseUrl: string
   token: string
-  proxyUrl: string
+  proxyUrl?: string
   timeoutMs: number
   keepFirstCandidate: boolean
 }
@@ -107,13 +109,13 @@ function activeTransport(): ScraperServiceTransport {
 }
 
 function serviceSession(proxyUrl: string | undefined): Promise<Session> {
-  const proxyKey = proxyUrl?.trim() || 'direct'
+  const proxyKey = proxyUrl?.trim() ?? 'direct://'
   const key = createHash('sha256').update(proxyKey).digest('hex').slice(0, 16)
   let pending = serviceSessions.get(key)
   if (!pending) {
     pending = (async () => {
       const ses = session.fromPartition(`metatube-service-${key}`)
-      await ses.setProxy(proxyUrl ? { proxyRules: proxyUrl } : { mode: 'direct' })
+      await ses.setProxy(electronProxyConfig(proxyKey))
       return ses
     })()
     serviceSessions.set(key, pending)
@@ -146,17 +148,23 @@ async function electronScraperServiceTransport(
       url: input.url,
       session: ses,
       headers: input.headers,
-      redirect: 'manual',
+      redirect: input.followRedirects ? 'follow' : 'manual',
       useSessionCookies: false
     })
-    req.on('redirect', (statusCode, _method, redirectUrl, headers) => {
-      resolveOnce({
-        statusCode,
-        headers: { ...headers, location: redirectUrl },
-        body: Buffer.alloc(0)
-      })
-      req.abort()
+    req.on('login', (auth, callback) => {
+      const [username, password] = proxyCredentials(input.proxyUrl, auth)
+      callback(username, password)
     })
+    if (!input.followRedirects) {
+      req.on('redirect', (statusCode, _method, redirectUrl, headers) => {
+        resolveOnce({
+          statusCode,
+          headers: { ...headers, location: redirectUrl },
+          body: Buffer.alloc(0)
+        })
+        req.abort()
+      })
+    }
     req.on('response', (response) => {
       const declaredLength = Number(response.headers['content-length'] ?? 0)
       if (Number.isFinite(declaredLength) && declaredLength > input.maxBytes) {
@@ -213,6 +221,26 @@ function assertTargetWithinService(baseUrl: string, target: URL): void {
   if (prefix && target.pathname !== prefix && !target.pathname.startsWith(`${prefix}/`)) {
     throw new ScraperServiceError('REDIRECT_BLOCKED', 'MetaTube 请求被阻止：目标路径离开了配置前缀')
   }
+}
+
+export async function fetchDirectMetaTubeImage(url: string): Promise<Buffer | undefined> {
+  const config = getSettings().scraperServiceConfigs.metatube
+  if (!config.serverUrl || config.useScrapeProxy) return
+  const prefix = `${normalizedBasePath(config.serverUrl)}/v1/images/`
+  const target = new URL(url)
+  if (target.origin !== new URL(config.serverUrl).origin || !target.pathname.startsWith(prefix)
+    || target.username || target.password) return
+  const response = await activeTransport()({
+    url: target.href,
+    headers: { Accept: 'image/*' },
+    followRedirects: true,
+    timeoutMs: DEFAULT_REQUEST_TIMEOUT_MS,
+    maxBytes: 64 * 1024 * 1024
+  })
+  if (response.statusCode < 200 || response.statusCode >= 300) {
+    throw new ScraperServiceError('HTTP', `MetaTube 图片请求失败（HTTP ${response.statusCode}）`, response.statusCode)
+  }
+  return response.body
 }
 
 function buildServiceUrl(
@@ -287,7 +315,7 @@ function createClient(snapshot: ScraperServiceSnapshot): ConfiguredScraperServic
             Accept: 'application/json',
             ...(snapshot.token ? { Authorization: `Bearer ${snapshot.token}` } : {})
           },
-          proxyUrl: snapshot.proxyUrl || undefined,
+          proxyUrl: snapshot.proxyUrl,
           timeoutMs: snapshot.timeoutMs,
           maxBytes: MAX_JSON_BYTES
         })
@@ -361,7 +389,7 @@ function storedServiceSnapshot(timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS): ScraperS
     serviceId: 'metatube',
     baseUrl: config.serverUrl,
     token: getScraperServiceToken('metatube'),
-    proxyUrl: config.useScrapeProxy ? resolveScrapeProxyUrl(settings) : '',
+    proxyUrl: config.useScrapeProxy ? resolveScrapeProxyUrl(settings) : undefined,
     timeoutMs,
     keepFirstCandidate: config.keepFirstCandidate === true
   }
@@ -518,7 +546,7 @@ export async function testScraperServiceConnection(
     serviceId,
     baseUrl: serverUrl,
     token: resolveTokenUpdate(input.tokenUpdate),
-    proxyUrl: input.useScrapeProxy ? resolveScrapeProxyUrl(settings) : '',
+    proxyUrl: input.useScrapeProxy ? resolveScrapeProxyUrl(settings) : undefined,
     timeoutMs: CONNECTION_TEST_TIMEOUT_MS,
     keepFirstCandidate: false
   })

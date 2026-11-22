@@ -243,9 +243,10 @@ function runSandboxWorkerInternal<T = void>(
     : initialPayload
 
   return new Promise<T | SandboxRunResult<T>>((resolve, reject) => {
+    const proxy = payload.proxyUrl && URL.canParse(payload.proxyUrl) ? new URL(payload.proxyUrl) : null
     const worker = new Worker(SANDBOX_WORKER_SOURCE, {
       eval: true,
-      workerData: payload
+      workerData: { ...payload, proxyUrl: proxy?.host ? `${proxy.protocol}//${proxy.host}` : undefined }
     })
 
     let terminalRequested = false
@@ -754,11 +755,12 @@ async function main() {
     publicUrl: servicePublicUrl,
     keepFirstCandidate: workerData.service.keepFirstCandidate === true
   } : undefined;
+  const pluginProxyUrl = workerData.proxyUrl;
   let result;
   if (workerData.kind === 'video') {
     const ctx = {
       code: workerData.task && workerData.task.code,
-      proxyUrl: workerData.proxyUrl,
+      proxyUrl: pluginProxyUrl,
       cheerio,
       fetchPage,
       fetchBuffer,
@@ -766,12 +768,12 @@ async function main() {
       helpers,
       ...(service ? { service } : {})
     };
-    result = loaded.parseVideo ? await loaded.parseVideo(ctx) : await loaded.parseTask(ctx, workerData.proxyUrl);
+    result = loaded.parseVideo ? await loaded.parseVideo(ctx) : await loaded.parseTask(ctx, pluginProxyUrl);
   } else {
     const ctx = {
       mainName: workerData.task && workerData.task.mainName,
       aliases: (workerData.task && workerData.task.aliases) || [],
-      proxyUrl: workerData.proxyUrl,
+      proxyUrl: pluginProxyUrl,
       cheerio,
       fetchPage,
       fetchBuffer,
@@ -780,7 +782,7 @@ async function main() {
     };
     result = loaded.parseActress
       ? await loaded.parseActress(ctx)
-      : await loaded.parseTask(ctx, ctx.aliases, workerData.proxyUrl);
+      : await loaded.parseTask(ctx, ctx.aliases, pluginProxyUrl);
   }
 
   parentPort.postMessage({ type: 'done', result });

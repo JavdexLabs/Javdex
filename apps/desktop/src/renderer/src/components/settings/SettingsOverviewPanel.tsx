@@ -16,6 +16,7 @@ import {
 import type { WebAccessStatus } from '@shared/webTypes'
 import type { SettingsSnapshot, ThemeId } from '@shared/settingsTypes'
 import type { ModelManagementSnapshot } from '@shared/modelManagementTypes'
+import { NETWORK_PROXY_ROUTE_LABELS, networkProxySettings } from '@shared/networkProxy'
 import type { BatchProgress } from '@shared/batchScrapeTypes'
 import { api } from '../../api'
 import { UI_ICON_SM } from '../iconDefaults'
@@ -129,16 +130,6 @@ function formatCount(value: number): string {
 function scrapePercent(part: number, total: number): number {
   if (total <= 0) return 0
   return Math.round((part / total) * 100)
-}
-
-function proxyStatus(enabled: boolean, url: string): { detail: string; value: string } {
-  if (enabled && url.trim()) {
-    return { detail: formatCompactPath(url, 48), value: '已启用' }
-  }
-  if (url.trim()) {
-    return { detail: '已填写地址', value: '未启用' }
-  }
-  return { detail: '未配置地址', value: '直连' }
 }
 
 export function SettingsStatusCard({
@@ -457,8 +448,8 @@ export default function SettingsOverviewPanel({
     return formatCompactPath(mediaAssetsPath)
   }, [mediaAssetsPath, usingDefaultMediaPath])
 
-  const scrapeProxy = proxyStatus(settings.proxyUrlEnabled, settings.proxyUrl ?? '')
-  const llmProxy = proxyStatus(settings.llmProxyUrlEnabled, settings.llmProxyUrl ?? '')
+  const proxy = networkProxySettings(settings)
+  const proxyOverrides = Object.keys(proxy.overrides).length
   const lanAccess = webAccessOverviewStatus({ status: webAccess, error: webAccessError })
 
   const videoDefaultBlockReason = scrapeActionBlockReason({
@@ -591,17 +582,10 @@ export default function SettingsOverviewPanel({
           />
           <SettingsStatusCard
             icon={Globe}
-            label="刮削代理"
-            value={scrapeProxy.value}
-            detail={scrapeProxy.detail}
-            onClick={() => onNavigate('network', 'proxy', 'settings-proxy-scrape')}
-          />
-          <SettingsStatusCard
-            icon={Bot}
-            label="模型代理"
-            value={llmProxy.value}
-            detail={llmProxy.detail}
-            onClick={() => onNavigate('network', 'proxy', 'settings-proxy-llm')}
+            label="网络代理"
+            value={NETWORK_PROXY_ROUTE_LABELS[proxy.default.mode]}
+            detail={proxyOverrides ? `${proxyOverrides} 项单独设置` : undefined}
+            onClick={() => onNavigate('network', 'proxy')}
           />
           <SettingsStatusCard
             icon={Brain}

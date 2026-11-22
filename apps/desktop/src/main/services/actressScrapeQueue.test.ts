@@ -3,10 +3,11 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import type { ActressBatchScrapeFilter } from '@shared/actressScrapeTypes'
 import { closeDatabase, getDb, initDatabaseAtPath } from '@library/db/database'
 import { getActressDetail } from '@library/db/actressRepo'
 import { installScraperPluginPackage } from '../scrapers/scraperPluginService'
-import { resetSettingsCacheForTests } from '../settings/settingsStore'
+import { resetSettingsCacheForTests, updateSettings } from '../settings/settingsStore'
 import { estimateActressBatchScrapeTargetCount } from './actressBatchScrapeTargets'
 import { actressScrapeQueue } from './actressScrapeQueue'
 import { resetBatchScrapeJobCache } from './batchScrapeJobStore'
@@ -50,6 +51,7 @@ beforeEach(async () => {
   tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'javdex-actress-scrape-queue-'))
   process.env.JAVDEX_TEST_USER_DATA = tempRoot
   resetSettingsCacheForTests()
+  updateSettings({ batchDelayMinMs: 0, batchDelayMaxMs: 0 })
   resetBatchScrapeJobCache()
   createDefaultScrapeJobController({
     emit: () => undefined,
@@ -141,10 +143,10 @@ describe('actressScrapeQueue.start target resolution', () => {
   })
 
   it('starts no target for an empty explicit id list', async () => {
+    const filter: ActressBatchScrapeFilter = { actressIds: [], scope: 'all', scrapeStatus: 'all' }
+    assert.equal(estimateActressBatchScrapeTargetCount(filter), 0)
     await actressScrapeQueue.start({
-      actressIds: [],
-      scope: 'all',
-      scrapeStatus: 'all',
+      ...filter,
       fields: ['birthDate'],
       scraperName: PLUGIN_NAME,
       mode: 'replace'

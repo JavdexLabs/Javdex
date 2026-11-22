@@ -8,6 +8,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useMatch, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import {
   Archive,
+  Captions,
   Plus,
   Film,
   ListPlus,
@@ -45,11 +46,14 @@ import { FilterPanelAnchor } from '../components/FilterPanelContent'
 import ListToolbar from '../components/ListToolbar'
 import AddToPlaylistModal from '../components/AddToPlaylistModal'
 import AddVideosToPlaylistModal from '../components/AddVideosToPlaylistModal'
+import BatchSubtitleModal from '../playback/BatchSubtitleModal'
+import { useDesktopSession } from '../desktop/DesktopSessionContext'
 import EditMetadataModal from '../components/EditMetadataModal'
 import Modal from '../components/Modal'
 import VideoDeleteImpact from '../components/VideoDeleteImpact'
 import ScrapeFieldsModal from '../components/ScrapeFieldsModal'
 import SortSwitch, { type SortSwitchOption } from '../components/SortSwitch'
+import CoverSizeSwitch from '../components/CoverSizeSwitch'
 import {
   LIBRARY_DEFAULTS,
   LIST_PARAM,
@@ -144,6 +148,8 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
   const detailOpen = Boolean(useMatch({ path: ROUTE_MATCH.mediaLibraryVideoOpen, end: false }))
   const [playlistTarget, setPlaylistTarget] = useState<VideoCard | null>(null)
   const [showBulkPlaylist, setShowBulkPlaylist] = useState(false)
+  const [subtitleIds, setSubtitleIds] = useState<number[] | null>(null)
+  const { session } = useDesktopSession()
   const [editingVideo, setEditingVideo] = useState<VideoDetail | null>(null)
   const [editLoadingId, setEditLoadingId] = useState<number | null>(null)
   const [scrapeTarget, setScrapeTarget] = useState<VideoCard | null>(null)
@@ -192,6 +198,7 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
     setFilterOpen(false)
     setPlaylistTarget(null)
     setShowBulkPlaylist(false)
+    setSubtitleIds(null)
     setEditingVideo(null)
     setEditLoadingId(null)
     setScrapeTarget(null)
@@ -760,6 +767,14 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
                 onClick: () => setShowBulkScrape(true)
               },
               {
+                key: 'subtitles',
+                label: '生成 AI 字幕',
+                icon: <Captions {...UI_ICON_SM} aria-hidden />,
+                disabled: session.mode !== 'local' || selectingRange,
+                title: session.mode !== 'local' ? '批量生成字幕需要使用本机资料库' : selectingRange ? '正在读取所选影片' : undefined,
+                onClick: () => setSubtitleIds([...selectedIds])
+              },
+              {
                 key: 'delete',
                 label: '删除影片',
                 icon: <Trash2 {...UI_ICON_SM} aria-hidden />,
@@ -819,6 +834,8 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
                     })
                   }
                 />
+
+                <CoverSizeSwitch variant="toolbar" />
 
                 <Button
                   type="button"
@@ -978,6 +995,10 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
             invalidateVideoLibraryQueries(queryClient)
           }}
         />
+      )}
+
+      {subtitleIds && session.mode === 'local' && (
+        <BatchSubtitleModal key={libraryId} libraryId={libraryId} videoIds={subtitleIds} onClose={() => setSubtitleIds(null)} />
       )}
 
       {showBulkPlaylist && (

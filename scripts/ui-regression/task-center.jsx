@@ -27,7 +27,8 @@ if (subtitleScene) tasks = [
   { id: 'paused', title: '影片播放', status: 'paused', duration: 6646, recognizedSeconds: 1200, translatedSeconds: 1200, outputName: 'DEMO-004.zh-ja.ai.ass' },
   { id: 'completed', title: '影片播放', status: 'completed', duration: 10563, recognizedSeconds: 10563, translatedSeconds: 10563, outputName: 'DEMO-071.zh-ja.ai.ass' },
   { id: 'queued', title: 'DEMO-002 · 海岸漫步', status: 'queued', duration: 5400, recognizedSeconds: 0, translatedSeconds: 0 },
-  { id: 'save', title: 'DEMO-003 · 森林清晨', status: 'awaiting-save', duration: 6030, recognizedSeconds: 6030, translatedSeconds: 6030, error: '同名字幕已存在，请另存或在保存对话框中确认替换。' }
+  { id: 'save', title: 'DEMO-003 · 森林清晨', status: 'awaiting-save', duration: 6030, recognizedSeconds: 6030, translatedSeconds: 6030, error: '同名字幕已存在，请另存或在保存对话框中确认替换。' },
+  ...Array.from({ length: 9 }, (_, index) => ({ id: `paused-${index}`, title: `DEMO-${100 + index}`, status: 'paused', duration: 7200, recognizedSeconds: 1200, translatedSeconds: 1200 }))
 ].map(task => ({ ...task, target: { libraryId: 1, videoId: 2, resourceId: 3 }, audioIndex: 1, output: 'bilingual' }))
 window.taskCommandDetails = []
 window.failCommand = null
@@ -50,9 +51,15 @@ window.api = {
       window.taskCommands.push(command.action)
       window.taskCommandDetails.push(command)
       if (window.failCommand === command.action) throw new Error('当前影片资源暂不可用，请检查文件路径后继续。')
+      if (command.action === 'bulk') {
+        const ids = new Set(command.ids)
+        tasks = ['remove-active', 'clear-completed'].includes(command.operation) ? tasks.filter(task => !ids.has(task.id))
+          : tasks.map(task => ids.has(task.id) ? { ...task, status: { pause: 'paused', resume: 'queued' }[command.operation] } : task)
+      }
       if (command.action === 'retry-save') tasks = tasks.map(task => task.id === command.id ? { ...task, status: 'completed', outputName: 'DEMO-003.zh-ja.ai.ass', error: null } : task)
-      if (['pause', 'resume', 'cancel'].includes(command.action)) tasks = tasks.map(task => task.id === command.id ? { ...task, status: { pause: 'paused', resume: 'running', cancel: 'cancelled' }[command.action] } : task)
+      if (['pause', 'resume'].includes(command.action)) tasks = tasks.map(task => task.id === command.id ? { ...task, status: { pause: 'paused', resume: 'running' }[command.action] } : task)
       if (command.action === 'remove') tasks = tasks.filter(task => task.id !== command.id)
+      if (command.action === 'remove' && window.failCommand === 'remove-after-commit') throw new Error('记录已移除，但中间文件未能清理')
       return { tasks, error: null }
     } }
 }

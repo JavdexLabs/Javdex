@@ -1,5 +1,6 @@
 import type { ScanAuditSnapshotIdentity, ScanAuditIndexQuery, ScanAuditIndexPage, ScanAuditReadHeader, ScanAuditViewQuery, ScanAuditViewPage } from './scanAuditReadTypes'
 import type { ClassificationPageQuery, ClassificationListPage } from './classificationTypes'
+import type { NetworkProxyFeature, NetworkProxyRoute } from './networkProxy'
 import type { WebAccessInput, WebAccessStatus } from './webTypes'
 import { IPC } from './ipc-channels'
 import type { ServerUpdateCommand, ServerUpdateSnapshot } from './serverUpdateTypes'
@@ -213,7 +214,7 @@ export interface AppIpcContract {
     result: ModelTestResult
   }
   [IPC.SETTINGS_RECOVERY_REVEAL_BACKUP]: { args: []; result: boolean }
-  [IPC.SETTINGS_PROXY_TEST]: { args: [kind: 'scrape' | 'llm', proxyUrl: string]; result: string }
+  [IPC.SETTINGS_PROXY_TEST]: { args: [feature: NetworkProxyFeature, route: NetworkProxyRoute]; result: string }
   [IPC.SETTINGS_OVERVIEW_STATS]: { args: []; result: LibraryOverviewStats }
 
   [IPC.APP_UPDATE_GET_STATE]: { args: []; result: UpdateCheckState }
@@ -468,6 +469,9 @@ export interface AppIpcContract {
   [IPC.PLAYBACK_SUBTITLE]: { args: [sessionId: string]; result: void }
   [IPC.PLAYBACK_AI_SUBTITLE_SNAPSHOT]: { args: []; result: import('./desktop/aiSubtitles').AiSubtitleSnapshot }
   [IPC.SUBTITLE_TASKS_SNAPSHOT]: { args: []; result: import('./desktop/subtitleTasks').SubtitleTasksSnapshot }
+  [IPC.SUBTITLE_BATCH_CONTEXT]: { args: []; result: string }
+  [IPC.SUBTITLE_BATCH_PREVIEW]: { args: [context: string, libraryId: number, videoId: number, resourceId: number | null]; result: import('./desktop/subtitleTasks').BatchSubtitlePreview }
+  [IPC.SUBTITLE_BATCH_SUBMIT]: { args: [context: string, libraryId: number, output: import('./desktop/subtitleTasks').SubtitleOutput, items: import('./desktop/subtitleTasks').BatchSubtitleItem[]]; result: import('./desktop/subtitleTasks').BatchSubtitleResult[] }
   [IPC.SUBTITLE_TASKS_PREPARE]: { args: [target: import('./desktop/playback').PlaybackTarget]; result: import('./desktop/subtitleTasks').SubtitlePreparation }
   [IPC.SUBTITLE_TASKS_COMMAND]: { args: [command: import('./desktop/subtitleTasks').SubtitleTaskCommand]; result: import('./desktop/subtitleTasks').SubtitleTasksSnapshot }
   [IPC.SUBTITLE_FILES_LIST]: { args: [target: import('./desktop/playback').PlaybackTarget]; result: import('./desktop/subtitleTasks').SubtitleFilesSnapshot }

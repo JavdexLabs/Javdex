@@ -21,11 +21,19 @@ window.api = {
   actressScrape: { conflictSummary: async () => ({ groupCount: 2 }) },
   scrape: { countPending: async () => 4, listPlugins: async () => [], listPluginDetails: async () => [] },
   settings: { get: async () => ({ theme, privacyModeEnabled: false, privacyModeScopes: ['globalBackground'] }) },
-  assetCrypto: { onProgress: () => () => {} }
+  assetCrypto: { onProgress: () => () => {} },
+  desktop: { pointerTiming: async () => ({ doubleClickMs: 500, source: 'chromium' }) },
+  playback: {
+    observation: async () => ({ snapshot: null, revision: 0 }),
+    onChanged: () => () => {},
+    onAiSubtitleChanged: () => () => {},
+    subtitleTasks: async () => ({ tasks: [], error: null })
+  }
 }
 const { default: Layout } = await import('../../apps/desktop/src/renderer/src/components/Layout')
 const { AppBackgroundProvider, useAppBackground } = await import('../../apps/desktop/src/renderer/src/components/AppBackgroundContext')
 const { ImagePreviewOverlayProvider, useImagePreviewOverlay } = await import('../../apps/desktop/src/renderer/src/components/ImagePreviewOverlayContext')
+const { OverlayHistoryProvider } = await import('../../apps/desktop/src/renderer/src/interaction/OverlayHistoryContext')
 const { ThemeProvider, useTheme } = await import('../../apps/desktop/src/renderer/src/components/ThemeProvider')
 const { ToastProvider } = await import('../../apps/desktop/src/renderer/src/components/Toast')
 const query = new QueryClient({ defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } } })
@@ -54,6 +62,8 @@ function Shell() {
 }
 createRoot(document.getElementById('root')).render(
   <QueryClientProvider client={query}><MemoryRouter initialEntries={['/libraries/3/video/1?q=ABC']}>
-    <ThemeProvider><ToastProvider><AppBackgroundProvider><ImagePreviewOverlayProvider><Shell /></ImagePreviewOverlayProvider></AppBackgroundProvider></ToastProvider></ThemeProvider>
+    <ThemeProvider><ToastProvider><AppBackgroundProvider><OverlayHistoryProvider>
+      <ImagePreviewOverlayProvider><Shell /></ImagePreviewOverlayProvider>
+    </OverlayHistoryProvider></AppBackgroundProvider></ToastProvider></ThemeProvider>
   </MemoryRouter></QueryClientProvider>
 )

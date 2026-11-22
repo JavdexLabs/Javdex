@@ -16,6 +16,7 @@ import { scrapeBrowser } from '../scrapers/scrapeBrowser'
 import { isScrapeBrowserBusyError } from '../scrapers/scrapeBrowser'
 import {
   collectVideoScrape,
+  fetchVideoScrapeImage,
   type ScrapeOutcome,
   type ScrapeVideoOptions
 } from '../scrapers/scraperManager'
@@ -60,7 +61,7 @@ export async function resolveRemoteScrapeFields<T extends VideoScrapeField | Act
 }
 
 async function readAsset(asset: MetadataAssetRef, sourceUrl?: string): Promise<Buffer> {
-  if (asset.kind === 'remote-url') return scrapeBrowser.fetchBuffer(asset.url, { referer: sourceUrl || 'omit' })
+  if (asset.kind === 'remote-url') return fetchVideoScrapeImage(asset.url, sourceUrl)
   return getDefaultNfoFileStore().readBytes(asset.capability, 64 * 1024 * 1024)
 }
 

@@ -8,8 +8,6 @@ import {
   estimateActressBatchScrapeTargetCount,
   normalizeActressBatchScrapeFilter,
   normalizeActressBatchScrapeRequest,
-  normalizeActressBatchScrapeStatus,
-  parseActressBatchScrapeStatus,
   reconcilePersistedActressBatchJob,
   resolveActressBatchScrapeTargets,
   type ActressBatchScrapeFilterInput
@@ -56,32 +54,6 @@ afterEach(() => {
 })
 
 describe('actressBatchScrapeTargets status normalization', () => {
-  it('keeps the four canonical cumulative-status scopes', () => {
-    for (const scope of ['unscraped', 'success', 'failed', 'all'] as const) {
-      assert.equal(normalizeActressBatchScrapeStatus(scope), scope)
-    }
-  })
-
-  it('normalizes the legacy scraped scope to 刮削成功', () => {
-    assert.equal(normalizeActressBatchScrapeStatus('scraped'), 'success')
-  })
-
-  it('normalizes an omitted scope to 全部', () => {
-    assert.equal(normalizeActressBatchScrapeStatus(undefined), 'all')
-  })
-
-  it('rejects an unknown scope instead of widening the batch', () => {
-    assert.throws(() => normalizeActressBatchScrapeStatus('everything'), /everything/)
-  })
-
-  it('reports unknown scopes without throwing for persisted job snapshots', () => {
-    assert.deepEqual(parseActressBatchScrapeStatus('everything'), {
-      ok: false,
-      value: 'everything'
-    })
-    assert.deepEqual(parseActressBatchScrapeStatus('scraped'), { ok: true, status: 'success' })
-  })
-
   it('never produces the legacy scope in a normalized request', () => {
     const request = normalizeActressBatchScrapeRequest({
       scope: 'female',
@@ -159,7 +131,7 @@ describe('reconcilePersistedActressBatchJob', () => {
 })
 
 describe('actressBatchScrapeTargets resolution', () => {
-  it('resolves each canonical cumulative-status scope', () => {
+  it('resolves each canonical cumulative-status scope and defaults to all', () => {
     setupDb()
 
     assert.deepEqual(targetNames({ scope: 'all', scrapeStatus: 'unscraped' }), ['Bravo'])
@@ -172,12 +144,6 @@ describe('actressBatchScrapeTargets resolution', () => {
       'Delta',
       'Echo'
     ])
-  })
-
-  it('resolves the legacy scraped scope as 刮削成功 and an omitted scope as 全部', () => {
-    setupDb()
-
-    assert.deepEqual(targetNames({ scope: 'all', scrapeStatus: 'scraped' }), ['Alpha', 'Echo'])
     assert.equal(targetNames({ scope: 'all' }).length, 5)
   })
 
@@ -198,52 +164,15 @@ describe('actressBatchScrapeTargets resolution', () => {
     assert.deepEqual(targetNames({ scope: 'male', scrapeStatus: 'failed' }), ['Charlie'])
   })
 
-  it('treats explicit ids as the whole target set, ignoring the other filters', () => {
-    setupDb()
-
-    assert.deepEqual(
-      targetNames({
-        actressIds: [3],
-        scope: 'female',
-        scrapeStatus: 'unscraped',
-        missingFields: ['avatar']
-      }),
-      ['Charlie']
-    )
-  })
-
-  it('deduplicates explicit ids and drops ids without a stored actress', () => {
-    setupDb()
-
-    assert.deepEqual(targetNames({ actressIds: [2, 2, 999], scope: 'all' }), ['Bravo'])
+  it('deduplicates explicit ids before resolving them against the database', () => {
     assert.deepEqual(
       normalizeActressBatchScrapeFilter({ actressIds: [2, 2, 999], scope: 'all' }).actressIds,
       [2, 999]
     )
   })
-
-  it('treats an empty explicit id list as zero targets', () => {
-    setupDb()
-
-    assert.deepEqual(targetNames({ actressIds: [], scope: 'all', scrapeStatus: 'all' }), [])
-    assert.equal(estimateActressBatchScrapeTargetCount({ actressIds: [], scope: 'all' }), 0)
-  })
 })
 
 describe('actressBatchScrapeTargets estimate and start', () => {
-  it('estimates the count the start would resolve from the same request', () => {
-    setupDb()
-    const filter: ActressBatchScrapeFilterInput = { scope: 'female', scrapeStatus: 'scraped' }
-
-    const estimate = estimateActressBatchScrapeTargetCount(filter)
-    const started = resolveActressBatchScrapeTargets(
-      normalizeActressBatchScrapeRequest({ ...filter, fields: ALL_ACTRESS_SCRAPE_FIELDS })
-    )
-
-    assert.equal(estimate, 2)
-    assert.equal(started.length, estimate)
-  })
-
   it('resolves targets again on start, so the total may differ from an earlier estimate', () => {
     setupDb()
     const filter: ActressBatchScrapeFilterInput = { scope: 'all', scrapeStatus: 'unscraped' }

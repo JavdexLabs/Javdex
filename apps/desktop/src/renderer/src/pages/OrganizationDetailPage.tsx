@@ -326,7 +326,7 @@ export default function OrganizationDetailPage(): JSX.Element {
             />
           ) : (
             <>
-              <ContinuousPosterGrid window={videoPage.window} initialIndex={videoPage.offset} onAnchor={index => videoPage.move(Math.floor(index / 60) * 60)} scope={videoQueryHash} />
+              <ContinuousPosterGrid window={videoPage.window} initialIndex={videoPage.offset} onAnchor={videoPage.move} scope={videoQueryHash} />
             </>
           )}
         </ClassificationDetailSurface>

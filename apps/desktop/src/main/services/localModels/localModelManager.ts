@@ -61,6 +61,7 @@ export function createLocalModelManager(userData: string, options: {
   /** Startup choice captured before another service creates fresh cloud settings; saved local usage still wins. */
   initialTextTranslationMode?: LocalTranslationMode
   installer?: typeof createAiRuntimeInstaller
+  download?: typeof fetch
   inference?: (paths: Parameters<typeof createLocalTextInference>[0]) => TextEngine
   runtimeSupported?: typeof localModelRuntimeSupported
   detectDevices?: typeof detectLocalGpuDevices
@@ -120,8 +121,8 @@ export function createLocalModelManager(userData: string, options: {
   let subtitleLeaseInstaller: ReturnType<typeof createAiRuntimeInstaller> | null = null
   const listeners = new Set<() => void>()
   const supported = options.runtimeSupported ?? localModelRuntimeSupported
-  const installer = (selection = selected, model = translationModel) => (options.installer ?? createAiRuntimeInstaller)(directory, undefined, localModelAssets(selection, model, undefined, downloadSource))
-  const gpuInstaller = (backend: 'cuda' | 'vulkan') => (options.installer ?? createAiRuntimeInstaller)(directory, undefined,
+  const installer = (selection = selected, model = translationModel) => (options.installer ?? createAiRuntimeInstaller)(directory, options.download, localModelAssets(selection, model, undefined, downloadSource))
+  const gpuInstaller = (backend: 'cuda' | 'vulkan') => (options.installer ?? createAiRuntimeInstaller)(directory, options.download,
     [...gpuRuntimeAssets(currentAiRuntimeTarget(), backend), ...localModelAssets(selected, translationModel).filter(asset => !asset.archive)])
   const runtimePaths = (runtime: ReturnType<typeof createAiRuntimeInstaller>, refs = {
     recognition: usage.subtitleRecognition.variant, translation: usage.subtitleTranslation.variant

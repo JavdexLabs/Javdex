@@ -21,9 +21,7 @@ function impact(id = 1, revision = 'first'): VideoLifecycleImpact {
 const resource = { id: 7, video_id: 1, library_id: 1, kind: 'local', display_name: 'old', locator: '/file' } as VideoResource
 const fake = { videos: {
   previewDeleteGlobally: async (_id: number) => impact(),
-  previewRemoveFromLibrary: async (_library: number, _id: number) => impact(),
   deleteGlobally: async (_input: unknown): Promise<unknown> => ({}),
-  removeFromLibrary: async (_input: unknown): Promise<unknown> => ({}),
   getResource: async () => resource,
   updateLocalResourceLabel: async (..._args: unknown[]) => true,
   setPrimaryResource: async () => true,
@@ -76,9 +74,7 @@ afterEach(async () => {
   await act(async () => renderer?.unmount())
   renderer = undefined; messages.length = 0; refreshes = 0; invalidations = 0
   fake.videos.previewDeleteGlobally = async () => impact()
-  fake.videos.previewRemoveFromLibrary = async () => impact()
   fake.videos.deleteGlobally = async () => ({})
-  fake.videos.removeFromLibrary = async () => ({})
   fake.videos.getResource = async () => resource
   fake.videos.updateLocalResourceLabel = async () => true
   fake.videos.removeResource = async () => ({ videoDeleted: false })
@@ -126,17 +122,6 @@ test('commit rejects duplicate clicks and does not navigate a different video on
   await act(async () => { pending.resolve({}); await request })
   assert.equal(output(), 'closed'); assert.deepEqual(messages, [])
   assert.equal(refreshes, 1)
-})
-
-test('lifecycle no longer exposes the retired manual membership removal action', async () => {
-  let keys: string[] = []
-  function Probe() {
-    keys = Object.keys(useVideoLifecycleController({ scopeKey: '1', videoId: 1, libraryId: 1,
-      onCommitted: () => {}, onSuccess: () => {}, onError: () => {} }))
-    return null
-  }
-  await mount(<Probe />)
-  assert.deepEqual(keys, ['deletion'])
 })
 
 test('resource editor saves the label and refreshes after completion', async () => {

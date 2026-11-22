@@ -45,12 +45,39 @@ afterEach(() => {
 })
 
 describe('DisplayModeProvider', () => {
+  it('preserves the latest choice across out-of-order saves and restores the last saved size on failure', async (t) => {
+    const { DisplayModeProvider, useDisplayMode } = await import('./DisplayModeContext')
+    const requests: { resolve: (value: object) => void; reject: () => void }[] = []
+    t.mock.method(window.api.settings, 'update', () => new Promise<object>((resolve, reject) => {
+      requests.push({ resolve, reject })
+    }))
+    let display!: ReturnType<typeof useDisplayMode>
+    function Harness() { display = useDisplayMode(); return null }
+    await act(async () => { renderer = TestRenderer.create(<DisplayModeProvider><Harness /></DisplayModeProvider>) })
+    act(() => { void display.persistListPageSize(20); void display.persistListPageSize(50) })
+    await act(async () => requests[1].resolve({ listPageSize: 50 }))
+    await act(async () => requests[0].resolve({ listPageSize: 20 }))
+    assert.equal(display.listPageSize, 50)
+    act(() => { void display.persistListPageSize(100) })
+    await act(async () => requests[2].reject())
+    assert.equal(display.listPageSize, 50)
+  })
+
   it('loads and exposes the application-wide cover mode', async () => {
     const { DisplayModeProvider, useDisplayMode } = await import('./DisplayModeContext')
 
     function Harness(): JSX.Element {
-      const { mode } = useDisplayMode()
-      return <span data-mode={mode}>{mode}</span>
+      const { mode, coverSize, listLoadMode, listPageSize } = useDisplayMode()
+      return (
+        <span
+          data-mode={mode}
+          data-cover-size={coverSize}
+          data-load-mode={listLoadMode}
+          data-page-size={listPageSize}
+        >
+          {mode}
+        </span>
+      )
     }
 
     await act(async () => {
@@ -63,15 +90,24 @@ describe('DisplayModeProvider', () => {
     })
     assert.ok(renderer)
     assert.equal(renderer.root.findByType('span').props['data-mode'], 'portrait')
+    assert.equal(renderer.root.findByType('span').props['data-cover-size'], 'md')
+    assert.equal(renderer.root.findByType('span').props['data-load-mode'], 'scroll')
+    assert.equal(renderer.root.findByType('span').props['data-page-size'], 100)
 
     await act(async () => {
       resolveSettings?.({
         coverDisplayMode: 'landscape',
+        coverSizePreset: 'lg',
+        listLoadMode: 'paged',
+        listPageSize: 50,
         showVideoResourceTypeBadges: false
       })
       await Promise.resolve()
       await Promise.resolve()
     })
     assert.equal(renderer.root.findByType('span').props['data-mode'], 'landscape')
+    assert.equal(renderer.root.findByType('span').props['data-cover-size'], 'lg')
+    assert.equal(renderer.root.findByType('span').props['data-load-mode'], 'paged')
+    assert.equal(renderer.root.findByType('span').props['data-page-size'], 50)
   })
 })

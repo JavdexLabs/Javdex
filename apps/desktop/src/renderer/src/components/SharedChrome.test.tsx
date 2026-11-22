@@ -4,7 +4,6 @@ import React from 'react'
 import TestRenderer, { act } from 'react-test-renderer'
 import EmptyState from './EmptyState'
 import IconButton from './IconButton'
-import { AppFormSection } from './FormPrimitives'
 import CodeEditor from './CodeEditor'
 import Modal from './Modal'
 
@@ -43,16 +42,6 @@ test('icon button retains native label, tone, ref and disabled state without bri
   assert.equal(button.props['aria-label'], '删除')
   assert.equal(button.props.title, '删除')
   assert.equal(button.props.disabled, true)
-  assertLocalClasses()
-})
-
-test('form sections retain title, hint, actions and body with local presentation', () => {
-  act(() => { renderer = TestRenderer.create(<AppFormSection title="字段分组" hint="说明"
-    actions={<button>刷新</button>} className="layout"><input defaultValue="正文" /></AppFormSection>) })
-  assert.equal(renderer!.root.findByType('h4').children.join(''), '字段分组')
-  assert.equal(renderer!.root.findByType('p').children.join(''), '说明')
-  assert.equal(renderer!.root.findByType('button').children.join(''), '刷新')
-  assert.equal(renderer!.root.findByType('input').props.defaultValue, '正文')
   assertLocalClasses()
 })
 

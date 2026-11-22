@@ -7,6 +7,7 @@ export const CATALOG_METHODS = {
     homeLoad: true,
     homeSearch: true,
     listVideos: true,
+    videoCardsByIds: true,
     getVideo: true,
     listVideoYears: true,
     resolveScrapeFields: true,

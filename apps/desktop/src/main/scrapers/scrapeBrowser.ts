@@ -7,6 +7,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { createRequire } from 'node:module'
+import { setTimeout as delay } from 'node:timers/promises'
 import { APP_PACKAGE_NAME, readTestUserDataPath } from '@shared/appIdentity'
 import type { Browser, Locator, Page, Route } from 'playwright-core'
 import {
@@ -66,6 +67,7 @@ const POST_ACTION_OBSERVATION_ATTEMPTS = 3
 interface RunningHelper {
   generation: number
   child: ChildProcess
+  exited: Promise<void>
   server: Server
   pipePath: string
   framed: ScrapeBrowserFramedSocket
@@ -250,6 +252,13 @@ function withAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
   })
 }
 
+async function terminateHelperProcess(child: ChildProcess, exited: Promise<void>): Promise<void> {
+  if (child.pid !== undefined && child.exitCode === null && child.signalCode === null) {
+    child.kill('SIGKILL')
+  }
+  await exited
+}
+
 function responseError(frame: ScrapeBrowserResponseFrame): Error {
   const source = frame.error
   if (source?.code === 'CHALLENGE') {
@@ -335,6 +344,7 @@ function isTransientObservationError(error: unknown): boolean {
 export class ScrapeBrowserHostModule implements ScrapeBrowserHost {
   private helper: RunningHelper | null = null
   private helperPromise: Promise<RunningHelper> | null = null
+  private helperStopPromise: Promise<void> | null = null
   private readonly pending = new Map<string, PendingRequest>()
   private activeLease: ActiveLeaseState | null = null
   private pendingAcquire: {
@@ -590,6 +600,7 @@ export class ScrapeBrowserHostModule implements ScrapeBrowserHost {
   }
 
   private async ensureHelper(signal: AbortSignal): Promise<RunningHelper> {
+    while (this.helperStopPromise) await withAbort(this.helperStopPromise, signal)
     signal.throwIfAborted()
     if (this.helper && !this.helper.fatal) return this.helper
     if (!this.helperPromise) {
@@ -617,72 +628,83 @@ export class ScrapeBrowserHostModule implements ScrapeBrowserHost {
     const token = crypto.randomBytes(32).toString('hex')
     const pipePath = helperPipePath()
     const cdpPort = await reserveLoopbackPort()
+    const startup = new AbortController()
+    const signal = startup.signal
+    const deadline = setTimeout(() => {
+      startup.abort(new Error('Scraper helper 启动超时'))
+    }, HELPER_START_TIMEOUT_MS)
+    let onFailure = (error: Error): void => startup.abort(error)
+    let child: ChildProcess | undefined
+    let exited: Promise<void> | undefined
+    let acceptedSocket: Socket | undefined
+    let framed: ScrapeBrowserFramedSocket | undefined
+    let browser: Browser | undefined
+
     const server = net.createServer()
-    const socketPromise = new Promise<Socket>((resolve, reject) => {
-      server.once('connection', resolve)
-      server.once('error', reject)
+    server.on('error', (error) => onFailure(error))
+    const socketPromise = new Promise<Socket>((resolve) => {
+      server.once('connection', (socket) => {
+        acceptedSocket = socket
+        resolve(socket)
+      })
     })
-    await new Promise<void>((resolve, reject) => {
-      server.once('error', reject)
-      server.listen(pipePath, resolve)
-    })
-
-    const args = process.defaultApp || !process.versions.electron
-      ? [hostAppPath(), SCRAPE_BROWSER_HELPER_FLAG]
-      : [SCRAPE_BROWSER_HELPER_FLAG]
-    const env = { ...process.env }
-    delete env.ELECTRON_RUN_AS_NODE
-    env[SCRAPE_BROWSER_HELPER_ENV.pipe] = pipePath
-    env[SCRAPE_BROWSER_HELPER_ENV.token] = token
-    env[SCRAPE_BROWSER_HELPER_ENV.profile] = path.join(hostUserDataPath(), 'Partitions', 'scraper')
-    env[SCRAPE_BROWSER_HELPER_ENV.cdpPort] = String(cdpPort)
-    env[SCRAPE_BROWSER_HELPER_ENV.parentPid] = String(process.pid)
-    const child = spawn(electronExecutable(), args, {
-      env,
-      stdio: ['ignore', 'ignore', 'pipe'],
-      // CREATE_NO_WINDOW hides the helper BrowserWindow on Windows.
-      windowsHide: false
-    })
-    child.stderr?.on('data', (data: Buffer) => {
-      const rawMessage = data.toString('utf8').trim()
-      const message = rawMessage.includes('DevTools listening on')
-        ? 'DevTools listening (loopback endpoint redacted)'
-        : rawMessage
-        .replaceAll(token, '[redacted-token]')
-        .replaceAll(pipePath, '[redacted-pipe]')
-        .replaceAll(env[SCRAPE_BROWSER_HELPER_ENV.profile]!, '[redacted-profile]')
-        .replaceAll(`127.0.0.1:${cdpPort}`, '[redacted-cdp]')
-      if (message) console.error(`[scraper-helper] ${message.slice(0, 2000)}`)
-    })
-
-    const framedHolder: { value?: ScrapeBrowserFramedSocket } = {}
     try {
-      const socket = await withTimeout(socketPromise, HELPER_START_TIMEOUT_MS, 'Scraper helper IPC 连接超时')
-      if (server.listening) server.close()
-      const helloPromise = new Promise<ScrapeBrowserHelloFrame>((resolve, reject) => {
-        framedHolder.value = new ScrapeBrowserFramedSocket(
-          socket,
-          (frame) => {
-            if (frame.type === 'hello') {
-              resolve(frame)
-              return
-            }
-            this.handleFrame(frame)
-          },
-          reject
-        )
+      await withAbort(new Promise<void>((resolve) => server.listen(pipePath, resolve)), signal)
+
+      const args = process.defaultApp || !process.versions.electron
+        ? [hostAppPath(), SCRAPE_BROWSER_HELPER_FLAG]
+        : [SCRAPE_BROWSER_HELPER_FLAG]
+      const env = { ...process.env }
+      delete env.ELECTRON_RUN_AS_NODE
+      env[SCRAPE_BROWSER_HELPER_ENV.pipe] = pipePath
+      env[SCRAPE_BROWSER_HELPER_ENV.token] = token
+      env[SCRAPE_BROWSER_HELPER_ENV.profile] = path.join(hostUserDataPath(), 'Partitions', 'scraper')
+      env[SCRAPE_BROWSER_HELPER_ENV.cdpPort] = String(cdpPort)
+      env[SCRAPE_BROWSER_HELPER_ENV.parentPid] = String(process.pid)
+      const spawned = spawn(electronExecutable(), args, {
+        env,
+        stdio: ['ignore', 'ignore', 'pipe'],
+        windowsHide: false
       })
-      const hello = await withTimeout(helloPromise, HELPER_START_TIMEOUT_MS, 'Scraper helper 握手超时')
-      const framed = framedHolder.value
-      if (!framed) throw new Error('Scraper helper IPC 尚未建立')
-      assertScrapeBrowserHello(hello, {
-        token,
-        parentPid: process.pid,
-        cdpPort,
-        childPid: child.pid
+      child = spawned
+      exited = new Promise<void>((resolve) => {
+        spawned.once('exit', () => {
+          resolve()
+          onFailure(new Error('Scraper helper exited'))
+        })
+        spawned.on('error', (error) => {
+          if (spawned.pid === undefined) resolve()
+          onFailure(error)
+        })
+      })
+      spawned.stderr?.on('data', (data: Buffer) => {
+        const rawMessage = data.toString('utf8').trim()
+        const message = rawMessage.includes('DevTools listening on')
+          ? 'DevTools listening (loopback endpoint redacted)'
+          : rawMessage
+          .replaceAll(token, '[redacted-token]')
+          .replaceAll(pipePath, '[redacted-pipe]')
+          .replaceAll(env[SCRAPE_BROWSER_HELPER_ENV.profile]!, '[redacted-profile]')
+          .replaceAll(`127.0.0.1:${cdpPort}`, '[redacted-cdp]')
+        if (message) console.error(`[scraper-helper] ${message.slice(0, 2000)}`)
       })
 
-      const targets = await this.readCdpTargets(cdpPort)
+      const socket = await withAbort(socketPromise, signal)
+      if (server.listening) server.close()
+      let acceptHello!: (hello: ScrapeBrowserHelloFrame) => void
+      const helloPromise = new Promise<ScrapeBrowserHelloFrame>((resolve) => { acceptHello = resolve })
+      framed = new ScrapeBrowserFramedSocket(socket, (frame) => {
+        if (frame.type === 'hello') {
+          acceptHello(frame)
+          return
+        }
+        this.handleFrame(frame)
+      }, (error) => onFailure(new Error('Scraper helper IPC disconnected', { cause: error })))
+
+      const hello = await withAbort(helloPromise, signal)
+      assertScrapeBrowserHello(hello, { token, parentPid: process.pid, cdpPort, childPid: spawned.pid })
+
+      const targets = await withAbort(this.readCdpTargets(cdpPort, signal), signal)
       const pages = targets.filter((target) => target.type === 'page')
       const helperPageTarget = pages.find((target) => target.id === hello.targetId)
       const unexpectedPageTarget = pages.some(
@@ -691,10 +713,21 @@ export class ScrapeBrowserHostModule implements ScrapeBrowserHost {
       if (!helperPageTarget || unexpectedPageTarget) {
         throw new Error('Scraper helper CDP target 校验失败')
       }
-      const { chromium } = await import('playwright-core')
-      const browser = await chromium.connectOverCDP(`http://127.0.0.1:${cdpPort}`)
-      const contexts = browser.contexts()
-      const identifiedPages = await Promise.all(contexts.flatMap((context) => context.pages()).map(async (page) => {
+      const { chromium } = await withAbort(import('playwright-core'), signal)
+      const connect = chromium.connectOverCDP(`http://127.0.0.1:${cdpPort}`, {
+        timeout: HELPER_START_TIMEOUT_MS
+      }).then((connection) => {
+        if (signal.aborted) {
+          // Playwright's connect call has no AbortSignal and can finish after teardown starts.
+          void connection.close().catch(() => {})
+          signal.throwIfAborted()
+        }
+        browser = connection
+        return connection
+      })
+      const connected = await withAbort(connect, signal)
+      const contexts = connected.contexts()
+      const identifiedPages = await withAbort(Promise.all(contexts.flatMap((context) => context.pages()).map(async (page) => {
         const connection = await page.context().newCDPSession(page)
         try {
           const { targetInfo } = await connection.send('Target.getTargetInfo')
@@ -702,10 +735,9 @@ export class ScrapeBrowserHostModule implements ScrapeBrowserHost {
         } finally {
           await connection.detach()
         }
-      }))
+      })), signal)
       const playwrightPages = identifiedPages.filter(({ id }) => id === hello.targetId).map(({ page }) => page)
       if (contexts.length !== 1 || playwrightPages.length !== 1) {
-        await browser.close()
         throw new Error('Scraper helper 只允许一个页面 target')
       }
       const page = playwrightPages[0]
@@ -713,11 +745,12 @@ export class ScrapeBrowserHostModule implements ScrapeBrowserHost {
       const generation = ++this.generation
       const helper: RunningHelper = {
         generation,
-        child,
+        child: spawned,
+        exited,
         server,
         pipePath,
         framed,
-        browser,
+        browser: connected,
         page,
         targetId: hello.targetId,
         cdpPort,
@@ -726,6 +759,7 @@ export class ScrapeBrowserHostModule implements ScrapeBrowserHost {
         viewEpoch: 0,
         snapshotViewRevision: null
       }
+      onFailure = (error) => this.markHelperFatal(helper, error)
       this.helper = helper
       page.on('framenavigated', (frame) => {
         if (frame === page.mainFrame()) {
@@ -742,30 +776,37 @@ export class ScrapeBrowserHostModule implements ScrapeBrowserHost {
           }
         })
       }
-      browser.on('disconnected', () => this.markHelperFatal(helper, 'Scraper helper CDP disconnected'))
-      child.once('exit', () => this.markHelperFatal(helper, 'Scraper helper exited'))
+      connected.on('disconnected', () => this.markHelperFatal(helper, 'Scraper helper CDP disconnected'))
       return helper
     } catch (error) {
-      framedHolder.value?.close()
+      startup.abort(error)
+      framed?.close()
+      acceptedSocket?.destroy()
       if (server.listening) server.close()
-      if (!child.killed) child.kill('SIGKILL')
+      if (child && exited) await terminateHelperProcess(child, exited)
+      // Closing CDP must not delay a retry after its owning process has exited.
+      void browser?.close().catch(() => {})
       if (process.platform !== 'win32') fs.rmSync(pipePath, { force: true })
       throw error
+    } finally {
+      clearTimeout(deadline)
     }
   }
 
   private async readCdpTargets(
-    cdpPort: number
+    cdpPort: number,
+    signal: AbortSignal
   ): Promise<Array<{ id: string; type: string; url?: string }>> {
     let lastError: unknown
     for (let attempt = 0; attempt < 20; attempt += 1) {
       try {
-        const response = await fetch(`http://127.0.0.1:${cdpPort}/json/list`)
+        const response = await fetch(`http://127.0.0.1:${cdpPort}/json/list`, { signal })
         if (!response.ok) throw new Error(`CDP HTTP ${response.status}`)
         return await response.json() as Array<{ id: string; type: string; url?: string }>
       } catch (error) {
+        signal.throwIfAborted()
         lastError = error
-        await new Promise((resolve) => setTimeout(resolve, 100))
+        await delay(100, undefined, { signal })
       }
     }
     throw lastError instanceof Error ? lastError : new Error('无法读取 scraper helper CDP targets')
@@ -830,10 +871,10 @@ export class ScrapeBrowserHostModule implements ScrapeBrowserHost {
     })
   }
 
-  private markHelperFatal(helper: RunningHelper, message: string): void {
+  private markHelperFatal(helper: RunningHelper, failure: string | Error): void {
     if (helper.fatal) return
     helper.fatal = true
-    const error = new Error(message)
+    const error = typeof failure === 'string' ? new Error(failure) : failure
     for (const [id, pending] of this.pending) {
       if (!id.startsWith(`${helper.generation}:`)) continue
       this.pending.delete(id)
@@ -841,15 +882,22 @@ export class ScrapeBrowserHostModule implements ScrapeBrowserHost {
       if (!pending.settledForCaller) pending.reject(error)
     }
     if (this.activeLease?.generation === helper.generation) this.activeLease = null
-    void this.stopHelper(message)
+    void this.stopHelper(error.message)
   }
 
-  private async stopHelper(_reason: string): Promise<void> {
+  private stopHelper(reason: string): Promise<void> {
+    if (this.helperStopPromise) return this.helperStopPromise
     const helper = this.helper
+    if (!helper) return Promise.resolve()
     this.helper = null
-    if (!helper) return
     helper.fatal = true
-    const exited = new Promise<void>((resolve) => helper.child.once('exit', () => resolve()))
+    this.helperStopPromise = this.shutdownHelper(helper, reason).finally(() => {
+      this.helperStopPromise = null
+    })
+    return this.helperStopPromise
+  }
+
+  private async shutdownHelper(helper: RunningHelper, reason: string): Promise<void> {
     try {
       helper.framed.send({
         type: 'request',
@@ -860,20 +908,13 @@ export class ScrapeBrowserHostModule implements ScrapeBrowserHost {
     } catch {
       // Already disconnected.
     }
-    if (_reason !== 'cancel grace exceeded' && helper.child.exitCode === null) {
-      await Promise.race([
-        exited,
-        new Promise<void>((resolve) => setTimeout(resolve, HELPER_CANCEL_GRACE_MS))
-      ])
+    if (reason !== 'cancel grace exceeded') {
+      await Promise.race([helper.exited, delay(HELPER_CANCEL_GRACE_MS, undefined, { ref: false })])
     }
     helper.framed.close()
-    try {
-      await helper.browser.close()
-    } catch {
-      // Browser may already be gone.
-    }
     if (helper.server.listening) helper.server.close()
-    if (helper.child.exitCode === null && !helper.child.killed) helper.child.kill('SIGKILL')
+    await terminateHelperProcess(helper.child, helper.exited)
+    void helper.browser.close().catch(() => {})
     if (process.platform !== 'win32') fs.rmSync(helper.pipePath, { force: true })
     const error = new Error('Scraper helper 已终止')
     for (const [id, pending] of this.pending) {

@@ -133,8 +133,7 @@ it('places LAN access after the library card and jumps each status card to its s
     '网页服务',
     '影片刮削',
     '演员刮削',
-    '刮削代理',
-    '模型代理',
+    '网络代理',
     '默认 LLM',
     '外观',
     '存储'
@@ -149,8 +148,7 @@ it('places LAN access after the library card and jumps each status card to its s
     ['network', 'web', undefined],
     ['plugins', 'video', undefined],
     ['plugins', 'actress', undefined],
-    ['network', 'proxy', 'settings-proxy-scrape'],
-    ['network', 'proxy', 'settings-proxy-llm'],
+    ['network', 'proxy', undefined],
     ['models', 'usage', undefined],
     ['appearance', 'theme', undefined],
     ['storage', 'assets', undefined]

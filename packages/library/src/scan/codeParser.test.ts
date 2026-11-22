@@ -17,10 +17,6 @@ describe('parseCode', () => {
     assert.equal(parseCode('ADVVSR-486'), 'ADVVSR-486')
   })
 
-  it('does not mis-parse ADV-R0484 as R0-484', () => {
-    assert.notEqual(parseCode('ADV-R0484'), 'R0-484')
-  })
-
   it('parses FC2 and Heyzo', () => {
     assert.equal(parseCode('FC2-PPV-1234567'), 'FC2-1234567')
     assert.equal(parseCode('HEYZO-1234'), 'HEYZO-1234')

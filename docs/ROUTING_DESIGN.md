@@ -183,7 +183,7 @@ Linux 专用键盘 `BrowserBack`／`BrowserForward` 在 `before-input-event` 接
 
 卡片数据在进入查询缓存前投影并检查单页1 MiB JSON编码预算；宽详情仍由GET读取。仅选中ID独立于卡片缓存。Shift采用半开绝对范围，逐页获取ID并比较读取修订、总数和端点；取消或结果变化不提交部分范围。只读返回仅刷新活动且过期的查询，不遍历已淘汰历史页。
 
-导演、系列、机构、演员作品和清单详情的关联影片使用独立 `relatedVideoOffset`（每页60），滚动 replace URL，筛选或排序变化归零，非法参数规范化、总数缩小后回到有效页。导航到嵌套影片时保留该参数。该偏移不参与外层分类的 `facetOffset` 或清单主列表的 `playlistOffset`，避免混用列表位置。实现及验收见 [DG报告](performance/large-library-window-selection-results.md)。
+导演、系列、机构、演员作品和清单详情的关联影片使用独立 `relatedVideoOffset` 保存条目位置。连续滚动按 60 项更新 URL，分页按所选页大小记录页首偏移。筛选或排序变化归零，非法参数规范化、总数缩小后回到有效页。导航到嵌套影片时保留该参数。该偏移不参与外层分类的 `facetOffset` 或清单主列表的 `playlistOffset`，避免混用列表位置。实现及验收见 [DG报告](performance/large-library-window-selection-results.md)。
 
 影片内打开的末层演员使用 `actressVideoOffset`，不读取或校正父层的 `relatedVideoOffset`。两人的作品总数不同时，末层归零不能重置父层位置，父层也不能裁切末层偏移。打开另一位末层演员或关闭末层时只清除 `actressVideoOffset`，保留父层关联影片位置与其余筛选。
 
@@ -193,8 +193,8 @@ Linux 专用键盘 `BrowserBack`／`BrowserForward` 在 `before-input-event` 接
 
 ## 任务中心
 
-`/tasks` 为概览，`tab=scan|scrape|subtitles` 选择分类，字幕的 `status=all|active|attention|finished` 为可分享筛选。分类切换由 `tasks/taskCenterRoutes.ts` 构建地址，未知分类回到概览。已有 `/pending` 及其影片／演员详情栈作为任务中心“待确认”分类继续使用，候选定位、分组分页和返回栈保持原合同；侧栏在两种路径下均高亮任务中心。角标点击固定进入概览，不继承上次的字幕筛选。
+`/tasks` 为概览，`tab=scan|scrape|subtitles` 选择分类，字幕的 `status=active|attention|finished` 为可分享筛选，缺省或未知值显示“进行中 / 暂停”。分类切换由 `tasks/taskCenterRoutes.ts` 构建地址，未知分类回到概览。已有 `/pending` 及其影片／演员详情栈作为任务中心“待确认”分类继续使用，候选定位、分组分页和返回栈保持原合同；侧栏在两种路径下均高亮任务中心。角标点击固定进入概览，不继承上次的字幕筛选。
 
 概览复用当前任务状态与待确认计数；“运行中”不计入排队或主动暂停，“需处理”包含资料确认组及字幕 failed／awaiting-save，每项只计一次。扫描不推测总文件数。首次进入页面通过只读快照获取正在执行的扫描；该快照不触发扫描。任务中心不增加执行调度器或数据库表，不承诺各服务尚未保存的长期任务历史。
 
-字幕分类使用带计数的状态筛选与紧凑任务行，沿用上述 `status` 地址参数。每行对齐影片、生成进度、状态和主操作；另存、导出、取消与移除收进更多菜单，完整错误和输出文件名在行内详情查看。删除字幕及移除任务在所属行确认，操作错误不显示到其他任务；默认标题缺失时优先用已有字幕文件名识别影片。
+字幕分类使用带计数的状态筛选与紧凑任务行。`status=finished` 对应“已完成”，只展示完成记录。每行对齐影片、生成进度、状态和主操作；另存、导出与移除收进更多菜单，完整错误和输出文件名在行内详情查看。删除字幕及移除任务在所属行确认，操作错误不显示到其他任务；默认标题缺失时优先用已有字幕文件名识别影片。

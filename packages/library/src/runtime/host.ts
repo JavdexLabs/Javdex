@@ -17,6 +17,7 @@ export interface LibraryAssetSettings {
 
 export interface LibraryHttpSettings {
   scrapeProxyUrl(): string
+  resolveScrapeProxyUrls?(url: URL): Promise<string[]>
 }
 
 export interface LibraryHost {
@@ -72,6 +73,10 @@ export function resolveLibraryMediaAssetsPath(): string | null {
 
 export function resolveLibraryScrapeProxyUrl(): string {
   return host?.http?.scrapeProxyUrl()?.trim() ?? ''
+}
+
+export function libraryScrapeProxyResolver(): LibraryHttpSettings['resolveScrapeProxyUrls'] {
+  return host?.http?.resolveScrapeProxyUrls
 }
 
 export function resolveLibraryMediaMounts(): Record<string, string> {

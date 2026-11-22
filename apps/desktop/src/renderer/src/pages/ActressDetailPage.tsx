@@ -473,7 +473,7 @@ export default function ActressDetailPage({ fromVideo = false }: { fromVideo?: b
           <ContinuousPosterGrid
             window={works.window}
             initialIndex={relatedOffset}
-            onAnchor={index => moveRelated(Math.floor(index / 60) * 60)}
+            onAnchor={moveRelated}
             onOpen={video => navigateToActressWork(navigate, location, actressId, video.id, relatedOffset)}
             scope={`actress-works:${actressId}`}
           />

@@ -38,7 +38,7 @@ export default function AiSubtitleSettings({ playback, onOpenModels, controller 
   const status = !state ? '正在读取状态'
     : !enabled ? state.installed ? '字幕模型与运行依赖已就绪' : '请在字幕模型设置中选择模型并下载所需文件'
       : state.taskStatus === 'queued' ? '任务排队中'
-        : state.taskStatus === 'paused' || state.taskStatus === 'cancelled' ? '生成已暂停，已生成部分仍可使用'
+        : state.taskStatus === 'paused' ? '生成已暂停，已生成部分仍可使用'
           : state.taskStatus === 'saving' ? '正在保存完整字幕'
             : state.taskStatus === 'completed' ? '完整字幕已保存'
       : state.phase === 'preparing' ? '正在准备当前音轨'
@@ -69,7 +69,7 @@ export default function AiSubtitleSettings({ playback, onOpenModels, controller 
         {enabled && state?.error && <Button size="sm" disabled={busy} onClick={() => void execute({ action: 'retry' })}>重试未完成字幕</Button>}
       </div>
       <p className={styles.status} role="status" aria-live="polite">{status}</p>
-      {state?.taskStatus && <p className={styles.note}>{state.taskStatus === 'completed' ? '字幕已保存，可在字幕管理中查看' : state.taskStatus === 'awaiting-save' ? '生成完成，等待保存，请打开字幕管理处理' : state.taskStatus === 'paused' || state.taskStatus === 'cancelled' ? '生成已暂停，可在任务中继续' : '后台任务已保留，可在字幕任务中暂停或取消'}</p>}
+      {state?.taskStatus && <p className={styles.note}>{state.taskStatus === 'completed' ? '字幕已保存，可在字幕管理中查看' : state.taskStatus === 'awaiting-save' ? '生成完成，等待保存，请打开字幕管理处理' : state.taskStatus === 'paused' ? '生成已暂停，可在任务中继续' : '可在任务中心查看和管理后台字幕任务'}</p>}
       {enabled && <p className={styles.note}>已识别 {playbackTime(state?.recognizedSeconds ?? 0)} · 已翻译 {playbackTime(state?.translatedSeconds ?? 0)} / {playbackTime(playback.duration ?? 0)}</p>}
       {state?.installed && <>
         <label className={styles.field}>AI 字幕显示<SelectControl value={state.display} aria-label="AI 字幕显示" disabled={busy}

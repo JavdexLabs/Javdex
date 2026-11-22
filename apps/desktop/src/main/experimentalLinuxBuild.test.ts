@@ -50,7 +50,8 @@ test('experimental update checks and release navigation make no network or exter
     if (id === 'axios') return { isAxiosError: () => false }
     if (id === '../utils/http') return { createHttpClient: unexpected }
     if (id === '../settings/settingsStore') return { getSettings: unexpected }
-    if (id === '@shared/settingsTypes') return { resolveScrapeProxyUrl: unexpected }
+    if (id === '@shared/networkProxy') return { networkProxySettings: unexpected, networkProxyRoute: unexpected }
+    if (id === '../utils/networkProxyTransport') return { fetchWithNetworkProxy: unexpected }
     if (id === '../experimentalLinuxBuild') return { isExperimentalLinuxBuild: () => true }
     throw new Error(id)
   })

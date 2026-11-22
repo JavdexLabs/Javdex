@@ -358,8 +358,8 @@ const api = {
     testManagedModel: (modelRef: string) =>
       invokeApp(IPC.SETTINGS_MODEL_MANAGEMENT_TEST_MODEL, modelRef),
     revealRecoveryBackup: () => invokeApp(IPC.SETTINGS_RECOVERY_REVEAL_BACKUP),
-    testProxy: (kind: 'scrape' | 'llm', proxyUrl: string) =>
-      invokeApp(IPC.SETTINGS_PROXY_TEST, kind, proxyUrl),
+    testProxy: (...args: AppIpcArgs<typeof IPC.SETTINGS_PROXY_TEST>) =>
+      invokeApp(IPC.SETTINGS_PROXY_TEST, ...args),
     getOverviewStats: () => invokeApp(IPC.SETTINGS_OVERVIEW_STATS)
   },
   scan: {
@@ -877,6 +877,11 @@ const api = {
     subtitle: (sessionId: string) => invokeApp(IPC.PLAYBACK_SUBTITLE, sessionId),
     aiSubtitleSnapshot: () => invokeApp(IPC.PLAYBACK_AI_SUBTITLE_SNAPSHOT),
     subtitleTasks: () => invokeApp(IPC.SUBTITLE_TASKS_SNAPSHOT),
+    batchSubtitleContext: () => invokeApp(IPC.SUBTITLE_BATCH_CONTEXT),
+    batchSubtitlePreview: (context: string, libraryId: number, videoId: number, resourceId: number | null) =>
+      invokeApp(IPC.SUBTITLE_BATCH_PREVIEW, context, libraryId, videoId, resourceId),
+    batchSubtitleSubmit: (context: string, libraryId: number, output: import('@shared/desktop/subtitleTasks').SubtitleOutput, items: import('@shared/desktop/subtitleTasks').BatchSubtitleItem[]) =>
+      invokeApp(IPC.SUBTITLE_BATCH_SUBMIT, context, libraryId, output, items),
     prepareSubtitles: (target: import('@shared/desktop/playback').PlaybackTarget) => invokeApp(IPC.SUBTITLE_TASKS_PREPARE, target),
     subtitleTaskCommand: (command: import('@shared/desktop/subtitleTasks').SubtitleTaskCommand) => invokeApp(IPC.SUBTITLE_TASKS_COMMAND, command),
     subtitleFiles: (target: import('@shared/desktop/playback').PlaybackTarget) => invokeApp(IPC.SUBTITLE_FILES_LIST, target),

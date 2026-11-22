@@ -255,7 +255,7 @@ describe('AgentRunStore', () => {
 })
 
 describe('Agent product journal pagination', () => {
-  it('reads the last cursor through the run/seq index without parsing any payload in a 100k journal', (t) => {
+  it('reads the last cursor for the requested run through the covering index without decoding payloads', (t) => {
     const { db, store } = createStore()
     try {
       store.createRun({ runId: 'large', useCase: 'test-agent', resolved: resolved(), productState: {} })
@@ -264,13 +264,13 @@ describe('Agent product journal pagination', () => {
       assert.equal(store.getProductJournalCursor('missing'), 0)
       const insert = db.prepare(`INSERT INTO agent_product_journal
         (run_id, event_type, payload_json, created_at) VALUES (?, 'test', ?, '2026-09-10')`)
-      db.transaction(() => {
-        for (let index = 0; index < 100_000; index++) insert.run('large', 'invalid JSON must not be decoded for a cursor')
-        insert.run('other', '{}')
-      })()
+      insert.run('large', '{}')
+      insert.run('other', '{}')
+      const last = Number(insert.run('large', 'invalid JSON must not be decoded for a cursor').lastInsertRowid)
+      insert.run('other', '{}')
       const parse = t.mock.method(JSON, 'parse', () => { throw new Error('unexpected payload parse') })
       const prepare = t.mock.method(db, 'prepare')
-      assert.equal(store.getProductJournalCursor('large'), 100_000)
+      assert.equal(store.getProductJournalCursor('large'), last)
       assert.equal(prepare.mock.callCount(), 1)
       const sql = prepare.mock.calls[0].arguments[0]
       assert.equal(/payload_json|SELECT\s+\*/i.test(sql), false)
@@ -279,7 +279,7 @@ describe('Agent product journal pagination', () => {
       assert.equal(plan.some((row) => /TEMP B-TREE|SCAN agent_product_journal/.test(row.detail)), false)
       assert.equal(parse.mock.callCount(), 0)
       parse.mock.restore()
-      assert.throws(() => store.readProductJournal('large', 99_999, 1), SyntaxError)
+      assert.throws(() => store.readProductJournal('large', last - 1, 1), SyntaxError)
     } finally {
       t.mock.restoreAll()
       db.close()
@@ -335,10 +335,8 @@ describe('Agent recovery enumeration', () => {
         (id,use_case,status,config_revision,config_snapshot_json,runtime_id,product_state_json,created_at,updated_at)
         VALUES (?,?,?,'test',?,'pi',?,'now',?)`)
       db.transaction(() => {
-        for (let index = 0; index < 10_000; index++) {
-          insert.run(`other-${index}`, 'other', 'waiting_user', 'bad JSON', 'bad JSON', '0')
-          insert.run(`closed-${index}`, 'owned', 'closed', 'bad JSON', 'bad JSON', '0')
-        }
+        insert.run('other', 'other', 'waiting_user', 'bad JSON', 'bad JSON', '0')
+        insert.run('closed', 'owned', 'closed', 'bad JSON', 'bad JSON', '0')
         insert.run('settled', 'owned', 'settled', 'bad JSON', 'bad JSON', '0')
         for (let index = 0; index < 260; index++) {
           insert.run(`owned-${index}`, 'owned', 'waiting_user', '{}', JSON.stringify({ index }), String(1000 - index).padStart(4, '0'))

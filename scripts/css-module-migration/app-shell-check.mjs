@@ -4,7 +4,7 @@ import path from 'node:path'
 export async function checkAppShell({ page, name, width, theme, output }) {
   const nav = page.locator('aside nav')
   const library = nav.getByRole('link', { name: '当前媒体库：用于检查长名称截断' })
-  const badge = nav.getByRole('button', { name: '打开 9 项待确认' })
+  const badge = nav.getByRole('button', { name: '查看 9 项需要处理的事项' })
   await library.waitFor()
   await badge.waitFor()
   await page.waitForFunction(theme => document.documentElement.dataset.theme === theme, theme)
@@ -13,8 +13,7 @@ export async function checkAppShell({ page, name, width, theme, output }) {
     return getComputedStyle(document.body).color === expected &&
       getComputedStyle(document.querySelector('[data-fixture-content]')).color === expected
   }, theme)
-  const root = page.locator('#root > div').first()
-  const background = root.locator(':scope > div[aria-hidden]')
+  const background = page.locator('[data-background] > div[aria-hidden]')
   const route = page.locator('[data-fixture-route]')
   const snapshot = async suffix => {
     await page.evaluate(async () => {
@@ -29,18 +28,18 @@ export async function checkAppShell({ page, name, width, theme, output }) {
     const brand = el.querySelector('[aria-label="Javdex"] > span')
     const home = el.querySelector('nav a')
     const currentLibrary = el.querySelector('[aria-label="媒体库列表"] a')
-    const pending = el.querySelector('a[href="/pending"]')
+    const tasks = el.querySelector('a[href="/tasks"]')
     const css = node => getComputedStyle(node)
     return { sidebar: el.getBoundingClientRect().width, brand: css(brand).fontSize,
       homeGap: css(home).gap, homePadding: css(home).padding, libraryPadding: css(currentLibrary).padding,
-      libraryHeight: css(currentLibrary).height, pendingPadding: css(pending).padding,
+      libraryHeight: css(currentLibrary).height, tasksPadding: css(tasks).padding,
       bottom: el.querySelector('a[href="/settings"]')?.getBoundingClientRect().bottom }
   })
   assert.equal(metrics.sidebar, width > 1120 ? 210 : 176)
   assert.equal(metrics.brand, width > 1120 ? '26px' : '22px')
   assert.ok(metrics.bottom <= page.viewportSize().height, 'sidebar maintenance stays within the viewport')
   assert.equal(metrics.libraryPadding, '0px 8px')
-  assert.equal(metrics.pendingPadding, width > 1120 ? '0px 44px 0px 14px' : '0px 44px 0px 10px')
+  assert.equal(metrics.tasksPadding, width > 1120 ? '0px 44px 0px 14px' : '0px 44px 0px 10px')
   assert.equal(await nav.getByRole('link', { name: '已归档' }).count(), 0)
   await snapshot('')
   await library.focus()
@@ -48,8 +47,8 @@ export async function checkAppShell({ page, name, width, theme, output }) {
   await route.getByText('/libraries/3?q=ABC', { exact: true }).waitFor()
   assert.equal(await route.innerText(), '/libraries/3?q=ABC')
   await badge.click()
-  await route.getByText('/pending', { exact: true }).waitFor()
-  assert.equal(await route.innerText(), '/pending')
+  await route.getByText('/tasks', { exact: true }).waitFor()
+  assert.equal(await route.innerText(), '/tasks')
   await nav.getByRole('link', { name: '导演', exact: true }).click()
   await route.getByText('/facet/director', { exact: true }).waitFor()
   assert.equal(await route.innerText(), '/facet/director')
@@ -66,7 +65,7 @@ export async function checkAppShell({ page, name, width, theme, output }) {
       if (!img.naturalWidth) throw new Error('Background fixture did not load')
     })
     if (kind === 'portrait') await page.waitForFunction(() => {
-      const img = document.querySelector('#root > div > div[aria-hidden] img')
+      const img = document.querySelector('[data-background] > div[aria-hidden] img')
       return img && getComputedStyle(img).objectPosition === '50% 0%'
     })
     await snapshot(`-${kind}`)
@@ -94,15 +93,15 @@ export async function checkAppShell({ page, name, width, theme, output }) {
   await dialog.waitFor({ state: 'detached' })
   await page.evaluate(() => window.fixtureShell.state('empty'))
   await nav.getByText('暂无媒体库', { exact: true }).waitFor()
-  await nav.getByRole('button', { name: '打开 6 项待确认' }).waitFor()
+  await nav.getByRole('button', { name: '查看 6 项需要处理的事项' }).waitFor()
   await snapshot('-empty')
   await page.evaluate(() => window.fixtureShell.state('error'))
   await nav.getByRole('button', { name: '读取失败，重试' }).waitFor()
-  await nav.getByRole('button', { name: '待确认数量加载失败，打开待确认项' }).waitFor()
+  await nav.getByRole('button', { name: '待处理数量加载失败，打开任务中心' }).waitFor()
   await snapshot('-error')
   await page.evaluate(() => { void window.fixtureShell.state('loading') })
   await nav.getByText('正在读取…', { exact: true }).waitFor()
-  await nav.getByRole('button', { name: '待确认数量加载中，打开待确认项' }).waitFor()
+  await nav.getByRole('button', { name: '待处理数量加载中，打开任务中心' }).waitFor()
   await snapshot('-loading')
   return metrics
 }

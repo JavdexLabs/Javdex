@@ -32,10 +32,13 @@ test('saved default and explicit overrides take precedence over legacy fields', 
   assert.deepEqual(networkProxyRoute(settings, 'updates'), { mode: 'manual', url: 'https://proxy.test:8443/' })
 })
 
-test('manual proxy inputs accept one HTTP or HTTPS endpoint', () => {
+test('manual proxy inputs accept one HTTP, HTTPS or unauthenticated SOCKS endpoint', () => {
   assert.equal(isManualProxyUrl('http://127.0.0.1:7890'), true)
   assert.equal(isManualProxyUrl('https://proxy.test:8443/'), true)
-  for (const url of ['', '127.0.0.1:7890', 'socks5://localhost:1080', 'http://proxy.test,path',
+  const settings = networkProxySettings({ proxyUrlEnabled: true, proxyUrl: 'socks5://localhost:1080' })
+  assert.deepEqual(normalizeNetworkProxy(settings), settings)
+  assert.equal(isManualProxyUrl('socks4://127.0.0.1:1080/'), true)
+  for (const url of ['', '127.0.0.1:7890', 'socks5://user:password@localhost:1080', 'http://proxy.test,path',
     'http://proxy.test/path', 'http://proxy.test?key=value']) {
     assert.equal(isManualProxyUrl(url), false, url)
   }

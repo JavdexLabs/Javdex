@@ -23,11 +23,11 @@ import { SettingsCard } from './SettingsPrimitives'
 import SettingsFormActions from './SettingsFormActions'
 import styles from './NetworkSettingsPanel.module.css'
 
-const INVALID_ADDRESS = '请输入有效的 HTTP / HTTPS 代理地址'
+const INVALID_ADDRESS = '请输入有效的 HTTP、HTTPS 或无认证的 SOCKS 代理地址'
 const ROUTE_MODES = ['system', 'manual', 'direct'] as const
 const DEFAULT_ROUTE_HINTS = {
   system: '系统未配置代理时直接连接',
-  manual: '支持 HTTP / HTTPS 代理',
+  manual: '支持 HTTP、HTTPS 和无认证的 SOCKS4 / SOCKS5 代理',
   direct: '请求直接连接目标服务'
 }
 const FEATURE_ICONS = { scrape: ScanSearch, llm: Bot, updates: RefreshCw, downloads: Download }

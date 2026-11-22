@@ -23,9 +23,11 @@ export function isManualProxyUrl(value: string): boolean {
     const url = new URL(value)
     decodeURIComponent(url.username)
     decodeURIComponent(url.password)
-    return (url.protocol === 'http:' || url.protocol === 'https:')
-      && Boolean(url.hostname) && url.pathname === '/' && !url.search && !url.hash
-      && /^https?:\/\/[^\s,;\\]+\/?$/i.test(value)
+    const http = url.protocol === 'http:' || url.protocol === 'https:'
+    const socks = url.protocol === 'socks4:' || url.protocol === 'socks5:'
+    return (http || socks && !url.username && !url.password)
+      && Boolean(url.hostname) && (!url.pathname || url.pathname === '/') && !url.search && !url.hash
+      && /^(?:https?|socks[45]):\/\/[^\s,;\\]+\/?$/i.test(value)
   } catch {
     return false
   }

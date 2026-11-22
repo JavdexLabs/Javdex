@@ -217,7 +217,7 @@ const networkProxyRoute = z.discriminatedUnion('mode', [
   z.object({ mode: z.literal('direct') }).strict(),
   z.object({
     mode: z.literal('manual'),
-    url: z.string().trim().max(2048).refine(isManualProxyUrl, '请输入有效的 HTTP / HTTPS 代理地址')
+    url: z.string().trim().max(2048).refine(isManualProxyUrl, '请输入有效的 HTTP、HTTPS 或无认证的 SOCKS 代理地址')
   }).strict()
 ])
 const networkProxySettings = z.object({

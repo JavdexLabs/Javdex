@@ -132,6 +132,7 @@ try {
       await button('全部暂停').click()
       await page.getByRole('alert').waitFor()
       await filters.getByRole('button', { name: '已完成', exact: true }).click()
+      await saved.waitFor()
       assert.equal(await page.getByRole('alert').count(), 0, 'batch feedback belongs to the filter where the action was requested')
       await active.click()
       await page.evaluate(() => { window.failCommand = null })

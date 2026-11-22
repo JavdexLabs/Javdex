@@ -15,6 +15,10 @@ describe('scrape browser helper banner', () => {
     assert.match(challengeHtml, /请在页面中完成验证后点击右侧的验证通过按钮/)
   })
 
+  it('renders an empty document for the hidden toolbar', () => {
+    assert.match(buildHelperToolbarHtml('none'), /^<!doctype html><body><\/body>$/)
+  })
+
   it('continues after login confirmation while the homepage navigation is still pending', async () => {
     let markNavigationStarted!: () => void
     const navigationStarted = new Promise<void>((resolve) => { markNavigationStarted = resolve })

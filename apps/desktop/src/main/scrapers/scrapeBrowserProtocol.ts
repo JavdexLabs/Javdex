@@ -105,6 +105,7 @@ export class ScrapeBrowserFramedSocket {
   ) {
     socket.on('data', (chunk: Buffer) => this.accept(chunk))
     socket.on('error', (error) => this.fail(error))
+    socket.once('close', () => this.fail(new Error('Scrape browser IPC is closed')))
   }
 
   send(frame: ScrapeBrowserProtocolFrame): void {

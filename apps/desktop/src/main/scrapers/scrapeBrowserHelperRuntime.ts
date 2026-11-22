@@ -541,7 +541,12 @@ export class ScrapeBrowserHelperRuntime {
     const toolbar = this.helperToolbarView
     if (!toolbar || toolbar.webContents.isDestroyed()) return
     if (this.win && !this.win.isDestroyed()) this.layoutHelperToolbar(this.win)
-    if (kind === 'none') return
+    if (kind === 'none') {
+      // Load default HTML so the previous banner content is cleared,
+      // then relayout to expand the page back to full window height.
+      void toolbar.webContents.loadURL(this.buildHelperToolbarDataUrl('none')).catch(() => {})
+      return
+    }
     void toolbar.webContents.loadURL(this.buildHelperToolbarDataUrl(kind, pluginName)).catch(() => {})
   }
 

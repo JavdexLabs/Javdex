@@ -652,7 +652,9 @@ export class ScrapeBrowserHostModule implements ScrapeBrowserHost {
         .replaceAll(pipePath, '[redacted-pipe]')
         .replaceAll(env[SCRAPE_BROWSER_HELPER_ENV.profile]!, '[redacted-profile]')
         .replaceAll(`127.0.0.1:${cdpPort}`, '[redacted-cdp]')
-      if (message) console.error(`[scraper-helper] ${message.slice(0, 2000)}`)
+      if (message) {
+        try { console.error(`[scraper-helper] ${message.slice(0, 2000)}`) } catch { /* pipe may be broken */ }
+      }
     })
 
     const framedHolder: { value?: ScrapeBrowserFramedSocket } = {}

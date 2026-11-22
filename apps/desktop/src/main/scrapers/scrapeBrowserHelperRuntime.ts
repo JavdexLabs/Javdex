@@ -35,11 +35,7 @@ import {
   prepareBrowserEvaluate,
   runPreparedBrowserEvaluate
 } from './scrapeBrowserEvaluatePolicy'
-import {
-  canResolveScrapePage,
-  canResolveScrapeSelector,
-  ScrapeBrowserWaitBudget
-} from './scrapeBrowserWaitBudget'
+import { ScrapeBrowserWaitBudget } from './scrapeBrowserWaitBudget'
 import {
   ScrapeBrowserChallengeError,
   type ScrapeBrowserFetchBufferOptions,
@@ -56,6 +52,11 @@ const HELPER_TOOLBAR_HEIGHT = 46
 const HELPER_TOOLBAR_ACTION_PROTOCOL = 'javdex-helper-action:'
 
 type HelperBannerKind = 'none' | 'preLogin' | 'challenge'
+
+function pageHostname(url: string): string {
+  const parsed = URL.parse(url)
+  return parsed && (parsed.protocol === 'https:' || parsed.protocol === 'http:') ? parsed.hostname : ''
+}
 
 // Own the page view explicitly: BrowserWindow's internal page cannot be laid out
 // through contentView.children or adopted into another WebContentsView.
@@ -279,14 +280,17 @@ export class ScrapeBrowserHelperRuntime {
   private toolbarReady: Promise<void> = Promise.resolve()
   private ses: Session | null = null
   private proxySetting?: string
-  private manualPass = false
+  private readonly relaxedChallengeHosts = new Set<string>()
+  private confirmedChallengeHost = ''
+  private challengeBannerHost = ''
   private preLoginMode = false
   private preLoginDone = false
   private preLoginPluginName = ''
   private helperBannerKind: HelperBannerKind = 'none'
   private stealthApplied = false
   private headerStealthInstalled = false
-  private currentMainFrameCfMitigated = false
+  private mainFrameChallengeUrl = ''
+  private navigationRevision = 0
   /**
    * All page loads share the single scraper window, so a second navigation
    * cancels the first and both callers would read back the same DOM. Page
@@ -403,9 +407,9 @@ export class ScrapeBrowserHelperRuntime {
     })
 
     ses.webRequest.onHeadersReceived((details, callback) => {
-      if (details.resourceType === 'mainFrame') {
-        this.currentMainFrameCfMitigated =
-          getResponseHeader(details.responseHeaders, 'cf-mitigated')?.toLowerCase() === 'challenge'
+      if (details.resourceType === 'mainFrame' && details.webContentsId === this.win?.webContents.id) {
+        this.mainFrameChallengeUrl =
+          getResponseHeader(details.responseHeaders, 'cf-mitigated')?.toLowerCase() === 'challenge' ? details.url : ''
       }
       callback({})
     })
@@ -459,6 +463,11 @@ export class ScrapeBrowserHelperRuntime {
     }
     win.webContents.on('dom-ready', syncBanner)
     win.webContents.on('did-finish-load', syncBanner)
+    win.webContents.on('did-start-navigation', (_event, _url, isInPlace, isMainFrame) => {
+      if (!isMainFrame || isInPlace) return
+      this.navigationRevision++
+      this.mainFrameChallengeUrl = ''
+    })
     win.on('show', () => this.layoutHelperToolbar(win))
 
     win.on('closed', () => {
@@ -474,6 +483,10 @@ export class ScrapeBrowserHelperRuntime {
       this.preLoginDone = false
       this.preLoginPluginName = ''
       this.helperBannerKind = 'none'
+      this.relaxedChallengeHosts.clear()
+      this.confirmedChallengeHost = ''
+      this.challengeBannerHost = ''
+      this.mainFrameChallengeUrl = ''
       this.onWindowClosed?.()
     })
 
@@ -564,9 +577,15 @@ export class ScrapeBrowserHelperRuntime {
       case 'pre-login-done':
         this.completePreLogin(win)
         break
-      case 'challenge-passed':
-        this.manualPass = true
+      case 'challenge-passed': {
+        if (this.win !== win || win.isDestroyed() || this.helperBannerKind !== 'challenge') break
+        const hostname = pageHostname(win.webContents.getURL())
+        if (!hostname || hostname !== this.challengeBannerHost) break
+        this.relaxedChallengeHosts.add(hostname)
+        this.confirmedChallengeHost = hostname
+        this.removeHelperBanner(win)
         break
+      }
     }
   }
 
@@ -834,12 +853,13 @@ export class ScrapeBrowserHelperRuntime {
 
   private async savePageDebug(win: ScraperHelperWindow): Promise<void> {
     const sample = await this.readPageChallengeSample(win)
+    const pageUrl = win.webContents.getURL()
+    const cfMitigated = this.hasMainFrameChallengeHeader(pageUrl)
     const diagnosis = diagnoseCloudflareChallenge(sample, {
-      cfMitigated: this.currentMainFrameCfMitigated,
+      cfMitigated,
       allowNormalContentOverride: true
     })
     const html = await this.readHtml(win).catch(() => '')
-    const pageUrl = win.webContents.getURL()
     const suggestedName = (() => {
       try {
         const { hostname, pathname } = new URL(pageUrl)
@@ -865,7 +885,7 @@ export class ScrapeBrowserHelperRuntime {
         {
           savedAt: new Date().toISOString(),
           url: pageUrl,
-          cfMitigated: this.currentMainFrameCfMitigated,
+          cfMitigated,
           diagnosis
         },
         null,
@@ -884,14 +904,17 @@ export class ScrapeBrowserHelperRuntime {
     })
   }
 
+  private hasMainFrameChallengeHeader(url: string): boolean {
+    return !!this.mainFrameChallengeUrl && url.split('#', 1)[0] === this.mainFrameChallengeUrl
+  }
+
   private async isPageChallenge(win: ScraperHelperWindow): Promise<boolean> {
+    const cfMitigated = this.hasMainFrameChallengeHeader(win.webContents.getURL())
     const sample = await this.readPageChallengeSample(win)
-    const challenge = isCloudflareChallengeText(sample, {
-      cfMitigated: this.currentMainFrameCfMitigated,
+    return isCloudflareChallengeText(sample, {
+      cfMitigated,
       allowNormalContentOverride: true
     })
-    if (!challenge) this.currentMainFrameCfMitigated = false
-    return challenge
   }
 
   private applyHelperBanner(win: ScraperHelperWindow, kind: 'preLogin' | 'challenge'): void {
@@ -911,18 +934,24 @@ export class ScrapeBrowserHelperRuntime {
     this.removeHelperBanner(win)
   }
 
-  private installChallengeBanner(win: ScraperHelperWindow): void {
-    if (this.helperBannerKind === 'challenge') return
+  private showChallengeBanner(win: ScraperHelperWindow, hostname: string): void {
+    if (win.isDestroyed() || (this.helperBannerKind === 'challenge' && hostname === this.challengeBannerHost)) return
+    this.challengeBannerHost = hostname
     this.applyHelperBanner(win, 'challenge')
+    if (!win.isVisible()) win.show()
+    app.focus({ steal: true })
+    win.focus()
   }
 
   private removeHelperBanner(win: ScraperHelperWindow): void {
     if (win.isDestroyed() || this.helperBannerKind === 'none') return
     this.helperBannerKind = 'none'
+    this.challengeBannerHost = ''
     this.renderHelperToolbar('none')
   }
 
   private async syncHelperBanner(win: ScraperHelperWindow): Promise<void> {
+    if (win.isDestroyed()) return
     if (this.preLoginMode && !this.preLoginDone) {
       if (this.helperBannerKind !== 'preLogin') {
         this.installPreLoginBanner(win, this.preLoginPluginName)
@@ -933,16 +962,25 @@ export class ScrapeBrowserHelperRuntime {
       win.focus()
       return
     }
-    const challenge = await this.isPageChallenge(win)
-    if (challenge) {
-      this.installChallengeBanner(win)
-      if (!win.isVisible()) win.show()
-      this.layoutHelperToolbar(win)
-      app.focus({ steal: true })
-      win.focus()
+    const url = win.webContents.getURL()
+    const hostname = pageHostname(url)
+    if (this.relaxedChallengeHosts.has(hostname)) {
+      // On a confirmed host only the active content wait can escalate.
+      if (this.challengeBannerHost !== hostname) this.removeHelperBanner(win)
       return
     }
-    this.removeHelperBanner(win)
+    const navigation = this.navigationRevision
+    const challenge = await this.isPageChallenge(win)
+    if (win.isDestroyed() || navigation !== this.navigationRevision || url !== win.webContents.getURL() ||
+      this.preLoginMode || this.relaxedChallengeHosts.has(hostname)) return
+    if (challenge) this.showChallengeBanner(win, hostname)
+    else this.removeHelperBanner(win)
+  }
+
+  private consumeChallengeConfirmation(hostname: string): boolean {
+    if (!hostname || hostname !== this.confirmedChallengeHost) return false
+    this.confirmedChallengeHost = ''
+    return true
   }
 
   /**
@@ -978,8 +1016,7 @@ export class ScrapeBrowserHelperRuntime {
     const settlePattern = settleWhenText?.source
     const settleFlags = settleWhenText?.flags.includes('i') ? 'i' : ''
     const win = this.ensureWindow()
-    this.manualPass = false
-    this.currentMainFrameCfMitigated = false
+    this.confirmedChallengeHost = ''
 
     // Align client hints with a real Chrome before hitting Cloudflare.
     await this.ensureStealth(win)
@@ -997,7 +1034,6 @@ export class ScrapeBrowserHelperRuntime {
     const waitBudget = new ScrapeBrowserWaitBudget(start, timeoutMs, VERIFICATION_TIMEOUT_MS)
     let stableContentSince = 0
     let lastStableSignature = ''
-    let focusedForChallenge = false
 
     while (true) {
       signal?.throwIfAborted()
@@ -1005,14 +1041,7 @@ export class ScrapeBrowserHelperRuntime {
         throw new Error('验证窗口已被关闭')
       }
 
-      if (this.manualPass) {
-        // “验证通过” only requests an immediate re-check. Cloudflare may still
-        // be redirecting, so the destination must pass the normal readiness loop.
-        this.manualPass = false
-        stableContentSince = 0
-        lastStableSignature = ''
-      }
-
+      const navigation = this.navigationRevision
       const info = await win.webContents
         .executeJavaScript(
           `(() => {
@@ -1052,27 +1081,16 @@ export class ScrapeBrowserHelperRuntime {
           signature: ''
         }))
 
+      if (win.isDestroyed()) throw new Error('验证窗口已被关闭')
+      const url = win.webContents.getURL()
       const isChallenge = await this.isPageChallenge(win)
-      const waitStatus = waitBudget.update(Date.now(), isChallenge)
-      if (waitStatus === 'verification-timeout') {
-        win.show()
-        win.focus()
-        throw new Error('验证超时：请在弹出的窗口中完成 Cloudflare 验证后点击「验证通过」')
-      }
-      if (waitStatus === 'page-timeout') break
-      if (isChallenge && !focusedForChallenge) {
-        await this.syncHelperBanner(win)
-        focusedForChallenge = true
-      } else if (!isChallenge && focusedForChallenge) {
-        await this.syncHelperBanner(win)
-        focusedForChallenge = false
-      }
-      if (isChallenge && returnOnChallenge) {
-        throw new ScrapeBrowserChallengeError({
-          url: info.pageUrl || win.webContents.getURL(),
-          title: info.title
-        })
-      }
+      if (win.isDestroyed()) throw new Error('验证窗口已被关闭')
+      const currentDocument = navigation === this.navigationRevision && url === win.webContents.getURL() && info.pageUrl === url
+      const hostname = pageHostname(url)
+      const relaxed = this.relaxedChallengeHosts.has(hostname)
+      const confirmed = currentDocument && this.consumeChallengeConfirmation(hostname)
+      // A challenge document can satisfy the generic selector and DOM-settle fallback.
+      const expectedContent = currentDocument && (info.settled || options.readySelector !== undefined && info.hasContent)
       const frameIdle = !win.webContents.isLoading() && !win.webContents.isLoadingMainFrame()
       const hasAnyDom =
         info.textLength > 0 || info.bodyChildCount > 0 || info.htmlLength > 200
@@ -1081,22 +1099,33 @@ export class ScrapeBrowserHelperRuntime {
         frameIdle &&
         hasAnyDom &&
         Date.now() - start > DOM_SETTLE_MIN_ELAPSED_MS
-      const mayResolve = canResolveScrapePage(
-        isChallenge,
-        info.hasContent || info.settled || hasTerminalDomState
-      )
+      const mayResolve = currentDocument && (isChallenge
+        ? relaxed && expectedContent
+        : info.hasContent || info.settled || hasTerminalDomState)
+      const now = Date.now()
+      const waitStatus = waitBudget.update(now, { detected: currentDocument && isChallenge, relaxed, expectedContent, confirmed })
+      const waiting = waitStatus === 'waiting-for-verification' || waitStatus === 'verification-timeout'
+      if (waiting) this.showChallengeBanner(win, hostname)
+      else if (currentDocument) this.removeHelperBanner(win)
+      if (waitStatus === 'verification-timeout') {
+        throw new Error('验证超时：请在弹出的窗口中完成 Cloudflare 验证后点击「验证通过」')
+      }
+      if (waiting && returnOnChallenge) throw new ScrapeBrowserChallengeError({ url, title: info.title })
+
+      if (confirmed) stableContentSince = 0
       if (mayResolve) {
         if (stableContentSince === 0 || lastStableSignature !== info.signature) {
-          stableContentSince = Date.now()
+          stableContentSince = now
           lastStableSignature = info.signature
         }
-        if (Date.now() - stableContentSince > DOM_SETTLE_STABLE_MS) {
+        if (now - stableContentSince > DOM_SETTLE_STABLE_MS) {
           return this.readHtml(win)
         }
       } else {
         stableContentSince = 0
         lastStableSignature = ''
       }
+      if (waitStatus === 'page-timeout') break
 
       await this.sleep(700, signal)
     }
@@ -1201,7 +1230,7 @@ export class ScrapeBrowserHelperRuntime {
       case 'press':
         return this.press(win, readKey(params))
       case 'waitForSelector':
-        return this.waitForSelector(win, readSelector(params), readTimeout(params.timeoutMs))
+        return this.enqueuePageWork(() => this.waitForSelector(win, readSelector(params), readTimeout(params.timeoutMs), signal))
       case 'wait':
         await this.sleep(readTimeout(params.timeoutMs), signal)
         return true
@@ -1615,35 +1644,37 @@ export class ScrapeBrowserHelperRuntime {
   private async waitForSelector(
     win: ScraperHelperWindow,
     selector: string,
-    timeoutMs: number
+    timeoutMs: number,
+    signal?: AbortSignal
   ): Promise<boolean> {
     const started = Date.now()
     const waitBudget = new ScrapeBrowserWaitBudget(started, timeoutMs, VERIFICATION_TIMEOUT_MS)
-    let focusedForChallenge = false
     while (true) {
+      signal?.throwIfAborted()
+      if (win.isDestroyed()) throw new Error('验证窗口已被关闭')
+      const url = win.webContents.getURL()
+      const navigation = this.navigationRevision
       const isChallenge = await this.isPageChallenge(win)
-      const found = isChallenge
+      const hostname = pageHostname(url)
+      const relaxed = this.relaxedChallengeHosts.has(hostname)
+      const found = win.isDestroyed() || isChallenge && !relaxed
         ? false
         : await win.webContents
             .executeJavaScript(`!!document.querySelector(${JSON.stringify(selector)})`)
             .catch(() => false)
-      if (canResolveScrapeSelector(isChallenge, found)) return true
-
-      const waitStatus = waitBudget.update(Date.now(), isChallenge)
+      if (win.isDestroyed()) throw new Error('验证窗口已被关闭')
+      const currentDocument = navigation === this.navigationRevision && url === win.webContents.getURL()
+      const expectedContent = currentDocument && found
+      const confirmed = currentDocument && this.consumeChallengeConfirmation(hostname)
+      const waitStatus = waitBudget.update(Date.now(), { detected: currentDocument && isChallenge, relaxed, expectedContent, confirmed })
+      if (waitStatus === 'waiting-for-verification' || waitStatus === 'verification-timeout') this.showChallengeBanner(win, hostname)
+      else if (currentDocument) this.removeHelperBanner(win)
       if (waitStatus === 'verification-timeout') {
-        await this.syncHelperBanner(win)
         throw new Error('验证超时：请在弹出的窗口中完成 Cloudflare 验证后点击「验证通过」')
       }
+      if (expectedContent) return true
       if (waitStatus === 'page-timeout') break
-      if (isChallenge && !focusedForChallenge) {
-        await this.syncHelperBanner(win)
-        focusedForChallenge = true
-      } else if (!isChallenge && focusedForChallenge) {
-        await this.syncHelperBanner(win)
-        focusedForChallenge = false
-      }
-
-      await this.sleep(250)
+      await this.sleep(250, signal)
     }
     throw new Error(`Timed out waiting for selector: ${selector}`)
   }

@@ -1,4 +1,5 @@
-import { idListSchema } from '@shared/manage/primitives'
+import { DIRECT_ID_BATCH_MAX } from '@shared/protocol/limits'
+import { z } from 'zod'
 import { playlistApplyImportResultSchema } from '@shared/playlistImportCommit'
 import { catalogVideoSourcePageSchema } from '@shared/catalogVideoSourceSchemas'
 import { videoLifecycleImpactSchema, videoLifecycleResultSchema } from '@shared/videoLifecycleSchemas'
@@ -6,7 +7,7 @@ import { browseMediaMountResultSchema } from '@shared/mediaLibraryIpcContract'
 import { playlistDetailSchema, playlistMetadataSchema, playlistPageSchema, playlistVideosPageSchema, playlistListPageSchema } from '@shared/playlistSchemas'
 import { actressEditResultSchema } from '@shared/actressEditContract'
 import { structuredError } from '@shared/protocol/errors'
-import { scopedVideoDetailSchema, actressDetailSchema, actressProfileSchema, actressMetadataSchema } from '@shared/catalogDetailSchemas'
+import { scopedVideoDetailSchema, actressDetailSchema, actressProfileSchema, actressMetadataSchema, videoCardSchema } from '@shared/catalogDetailSchemas'
 import type { CatalogOperationResults } from '../../application/catalogOperationResults'
 
 type OperationsReturning<T> = {
@@ -53,7 +54,7 @@ const complexResultSchemas: CatalogResultSchemas = {
   'videos.removeFromLibrary': videoLifecycleResultSchema,
   'videos.moveResource': videoLifecycleResultSchema,
   'videos.deleteGlobal': videoLifecycleResultSchema,
-  'videos.existingIds': idListSchema,
+  'videos.cardsByIds': z.array(videoCardSchema).max(DIRECT_ID_BATCH_MAX),
   'videos.get': scopedVideoDetailSchema.nullable(),
   'actresses.get': actressDetailSchema.nullable(),
   'actresses.profile': actressProfileSchema.nullable(),

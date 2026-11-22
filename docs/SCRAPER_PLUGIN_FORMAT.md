@@ -125,6 +125,8 @@ helper 启动与建立租约时不显示窗口；实际加载网页或显式展�
 
 租约内部的 `fetchPage` 与宿主预登入共用同一页面队列，按顺序执行，因此 `Promise.all(urls.map(ctx.fetchPage))` 不会让单页 target 并发导航，也不会在登入未完成时抢走当前页；总耗时仍接近各页之和。helper 使用 Electron 内置 Chromium和既有 `Partitions/scraper` profile，不要求系统浏览器或 Playwright 浏览器下载。
 
+用户点击工具栏「验证通过」后，当前域名在本次刮削中进入宽松检测。出现疑似验证信号时，`fetchPage` 优先等待插件指定的 `readySelector` 或 `settleWhenText`，`waitForSelector` 优先等待目标元素。验收条件应指向站点正文或真实空结果容器。收到疑似挑战时，通用页面加载完成仅表示文档已载入。等待预期内容超时且仍有验证信号时，显示人工验证横幅，验证后继续等待同一页面。不同主机名以及下一次刮削默认使用普通检测。
+
 `ctx.browser.*` 保持既有返回契约，但一串 `click` / `type` / `snapshot` 仍依赖页面在调用之间保持不动，所以动作序列必须顺序 `await`，且不可与 `fetchPage` 交叉。
 
 ### `ctx.fetchBuffer` 持久缓存

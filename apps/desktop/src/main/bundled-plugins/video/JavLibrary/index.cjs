@@ -27,7 +27,10 @@ async function parseVideo(ctx) {
   const requestedCode = normalizeCode(ctx.code);
   const baseUrl = 'https://www.javlibrary.com/cn';
   const searchUrl = `${baseUrl}/vl_searchbyid.php?keyword=${encodeURIComponent(requestedCode)}`;
-  const searchHtml = await ctx.fetchPage(searchUrl, { timeoutMs: 15000 });
+  const searchHtml = await ctx.fetchPage(searchUrl, {
+    readySelector: '#video_info, .videos',
+    timeoutMs: 15000
+  });
   const $search = ctx.cheerio.load(searchHtml);
 
   if ($search('#video_info').length > 0) {
@@ -54,7 +57,7 @@ async function parseVideo(ctx) {
 
   // Fetch every first-page exact match. Any rejection aborts the complete candidate set.
   return Promise.all(detailUrls.map(async (detailUrl) => {
-    const detailHtml = await ctx.fetchPage(detailUrl, { timeoutMs: 15000 });
+    const detailHtml = await ctx.fetchPage(detailUrl, { readySelector: '#video_id .text', timeoutMs: 15000 });
     const $detail = ctx.cheerio.load(detailHtml);
     return parseDetail($detail, detailPageCode($detail), detailUrl);
   }));

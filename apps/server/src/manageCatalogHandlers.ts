@@ -6,7 +6,7 @@ import path from 'node:path'
 import { getDb } from '@library/db/database'
 import { createHomeDiscoveryRepo } from '@library/db/homeDiscoveryRepo'
 import { scopedVideoCatalogRepo } from '@library/db/scopedVideoCatalogRepo'
-import { existingVideoIds, getVideoResourceInLibrary } from '@library/db/videoRepo'
+import { videoCardsByIds, getVideoResourceInLibrary } from '@library/db/videoRepo'
 import { listCatalogVideoSources } from '@library/catalog/catalogVideoSources'
 import type { ScopedStoredVideoDetail } from '@shared/catalogTypes'
 import { projectVideoDetail } from '@library/catalog/videoDetailProjection'
@@ -225,9 +225,9 @@ const handlers: Partial<Record<ManageOperationId, CatalogHandler>> = {
     const input = args.envelope.input as GlobalSearchInput
     return createHomeDiscoveryRepo({ database: catalogDb(args.database) }).search(input)
   },
-  'videos.existingIds'(args) {
+  'videos.cardsByIds'(args) {
     const { videoIds } = args.envelope.input as { videoIds: number[] }
-    return existingVideoIds(videoIds, catalogDb(args.database))
+    return videoCardsByIds(videoIds, catalogDb(args.database))
   },
   'videos.years'(args) {
     const input = args.envelope.input as { scope: CatalogScope }

@@ -28,9 +28,9 @@ Linux Electron 图片元数据读取和缩略图使用 Sharp 官方 WASM 后端�
 
 ## 数据格式与数据库迁移
 
-桌面本机“最近播放”不增加数据库表：`player/recentPlayback.ts` 在 Electron `userData/recent-playback.json` 中原子保存最多 1,000 个窄影片快照，同时限制 UTF-8 文件为 8 MiB，超出任一限制均从最旧记录开始淘汰，确保写入后仍可读取。按 mode／catalogId／serverId 的摘要隔离，不保存播放 URL、授权或资源路径。独立 `recentPlayback:*` IPC 读取／分页／移除／清空；桌面 `/playlists/0` 是虚拟入口，不能传给资料库清单接口。自动记录复用内置播放的真实启动信号与外部系统接受打开信号，晚到的资料读取不能跨资料库写入、覆盖较新播放或撤销已确认的清空／单条移除。资料库备份、服务器与 Web 不包含此数据。
+桌面本机“最近播放”通过 `player/recentPlayback.ts` 在 Electron `userData/recent-playback.json` 中原子保存最多 1,000 条记录。每条只含 mode／catalogId／serverId 的摘要、影片 ID 和最后播放时间。旧版卡片快照在读取时转换为对应记录，保留播放时间和顺序。独立 `recentPlayback:*` IPC 处理读取、分页、移除和清空。桌面 `/playlists/0` 是本机历史的虚拟入口。自动记录复用内置播放的真实启动信号和外部系统接受打开信号。资料库备份、服务器和 Web 不保存播放历史。
 
-读取数量或分页前，用 `videos.existingIds` 分批核对当前资料库的影片 ID，清理已删除影片的快照。远程查询只传按 ID 排序的编号。服务端离线或不支持此查询时保留本机记录，待下次读取再核对。
+读取时用 `videos.cardsByIds` 分批获取当前卡片字段，再按本机播放时间排序、筛选和分页。资料库确认影片已删除时清理对应记录。远程查询只传按 ID 排序的编号。服务端离线或查询失败时保留本机记录，恢复连接后再读取卡片。
 
 历史版本中，v0.6.2 使用 schema 15，v0.7.x 使用 schema 16，v0.8.0 使用 schema 19：17 引入 catalog 身份、写入凭据和操作回执；18 引入图片上传及关联实体版本保护；19 引入持久任务表。0.7.x 升级至 0.8.0 时执行 16 → 19，已有相同结构不重复升级。当前 0.9.0 使用 **schema 21**；从旧版升级会继续执行至 21，具体迁移以 [migrations.ts](../packages/library/src/db/migrations.ts) 为准。
 

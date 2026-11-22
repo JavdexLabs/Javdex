@@ -39,7 +39,7 @@ export const MANAGE_OPERATIONS = {
   'home.load': { auth: 'manageRead', versions: [], completion: 'sync', summary: 'Home discovery snapshot' },
   'home.search': { auth: 'manageRead', versions: [], completion: 'sync', summary: 'Global catalog search' },
   'videos.list': { auth: 'manageRead', versions: [], completion: 'sync', summary: 'Scoped video list' },
-  'videos.existingIds': { auth: 'manageRead', versions: [], completion: 'sync', summary: 'Check canonical video IDs in one batch' },
+  'videos.cardsByIds': { auth: 'manageRead', versions: [], completion: 'sync', summary: 'Read canonical video cards in one batch' },
   'videos.get': { auth: 'manageRead', versions: ['V', 'R'], completion: 'sync', summary: 'Scoped video detail' },
   'videos.sources': { auth: 'manageRead', versions: [], completion: 'sync', summary: 'Restricted paginated video_sources lookup for matching' },
   'videos.years': { auth: 'manageRead', versions: [], completion: 'sync', summary: 'Release years in scope' },

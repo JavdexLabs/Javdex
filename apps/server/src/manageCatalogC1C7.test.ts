@@ -130,11 +130,16 @@ describe('C1-C7 catalog manage handlers', () => {
 
     assert.deepEqual(dispatch('pendingVideoScrapes.existingIds', { scrapeIds: [8, 99, 8] }), [8])
     assert.deepEqual(dispatch('pendingVideoScrapes.existingIds', { videoIds: [12, 11, 99] }), [11, 12])
-    assert.deepEqual(dispatch('videos.existingIds', { videoIds: [12, 99, 11] }), [11, 12])
+    type Card = { id: number; cover_path: string | null; resource_kinds: string[] }
+    const cards = (videoIds: number[]) => dispatch('videos.cardsByIds', { videoIds }) as Card[]
+    assert.deepEqual(cards([12, 99, 11]).map(card => card.id).sort((a, b) => a - b), [11, 12])
+    db.prepare('UPDATE videos SET cover_path = ? WHERE id = 11').run('covers/current.jpg')
+    assert.equal(cards([11])[0].cover_path, 'covers/current.jpg')
+    assert.ok(!JSON.stringify(cards([11])).includes('/one/visible.mp4'))
     db.prepare('INSERT INTO videos(id, code) VALUES(13, ?)').run('NO-RESOURCES')
-    assert.deepEqual(dispatch('videos.existingIds', { videoIds: [13] }), [13])
+    assert.deepEqual(cards([13]).map(card => [card.id, card.resource_kinds]), [[13, []]])
     db.prepare('DELETE FROM videos WHERE id = 13').run()
-    assert.deepEqual(dispatch('videos.existingIds', { videoIds: [11, 13] }), [11])
+    assert.deepEqual(cards([11, 13]).map(card => card.id), [11])
 
     const scrapePage = dispatch('pendingVideoScrapes.page', { videoId: 12, limit: 50, offset: 0 }) as {
       total: number

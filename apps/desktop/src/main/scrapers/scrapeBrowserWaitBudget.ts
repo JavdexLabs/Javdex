@@ -1,52 +1,46 @@
-export type ScrapeBrowserWaitStatus = 'active' | 'page-timeout' | 'verification-timeout'
+export type ScrapeBrowserWaitStatus = 'active' | 'waiting-for-verification' | 'page-timeout' | 'verification-timeout'
 
-export function canResolveScrapePage(
-  isChallenge: boolean,
-  hasStableContent: boolean
-): boolean {
-  return !isChallenge && hasStableContent
+interface ChallengeObservation {
+  detected: boolean
+  relaxed?: boolean
+  expectedContent?: boolean
+  confirmed?: boolean
 }
 
-export function canResolveScrapeSelector(
-  isChallenge: boolean,
-  selectorFound: boolean
-): boolean {
-  return !isChallenge && selectorFound
-}
-
-/** Tracks page loading and manual verification timeout budgets for fetchPage(). */
+/** Tracks the normal page budget and cumulative time spent waiting for manual verification. */
 export class ScrapeBrowserWaitBudget {
   private pageDeadlineAt: number
   private challengeStartedAt: number | null = null
   private challengeElapsedMs = 0
+  private deferredVerification = false
 
   constructor(
     startedAt: number,
-    pageTimeoutMs: number,
+    private readonly pageTimeoutMs: number,
     private readonly verificationTimeoutMs: number
   ) {
     this.pageDeadlineAt = startedAt + pageTimeoutMs
   }
 
-  update(now: number, isChallenge: boolean): ScrapeBrowserWaitStatus {
-    if (isChallenge) {
-      this.challengeStartedAt ??= now
-      if (
-        this.challengeElapsedMs + now - this.challengeStartedAt >=
-        this.verificationTimeoutMs
-      ) {
-        return 'verification-timeout'
-      }
-      return 'active'
-    }
-
-    if (this.challengeStartedAt !== null) {
+  update(now: number, { detected, relaxed = false, expectedContent = false, confirmed = false }: ChallengeObservation): ScrapeBrowserWaitStatus {
+    const blocked = detected && !(relaxed && expectedContent)
+    if (this.challengeStartedAt !== null && (confirmed || !blocked)) {
       const elapsed = Math.max(0, now - this.challengeStartedAt)
       this.challengeElapsedMs += elapsed
-      this.pageDeadlineAt += elapsed
+      // A deferred challenge used up the page budget before it was shown.
+      // Give the current page time to reload or settle after verification.
+      this.pageDeadlineAt = this.deferredVerification ? now + this.pageTimeoutMs : this.pageDeadlineAt + elapsed
       this.challengeStartedAt = null
+      this.deferredVerification = false
     }
-
+    if (blocked && (!relaxed || this.challengeStartedAt !== null || now >= this.pageDeadlineAt)) {
+      if (this.challengeStartedAt === null) {
+        this.challengeStartedAt = now
+        this.deferredVerification = now >= this.pageDeadlineAt
+      }
+      return this.challengeElapsedMs + now - this.challengeStartedAt >= this.verificationTimeoutMs
+        ? 'verification-timeout' : 'waiting-for-verification'
+    }
     return now >= this.pageDeadlineAt ? 'page-timeout' : 'active'
   }
 }

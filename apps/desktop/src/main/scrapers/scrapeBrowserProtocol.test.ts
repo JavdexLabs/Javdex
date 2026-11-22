@@ -126,6 +126,19 @@ describe('ScrapeBrowserFramedSocket', () => {
     assert.deepEqual([...body], [0, 1, 2, 255])
   })
 
+  it('reports an unexpected peer close before the next write', { timeout: 2_000 }, async () => {
+    const [client, remote] = await socketPair()
+    const failures: Error[] = []
+    const receiver = new ScrapeBrowserFramedSocket(client, () => undefined, (error) => failures.push(error))
+    sockets.push(receiver)
+
+    const closed = new Promise<void>((resolve) => client.once('close', () => resolve()))
+    remote.end()
+    await closed
+
+    assert.deepEqual(failures.map((error) => error.message), ['Scrape browser IPC is closed'])
+  })
+
   it('rejects an oversized incoming frame before allocating its body', async () => {
     const [client, remote] = await socketPair()
     const failed = new Promise<Error>((resolve) => {

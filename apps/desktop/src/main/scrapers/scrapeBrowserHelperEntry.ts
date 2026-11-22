@@ -200,7 +200,6 @@ export async function startScrapeBrowserHelper(): Promise<void> {
   }
 
   framed = new ScrapeBrowserFramedSocket(socket, onFrame, () => shutdown())
-  socket.once('close', shutdown)
   await new Promise<void>((resolve, reject) => {
     socket.once('connect', resolve)
     socket.once('error', reject)

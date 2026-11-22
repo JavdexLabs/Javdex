@@ -652,16 +652,20 @@ export class ScrapeBrowserHostModule implements ScrapeBrowserHost {
         .replaceAll(pipePath, '[redacted-pipe]')
         .replaceAll(env[SCRAPE_BROWSER_HELPER_ENV.profile]!, '[redacted-profile]')
         .replaceAll(`127.0.0.1:${cdpPort}`, '[redacted-cdp]')
-      if (message) {
-        try { console.error(`[scraper-helper] ${message.slice(0, 2000)}`) } catch { /* pipe may be broken */ }
-      }
+      if (message) console.error(`[scraper-helper] ${message.slice(0, 2000)}`)
     })
 
     const framedHolder: { value?: ScrapeBrowserFramedSocket } = {}
     try {
       const socket = await withTimeout(socketPromise, HELPER_START_TIMEOUT_MS, 'Scraper helper IPC 连接超时')
       if (server.listening) server.close()
+      let startupDisconnect: Error | undefined
+      let onDisconnect: (error: Error) => void
       const helloPromise = new Promise<ScrapeBrowserHelloFrame>((resolve, reject) => {
+        onDisconnect = (error) => {
+          startupDisconnect = error
+          reject(error)
+        }
         framedHolder.value = new ScrapeBrowserFramedSocket(
           socket,
           (frame) => {
@@ -671,7 +675,7 @@ export class ScrapeBrowserHostModule implements ScrapeBrowserHost {
             }
             this.handleFrame(frame)
           },
-          reject
+          (error) => onDisconnect(error)
         )
       })
       const hello = await withTimeout(helloPromise, HELPER_START_TIMEOUT_MS, 'Scraper helper 握手超时')
@@ -706,9 +710,9 @@ export class ScrapeBrowserHostModule implements ScrapeBrowserHost {
         }
       }))
       const playwrightPages = identifiedPages.filter(({ id }) => id === hello.targetId).map(({ page }) => page)
-      if (contexts.length !== 1 || playwrightPages.length !== 1) {
+      if (startupDisconnect || contexts.length !== 1 || playwrightPages.length !== 1) {
         await browser.close()
-        throw new Error('Scraper helper 只允许一个页面 target')
+        throw startupDisconnect ?? new Error('Scraper helper 只允许一个页面 target')
       }
       const page = playwrightPages[0]
       page.setDefaultTimeout(10_000)
@@ -727,6 +731,9 @@ export class ScrapeBrowserHostModule implements ScrapeBrowserHost {
         pageEpoch: 0,
         viewEpoch: 0,
         snapshotViewRevision: null
+      }
+      onDisconnect = (error) => {
+        this.markHelperFatal(helper, new Error('Scraper helper IPC disconnected', { cause: error }))
       }
       this.helper = helper
       page.on('framenavigated', (frame) => {
@@ -832,10 +839,10 @@ export class ScrapeBrowserHostModule implements ScrapeBrowserHost {
     })
   }
 
-  private markHelperFatal(helper: RunningHelper, message: string): void {
+  private markHelperFatal(helper: RunningHelper, failure: string | Error): void {
     if (helper.fatal) return
     helper.fatal = true
-    const error = new Error(message)
+    const error = typeof failure === 'string' ? new Error(failure) : failure
     for (const [id, pending] of this.pending) {
       if (!id.startsWith(`${helper.generation}:`)) continue
       this.pending.delete(id)
@@ -843,7 +850,7 @@ export class ScrapeBrowserHostModule implements ScrapeBrowserHost {
       if (!pending.settledForCaller) pending.reject(error)
     }
     if (this.activeLease?.generation === helper.generation) this.activeLease = null
-    void this.stopHelper(message)
+    void this.stopHelper(error.message)
   }
 
   private async stopHelper(_reason: string): Promise<void> {

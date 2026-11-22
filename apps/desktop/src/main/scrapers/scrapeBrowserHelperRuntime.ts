@@ -105,30 +105,20 @@ export function buildHelperToolbarHtml(
   kind: HelperBannerKind,
   pluginName = ''
 ): string {
+  if (kind === 'none') return '<!doctype html><body></body>'
+
   const pluginLabel = pluginName.trim() ? `插件【${pluginName.trim()}】` : '插件'
-  const status = (() => {
-    if (kind === 'preLogin') {
-      return `⚠️ ${pluginLabel}开启了预登入，当前刮削已暂停，请在页面中完成登入后点击右侧的登入完成按钮`
-    }
-    if (kind === 'challenge') {
-      return '⚠️ 检测到 Cloudflare 人机验证，当前刮削已暂停，请在页面中完成验证后点击右侧的验证通过按钮'
-    }
-    return '刮削窗口'
-  })()
-  const actions = (() => {
-    if (kind === 'preLogin') {
-      return `
+  const status = kind === 'preLogin'
+    ? `⚠️ ${pluginLabel}开启了预登入，当前刮削已暂停，请在页面中完成登入后点击右侧的登入完成按钮`
+    : '⚠️ 检测到 Cloudflare 人机验证，当前刮削已暂停，请在页面中完成验证后点击右侧的验证通过按钮'
+  const actions = kind === 'preLogin'
+    ? `
         <a class="toolbar-action" href="${HELPER_TOOLBAR_ACTION_PROTOCOL}//refresh">↻ 刷新页面</a>
         <a class="toolbar-action toolbar-action--primary" href="${HELPER_TOOLBAR_ACTION_PROTOCOL}//pre-login-done">✅ 登入完成</a>`
-    }
-    if (kind === 'challenge') {
-      return `
+    : `
         <a class="toolbar-action" href="${HELPER_TOOLBAR_ACTION_PROTOCOL}//refresh">↻ 刷新页面</a>
         <a class="toolbar-action" href="${HELPER_TOOLBAR_ACTION_PROTOCOL}//save">💾 保存页面</a>
         <a class="toolbar-action toolbar-action--primary" href="${HELPER_TOOLBAR_ACTION_PROTOCOL}//challenge-passed">✅ 验证通过</a>`
-    }
-    return ''
-  })()
 
   return `<!doctype html>
 <html lang="zh-CN">
@@ -529,7 +519,7 @@ export class ScrapeBrowserHelperRuntime {
       x: 0,
       y: 0,
       width: Math.max(1, bounds.width),
-      height: HELPER_TOOLBAR_HEIGHT
+      height: top
     })
   }
 
@@ -541,12 +531,6 @@ export class ScrapeBrowserHelperRuntime {
     const toolbar = this.helperToolbarView
     if (!toolbar || toolbar.webContents.isDestroyed()) return
     if (this.win && !this.win.isDestroyed()) this.layoutHelperToolbar(this.win)
-    if (kind === 'none') {
-      // Load default HTML so the previous banner content is cleared,
-      // then relayout to expand the page back to full window height.
-      void toolbar.webContents.loadURL(this.buildHelperToolbarDataUrl('none')).catch(() => {})
-      return
-    }
     void toolbar.webContents.loadURL(this.buildHelperToolbarDataUrl(kind, pluginName)).catch(() => {})
   }
 
@@ -923,7 +907,7 @@ export class ScrapeBrowserHelperRuntime {
   }
 
   private removeHelperBanner(win: ScraperHelperWindow): void {
-    if (win.isDestroyed()) return
+    if (win.isDestroyed() || this.helperBannerKind === 'none') return
     this.helperBannerKind = 'none'
     this.renderHelperToolbar('none')
   }
@@ -948,7 +932,7 @@ export class ScrapeBrowserHelperRuntime {
       win.focus()
       return
     }
-    if (this.helperBannerKind !== 'none') this.removeHelperBanner(win)
+    this.removeHelperBanner(win)
   }
 
   /**

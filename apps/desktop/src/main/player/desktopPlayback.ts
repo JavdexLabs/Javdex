@@ -287,6 +287,8 @@ export function registerBuiltinPlayback(backend: CatalogBackend, getWindow: () =
       if (!prepared.audio.some(audio => audio.index === command.audioIndex)) throw new Error('所选音轨已变化，请刷新后重试')
       if (!command.replaceRevision && prepared.existingFiles[command.output]) throw new Error('同名字幕已存在，请刷新后选择是否覆盖')
       await subtitleTasks.enqueue(prepared.source, command.audioIndex, prepared.duration, command.output, command.replaceRevision)
+    } else if (command.action === 'bulk') {
+      await subtitleTasks.bulkAction(command.operation, command.ids)
     } else if (command.action === 'save-as' || command.action === 'export-srt') {
       const job = (await subtitleTasks.snapshot()).tasks.find(job => job.id === command.id)
       if (!job) throw new Error('字幕任务不存在')

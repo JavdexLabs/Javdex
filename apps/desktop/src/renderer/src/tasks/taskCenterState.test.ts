@@ -13,12 +13,12 @@ test('task categories preserve pending deep links and normalize unknown category
 })
 
 test('attention and running totals exclude user-paused and queued subtitle jobs', () => {
-  const statuses = ['running', 'queued', 'paused', 'failed', 'awaiting-save', 'saving', 'completed', 'cancelled'] as const
+  const statuses = ['running', 'queued', 'paused', 'failed', 'awaiting-save', 'saving', 'completed'] as const
   const tasks = statuses.map(status => ({ status }))
   assert.deepEqual(tasks.filter(subtitleNeedsAttention).map(task => task.status), ['failed', 'awaiting-save'])
   assert.deepEqual(tasks.filter(subtitleIsRunning).map(task => task.status), ['running', 'saving'])
   assert.deepEqual(tasks.filter(task => matchesSubtitleFilter(task, 'active')).map(task => task.status), ['running', 'queued', 'paused', 'saving'])
-  assert.deepEqual(tasks.filter(task => matchesSubtitleFilter(task, 'finished')).map(task => task.status), ['completed', 'cancelled'])
+  assert.deepEqual(tasks.filter(task => matchesSubtitleFilter(task, 'finished')).map(task => task.status), ['completed'])
 })
 
 test('bilingual progress does not claim recognition alone completes the subtitle', () => {

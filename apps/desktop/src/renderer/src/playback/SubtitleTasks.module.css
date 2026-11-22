@@ -5,6 +5,13 @@
   font-size: 13px;
 }
 
+.workspace {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
 .managementTabs {
   display: flex;
   margin-bottom: var(--form-section-gap);
@@ -12,6 +19,7 @@
 
 .toolbar {
   display: flex;
+  flex-shrink: 0;
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
@@ -23,6 +31,20 @@
   color: var(--text-muted);
   font-size: 12px;
   white-space: nowrap;
+}
+
+.bulkActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-inline-start: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-panel);
+}
+
+.bulkActions > button {
+  gap: 6px;
 }
 
 .filterCount {
@@ -153,7 +175,7 @@
   --subtitle-progress-color: var(--text-success);
 }
 
-.row[data-status='paused'], .row[data-status='cancelled'] {
+.row[data-status='paused'] {
   --subtitle-progress-color: var(--text-muted);
 }
 

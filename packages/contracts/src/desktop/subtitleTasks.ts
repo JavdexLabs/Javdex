@@ -1,6 +1,17 @@
 import type { PlaybackTarget } from './playback'
 
-export type SubtitleTaskStatus = 'queued' | 'running' | 'paused' | 'failed' | 'saving' | 'awaiting-save' | 'completed' | 'cancelled'
+export type SubtitleTaskStatus = 'queued' | 'running' | 'paused' | 'failed' | 'saving' | 'awaiting-save' | 'completed'
+export const MAX_SUBTITLE_TASKS = 10000
+export const subtitleBulkOperations = ['resume', 'pause', 'remove-active', 'clear-completed'] as const
+export type SubtitleBulkOperation = typeof subtitleBulkOperations[number]
+export function canApplySubtitleBulkOperation(status: SubtitleTaskStatus, operation: SubtitleBulkOperation): boolean {
+  switch (operation) {
+    case 'resume': return status === 'paused'
+    case 'pause': return status === 'queued' || status === 'running'
+    case 'remove-active': return status === 'queued' || status === 'running' || status === 'paused'
+    case 'clear-completed': return status === 'completed'
+  }
+}
 export interface SubtitleTaskView {
   id: string
   title: string
@@ -31,8 +42,9 @@ export interface SubtitlePreparation {
   existingFiles: SubtitleOutputs
 }
 export type SubtitleTaskCommand =
+  | { action: 'bulk'; operation: SubtitleBulkOperation; ids: string[] }
   | { action: 'enqueue'; target: PlaybackTarget; audioIndex: number; output: 'bilingual' | 'japanese'; replaceRevision?: string }
-  | { action: 'resume' | 'pause' | 'cancel' | 'retry-save' | 'save-as' | 'export-srt' | 'remove' | 'delete-output'; id: string }
+  | { action: 'resume' | 'pause' | 'retry-save' | 'save-as' | 'export-srt' | 'remove' | 'delete-output'; id: string }
 
 export type SubtitleOutput = SubtitleTaskView['output']
 export type SubtitleOutputs = Partial<Record<SubtitleOutput, { name: string; revision: string | null }>>

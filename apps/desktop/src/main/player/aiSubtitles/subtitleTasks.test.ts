@@ -43,7 +43,9 @@ async function fixture() {
   let jobs = createSubtitleTasks(dependencies)
   return { root, source, paths, get jobs() { return jobs }, recognizes: () => recognizes, translations: () => translations, leases: () => leases,
     waitRecognition: (fn: typeof recognizeWait) => { recognizeWait = fn }, failTranslation: (value: boolean) => { failTranslation = value },
-    changeSource: () => { changed = true }, restart: async () => { await jobs.close(); jobs = createSubtitleTasks(dependencies); await jobs.ready },
+    changeSource: () => { changed = true }, restart: async (beforeOpen?: () => Promise<void>) => {
+      await jobs.close(); await beforeOpen?.(); jobs = createSubtitleTasks(dependencies); await jobs.ready
+    },
     cleanup: async () => { await jobs.close(); await fs.rm(root, { recursive: true, force: true }) } }
 }
 
@@ -70,10 +72,67 @@ test('batch joins the device queue exactly once, respects user pauses and never 
     assert.equal((await add()).outcome, 'skipped')
     assert.equal((await add('stale-id')).outcome, 'skipped')
     assert.equal((await add(job.id)).outcome, 'resumed')
-    await f.jobs.action(job.id, 'cancel')
+    await f.jobs.action(job.id, 'remove')
     assert.equal((await add(job.id)).outcome, 'skipped')
-    assert.equal((await f.jobs.matchingJobs(f.source))[0].status, 'cancelled')
+    assert.deepEqual(await f.jobs.matchingJobs(f.source), [])
     assert.equal(f.recognizes(), 0)
+  } finally { await f.cleanup() }
+})
+
+test('bulk shortcuts stop the active worker, respect changed states and keep published subtitles on clear', async t => {
+  const f = await fixture()
+  try {
+    const file = subtitleOutputPath(f.source.locator, 'japanese')
+    let finishSave!: () => void
+    const saving = new Promise<void>(resolve => { finishSave = resolve })
+    const link = fs.link
+    t.mock.method(fs, 'link', async (...args: Parameters<typeof fs.link>) => {
+      if (args[1] === file) await saving
+      return link(...args)
+    })
+    const saved = await f.jobs.enqueue(f.source, 1, 15, 'japanese')
+    try {
+      await until(() => f.jobs.state(saved)?.job.status === 'saving')
+      await f.jobs.bulkAction('remove-active', [saved])
+      await f.jobs.bulkAction('clear-completed', [saved])
+      await assert.rejects(f.jobs.action(saved, 'remove'), /字幕正在保存/)
+    } finally { finishSave() }
+    await until(() => f.jobs.state(saved)?.job.status === 'completed' && f.leases() === 0)
+    const original = await fs.readFile(file, 'utf8')
+    f.jobs.observe(true, null, 0)
+    const running = await f.jobs.enqueue(f.source, 1, 60)
+    const waiting = await f.jobs.enqueue(f.source, 2, 60)
+    f.waitRecognition(signal => new Promise((_, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true })))
+    f.jobs.observe(false, null, 0)
+    await until(() => f.jobs.state(running)?.job.status === 'running' && f.leases() === 1)
+    const both = [running, waiting]
+    const states = () => both.map(id => f.jobs.state(id)?.job.status)
+    await f.jobs.bulkAction('pause', [saved, ...both])
+    assert.deepEqual(states(), ['paused', 'paused'])
+    assert.equal(f.leases(), 0)
+    f.jobs.observe(true, null, 0)
+    const later = await f.jobs.enqueue(f.source, 3, 60)
+    await f.jobs.bulkAction('resume', both)
+    assert.deepEqual(states(), ['queued', 'queued'])
+    f.jobs.observe(true, running, 0)
+    await until(() => f.jobs.state(running)?.job.status === 'running' && f.leases() === 1)
+    await f.jobs.bulkAction('remove-active', [saved, ...both])
+    assert.equal(f.leases(), 0)
+    assert.deepEqual(states(), [undefined, undefined])
+    assert.equal(f.jobs.state(saved)?.job.status, 'completed')
+    assert.equal(f.jobs.state(later)?.job.status, 'queued')
+    await f.jobs.bulkAction('clear-completed', [saved, later])
+    assert.equal(f.jobs.state(saved), null)
+    await f.restart(async () => {
+      const filename = path.join(f.root, 'tasks', 'tasks.json')
+      const manifest = JSON.parse(await fs.readFile(filename, 'utf8'))
+      assert.deepEqual(manifest.jobs.map((job: { id: string }) => job.id), [later])
+      Object.assign(manifest.jobs[0], { status: 'cancelled', recognizedSeconds: 30 })
+      await fs.writeFile(filename, JSON.stringify(manifest))
+    })
+    assert.equal(f.jobs.state(later)?.job.status, 'paused')
+    assert.equal(f.jobs.state(later)?.job.recognizedSeconds, 30)
+    assert.equal(await fs.readFile(file, 'utf8'), original)
   } finally { await f.cleanup() }
 })
 

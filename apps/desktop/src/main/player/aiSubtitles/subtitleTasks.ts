@@ -4,6 +4,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { z } from 'zod'
 import type { PlaybackTarget } from '@shared/desktop/playback'
 import type { BatchSubtitleResult, SubtitleOutput, SubtitleTaskView, SubtitleTasksSnapshot } from '@shared/desktop/subtitleTasks'
+import { canApplySubtitleBulkOperation, MAX_SUBTITLE_TASKS, type SubtitleBulkOperation } from '@shared/desktop/subtitleTasks'
 import type { PlaybackSource } from '../playbackSource'
 import { playbackTargetSchema } from '../playbackSchemas'
 import { atomicWrite } from '../../utils/atomicWrite'
@@ -14,14 +15,14 @@ import { createSubtitleScheduler, type SubtitleSchedulerState } from './subtitle
 import { renderSubtitleAss, renderSubtitleSrt, type SubtitleCue } from './subtitleDocument'
 import { inspectSubtitleOutput, publishSubtitleFile, subtitleOutputPath } from './subtitleFiles'
 
-const MAX_JOBS = 10000
 const MAX_MANIFEST_BYTES = 8 * 1024 * 1024
 const jobSchema = z.object({
   id: z.string().uuid(), title: z.string(), target: playbackTargetSchema,
   resourceKey: z.string(), fileIdentity: z.string(), revision: z.string(),
   audioIndex: z.number().int().nonnegative(), output: z.enum(['bilingual', 'japanese']),
   asrVersion: z.string(), translationVersion: z.string(), duration: z.number().positive().max(604800),
-  status: z.enum(['queued', 'running', 'paused', 'failed', 'saving', 'awaiting-save', 'completed', 'cancelled']),
+  status: z.enum(['queued', 'running', 'paused', 'failed', 'saving', 'awaiting-save', 'completed', 'cancelled'])
+    .transform(status => status === 'cancelled' ? 'paused' as const : status),
   recognizedSeconds: z.number().nonnegative(), translatedSeconds: z.number().nonnegative(), error: z.string().nullable(),
   outputPath: z.string().nullable(), outputHash: z.string().nullable(), cacheKey: z.string().nullable(),
   replaceRevision: z.string().regex(/^[a-f0-9]{64}$/).optional()
@@ -59,7 +60,7 @@ export function createSubtitleTasks(deps: Dependencies) {
     try {
       const stat = await fs.stat(manifest)
       if (stat.size > MAX_MANIFEST_BYTES) throw new Error('字幕任务清单过大')
-      const parsed = z.object({ version: z.literal(1), jobs: z.array(jobSchema).max(MAX_JOBS) }).strict().parse(JSON.parse(await fs.readFile(manifest, 'utf8')))
+      const parsed = z.object({ version: z.literal(1), jobs: z.array(jobSchema).max(MAX_SUBTITLE_TASKS) }).strict().parse(JSON.parse(await fs.readFile(manifest, 'utf8')))
       jobs = parsed.jobs.map(job => ['queued', 'running', 'saving'].includes(job.status)
         ? { ...job, status: 'paused', error: '应用已退出，请继续任务' } : job)
     } catch (cause) {
@@ -251,6 +252,35 @@ export function createSubtitleTasks(deps: Dependencies) {
     if (path.dirname(directory) !== root) throw new Error('字幕任务目录无效')
     await fs.rm(directory, { recursive: true, force: true })
   }
+  async function removeJobs(selected: Job[]): Promise<void> {
+    const removed = new Set(selected)
+    // Dequeue the whole selection before stopping the worker so it cannot pick the next removed job.
+    jobs = jobs.filter(job => !removed.has(job))
+    if (active && removed.has(active.job)) {
+      active.controller.abort()
+      await loop
+    }
+    for (const job of selected) { results.delete(job.id); progress.delete(job.id) }
+    await persist(); notify(); kick()
+    // Commit the manifest first. Only remove private checkpoints, never the published subtitle.
+    let failures = 0
+    for (const job of selected) {
+      try { await removeCheckpoints(job) } catch { failures++ }
+    }
+    if (failures) throw new Error(`记录已移除，但有 ${failures} 项任务的中间文件未能清理，请检查任务目录权限`)
+  }
+  async function updateQueue(selected: Job[], operation: 'pause' | 'resume'): Promise<void> {
+    for (const job of selected) {
+      if (operation === 'resume') { job.status = 'queued'; job.error = null }
+      else job.status = 'paused'
+    }
+    // Mark every queued target before aborting. The worker can pick its next job as soon as it stops.
+    if (operation !== 'resume' && active && selected.includes(active.job)) {
+      active.controller.abort()
+      await loop
+    }
+    await persist(); notify(); kick()
+  }
   async function enqueue(source: PlaybackSource, audioIndex: number, duration: number, output: SubtitleOutput,
     batch?: { title: string; resumeId?: string; replaceRevision?: string }): Promise<{ id: string | null; outcome: BatchSubtitleResult['outcome']; message: string }> {
     return exclusive(async () => {
@@ -289,7 +319,7 @@ export function createSubtitleTasks(deps: Dependencies) {
       const retired = replaceRevision && old?.outputPath && normalized(old.outputPath) === normalized(destination) ? old : null
       const nextJobs = [...jobs.filter(item => item !== retired), job]
       const body = JSON.stringify({ version: 1, jobs: nextJobs })
-      if (nextJobs.length > MAX_JOBS || Buffer.byteLength(body) > MAX_MANIFEST_BYTES) {
+      if (nextJobs.length > MAX_SUBTITLE_TASKS || Buffer.byteLength(body) > MAX_MANIFEST_BYTES) {
         throw new Error('字幕任务清单已满，请移除已完成的任务')
       }
       jobs = nextJobs
@@ -334,34 +364,35 @@ export function createSubtitleTasks(deps: Dependencies) {
       else if (active && active.job.id === priority) active.run?.position(at)
       if (changed) kick()
     },
-    action(id: string, action: 'pause' | 'resume' | 'cancel' | 'retry-save' | 'remove' | 'delete-output', selected?: { filename: string; replace: boolean; srt?: boolean }): Promise<void> {
+    bulkAction(operation: SubtitleBulkOperation, ids: string[]): Promise<void> {
+      return exclusive(async () => {
+        const requested = new Set(ids)
+        const selected = jobs.filter(job => requested.has(job.id) && canApplySubtitleBulkOperation(job.status, operation))
+        if (!selected.length) return
+        if (operation === 'remove-active' || operation === 'clear-completed') return removeJobs(selected)
+        return updateQueue(selected, operation)
+      })
+    },
+    action(id: string, action: 'pause' | 'resume' | 'retry-save' | 'remove' | 'delete-output', selected?: { filename: string; replace: boolean; srt?: boolean }): Promise<void> {
       return exclusive(async () => {
         const job = requireJob(id)
         if (action === 'pause' && !['queued', 'running'].includes(job.status)) return
-        if (action === 'cancel' && ['completed', 'saving'].includes(job.status)) return
-        if (action === 'pause' || action === 'cancel' || action === 'remove' || action === 'delete-output') {
+        if (action === 'resume' && ['completed', 'awaiting-save', 'saving', 'running'].includes(job.status)) return
+        if (action === 'pause' || action === 'resume') return updateQueue([job], action)
+        if (action === 'remove') {
+          if (job.status === 'saving') throw new Error('字幕正在保存，请在保存结束后移除任务')
+          return removeJobs([job])
+        }
+        if (action === 'delete-output') {
           if (active?.job === job) { job.status = 'paused'; active.controller.abort(); await loop }
-          if (action === 'pause') job.status = 'paused'
-          if (action === 'cancel') job.status = 'cancelled'
-          if (action === 'remove') {
-            jobs = jobs.filter(value => value !== job); results.delete(id); progress.delete(id)
-            // Remove only this UUID's private checkpoint directory after the
-            // manifest commits. Never follow outputPath into the media folder.
-            await persist()
-            await removeCheckpoints(job)
-          }
-          if (action === 'delete-output') {
-            await resolve(job)
-            await mutateOutput(async () => {
-              if (!job.outputPath || !job.outputHash) throw new Error('没有已保存的字幕')
-              const body = await fs.readFile(job.outputPath, 'utf8')
-              if (hash(body) !== job.outputHash) throw new Error('字幕已被外部修改，为避免误删，请在文件管理器中处理')
-              await fs.unlink(job.outputPath)
-              job.outputPath = null; job.outputHash = null; job.status = 'awaiting-save'; job.error = '已删除生成文件，中间结果保留'
-            })
-          }
-        } else if (action === 'resume') {
-          if (!['completed', 'awaiting-save', 'saving', 'running'].includes(job.status)) { job.status = 'queued'; job.error = null }
+          await resolve(job)
+          await mutateOutput(async () => {
+            if (!job.outputPath || !job.outputHash) throw new Error('没有已保存的字幕')
+            const body = await fs.readFile(job.outputPath, 'utf8')
+            if (hash(body) !== job.outputHash) throw new Error('字幕已被外部修改，为避免误删，请在文件管理器中处理')
+            await fs.unlink(job.outputPath)
+            job.outputPath = null; job.outputHash = null; job.status = 'awaiting-save'; job.error = '已删除生成文件，中间结果保留'
+          })
         } else {
           if (!['completed', 'awaiting-save'].includes(job.status)) throw new Error('请先完成生成')
           await save(job, selected)

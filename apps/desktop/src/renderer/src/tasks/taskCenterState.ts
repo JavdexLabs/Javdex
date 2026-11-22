@@ -1,6 +1,6 @@
 import type { SubtitleTaskView } from '@shared/desktop/subtitleTasks'
 
-export type SubtitleTaskFilter = 'all' | 'active' | 'attention' | 'finished'
+export type SubtitleTaskFilter = 'active' | 'attention' | 'finished'
 export function subtitleNeedsAttention(task: Pick<SubtitleTaskView, 'status'>): boolean {
   return task.status === 'failed' || task.status === 'awaiting-save'
 }
@@ -10,8 +10,7 @@ export function subtitleIsRunning(task: Pick<SubtitleTaskView, 'status'>): boole
 export function matchesSubtitleFilter(task: Pick<SubtitleTaskView, 'status'>, filter: SubtitleTaskFilter): boolean {
   if (filter === 'attention') return subtitleNeedsAttention(task)
   if (filter === 'active') return ['queued', 'running', 'saving', 'paused'].includes(task.status)
-  if (filter === 'finished') return ['completed', 'cancelled'].includes(task.status)
-  return true
+  return task.status === 'completed'
 }
 /** Bilingual completion is limited by translation, not just recognition. */
 export function subtitleProgress(task: SubtitleTaskView): number | null {

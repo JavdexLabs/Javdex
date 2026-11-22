@@ -41,7 +41,7 @@ function decision(row: Row, output: SubtitleOutput): { group: Group; reason: str
   if (job.status === 'paused' || job.status === 'failed') {
     return { group: row.resumeId === job.id ? 'ready' : 'choice', reason: job.status === 'paused' ? '已有暂停任务' : '已有失败任务', resume: job.id }
   }
-  const reason = { queued: '已在队列中', running: '正在生成', saving: '正在保存', 'awaiting-save': '已生成，等待保存', completed: '已有完成记录', cancelled: '任务已取消' }[job.status]
+  const reason = { queued: '已在队列中', running: '正在生成', saving: '正在保存', 'awaiting-save': '已生成，等待保存', completed: '已有完成记录' }[job.status]
   return { group: 'skip', reason }
 }
 

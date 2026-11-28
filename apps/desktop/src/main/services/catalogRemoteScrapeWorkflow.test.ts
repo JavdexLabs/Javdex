@@ -41,6 +41,7 @@ describe('remote persistence adapters through the shared scrape binding', () => 
   it('uses authoritative effective fields and preserves captured video and pending revisions', async () => {
     await installVideo({ code: 'ABC-123', title: 'New title', sourceUrl: 'https://example.test/one' })
     const calls: string[] = []
+    let appliedOperationId: string | undefined
     const backend = {
       mode: 'remote',
       queries: {
@@ -55,6 +56,13 @@ describe('remote persistence adapters through the shared scrape binding', () => 
       pendingVideoScrapes: {
         page: async () => { calls.push('pending'); return { items: [{ id: 8, videoId: 7, revision: 6 }] } }
       },
+      tasks: {
+        getOperation: async ({ operationId }: { operationId: string }) => {
+          calls.push('receipt')
+          assert.equal(operationId, appliedOperationId)
+          return { status: 'applied' }
+        }
+      },
       videos: {
         applyScrapeCandidate: async (
           input: Parameters<CatalogBackend['videos']['applyScrapeCandidate']>[0], ctx: MutationContext
@@ -68,7 +76,12 @@ describe('remote persistence adapters through the shared scrape binding', () => 
           assert.deepEqual(ctx.expectedVersions, {
             V: { generation: 3, revision: 4 }, Q: { generation: 1, revision: 6 }
           })
-          return { applied: true, warnings: ['catalog warning'] }
+          if (!appliedOperationId) {
+            appliedOperationId = ctx.operationId
+            throw structuredError('CONNECTION_UNAVAILABLE', 'response lost after commit')
+          }
+          assert.equal(ctx.operationId, appliedOperationId)
+          return { applied: true, warnings: ['catalog warning'], writtenText: { title: 'New title' } }
         }
       }
     } as unknown as CatalogBackend
@@ -78,7 +91,8 @@ describe('remote persistence adapters through the shared scrape binding', () => 
     })
     assert.equal(outcome.ok, true)
     assert.deepEqual(outcome.warnings, ['catalog warning'])
-    assert.deepEqual(calls, ['fields', 'pending', 'apply'])
+    assert.deepEqual(outcome.writtenText, { title: 'New title' })
+    assert.deepEqual(calls, ['fields', 'pending', 'apply', 'receipt', 'apply'])
     assert.equal(fs.existsSync(path.join(tempRoot, 'library.db')), false)
   })
 

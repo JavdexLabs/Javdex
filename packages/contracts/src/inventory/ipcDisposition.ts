@@ -423,7 +423,15 @@ export const IPC_DISPOSITION = {
   ASSET_CRYPTO_PROGRESS: event('Local encryption progress; hidden in remote mode'),
   ASSET_STORAGE_RELOCATE: unavailable('Server asset location is the data volume'),
   ASSET_FETCH_REMOTE_IMAGE: workflow('assets.fetchRemote', 'uploads.create', [], 'Desktop may download to a temp handle then upload; renderer cannot pass host paths'),
-  LLM_TRANSLATE_TO_CHINESE: desktop('Translation is a desktop draft; save still uses videos.edit')
+  LLM_TRANSLATE_TO_CHINESE: desktop('Single field translation is a desktop draft'),
+  METADATA_TRANSLATION_MODEL: desktop('Current text translation model'),
+  METADATA_TRANSLATION_START: workflow('metadataTranslation.start', 'videos.translationTargets', [], 'Device-local translation batch'),
+  METADATA_TRANSLATION_LIST: desktop('Film translation task totals'),
+  METADATA_TRANSLATION_PAGE: desktop('Paged film translation tasks'),
+  METADATA_TRANSLATION_BULK_TARGETS: desktop('Eligible film tasks for the requested bulk action'),
+  METADATA_TRANSLATION_SELECTION: desktop('Snapshot of selectable translation fields, statuses and revisions'),
+  METADATA_TRANSLATION_COMMAND: workflow('metadataTranslation.command', 'videos.applyTranslation', [], 'Apply approved fields through the catalog'),
+  METADATA_TRANSLATION_APPLIED: event('Catalog metadata changed after a translation write')
 } as const satisfies Record<keyof typeof IPC, IpcDisposition>
 
 export type IpcDispositionKey = keyof typeof IPC_DISPOSITION

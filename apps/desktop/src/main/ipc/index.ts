@@ -31,11 +31,13 @@ import type { CatalogBackend } from '../application/catalogBackend'
 import type { DesktopSettingsStore } from '../application/desktopPorts'
 import type { DesktopWorkStoreHandle } from '../desktop/workStore'
 import { bindMainWindow } from '../desktop/mainWindowBindings'
+import type { createMetadataTranslationTasks } from '../services/metadataTranslationTasks'
 
 export interface RegisterIpcHandlersOptions {
   backend: CatalogBackend
   settings: DesktopSettingsStore
   workStore: DesktopWorkStoreHandle
+  translation: ReturnType<typeof createMetadataTranslationTasks>
   videoDesktop?: VideoHandlerDesktopPorts
   actressDesktop?: ActressHandlerDesktopQueries
   mediaLibraryDesktop?: MediaLibraryHandlerDesktopPorts
@@ -52,6 +54,14 @@ export function registerIpcHandlers(
   registerDesktopSessionHandlers(ctx, { backend: options.backend, settings: options.settings })
   registerBackupHandlers(ctx, options.backend)
   registerSettingsHandlers(ctx, options.backend)
+  const { translation } = options
+  appCommandAdapter.register(IPC.METADATA_TRANSLATION_MODEL, translation.modelView)
+  appCommandAdapter.register(IPC.METADATA_TRANSLATION_START, translation.start)
+  appCommandAdapter.register(IPC.METADATA_TRANSLATION_LIST, translation.list)
+  appCommandAdapter.register(IPC.METADATA_TRANSLATION_PAGE, translation.page)
+  appCommandAdapter.register(IPC.METADATA_TRANSLATION_BULK_TARGETS, translation.bulkTargets)
+  appCommandAdapter.register(IPC.METADATA_TRANSLATION_SELECTION, translation.selection)
+  appCommandAdapter.register(IPC.METADATA_TRANSLATION_COMMAND, translation.command)
   registerNfoExportHandlers(ctx, options.backend)
   registerMediaLibraryHandlers(options.backend, options.mediaLibraryDesktop)
   registerUpdateHandlers(ctx)
@@ -62,7 +72,7 @@ export function registerIpcHandlers(
   registerPlaylistHandlers(options.backend)
   registerActressHandlers(options.backend, options.actressDesktop)
   registerFacetHandlers(options.backend)
-  registerScrapeHandlers(ctx, options.backend)
+  registerScrapeHandlers(ctx, options.backend, translation.scrape)
   registerPluginDevHandlers(ctx)
   registerLibraryCuratorHandlers(options.backend)
   registerAgentMetadataHandlers(ctx, options.backend)

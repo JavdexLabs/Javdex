@@ -678,13 +678,26 @@ export class ModelManagementModule {
   }
 
   resolve(workloadId: ModelWorkloadId): ResolvedModelAccess {
+    return this.resolveAccess(workloadId)
+  }
+
+  resolveTranslation(pinnedModelRef?: string) {
+    return this.resolveAccess('app-default', pinnedModelRef)
+  }
+
+  private resolveAccess(workloadId: ModelWorkloadId, pinnedModelRef?: string): ResolvedModelAccess & {
+    modelRef: string; connectionId: string; local: boolean
+  } {
     const document = this.document()
-    const { assignment, model, connection, effective } = this.assertWorkloadReady(document, workloadId)
+    const { assignment, model, connection, effective } = this.assertWorkloadReady(document, workloadId, pinnedModelRef)
     const maxTokens = assignment.runtime.maxTokens === 0
       ? effective.maxTokens
       : Math.min(effective.maxTokens, assignment.runtime.maxTokens)
     const contextWindow = Math.min(effective.contextWindow, assignment.limits.maxContextTokens)
     return {
+      modelRef: model.id,
+      connectionId: connection.id,
+      local: connection.local,
       credentialRef: connection.credentialRef,
       model: {
         providerId: connection.providerId,
@@ -878,7 +891,7 @@ export class ModelManagementModule {
     }
   }
 
-  private assertWorkloadReady(document: ModelManagementDocument, workloadId: ModelWorkloadId) {
+  private assertWorkloadReady(document: ModelManagementDocument, workloadId: ModelWorkloadId, pinnedModelRef?: string) {
     const assignment = document.assignments.find((item) => item.workloadId === workloadId)
     if (!assignment) throw new ModelManagementError('VALIDATION_FAILED', `缺少用途配置：${workloadId}`)
     const defaultAssignment = document.assignments.find((item) => item.workloadId === 'app-default')
@@ -887,7 +900,7 @@ export class ModelManagementModule {
       : defaultAssignment?.model.mode === 'explicit'
         ? defaultAssignment.model.modelRef
         : ''
-    const model = document.models.find((item) => item.id === selectedRef)
+    const model = document.models.find((item) => item.id === (pinnedModelRef ?? selectedRef))
     if (!model) throw new ModelManagementError('VALIDATION_FAILED', `用途 ${workloadId} 没有可用模型`)
     if (model.kind !== 'chat') {
       throw new ModelManagementError('VALIDATION_FAILED', `模型「${model.name}」不是生成模型`)

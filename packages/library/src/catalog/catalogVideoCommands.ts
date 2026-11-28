@@ -1,5 +1,7 @@
 import type { CatalogImageRef } from '@shared/protocol/uploads'
 import type { ManageOperationInput } from '@shared/manage/inputs'
+import { METADATA_TRANSLATION_FIELDS, type ApplyMetadataTranslation, type ApplyMetadataTranslationResult, type MetadataTranslationField, type MetadataTranslationOutcome, type TranslationTarget } from '@shared/metadataTranslation'
+import { getDb } from '@library/db/database'
 import { getVideoById, markScrapeFailed } from '@library/db/videoRepo'
 import { videoMaintenanceService, type VideoMaintenanceService } from './videoMaintenanceService'
 import { videoEditInputFromManageFields } from './videoEditFields'
@@ -14,6 +16,50 @@ type EditInput = {
     cover?: CatalogImageRef
     coverSourcePath?: string
   }
+}
+
+export function listTranslationTargets(input: ManageOperationInput<'videos.translationTargets'>, database = getDb()): TranslationTarget[] {
+  if (!input.videoIds.length) return []
+  const textColumns = input.includeText ? ', v.title, v.summary' : ''
+  return database.prepare(`SELECT v.id, v.generation, v.code${textColumns} FROM videos v
+    JOIN library_video_memberships m ON m.video_id = v.id AND m.is_hidden = 0
+    JOIN media_libraries l ON l.id = m.library_id AND l.status = 'active'
+    WHERE m.library_id = ? AND v.id IN (${input.videoIds.map(() => '?').join(',')})`)
+    .all(input.libraryId, ...input.videoIds) as TranslationTarget[]
+}
+
+function applyTranslation(input: ApplyMetadataTranslation, context: CatalogWriteContext) {
+  const database = context.database ?? getDb()
+  return commitCatalogMutation({ ...context, operation: 'videos.applyTranslation', input }, () => {
+    const video = database.prepare('SELECT generation, revision, title, summary FROM videos WHERE id = ?')
+      .get(input.videoId) as { generation: number; revision: number; title: string | null; summary: string | null } | undefined
+    const member = video && database.prepare(`SELECT 1 FROM library_video_memberships m
+      JOIN media_libraries l ON l.id = m.library_id AND l.status = 'active'
+      WHERE m.library_id = ? AND m.video_id = ? AND m.is_hidden = 0`).get(input.libraryId, input.videoId)
+    const locked = member && database.prepare('SELECT 1 FROM pending_video_scrapes WHERE video_id = ?').get(input.videoId)
+    const fields: ApplyMetadataTranslationResult['fields'] = {}
+    const patch: Record<MetadataTranslationField, string | null> = { title: null, summary: null }
+    for (const field of METADATA_TRANSLATION_FIELDS) {
+      const value = input.fields[field]
+      if (!value) continue
+      let outcome: MetadataTranslationOutcome
+      if (!video || video.generation !== input.generation) outcome = 'missing'
+      else if (!member) outcome = 'out-of-scope'
+      else if (locked) outcome = 'locked'
+      else if (video[field] !== value.original) outcome = 'conflict'
+      else {
+        outcome = 'applied'
+        if (video[field] !== value.translation) patch[field] = value.translation
+      }
+      fields[field] = outcome
+    }
+    if (patch.title !== null || patch.summary !== null) {
+      database.prepare(`UPDATE videos SET title = COALESCE(@title, title), summary = COALESCE(@summary, summary),
+        updated_at = @updatedAt, revision = revision + 1 WHERE id = @videoId`)
+        .run({ ...patch, updatedAt: new Date().toISOString(), videoId: input.videoId })
+    }
+    return { fields, versions: video && { V: readVideoAggregateVersion(input.videoId, database)! } }
+  }, database)
 }
 
 /** Synchronous authoritative video writes, shared by both hosts. */
@@ -34,6 +80,7 @@ export function createCatalogVideoCommands(videos: VideoMaintenanceService = vid
     )
   }
   return {
+    applyTranslation,
     edit(input: EditInput, context: CatalogWriteContext) {
       return commitManageImageMutation({ ...context, operation: 'videos.edit', input }, () => {
         assertExpectedVideoVersion(input.videoId, context.expectedVersions, context.operationId, context.database)

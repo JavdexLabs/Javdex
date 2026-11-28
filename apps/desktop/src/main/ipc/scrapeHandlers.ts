@@ -2,7 +2,7 @@ import { dialog } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { IPC } from '@shared/ipc-channels'
 import type { ScraperPluginKind } from '@shared/scraperPluginTypes'
-import { createDefaultScrapeJobController } from '../services/scrapeJobController'
+import { createDefaultScrapeJobController, type ScrapeTranslationService } from '../services/scrapeJobController'
 import { createDefaultScraperPluginCatalog } from '../services/scraperPluginCatalog'
 import { createDefaultScraperServiceConfiguration } from '../services/scraperServiceConfiguration'
 import { loadCatalogActressAvatarCropSnapshot } from '../application/catalogActressAvatarCropSnapshot'
@@ -11,7 +11,7 @@ import type { IpcContext } from './shared'
 import { registerScrapeHandler, sendScrapeEvent } from './scrapeContractAdapter'
 import { registerMainWindowBinder } from '../desktop/mainWindowBindings'
 
-export function registerScrapeHandlers(ctx: IpcContext, backend: CatalogBackend): void {
+export function registerScrapeHandlers(ctx: IpcContext, backend: CatalogBackend, translations: ScrapeTranslationService): void {
   const plugins = createDefaultScraperPluginCatalog()
   const serviceConfiguration = createDefaultScraperServiceConfiguration()
   const jobs = createDefaultScrapeJobController({
@@ -21,6 +21,7 @@ export function registerScrapeHandlers(ctx: IpcContext, backend: CatalogBackend)
     },
     emit: (channel, payload) => sendScrapeEvent(ctx.getWindow()?.webContents, channel, payload),
     backend,
+    translations,
     avatarAutoCropOptions:
       backend.mode === 'remote'
         ? { createBatchTargets: () => loadCatalogActressAvatarCropSnapshot(backend) }
@@ -115,6 +116,7 @@ export function registerScrapeHandlers(ctx: IpcContext, backend: CatalogBackend)
   )
   registerScrapeHandler(IPC.PENDING_VIDEO_SCRAPE_LIST, () => backend.pendingVideoScrapes.list({}))
   registerScrapeHandler(IPC.PENDING_VIDEO_SCRAPE_CONFIRM, async (input) => {
+    const scope = translations.scope()
     const pending = (await backend.pendingVideoScrapes.get({
       pendingScrapeId: input.pendingScrapeId
     })) as { videoId: number; revision: number } | null
@@ -123,7 +125,7 @@ export function registerScrapeHandlers(ctx: IpcContext, backend: CatalogBackend)
       scope: { kind: 'all' },
       videoId: pending.videoId
     })) as { generation?: number; revision?: number } | null
-    return backend.pendingVideoScrapes.confirm(input, {
+    const result = await backend.pendingVideoScrapes.confirm(input, {
       operationId: randomUUID(),
       expectedVersions: {
         Q: { generation: 1, revision: pending.revision },
@@ -132,8 +134,11 @@ export function registerScrapeHandlers(ctx: IpcContext, backend: CatalogBackend)
           : {})
       }
     })
+    await translations.afterConfirm(scope, input.pendingScrapeId, pending.videoId, input.mergeRetainedVideoId ?? pending.videoId, result)
+    return result
   })
   registerScrapeHandler(IPC.PENDING_VIDEO_SCRAPE_DISCARD, async (pendingScrapeId) => {
+    const scope = translations.scope()
     const pending = (await backend.pendingVideoScrapes.get({ pendingScrapeId })) as {
       revision: number
     } | null
@@ -145,6 +150,7 @@ export function registerScrapeHandlers(ctx: IpcContext, backend: CatalogBackend)
         expectedVersions: { Q: { generation: 1, revision: pending.revision } }
       }
     )) as { ok?: boolean }
+    if (result.ok !== false) translations.discard(scope, pendingScrapeId)
     return result.ok !== false
   })
   registerScrapeHandler(IPC.SCRAPE_BATCH_START, (scraperName) =>

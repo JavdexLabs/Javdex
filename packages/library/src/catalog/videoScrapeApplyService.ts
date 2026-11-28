@@ -8,6 +8,7 @@ import type {
   VideoClassificationResolutionOutcome,
   VideoDirectorChoiceRequired,
   VideoScrapeField,
+  VideoScrapeTextReceipt,
   VideoScrapeUpdateMode
 } from '@shared/videoScrapeTypes'
 import { ALL_VIDEO_SCRAPE_FIELDS } from '@shared/videoScrapeTypes'
@@ -753,7 +754,7 @@ export function findVideoBusinessIdentityConflictForScrape(
  * Apply a scrape result to a video, link actresses/tags, and store cover path.
  * Wrapped in a transaction so a partial failure doesn't corrupt relations.
  */
-export interface ApplyVideoScrapeResult {
+export interface ApplyVideoScrapeResult extends VideoScrapeTextReceipt {
   applied: boolean
   warnings: string[]
   obsoleteAssetPaths: string[]
@@ -992,6 +993,9 @@ export function applyScrapeResult(
   }
   return {
     applied: true,
+    writtenText: Object.fromEntries(scalarWrites.filter(({ field, value }) =>
+      (field === 'title' || field === 'summary') && typeof value === 'string' && value.trim()
+    ).map(({ field, value }) => [field, value])),
     warnings,
     obsoleteAssetPaths,
     classifications: plan.classifications

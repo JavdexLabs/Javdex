@@ -13,7 +13,7 @@ import {
   confirmPendingVideoScrapeCommand
 } from '@library/catalog/catalogScrapeCommands'
 import { resolveCatalogScrapeFields } from '@library/catalog/catalogScrapeFields'
-import { createCatalogVideoCommands } from '@library/catalog/catalogVideoCommands'
+import { createCatalogVideoCommands, listTranslationTargets } from '@library/catalog/catalogVideoCommands'
 import { videoCardsByIds } from '@library/db/videoRepo'
 import { getDb } from '@library/db/database'
 import { recordActressScrapeFailure } from '@library/db/actressRepo'
@@ -325,6 +325,15 @@ export function createLocalCatalogBackend(
   const videoCommands: CatalogVideoCommands = {
     async edit(input, ctx) {
       return writes.edit(input, { ...ctx, writerEpoch: 0 }).data.ok
+    },
+    async applyTranslation(input, ctx) {
+      if (input.catalogId !== identity.catalogId || input.serverId !== null) {
+        throw structuredError('CATALOG_MISMATCH', '目标资料库已变化')
+      }
+      return writes.applyTranslation(input, { ...ctx, writerEpoch: 0 }).data
+    },
+    async translationTargets(input) {
+      return listTranslationTargets(input)
     },
     async clearMeta(input, ctx) {
       return writes.clearMeta(input, { ...ctx, writerEpoch: 0 }, true).data.ok

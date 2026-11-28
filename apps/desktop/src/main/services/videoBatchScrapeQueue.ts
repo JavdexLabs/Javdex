@@ -6,10 +6,7 @@ import {
   resolveVideoScrapeFieldSources,
   type ScrapeOutcome
 } from '../scrapers/scraperManager'
-import {
-  createScrapeCatalogBinding,
-  type ScrapeCatalogBinding
-} from './scrapeCatalogBinding'
+import type { ScrapeCatalogBinding } from './scrapeCatalogBinding'
 import {
   freezeRemoteVideoTargets
 } from './catalogRemoteBatch'
@@ -159,7 +156,7 @@ export function formatVideoBatchScrapeOutcome(
     return {
       status: 'pending',
       level: 'info',
-      message: '待确认：已保存全部匹配候选，可稍后在待确认中心处理'
+      message: ['待确认：已保存全部匹配候选，可稍后在待确认中心处理', ...outcome.warnings ?? []].join('；')
     }
   }
   const warningText = outcome.warnings?.join('；')
@@ -176,7 +173,7 @@ export function formatVideoBatchScrapeOutcome(
     status: 'success',
     level: warningText ? 'info' : 'success',
     message: warningText
-      ? `更新成功，部分字段未应用：${outcome.result?.title ?? fallbackCode}（${warningText}）`
+      ? `更新成功：${outcome.result?.title ?? fallbackCode}（${warningText}）`
       : `更新成功：${outcome.result?.title ?? fallbackCode}`
   }
 }
@@ -232,6 +229,8 @@ function createVideoBatchPolicy(
           if (scopeFailure) return scopeFailure
           const itemOutcome = await binding.scrapeVideo(id, request.scraperName, {
             closeBrowser: false,
+            translation: request.translation,
+            libraryId: request.libraryId,
             fields,
             mode,
             expectedVersion: generation == null || revision == null ? undefined : { generation, revision },
@@ -247,11 +246,11 @@ function createVideoBatchPolicy(
 }
 
 /** Sequential batch queue for video metadata scraping/updating. */
-class VideoBatchScrapeQueue {
+export class VideoBatchScrapeQueue {
   private readonly lifecycle: CheckpointedSequentialBatchQueue<VideoTarget, VideoBatchScrapeRequest>
 
   constructor(
-    binding: ScrapeCatalogBinding = createScrapeCatalogBinding(),
+    binding: ScrapeCatalogBinding,
     catalogKey: CatalogKeyProvider = 'local'
   ) {
     this.lifecycle = new CheckpointedSequentialBatchQueue(
@@ -297,12 +296,3 @@ class VideoBatchScrapeQueue {
     await this.lifecycle.start(request)
   }
 }
-
-export function createVideoBatchScrapeQueue(
-  backend?: CatalogBackend,
-  catalogKey: CatalogKeyProvider = 'local'
-): VideoBatchScrapeQueue {
-  return new VideoBatchScrapeQueue(createScrapeCatalogBinding(backend), catalogKey)
-}
-
-export const videoBatchScrapeQueue = new VideoBatchScrapeQueue()

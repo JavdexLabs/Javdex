@@ -1,5 +1,6 @@
 import { DIRECT_ID_BATCH_MAX } from '@shared/protocol/limits'
 import { z } from 'zod'
+import { applyMetadataTranslationResultSchema, translationTargetsResultSchema } from '@shared/metadataTranslation'
 import { playlistApplyImportResultSchema } from '@shared/playlistImportCommit'
 import { catalogVideoSourcePageSchema } from '@shared/catalogVideoSourceSchemas'
 import { videoLifecycleImpactSchema, videoLifecycleResultSchema } from '@shared/videoLifecycleSchemas'
@@ -47,6 +48,8 @@ export type CatalogResultSchemas = {
 }
 
 const complexResultSchemas: CatalogResultSchemas = {
+  'videos.applyTranslation': applyMetadataTranslationResultSchema,
+  'videos.translationTargets': translationTargetsResultSchema,
   'videos.sources': catalogVideoSourcePageSchema,
   'videos.previewRemoveFromLibrary': videoLifecycleImpactSchema,
   'videos.previewMoveResource': videoLifecycleImpactSchema,

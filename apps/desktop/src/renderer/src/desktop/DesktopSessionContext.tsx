@@ -19,6 +19,7 @@ import {
 import type { DesktopCapabilityMap } from '@shared/desktop/capabilities'
 import { DESKTOP_CAPABILITY_ACTIONS } from '@shared/desktop/capabilities'
 import { queryClient } from '../query/queryClient'
+import { invalidateVideoLibraryQueries } from '../query/invalidateLibraryQueries'
 
 function assumedLocalCapabilities(): DesktopCapabilityMap {
   return Object.fromEntries(
@@ -57,6 +58,8 @@ export function DesktopSessionProvider({ children }: { children: ReactNode }): J
   const [session, setSession] = useState<DesktopSession>(ASSUMED_LOCAL_SESSION)
   const [capabilities, setCapabilities] = useState<DesktopCapabilityMap>(FALLBACK_CAPABILITIES)
   const identityRef = useRef({ catalogId: ASSUMED_LOCAL_SESSION.catalogId, generation: ASSUMED_LOCAL_SESSION.generation })
+
+  useEffect(() => window.api.metadataTranslation.onApplied(() => invalidateVideoLibraryQueries(queryClient)), [])
 
   const applySnapshot = useCallback((snapshot: DesktopSessionSnapshot) => {
     if (!sessionAllowsCatalogReads(snapshot.session)) void queryClient.cancelQueries()

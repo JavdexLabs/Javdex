@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { ChevronRight, Captions, FolderSearch, ListChecks, Search } from 'lucide-react'
+import { ChevronRight, Captions, FolderSearch, Languages, ListChecks, Search } from 'lucide-react'
 import { api } from '../api'
 import ScrollViewport from '../components/ScrollViewport'
 import EmptyState from '../components/EmptyState'
@@ -16,6 +16,7 @@ import { parseTaskTab, taskCenterPath, type TaskTab } from './taskCenterRoutes'
 import { subtitleIsRunning, subtitleProgress, type SubtitleTaskFilter } from './taskCenterState'
 import { ScrapeTaskList, ScanTaskList } from './TaskPanels'
 import styles from './TaskCenter.module.css'
+import TranslationTasks from './TranslationTasks'
 
 export function TaskProgress({ value, label }: { value: number | null; label: string }): JSX.Element | null {
   return value == null ? null : <progress className={styles.progress} value={value} max={100} aria-label={label} />
@@ -36,7 +37,7 @@ export default function TaskCenterPage(): JSX.Element {
   const location = useLocation(), navigate = useNavigate()
   const tab = parseTaskTab(location.search)
   const data = useTaskCenterData()
-  const { catalogReadsEnabled } = useDesktopSession()
+  const { catalogReadsEnabled, session } = useDesktopSession()
   const batches = useBatchScrapeActivity()
   const scans = useQuery({ queryKey: ['task-center', 'active-scans'], queryFn: () => api.scan.getActive(),
     refetchInterval: 2000, enabled: catalogReadsEnabled })
@@ -49,7 +50,10 @@ export default function TaskCenterPage(): JSX.Element {
   const subtitle = tasks.find(subtitleIsRunning) ?? tasks.find(job => job.status === 'queued')
   const batchList = [batches.videoBatch, batches.actressBatch].filter(batch => batch && batch.status !== 'idle')
   const activeBatch = batchList.find(batch => batch?.status === 'running') ?? batchList.find(batch => batch?.status === 'paused')
-  const running = (scans.data?.length ?? 0) + batchList.filter(batch => batch?.status === 'running').length + tasks.filter(subtitleIsRunning).length
+  const translationCount = data.translations.data?.total ?? 0
+  const translationsRunning = data.translations.data?.running ?? 0
+  const running = (scans.data?.length ?? 0) + batchList.filter(batch => batch?.status === 'running').length
+    + tasks.filter(subtitleIsRunning).length + translationsRunning
   const scan = scans.data?.[0]
   const scanName = data.libraries.data?.find(library => library.id === scan?.libraryId)?.name ?? '媒体库扫描'
   const subtitleError = data.subtitles.isError ? '读取失败' : !data.subtitles.data ? '读取中…' : null
@@ -57,7 +61,7 @@ export default function TaskCenterPage(): JSX.Element {
   const rawFilter = new URLSearchParams(location.search).get('status')
   const filter: SubtitleTaskFilter = rawFilter === 'attention' || rawFilter === 'finished' ? rawFilter : 'active'
   return <TaskCenterFrame tab={tab} onRefresh={() => void refresh()} refreshing={refreshing}>
-    <ScrollViewport key={tab} variant={tab === 'subtitles' && data.local ? 'fill' : 'scroll'} className={styles.body}>
+    <ScrollViewport key={tab} variant={tab === 'translation' || tab === 'subtitles' && data.local ? 'fill' : 'scroll'} className={styles.body}>
       {tab === 'overview' && <>
         <div className={styles.overview}>
           <div className={styles.overviewHead}><span>任务概览</span><span>
@@ -85,6 +89,12 @@ export default function TaskCenterPage(): JSX.Element {
             {data.local && <p className={styles.muted}>{tasks.filter(job => job.status === 'queued').length} 项排队
               {data.subtitleAttention > 0 && <> · <Link draggable={false} className={`${styles.link} ${styles.warning}`} to={taskCenterPath('subtitles', 'attention')}>{data.subtitleAttention} 项需要处理</Link></>}</p>}
           </OverviewRow>
+          <OverviewRow icon={<Languages size={20} />} title="翻译" hint="影片标题与简介" tab="translation"
+            warning={data.translationAttention > 0} state={data.translations.isError ? '读取失败' : data.translationAttention ? `${data.translationAttention} 项需处理`
+              : translationsRunning ? `${translationsRunning} 项运行中` : '空闲'}>
+            <p>{translationCount ? `${translationCount} 项影片翻译任务` : '暂无影片翻译任务'}
+              {data.translationAttention > 0 && <> · <Link draggable={false} className={`${styles.link} ${styles.warning}`} to={taskCenterPath('translation', 'attention')}>{data.translationAttention} 项需要处理</Link></>}</p>
+          </OverviewRow>
         </div>
         <p className={styles.notice}>任务可在对应分类中暂停、继续或查看结果。任务关闭应用后的恢复方式以各分类说明为准。</p>
       </>}
@@ -92,6 +102,8 @@ export default function TaskCenterPage(): JSX.Element {
       {tab === 'scrape' && <ScrapeTaskList />}
       {tab === 'subtitles' && (data.local ? <SubtitleTasksDialog filter={filter} onFilterChange={value => navigate(taskCenterPath('subtitles', value))} />
         : <EmptyState title="字幕任务在本机资料库中管理">远程影片播放时的实时字幕仍在播放器内使用。</EmptyState>)}
+      {tab === 'translation' && <TranslationTasks key={JSON.stringify([session.catalogId, session.serverId, session.generation])}
+        filter={filter} onFilterChange={value => navigate(taskCenterPath('translation', value))} />}
     </ScrollViewport>
   </TaskCenterFrame>
 }

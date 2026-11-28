@@ -9,6 +9,7 @@ import { useMatch, useLocation, useNavigate, useSearchParams } from 'react-route
 import {
   Archive,
   Captions,
+  Languages,
   Plus,
   Film,
   ListPlus,
@@ -30,6 +31,7 @@ import type { LibraryListDefaults } from '../listView/listQueryParams'
 import type {
   VideoDirectorChoiceRequired,
   VideoScrapeField,
+  VideoScrapeTranslation,
   VideoScrapeUpdateMode
 } from '@shared/videoScrapeTypes'
 import { ALL_VIDEO_SCRAPE_FIELDS, VIDEO_SCRAPE_FIELD_OPTIONS, VIDEO_SCRAPE_UPDATE_MODE_OPTIONS } from '@shared/videoScrapeTypes'
@@ -47,6 +49,7 @@ import ListToolbar from '../components/ListToolbar'
 import AddToPlaylistModal from '../components/AddToPlaylistModal'
 import AddVideosToPlaylistModal from '../components/AddVideosToPlaylistModal'
 import BatchSubtitleModal from '../playback/BatchSubtitleModal'
+import BatchMetadataTranslationModal from './library/BatchMetadataTranslationModal'
 import { useDesktopSession } from '../desktop/DesktopSessionContext'
 import EditMetadataModal from '../components/EditMetadataModal'
 import Modal from '../components/Modal'
@@ -130,6 +133,7 @@ interface SingleScrapeRequest {
   fields: VideoScrapeField[]
   site: string
   mode?: VideoScrapeUpdateMode
+  translation?: VideoScrapeTranslation
 }
 
 interface PendingDirectorChoice extends SingleScrapeRequest {
@@ -149,7 +153,11 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
   const [playlistTarget, setPlaylistTarget] = useState<VideoCard | null>(null)
   const [showBulkPlaylist, setShowBulkPlaylist] = useState(false)
   const [subtitleIds, setSubtitleIds] = useState<number[] | null>(null)
-  const { session } = useDesktopSession()
+  const [translationSelection, setTranslationSelection] = useState<{ scopeKey: string; videoIds: number[] } | null>(null)
+  const { session, capabilities } = useDesktopSession()
+  const translationScopeKey = JSON.stringify([libraryId, session.mode, session.catalogId, session.generation])
+  const canTranslate = capabilities.editCatalog.allowed
+  useEffect(() => setTranslationSelection(null), [translationScopeKey, canTranslate])
   const [editingVideo, setEditingVideo] = useState<VideoDetail | null>(null)
   const [editLoadingId, setEditLoadingId] = useState<number | null>(null)
   const [scrapeTarget, setScrapeTarget] = useState<VideoCard | null>(null)
@@ -199,6 +207,7 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
     setPlaylistTarget(null)
     setShowBulkPlaylist(false)
     setSubtitleIds(null)
+    setTranslationSelection(null)
     setEditingVideo(null)
     setEditLoadingId(null)
     setScrapeTarget(null)
@@ -467,7 +476,8 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
         request.fields,
         request.mode,
         directorSelectionId,
-        libraryId
+        libraryId,
+        request.translation
       )
       if (res.directorChoice) {
         setPendingDirectorChoice({ ...request, choice: res.directorChoice })
@@ -475,7 +485,7 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
       }
       if (res.pending) {
         setScrapeTarget(null)
-        toast.show('发现多个候选，已保存到待确认中心', 'info')
+        toast.show(['发现多个候选，已保存到待确认中心', ...res.warnings].join('；'), 'info')
         navigate(pendingCenterPath({ type: 'scrape', videoId: request.target.id }))
         return
       }
@@ -484,7 +494,7 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
       toast.show(
         res.applied
           ? hasWarnings
-            ? `已更新 ${request.target.code}，部分字段未应用：${res.warnings.join('；')}`
+            ? `已更新 ${request.target.code}；${res.warnings.join('；')}`
             : `已更新 ${request.target.code}`
           : hasWarnings
             ? `所选字段未应用：${res.warnings.join('；')}`
@@ -505,14 +515,16 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
   const runSingleScrape = (
     fields: VideoScrapeField[],
     site: string,
-    mode?: VideoScrapeUpdateMode
+    mode?: VideoScrapeUpdateMode,
+    translation?: VideoScrapeTranslation
   ): void => {
     if (!scrapeTarget) return
     const request: SingleScrapeRequest = {
       target: { id: scrapeTarget.id, code: scrapeTarget.code },
       fields,
       site,
-      mode
+      mode,
+      translation
     }
     setScrapeTarget(null)
     void executeSingleScrape(request)
@@ -534,7 +546,8 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
   const runBulkScrape = async (
     fields: VideoScrapeField[],
     site: string,
-    mode?: VideoScrapeUpdateMode
+    mode?: VideoScrapeUpdateMode,
+    translation?: VideoScrapeTranslation
   ): Promise<void> => {
     const videoIds = [...selectedIds]
     if (videoIds.length === 0) return
@@ -549,6 +562,7 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
             videoIds,
             fields,
             scraperName: site || undefined,
+            translation,
             mode
           }
         )
@@ -773,6 +787,14 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
                 disabled: session.mode !== 'local' || selectingRange,
                 title: session.mode !== 'local' ? '批量生成字幕需要使用本机资料库' : selectingRange ? '正在读取所选影片' : undefined,
                 onClick: () => setSubtitleIds([...selectedIds])
+              },
+              {
+                key: 'translate',
+                label: '翻译元数据',
+                icon: <Languages {...UI_ICON_SM} aria-hidden />,
+                disabled: !canTranslate || selectingRange,
+                title: !canTranslate ? '当前资料库无法编辑' : selectingRange ? '正在读取所选影片' : undefined,
+                onClick: () => setTranslationSelection({ scopeKey: translationScopeKey, videoIds: [...selectedIds] })
               },
               {
                 key: 'delete',
@@ -1001,6 +1023,15 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
         <BatchSubtitleModal key={libraryId} libraryId={libraryId} videoIds={subtitleIds} onClose={() => setSubtitleIds(null)} />
       )}
 
+      {canTranslate && translationSelection?.scopeKey === translationScopeKey && (
+        <BatchMetadataTranslationModal
+          libraryId={libraryId}
+          libraryName={library?.name ?? `媒体库 #${libraryId}`}
+          videoIds={translationSelection.videoIds}
+          onClose={() => setTranslationSelection(null)}
+        />
+      )}
+
       {showBulkPlaylist && (
         <AddVideosToPlaylistModal
           videoIds={[...selectedIds]}
@@ -1034,8 +1065,8 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
           initialUpdateMode="replace"
           confirmText="开始刮削"
           onCancel={() => setScrapeTarget(null)}
-          onConfirm={(fields, site, _scope, mode) => {
-            runSingleScrape(fields, site, mode as VideoScrapeUpdateMode | undefined)
+          onConfirmVideo={(fields, site, _scope, mode, _missing, translation) => {
+            runSingleScrape(fields, site, mode as VideoScrapeUpdateMode | undefined, translation)
           }}
         />
       )}
@@ -1064,8 +1095,8 @@ export default function LibraryPage({ libraryId }: { libraryId: number }): JSX.E
           updateModeOptions={VIDEO_SCRAPE_UPDATE_MODE_OPTIONS}
           confirmText="开始批量刮削"
           onCancel={() => setShowBulkScrape(false)}
-          onConfirm={(fields, site, _scope, mode) => {
-            void runBulkScrape(fields, site, mode as VideoScrapeUpdateMode | undefined)
+          onConfirmVideo={(fields, site, _scope, mode, _missing, translation) => {
+            void runBulkScrape(fields, site, mode as VideoScrapeUpdateMode | undefined, translation)
           }}
         />
       )}

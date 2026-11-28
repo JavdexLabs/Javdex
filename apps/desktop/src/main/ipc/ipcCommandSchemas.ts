@@ -2,6 +2,7 @@ import { backupRequestSchema, desktopBackupFileSchema } from '@shared/protocol/b
 import { serverUpdateCommandSchema } from '@shared/serverUpdateTypes'
 import { SCAN_AUDIT_SECTIONS, SCAN_AUDIT_OUTCOMES } from '@shared/scanAuditReadTypes'
 import { z } from 'zod'
+import { translationBulkOperationSchema, translationReviewFilterSchema, translationStartSchema, translationTaskCommandSchema } from '@shared/desktop/metadataTranslationTasks'
 import { LLM_PROVIDER_PROTOCOLS } from '@shared/llmProviders'
 import { IPC } from '@shared/ipc-channels'
 import type { ActressIpcContract } from '@shared/actressIpcContract'
@@ -105,9 +106,11 @@ const videoBatchScrapeFilter = z
     scraperName: text.optional()
   })
   .strict()
+const scrapeTranslation = translationStartSchema.pick({ modelToken: true, directApply: true }).optional()
 const videoBatchScrapeRequest = videoBatchScrapeFilter
   .extend({
     fields: videoScrapeFields.min(1),
+    translation: scrapeTranslation,
     mode: z.enum(['replace', 'fillEmpty', 'replaceIfPresent']).optional()
   })
   .strict()
@@ -630,7 +633,8 @@ export const scrapeIpcSchemas = {
     videoScrapeFields.optional(),
     z.enum(['replace', 'fillEmpty', 'replaceIfPresent']).optional(),
     id.optional(),
-    id.optional()
+    id.optional(),
+    scrapeTranslation
   ]),
   [IPC.PENDING_VIDEO_SCRAPE_COUNT]: noArgs,
   [IPC.PENDING_VIDEO_SCRAPE_EXISTING_IDS]: z.tuple([z.array(id.max(Number.MAX_SAFE_INTEGER)).max(100)]),
@@ -1056,5 +1060,12 @@ export const appIpcSchemas = {
   [IPC.ASSET_CRYPTO_SET]: z.tuple([z.boolean()]),
   [IPC.ASSET_STORAGE_RELOCATE]: z.tuple([nullableText.optional()]),
   [IPC.ASSET_FETCH_REMOTE_IMAGE]: z.tuple([nonEmptyText]),
-  [IPC.LLM_TRANSLATE_TO_CHINESE]: z.tuple([nonEmptyText])
+  [IPC.LLM_TRANSLATE_TO_CHINESE]: z.tuple([nonEmptyText]),
+  [IPC.METADATA_TRANSLATION_MODEL]: z.tuple([]),
+  [IPC.METADATA_TRANSLATION_START]: z.tuple([translationStartSchema]),
+  [IPC.METADATA_TRANSLATION_LIST]: z.tuple([]),
+  [IPC.METADATA_TRANSLATION_PAGE]: z.tuple([z.number().int().nonnegative(), translationReviewFilterSchema.optional()]),
+  [IPC.METADATA_TRANSLATION_BULK_TARGETS]: z.tuple([translationBulkOperationSchema]),
+  [IPC.METADATA_TRANSLATION_SELECTION]: noArgs,
+  [IPC.METADATA_TRANSLATION_COMMAND]: z.tuple([translationTaskCommandSchema])
 } satisfies IpcArgsSchemaMap<AppIpcContract>

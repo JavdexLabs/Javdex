@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import type { PlaybackTarget } from '@shared/desktop/playback'
 import type { SubtitlePreparation, SubtitleTaskCommand, SubtitleTasksSnapshot } from '@shared/desktop/subtitleTasks'
 import { Captions, Info } from 'lucide-react'
@@ -27,6 +27,7 @@ type Props =
   | { target?: never; onClose?: never; filter: SubtitleTaskFilter; onFilterChange(filter: SubtitleTaskFilter): void }
 
 export default function SubtitleTasksDialog({ target, onClose, filter, onFilterChange }: Props): JSX.Element {
+  const countId = useId()
   const [snapshot, setSnapshot] = useState<SubtitleTasksSnapshot>({ tasks: [], error: null })
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -99,11 +100,11 @@ export default function SubtitleTasksDialog({ target, onClose, filter, onFilterC
   if (filter) return <div className={`${styles.root} ${styles.workspace}`}>
     <div className={styles.toolbar}>
       <SegmentedControl variant="subtle" aria-label="筛选字幕任务">
-        {filters.map(item => <SegmentedOption key={item.value} selected={filter === item.value} aria-label={item.accessible} onClick={() => onFilterChange(item.value)}>
-          {item.label}<span className={styles.filterCount}>{loading ? '—' : sourceTasks.filter(job => matchesSubtitleFilter(job, item.value)).length}</span>
+        {filters.map(item => <SegmentedOption key={item.value} selected={filter === item.value} aria-label={item.accessible}
+          aria-describedby={`${countId}-${item.value}`} onClick={() => onFilterChange(item.value)}>
+          {item.label}<span id={`${countId}-${item.value}`} className={styles.filterCount}>{loading ? '—' : sourceTasks.filter(job => matchesSubtitleFilter(job, item.value)).length}</span>
         </SegmentedOption>)}
       </SegmentedControl>
-      <span className={styles.count}>{loading ? '读取中…' : `${tasks.length} 项任务`}</span>
       <SubtitleTaskBulkActions key={filter} filter={filter} tasks={tasks} disabled={busy || loading || !!loadError || !!snapshot.error} execute={execute} />
     </div>
     {listAlert}

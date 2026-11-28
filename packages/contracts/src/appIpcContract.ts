@@ -496,11 +496,19 @@ export interface AppIpcContract {
   [IPC.ASSET_STORAGE_RELOCATE]: { args: [targetPath?: string | null]; result: SettingsSnapshot }
   [IPC.ASSET_FETCH_REMOTE_IMAGE]: { args: [url: string]; result: RemoteImagePreviewResult }
   [IPC.LLM_TRANSLATE_TO_CHINESE]: { args: [text: string]; result: string }
+  [IPC.METADATA_TRANSLATION_MODEL]: { args: []; result: import('./desktop/metadataTranslationTasks').TranslationModelView }
+  [IPC.METADATA_TRANSLATION_START]: { args: [import('./desktop/metadataTranslationTasks').TranslationStart]; result: import('./desktop/metadataTranslationTasks').TranslationStartResult }
+  [IPC.METADATA_TRANSLATION_LIST]: { args: []; result: import('./desktop/metadataTranslationTasks').TranslationOverview }
+  [IPC.METADATA_TRANSLATION_PAGE]: { args: [offset: number, filter?: import('./desktop/metadataTranslationTasks').TranslationReviewFilter]; result: import('./desktop/metadataTranslationTasks').TranslationTaskPage }
+  [IPC.METADATA_TRANSLATION_BULK_TARGETS]: { args: [operation: import('./desktop/metadataTranslationTasks').TranslationBulkOperation]; result: import('./desktop/metadataTranslationTasks').TranslationFilmRef[] }
+  [IPC.METADATA_TRANSLATION_SELECTION]: { args: []; result: import('./desktop/metadataTranslationTasks').TranslationFieldSelection[] }
+  [IPC.METADATA_TRANSLATION_COMMAND]: { args: [import('./desktop/metadataTranslationTasks').TranslationTaskCommand]; result: import('./desktop/metadataTranslationTasks').TranslationDraftRef | undefined }
 }
 
 export interface AppIpcEventContract {
   [IPC.PLAYBACK_CHANGED]: import('./desktop/playback').PlaybackObservation
   [IPC.RECENT_PLAYBACK_CHANGED]: null
+  [IPC.METADATA_TRANSLATION_APPLIED]: null
   [IPC.PLAYBACK_AI_SUBTITLE_CHANGED]: import('./desktop/aiSubtitles').AiSubtitleSnapshot
   [IPC.LOCAL_MODELS_CHANGED]: import('./desktop/localModels').LocalModelSnapshot
   [IPC.APP_UPDATE_STATE_CHANGED]: UpdateCheckState

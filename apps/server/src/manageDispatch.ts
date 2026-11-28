@@ -1,5 +1,5 @@
 import { dispatchBackup } from './manageBackup'
-import { catalogVideoCommands } from '@library/catalog/catalogVideoCommands'
+import { catalogVideoCommands, listTranslationTargets } from '@library/catalog/catalogVideoCommands'
 import type Database from 'better-sqlite3'
 import fs from 'node:fs'
 import { createVideoQueryService, type VideoQueryService } from '@library/catalog/videoQueryService'
@@ -327,6 +327,17 @@ export function dispatchManageOperation(context: ManageHttpContext, database?: D
       )
       maybeCrashImageFlow('afterPersistUploadRow')
       return { receipt: result.receipt, ...result.data }
+    }
+    if (operation === 'videos.applyTranslation') {
+      const input = envelope.input as Parameters<typeof catalogVideoCommands.applyTranslation>[0]
+      if (input.catalogId !== envelope.catalogId || input.serverId !== envelope.serverId) {
+        throw structuredError('CATALOG_MISMATCH', '目标资料库已变化')
+      }
+      const result = catalogVideoCommands.applyTranslation(input, { ...requireMutation(envelope), writerEpoch: auth.epoch, database })
+      return { receipt: result.receipt, data: { fields: result.data.fields } }
+    }
+    if (operation === 'videos.translationTargets') {
+      return listTranslationTargets(envelope.input as Parameters<typeof listTranslationTargets>[0], catalogDb(database))
     }
     if (operation === 'videos.edit') {
       const input = envelope.input as Parameters<typeof catalogVideoCommands.edit>[0]

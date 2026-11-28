@@ -49,6 +49,7 @@ import type { VideoEditInput } from '@shared/videoTypes'
 import { expectedVideoVersion } from '@shared/protocol/versions'
 import type {
   VideoScrapeField,
+  VideoScrapeTranslation,
   VideoScrapeUpdateMode
 } from '@shared/videoScrapeTypes'
 import { VIDEO_SCRAPE_FIELD_OPTIONS, VIDEO_SCRAPE_UPDATE_MODE_OPTIONS, ALL_VIDEO_SCRAPE_FIELDS } from '@shared/videoScrapeTypes'
@@ -511,10 +512,11 @@ export default function DetailPage(): JSX.Element {
   const handleRescrape = (
     fields: VideoScrapeField[],
     site: string,
-    mode?: VideoScrapeUpdateMode
+    mode?: VideoScrapeUpdateMode,
+    translation?: VideoScrapeTranslation
   ): void => {
     setShowScrapeFields(false)
-    void executeRescrape(fields, site, mode)
+    void executeRescrape(fields, site, mode, undefined, translation)
   }
 
   const { handleRating, rating: displayedRating } = useVideoRatingController({
@@ -1011,8 +1013,8 @@ export default function DetailPage(): JSX.Element {
           updateModeOptions={VIDEO_SCRAPE_UPDATE_MODE_OPTIONS}
           initialUpdateMode="fillEmpty"
           onCancel={() => setShowScrapeFields(false)}
-          onConfirm={(fields, site, _scope, mode) => {
-            handleRescrape(fields, site, mode as VideoScrapeUpdateMode | undefined)
+          onConfirmVideo={(fields, site, _scope, mode, _missing, translation) => {
+            handleRescrape(fields, site, mode as VideoScrapeUpdateMode | undefined, translation)
           }}
         />
       )}
@@ -1027,7 +1029,8 @@ export default function DetailPage(): JSX.Element {
               pendingDirectorChoice.fields,
               pendingDirectorChoice.site,
               pendingDirectorChoice.mode,
-              directorId
+              directorId,
+              pendingDirectorChoice.translation
             )
           }}
         />

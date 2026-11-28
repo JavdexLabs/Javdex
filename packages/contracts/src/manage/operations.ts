@@ -44,6 +44,8 @@ export const MANAGE_OPERATIONS = {
   'videos.sources': { auth: 'manageRead', versions: [], completion: 'sync', summary: 'Restricted paginated video_sources lookup for matching' },
   'videos.years': { auth: 'manageRead', versions: [], completion: 'sync', summary: 'Release years in scope' },
   'videos.edit': { auth: 'manageWrite', versions: ['V'], completion: 'sync', summary: 'Edit canonical video fields and relations' },
+  'videos.applyTranslation': { auth: 'manageWrite', versions: [], completion: 'sync', summary: 'Apply reviewed translations against the original fields and generation' },
+  'videos.translationTargets': { auth: 'manageRead', versions: [], completion: 'sync', summary: 'Read scoped video identities for a desktop translation batch' },
   'videos.clearMeta': { auth: 'manageWrite', versions: ['V'], completion: 'sync', summary: 'Clear scraped metadata' },
   'videos.markScrapeSuccess': { auth: 'manageWrite', versions: ['V'], completion: 'sync', summary: 'Mark cumulative scrape success' },
   'videos.markScrapeFailed': { auth: 'manageWrite', versions: ['V'], completion: 'sync', summary: 'Mark scrape failure without writing collected metadata' },

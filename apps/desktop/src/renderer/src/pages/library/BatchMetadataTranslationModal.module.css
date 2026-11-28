@@ -1,0 +1,52 @@
+.dialog {
+  height: min(440px, calc(100vh - var(--modal-viewport-inset)));
+}
+
+.form {
+  display: grid;
+  gap: var(--form-section-gap);
+}
+
+.context {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--form-label-gap) var(--form-section-gap);
+  margin: 0;
+  padding: var(--form-field-gap);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-elevated);
+}
+
+.context > dt, .note, .direct > span > small {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.context > dd, .note { margin: 0; }
+.context > dd { overflow-wrap: anywhere; }
+
+.choices, .choices > label, .links {
+  display: flex;
+  align-items: center;
+  gap: var(--form-field-gap);
+}
+
+.choices > label {
+  min-height: var(--control-h-sm);
+  cursor: pointer;
+}
+
+.direct {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--form-field-gap);
+  padding: var(--form-field-gap);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.direct > span > small { display: block; }
+.links > a { color: var(--text-accent); }

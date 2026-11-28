@@ -10,6 +10,7 @@ import type {
   PendingVideoScrapePage,
   PendingVideoScrapeResolutionResult,
   VideoDirectorChoiceRequired,
+  VideoScrapeTextReceipt,
   VideoScrapeField
 } from '@shared/videoScrapeTypes'
 import type { ActressScrapeField } from '@shared/actressScrapeTypes'
@@ -179,6 +180,8 @@ export interface CatalogOperationResults {
   'tags.manualOptions': TagOptionsPage
   'catalog.overviewStats': LibraryOverviewStats
   'videos.edit': boolean
+  'videos.applyTranslation': import('@shared/metadataTranslation').ApplyMetadataTranslationResult
+  'videos.translationTargets': import('@shared/metadataTranslation').TranslationTarget[]
   'videos.clearMeta': boolean
   'videos.markScrapeSuccess': boolean
   'videos.markScrapeFailed': boolean
@@ -208,7 +211,7 @@ export interface CatalogOperationResults {
   'videos.deleteGlobal': VideoLifecycleResult
   'videos.merge': VideoMergeResult
   'videos.splitResource': VideoResourceSplitResult
-  'videos.applyScrapeCandidate': {
+  'videos.applyScrapeCandidate': VideoScrapeTextReceipt & {
     applied: boolean
     warnings: string[]
     videoId: number

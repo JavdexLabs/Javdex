@@ -51,6 +51,8 @@ export interface CatalogQueries {
 
 export interface CatalogVideoCommands {
   edit: Command<'videos.edit'>
+  applyTranslation: Command<'videos.applyTranslation'>
+  translationTargets: Query<'videos.translationTargets'>
   clearMeta: Command<'videos.clearMeta'>
   markScrapeSuccess: Command<'videos.markScrapeSuccess'>
   markScrapeFailed: Command<'videos.markScrapeFailed'>

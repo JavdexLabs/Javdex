@@ -1,4 +1,6 @@
 import type { ResolvedLlmModelRequestConfig } from './llmClient'
+import { createHash } from 'node:crypto'
+import type { LocalTranslationModelId } from '@shared/desktop/localModels'
 import { llmRequestEndpoints } from './llmClient'
 import { llmRuntimeApiToProtocol } from '@shared/llmProviders'
 import { requestResponsesText } from './llm/adapters/openaiResponsesAdapter'
@@ -49,7 +51,59 @@ export async function translateTextToChinese(text: string): Promise<string> {
     return output
   }
 
-  return translateCloudTextToChinese(trimmed, await resolveDefaultTranslationConfig())
+  return translateCloudTextToChinese(trimmed, await resolveTranslationConfig(modelManagement.resolveTranslation()))
+}
+
+export type TranslationModel =
+  | { kind: 'local'; name: string; ref: { model: LocalTranslationModelId; variant: string } }
+  | { kind: 'service'; name: string; ref: string; fingerprint: string; local: boolean }
+
+export class TranslationModelUnavailable extends Error {}
+
+type ModelAccess = ReturnType<typeof modelManagement.resolveTranslation>
+
+function serviceFingerprint(access: ModelAccess): string {
+  const { providerId, modelId, api, baseUrl } = access.model
+  return createHash('sha256').update(JSON.stringify([access.connectionId, providerId, modelId, api, baseUrl, access.local])).digest('hex')
+}
+
+export async function currentTranslationModel(): Promise<TranslationModel> {
+  const local = getLocalModels()
+  if (await local.mode() === 'local') {
+    const snapshot = await local.snapshot()
+    const { model, variant } = snapshot.usage.textTranslation
+    const selected = snapshot.models.find(item => item.id === model)
+    const variantView = selected?.variants.find(item => item.id === variant)
+    if (!variantView?.ready) throw new TranslationModelUnavailable('请先在 AI 模型设置中准备本地翻译模型和运行库')
+    return { kind: 'local', name: `${selected!.name} · ${variantView.precision}`, ref: { model, variant } }
+  }
+  const access = modelManagement.resolveTranslation()
+  return { kind: 'service', name: access.model.name, ref: access.modelRef, fingerprint: serviceFingerprint(access), local: access.local }
+}
+
+export function translationModelToken(model: TranslationModel): string {
+  return createHash('sha256').update(JSON.stringify(model)).digest('hex')
+}
+
+export async function translateWithModel(text: string, model: TranslationModel): Promise<string> {
+  if (model.kind === 'local') {
+    const local = getLocalModels()
+    const snapshot = await local.snapshot()
+    const variant = snapshot.models.find(item => item.id === model.ref.model)?.variants.find(item => item.id === model.ref.variant)
+    if (snapshot.configurationError || !variant?.ready) throw new TranslationModelUnavailable('任务所选的本地模型或运行库不可用')
+    const output = normalizeTranslationOutput(await local.translateText(text, model.ref))
+    if (!output) throw new Error('本地模型未返回有效译文')
+    return output
+  }
+  let config: ResolvedLlmModelRequestConfig
+  try {
+    const access = modelManagement.resolveTranslation(model.ref)
+    if (serviceFingerprint(access) !== model.fingerprint) throw new Error('任务所选模型的连接已变化')
+    config = await resolveTranslationConfig(access)
+  } catch (error) {
+    throw new TranslationModelUnavailable(error instanceof Error ? error.message : String(error))
+  }
+  return translateCloudTextToChinese(text, config)
 }
 
 export async function translateCloudTextToChinese(trimmed: string, config: ResolvedLlmModelRequestConfig): Promise<string> {
@@ -65,8 +119,7 @@ export async function translateCloudTextToChinese(trimmed: string, config: Resol
   return normalized
 }
 
-async function resolveDefaultTranslationConfig(): Promise<ResolvedLlmModelRequestConfig> {
-  const access = modelManagement.resolve('app-default')
+async function resolveTranslationConfig(access: ModelAccess): Promise<ResolvedLlmModelRequestConfig> {
   const lease = await access.getCredentialLease()
   try {
     const protocol = llmRuntimeApiToProtocol(access.model.api)

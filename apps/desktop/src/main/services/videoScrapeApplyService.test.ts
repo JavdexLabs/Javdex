@@ -87,6 +87,9 @@ describe('videoScrapeApplyService.resolveEffectiveScrapeFields', () => {
       'fillEmpty'
     )
     assert.deepEqual(effective, ['summary'])
+    const applied = applyScrapeResult(1, { code: 'IPX-535', title: 'Incoming', summary: 'New summary' },
+      null, new Map(), [], ['title', 'summary'], undefined, 'fillEmpty')
+    assert.deepEqual(applied.writtenText, { summary: 'New summary' })
   })
 
   it('fillEmpty evaluates female and male cast independently', () => {

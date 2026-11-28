@@ -5,6 +5,7 @@ import type {
   ScrapeResult,
   VideoDirectorChoiceRequired,
   VideoScrapeField,
+  VideoScrapeTextReceipt,
   VideoScrapeUpdateMode
 } from '@shared/videoScrapeTypes'
 import type { CatalogImageRef } from '@shared/protocol/uploads'
@@ -156,7 +157,7 @@ export function applyVideoScrapeCandidate(input: {
   expected: ExpectedVersions
   operationId: string
   database?: Database.Database
-}): {
+}): VideoScrapeTextReceipt & {
   applied: boolean
   warnings: string[]
   videoId: number
@@ -256,6 +257,7 @@ export function applyVideoScrapeCandidate(input: {
   return {
     applied: applied.applied,
     warnings: applied.warnings,
+    writtenText: applied.writtenText,
     videoId: input.videoId,
     directorChoice: applied.directorChoice,
     versions: { V: readVideoAggregateVersion(input.videoId, database)! }

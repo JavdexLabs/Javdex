@@ -308,9 +308,9 @@ export function createLocalModelManager(userData: string, options: {
   }
   // Drain validation first, then recheck purpose bindings before synchronously claiming
   // leases. A configuration save during probe teardown must not start stale paths.
-  async function acquireReady(requestedRefs: LocalModelRef[], purposes: Array<keyof LocalModelUsage> = []): Promise<() => void> {
+  async function acquireReady(requestedRefs: LocalModelRef[], purposes: Array<keyof LocalModelUsage> = [], pinned = false): Promise<() => void> {
     await validation.pause()
-    if (purposes.some(purpose => !requestedRefs.some(ref => ref.model === usage[purpose].model && ref.variant === usage[purpose].variant))) {
+    if (!pinned && purposes.some(purpose => !requestedRefs.some(ref => ref.model === usage[purpose].model && ref.variant === usage[purpose].variant))) {
       throw new Error('模型用途已更新，请重新启动任务')
     }
     const refs = [...new Map(requestedRefs.map(ref => [ref.variant, { ...ref }])).values()]
@@ -619,10 +619,17 @@ export function createLocalModelManager(userData: string, options: {
       operation = null; validation.schedule(); activeModel = null; activeVariant = null; publish()
     }
   }
-  async function translateText(text: string): Promise<string> {
+  let textRequests = Promise.resolve()
+  type TextModelRef = Pick<LocalModelUsage['textTranslation'], 'model' | 'variant'>
+  function translateText(text: string, pinned?: TextModelRef): Promise<string> {
+    const request = textRequests.then(() => translate(text, pinned))
+    textRequests = request.then(() => {}, () => {})
+    return request
+  }
+  async function translate(text: string, pinned?: TextModelRef): Promise<string> {
     await ready
-    const ref = { ...usage.textTranslation }, model = ref.model
-    const release = await acquireReady([ref], ['textTranslation'])
+    const ref = pinned ?? { ...usage.textTranslation }, model = ref.model
+    const release = await acquireReady([ref], ['textTranslation'], Boolean(pinned))
     if (idle) clearTimeout(idle)
     try {
       if (engine && engineVariant !== ref.variant) await shutdownEngine()

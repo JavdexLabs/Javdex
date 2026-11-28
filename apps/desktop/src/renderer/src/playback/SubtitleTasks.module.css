@@ -27,12 +27,6 @@
   margin-bottom: 16px;
 }
 
-.count {
-  color: var(--text-muted);
-  font-size: 12px;
-  white-space: nowrap;
-}
-
 .bulkActions {
   display: flex;
   flex-wrap: wrap;

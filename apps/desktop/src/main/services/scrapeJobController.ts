@@ -22,6 +22,7 @@ import type {
   VideoRematchBatchRequest,
   VideoRematchScope,
   VideoScrapeField,
+  VideoScrapeTranslation,
   VideoScrapeOneResult,
   VideoScrapeUpdateMode
 } from '@shared/scrapeTypes'
@@ -40,10 +41,7 @@ import {
   actressScrapeQueue,
   createActressScrapeQueue
 } from './actressScrapeQueue'
-import {
-  createVideoBatchScrapeQueue,
-  videoBatchScrapeQueue
-} from './videoBatchScrapeQueue'
+import { VideoBatchScrapeQueue } from './videoBatchScrapeQueue'
 import { scrapeRunCoordinator } from './scrapeRunCoordinator'
 import {
   assertActressBatchJobRecoverable,
@@ -63,7 +61,7 @@ import {
 import type { PersistedBatchScrapeJob } from './batchScrapeJobStore'
 import { estimateActressBatchScrapeTargetCount } from './actressBatchScrapeTargets'
 import { resolveVideoScrapeFieldSources } from '../scrapers/scraperManager'
-import { createScrapeCatalogBinding } from './scrapeCatalogBinding'
+import { createScrapeCatalogBinding, type ScrapeTranslationService } from './scrapeCatalogBinding'
 import {
   countRemoteActressTargets,
   countRemoteVideoTargets
@@ -80,6 +78,8 @@ import {
   AvatarAutoCropMediator,
   type AvatarAutoCropMediatorDependencies
 } from './avatarAutoCropMediator'
+
+export type { ScrapeTranslationService } from './scrapeCatalogBinding'
 
 type ProgressListener = (progress: BatchProgress) => void
 
@@ -131,6 +131,8 @@ export interface ScrapeJobControllerDependencies {
       fields?: VideoScrapeField[]
       mode?: VideoScrapeUpdateMode
       directorSelectionId?: number
+      libraryId?: number
+      translation?: VideoScrapeTranslation
       directorAmbiguity?: 'choice' | 'preserve'
     }
   ): Promise<VideoScrapeOutcome>
@@ -228,7 +230,8 @@ export class ScrapeJobController {
     fields?: VideoScrapeField[],
     mode?: VideoScrapeUpdateMode,
     directorSelectionId?: number,
-    libraryId?: number
+    libraryId?: number,
+    translation?: VideoScrapeTranslation
   ): Promise<VideoScrapeOneResult> {
     if (
       libraryId !== undefined &&
@@ -242,7 +245,8 @@ export class ScrapeJobController {
         fields,
         mode,
         directorSelectionId,
-        directorAmbiguity: 'choice'
+        directorAmbiguity: 'choice',
+        ...(translation && { translation, libraryId })
       })
     )
     if (!outcome.ok) {
@@ -516,18 +520,17 @@ export function createDefaultScrapeJobController(
   boundary: Pick<ScrapeJobControllerDependencies, 'emit' | 'rendererAvailable'> & {
     avatarAutoCropOptions?: ScrapeJobControllerDependencies['avatarAutoCropOptions']
     backend?: CatalogBackend
+    translations?: ScrapeTranslationService
   }
 ): ScrapeJobController {
-  const binding = createScrapeCatalogBinding(boundary.backend)
+  const binding = createScrapeCatalogBinding(boundary.backend, boundary.translations)
   const remote = boundary.backend?.mode === 'remote' ? boundary.backend : null
   const catalogKey = remote ? () => catalogKeyFor(boundary.backend) : 'local'
   return createScrapeJobController({
     coordinator: scrapeRunCoordinator,
     assertBatchAvailable: assertBatchScrapeAvailable,
     getBatchState: getBatchScrapeState,
-    videoQueue: remote
-      ? createVideoBatchScrapeQueue(remote, catalogKey)
-      : videoBatchScrapeQueue,
+    videoQueue: new VideoBatchScrapeQueue(binding, catalogKey),
     actressQueue: remote
       ? createActressScrapeQueue(remote, catalogKey)
       : actressScrapeQueue,

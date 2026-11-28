@@ -1,6 +1,7 @@
 import { backupRequestSchema } from '../protocol/backup'
 import { actressProfileEditFieldsSchema } from '../actressEditContract'
 import { z } from 'zod'
+import { applyMetadataTranslationSchema, translationTargetsSchema } from '../metadataTranslation'
 import { ALL_VIDEO_SCRAPE_FIELDS } from '../videoScrapeTypes'
 import { ALL_ACTRESS_SCRAPE_FIELDS } from '../actressScrapeTypes'
 import { NFO_EXPORT_PROFILE_IDS } from '../nfoExportTypes'
@@ -575,6 +576,8 @@ export const MANAGE_OPERATION_INPUTS = {
   'videos.sources': videoSourceQuerySchema,
   'videos.years': z.object({ scope: catalogScopeSchema }).strict(),
   'videos.edit': z.object({ videoId: idSchema, fields: videoEditFields }).strict(),
+  'videos.applyTranslation': applyMetadataTranslationSchema,
+  'videos.translationTargets': translationTargetsSchema,
   'videos.clearMeta': z.object({ videoId: idSchema }).strict(),
   'videos.markScrapeSuccess': z.object({ videoId: idSchema }).strict(),
   'videos.markScrapeFailed': z.object({ videoId: idSchema }).strict(),

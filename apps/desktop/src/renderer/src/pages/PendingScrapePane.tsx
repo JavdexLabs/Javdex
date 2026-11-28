@@ -202,8 +202,8 @@ export default function PendingScrapePane({
         return
       }
       toast.show(
-        result.applied ? '候选已应用' : '没有可写入字段，已跳过',
-        result.applied ? 'success' : 'info'
+        [result.applied ? '候选已应用' : '没有可写入字段，已跳过', ...result.warnings].join('；'),
+        result.applied && !result.warnings.length ? 'success' : 'info'
       )
       onResolved()
     } catch (error) {

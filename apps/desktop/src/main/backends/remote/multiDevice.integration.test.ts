@@ -47,6 +47,22 @@ test('three real HTTP clients edit with conflict detection; revoking one preserv
     await assert.rejects(clients[1].videos.edit({ videoId, fields: { title: 'Stale edit' } }, context()), { code: 'VERSION_CONFLICT' })
     assert.equal((getDb().prepare('SELECT title FROM videos WHERE id=?').get(videoId) as { title: string }).title, 'First edit')
     assert.equal(await clients[1].videos.edit({ videoId, fields: { title: 'Refreshed edit' } }, { operationId: randomUUID(), expectedVersions: { V: readVideoAggregateVersion(videoId)! } }), true)
+    const libraryId = Number(getDb().prepare("INSERT INTO media_libraries(name) VALUES ('Translation fixture')").run().lastInsertRowid)
+    getDb().prepare('INSERT INTO library_video_memberships(library_id,video_id,discovery_key) VALUES (?, ?, 0)').run(libraryId, videoId)
+    const [target] = await clients[0].videos.translationTargets({ libraryId, videoIds: [videoId] })
+    assert.equal(target.id, videoId)
+    assert.equal(target.title, undefined)
+    const translate = { catalogId: identity.catalogId, serverId: identity.serverId!, libraryId, videoId, generation: target.generation,
+      fields: { title: { original: 'Refreshed edit', translation: '译文一' } } }
+    const apply = { operationId: randomUUID(), expectedVersions: {} }
+    assert.deepEqual(await clients[0].videos.applyTranslation(translate, apply), { fields: { title: 'applied' } })
+    assert.deepEqual(await clients[0].videos.applyTranslation(translate, apply), { fields: { title: 'applied' } })
+    assert.deepEqual(await clients[1].videos.applyTranslation({
+      ...translate, fields: { title: { ...translate.fields.title, translation: '译文二' } }
+    }, { ...apply, operationId: randomUUID() }), { fields: { title: 'conflict' } })
+    assert.deepEqual(await clients[1].videos.translationTargets({ libraryId, videoIds: [videoId], includeText: true }), [
+      { ...target, title: '译文一', summary: null }
+    ])
     const devices = await clients[0].devices!.list()
     assert.equal(devices.length, 3)
     assert.equal(devices.filter(device => device.current).length, 1)

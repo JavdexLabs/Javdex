@@ -4,7 +4,7 @@ import WebAccessPanel from '../components/settings/WebAccessPanel'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { lazy, useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
-import type { ActressBatchScrapeScope, ActressBatchScrapeStatus, ActressScrapeField, ActressScrapeUpdateMode, VideoBatchScrapeStatus, VideoScrapeField, VideoScrapeUpdateMode } from '@shared/scrapeTypes'
+import type { ActressBatchScrapeScope, ActressBatchScrapeStatus, ActressScrapeField, ActressScrapeUpdateMode, VideoBatchScrapeStatus, VideoScrapeField, VideoScrapeTranslation, VideoScrapeUpdateMode } from '@shared/scrapeTypes'
 import type { AppSettings, SettingsSnapshot } from '@shared/settingsTypes'
 import type { BatchProgress } from '@shared/batchScrapeTypes'
 import { ACTRESS_BATCH_SCRAPE_SCOPE_OPTIONS, ACTRESS_BATCH_SCRAPE_STATUS_OPTIONS, ACTRESS_SCRAPE_FIELD_OPTIONS, ACTRESS_SCRAPE_UPDATE_MODE_OPTIONS, ALL_ACTRESS_SCRAPE_FIELDS, ALL_VIDEO_SCRAPE_FIELDS, VIDEO_BATCH_SCRAPE_STATUS_OPTIONS, VIDEO_SCRAPE_FIELD_OPTIONS, VIDEO_SCRAPE_UPDATE_MODE_OPTIONS } from '@shared/scrapeTypes'
@@ -514,7 +514,8 @@ export default function SettingsPage(): JSX.Element {
     status: VideoBatchScrapeStatus,
     mode?: VideoScrapeUpdateMode,
     missingFields: VideoScrapeField[] = [],
-    libraryId?: number
+    libraryId?: number,
+    translation?: VideoScrapeTranslation
   ): Promise<void> => {
     setShowVideoBatchModal(false)
     try {
@@ -523,6 +524,7 @@ export default function SettingsPage(): JSX.Element {
           libraryId === undefined ? { kind: 'all' } : { kind: 'library', libraryId },
           {
             fields,
+            translation,
             scraperName: site || undefined,
             status,
             missingFields,
@@ -1064,14 +1066,16 @@ export default function SettingsPage(): JSX.Element {
             }
           }}
           onCancel={() => setShowVideoBatchModal(false)}
-          onConfirm={(fields, site, status, mode, missingFields) => {
+          onConfirmVideo={(fields, site, status, mode, missingFields, translation) => {
             if (status !== undefined) {
               void startVideoBatch(
                 fields,
                 site,
                 status,
                 mode as VideoScrapeUpdateMode,
-                missingFields ?? []
+                missingFields ?? [],
+                undefined,
+                translation
               )
             }
           }}

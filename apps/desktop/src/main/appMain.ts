@@ -4,6 +4,7 @@ import { webAccess } from './web/webAccess'
 import { app, BrowserWindow, powerMonitor, protocol } from 'electron'
 import { pathToFileURL } from 'node:url'
 import { APP_DISPLAY_NAME } from '@shared/appIdentity'
+import { IPC } from '@shared/ipc-channels'
 import { applyAppIcons, resolveWindowIcon } from './appIcon'
 import { startupGraphics } from './bootstrap/startupGraphics'
 import { bindMainWindowPresentation } from './bootstrap/mainWindowPresentation'
@@ -12,6 +13,8 @@ import { configureDesktopLibraryRuntime } from './libraryRuntime'
 import { catalogReadService } from './services/catalogReadService'
 import { mediaAssetStore } from '@library/mediaAssetStore'
 import { registerIpcHandlers } from './ipc'
+import { appEventAdapter } from './ipc/appContractAdapter'
+import { createMetadataTranslationTasks } from './services/metadataTranslationTasks'
 import { scrapeBrowser } from './scrapers/scrapeBrowser'
 import { migrateUserPluginsAwayFromBuiltInNames } from './scrapers/scraperPluginService'
 import { serveMediaAssetRequest, createRemoteAssetReader } from './services/mediaProtocol'
@@ -49,6 +52,7 @@ let mainWindow: BrowserWindow | null = null
 let shutdownInProgress = false
 let shutdownReady = false
 let desktopRuntime: DesktopRuntime | null = null
+let stopMetadataTranslation: (() => void) | undefined
 let startupTask: Promise<void> | undefined
 let bootstrapStarted = false
 
@@ -245,6 +249,10 @@ if (gotSingleInstanceLock && startupGraphics.canContinue()) {
       // Leave normal close behavior available when the platform cannot create a tray.
       console.error(`[tray] ${(error as Error).message}`)
     }
+    const translation = createMetadataTranslationTasks(runtime.workStore.database(), runtime.backend, () => {
+      appEventAdapter.send(mainWindow?.webContents, IPC.METADATA_TRANSLATION_APPLIED, null)
+    })
+    stopMetadataTranslation = translation.close
     registerIpcHandlers(
       () => mainWindow,
       (url) => isSameRendererLocation(url, rendererEntryUrl),
@@ -252,6 +260,7 @@ if (gotSingleInstanceLock && startupGraphics.canContinue()) {
         backend: runtime.backend,
         settings: runtime.settings,
         workStore: runtime.workStore,
+        translation,
         videoDesktop:
           runtime.mode === 'local'
             ? { checkLinkResource: (url) => videoMaintenanceService.checkLinkResource(url) }
@@ -304,6 +313,7 @@ if (gotSingleInstanceLock && startupGraphics.canContinue()) {
     // A graphics restart can arrive while the database/runtime is opening.
     // Let that operation settle before disposing its resources or relaunching.
     void Promise.resolve(bootstrapStarted ? startupTask : undefined).then(() => {
+      stopMetadataTranslation?.()
       const playbackDisposal = disposeBuiltinPlayback()
       if (desktopRuntime?.mode === 'local') {
         automaticScanScheduler.stop()

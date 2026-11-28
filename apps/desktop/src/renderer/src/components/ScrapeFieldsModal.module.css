@@ -456,10 +456,70 @@
   overflow: hidden;
 }
 
-.scrapeModalToggles > label {
-  min-height: 0;
-  padding: 10px 12px;
+.scrapeOption > label {
+  margin: 0;
+  padding: 10px var(--form-field-gap);
 }
+
+.scrapeOption > label::before { content: none; }
+
+@media (hover: hover) {
+  .scrapeOption:where(:has(> label:hover):has(input:enabled)) {
+    background: var(--surface-control-hover);
+  }
+}
+
+.scrapeOption:where(:has(input:focus-visible)) { background: var(--surface-control-hover); }
+
+.scrapeOption:where(:has(input:enabled:checked)) { background: var(--surface-selected); }
+
+.scrapeOption + .scrapeOption { border-block-start: 1px solid var(--border-subtle); }
+
+.translationModel {
+  display: grid;
+  gap: var(--form-label-gap);
+  padding: 0 var(--form-field-gap) var(--form-field-gap);
+  overflow-wrap: anywhere;
+}
+
+.translationModel > button { justify-self: start; }
+
+.modelCaption {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: calc(1.4em + 4px);
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.modelLocation {
+  margin-inline-start: auto;
+  padding: 1px 6px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-pill);
+  background: var(--surface-panel);
+  line-height: 1.4;
+}
+
+.modelName {
+  display: block;
+  margin-block-start: 3px;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.45;
+  user-select: text;
+}
+
+.modelNote {
+  margin: 3px 0 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.modelNote[data-error='true'] { color: var(--text-danger); }
 
 .scrapeFieldsToolbarInline {
   margin-bottom: 0;

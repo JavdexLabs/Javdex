@@ -1,4 +1,6 @@
 import type { ActressGender } from './actressTypes'
+import type { MetadataTranslationField } from './metadataTranslation'
+import type { TranslationStart } from './desktop/metadataTranslationTasks'
 import type { ScrapedStatus } from './commonTypes'
 
 export type VideoClassificationField = 'maker' | 'publisher' | 'series' | 'director'
@@ -114,7 +116,13 @@ export interface PendingVideoScrapePage {
   offset: number
 }
 
-export interface PendingVideoScrapeResolutionResult {
+export type VideoScrapeTranslation = Pick<TranslationStart, 'modelToken' | 'directApply'>
+export interface VideoScrapeTextReceipt {
+  /** Nonempty text committed by this scrape. Older servers may omit this receipt. */
+  writtenText?: Partial<Record<MetadataTranslationField, string>>
+}
+
+export interface PendingVideoScrapeResolutionResult extends VideoScrapeTextReceipt {
   status: 'applied' | 'skipped' | 'merge-required'
   applied: boolean
   conflictVideoId?: number
@@ -191,6 +199,7 @@ export interface VideoBatchScrapeFilter {
   scraperName?: string
 }
 export interface VideoBatchScrapeRequest extends VideoBatchScrapeFilter {
+  translation?: VideoScrapeTranslation
   fields: VideoScrapeField[]
   mode?: VideoScrapeUpdateMode
 }

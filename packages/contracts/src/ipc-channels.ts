@@ -368,7 +368,15 @@ export const IPC = {
   ASSET_FETCH_REMOTE_IMAGE: 'asset:fetchRemoteImage',
 
   // LLM utilities
-  LLM_TRANSLATE_TO_CHINESE: 'llm:translateToChinese'
+  LLM_TRANSLATE_TO_CHINESE: 'llm:translateToChinese',
+  METADATA_TRANSLATION_MODEL: 'metadataTranslation:model',
+  METADATA_TRANSLATION_START: 'metadataTranslation:start',
+  METADATA_TRANSLATION_LIST: 'metadataTranslation:list',
+  METADATA_TRANSLATION_PAGE: 'metadataTranslation:page',
+  METADATA_TRANSLATION_BULK_TARGETS: 'metadataTranslation:bulkTargets',
+  METADATA_TRANSLATION_SELECTION: 'metadataTranslation:selection',
+  METADATA_TRANSLATION_COMMAND: 'metadataTranslation:command',
+  METADATA_TRANSLATION_APPLIED: 'metadataTranslation:applied'
 } as const
 
 export type IpcChannel = (typeof IPC)[keyof typeof IPC]

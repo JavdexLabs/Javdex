@@ -24,6 +24,7 @@ import type {
   VideoRematchScope,
   VideoScrapeField,
   VideoScrapeOneResult,
+  VideoScrapeTranslation,
   VideoScrapeUpdateMode
 } from './videoScrapeTypes'
 import type {
@@ -56,7 +57,8 @@ export interface ScrapeIpcContract {
       fields?: VideoScrapeField[],
       mode?: VideoScrapeUpdateMode,
       directorSelectionId?: number,
-      libraryId?: number
+      libraryId?: number,
+      translation?: VideoScrapeTranslation
     ]
     result: VideoScrapeOneResult
   }

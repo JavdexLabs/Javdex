@@ -295,6 +295,7 @@ export function confirmPendingVideoScrape(
   return {
     status: application.applied ? 'applied' : 'skipped',
     applied: application.applied,
+    writtenText: application.writtenText,
     warnings: [...snapshot.pending.warnings, ...application.warnings]
   }
 }

@@ -492,6 +492,8 @@ export function createRemoteCatalogBackend(options: RemoteCatalogBackendOptions)
     },
     videos: {
       edit: m('videos.edit'),
+      applyTranslation: m('videos.applyTranslation'),
+      translationTargets: q('videos.translationTargets'),
       setRating: m('videos.setRating'),
       clearMeta: m('videos.clearMeta'),
       markScrapeSuccess: m('videos.markScrapeSuccess'),

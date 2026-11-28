@@ -5,6 +5,7 @@ import type {
   VideoClassificationResolutionOutcome,
   VideoDirectorChoiceRequired,
   VideoScrapeField,
+  VideoScrapeTextReceipt,
   VideoScrapeUpdateMode
 } from '@shared/videoScrapeTypes'
 import type {
@@ -64,7 +65,7 @@ export interface VideoScrapeDeliverInput {
   beforeCommit?: (result: VideoScrapeDeliverOutcome) => void
 }
 
-export interface VideoScrapeDeliverOutcome {
+export interface VideoScrapeDeliverOutcome extends VideoScrapeTextReceipt {
   applied: boolean
   warnings: string[]
   classifications: VideoClassificationResolutionOutcome[]
@@ -178,6 +179,7 @@ export function createVideoScrapeApplyService(
             if (applied.applied) input.afterSuccessfulApply?.()
             const callbackResult: unknown = input.beforeCommit?.({
               applied: applied.applied,
+              writtenText: applied.writtenText,
               warnings: [...applied.warnings],
               classifications: applied.classifications,
               directorChoice: applied.directorChoice
@@ -222,6 +224,7 @@ export function createVideoScrapeApplyService(
 
       return {
         applied: application.applied,
+        writtenText: application.writtenText,
         warnings: application.warnings,
         classifications: application.classifications,
         directorChoice: application.directorChoice

@@ -1,12 +1,13 @@
 import { useCallback, useLayoutEffect, useRef, useState } from 'react'
 import type { ScopedVideoDetail } from '@shared/catalogTypes'
-import type { VideoDirectorChoiceRequired, VideoScrapeField, VideoScrapeUpdateMode } from '@shared/videoScrapeTypes'
+import type { VideoDirectorChoiceRequired, VideoScrapeField, VideoScrapeTranslation, VideoScrapeUpdateMode } from '@shared/videoScrapeTypes'
 import type { api } from '../api'
 
 interface DirectorChoice {
   fields: VideoScrapeField[]
   site: string
   mode?: VideoScrapeUpdateMode
+  translation?: VideoScrapeTranslation
   choice: VideoDirectorChoiceRequired
 }
 type ScrapeState = { phase: 'idle' } | { phase: 'running'; choice?: DirectorChoice } | { phase: 'choice'; choice: DirectorChoice }
@@ -38,7 +39,7 @@ export function useVideoScrapeController({ video, scope, onSelected, onPending, 
       state: current.state.phase === 'running' ? { phase: 'running' } : { phase: 'idle' }
     })
   }, [])
-  const execute = async (fields: VideoScrapeField[], site: string, mode?: VideoScrapeUpdateMode, directorSelectionId?: number) => {
+  const execute = async (fields: VideoScrapeField[], site: string, mode?: VideoScrapeUpdateMode, directorSelectionId?: number, translation?: VideoScrapeTranslation) => {
     if (!video || running.current === scope || currentScope.current !== scope) return
     const token = ++request.current
     running.current = scope
@@ -48,18 +49,18 @@ export function useVideoScrapeController({ video, scope, onSelected, onPending, 
     const active = () => currentScope.current === scope && token === request.current
     let next: ScrapeState | undefined
     try {
-      const result = await scrape(video.id, site || undefined, fields, mode, directorSelectionId, video.activeLibraryId)
+      const result = await scrape(video.id, site || undefined, fields, mode, directorSelectionId, video.activeLibraryId, translation)
       if (!active()) return
-      if (result.directorChoice) { next = { phase: 'choice', choice: { fields, site, mode, choice: result.directorChoice } }; return }
+      if (result.directorChoice) { next = { phase: 'choice', choice: { fields, site, mode, translation, choice: result.directorChoice } }; return }
       next = { phase: 'idle' }
       if (result.pending) {
-        notify('发现多个候选，已保存到待确认中心', 'info')
+        notify(['发现多个候选，已保存到待确认中心', ...result.warnings].join('；'), 'info')
         onPending(video.id)
         return
       }
       const warnings = result.warnings.length > 0
       notify(result.applied
-        ? warnings ? `已更新，部分字段未应用：${result.warnings.join('；')}` : '匹配完成'
+        ? warnings ? `已更新；${result.warnings.join('；')}` : '匹配完成'
         : warnings ? `所选字段未应用：${result.warnings.join('；')}` : '所选字段无可写入内容', result.applied && !warnings ? 'success' : 'info')
       if (result.applied) onApplied()
     } catch (error) {

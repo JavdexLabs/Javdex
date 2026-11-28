@@ -22,6 +22,8 @@ export const CATALOG_METHODS = {
   },
   videos: {
     edit: true,
+    applyTranslation: true,
+    translationTargets: true,
     clearMeta: true,
     markScrapeSuccess: true,
     markScrapeFailed: true,

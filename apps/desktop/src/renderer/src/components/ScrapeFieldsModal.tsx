@@ -5,6 +5,11 @@ import {
 } from '@shared/actressProfileOptions'
 import type { ScraperPluginDescriptor } from '@shared/scraperPluginTypes'
 import { useEffect, useMemo, useState } from 'react'
+import { Box } from 'lucide-react'
+import type { VideoScrapeTranslation } from '@shared/videoScrapeTypes'
+import type { TranslationModelView } from '@shared/desktop/metadataTranslationTasks'
+import { api } from '../api'
+import { translationDirectApplyDescription, translationModelLocation } from '../tasks/translationTaskState'
 import ScraperSiteSelect from './ScraperSiteSelect'
 import SelectControl from './SelectControl'
 import SettingsSwitchRow from './SettingsSwitchRow'
@@ -99,7 +104,7 @@ function scopeOptionLabel<V extends string | number>(
   return options?.find((option) => option.id === value)?.label
 }
 
-interface Props<T extends string, S extends string | number = never, A extends string | number = never> {
+type Props<T extends string, S extends string | number, A extends string | number> = {
   title: string
   hint?: string
   options: ScrapeFieldOption<T>[]
@@ -140,6 +145,8 @@ interface Props<T extends string, S extends string | number = never, A extends s
   initialAutoCropAvatar?: boolean
   autoCropAvatarHint?: string
   onCancel: () => void
+} & ({
+  onConfirmVideo?: never
   onConfirm: (
     selected: T[],
     scraperName: string,
@@ -151,7 +158,11 @@ interface Props<T extends string, S extends string | number = never, A extends s
     auxScope?: A,
     autoCropAvatar?: boolean
   ) => void
-}
+} | {
+  onConfirm?: never
+  onConfirmVideo: (fields: T[], scraperName: string, scope: S | undefined, mode: string | undefined,
+    missingFields: T[], translation?: VideoScrapeTranslation) => void
+})
 
 /** Modal for choosing scrape site, scope, update mode, and metadata fields. */
 export default function ScrapeFieldsModal<
@@ -194,6 +205,7 @@ export default function ScrapeFieldsModal<
   initialAutoCropAvatar = false,
   autoCropAvatarHint,
   onCancel,
+  onConfirmVideo,
   onConfirm
 }: Props<T, S, A>): JSX.Element {
   const allIds = options.map((o) => o.id)
@@ -431,14 +443,37 @@ export default function ScrapeFieldsModal<
     </div>
   )
 
+  const [translate, setTranslate] = useState(false)
+  const [directApply, setDirectApply] = useState(false)
+  const [model, setModel] = useState<TranslationModelView | null>(null)
+  const [modelError, setModelError] = useState('')
+  const [modelAttempt, setModelAttempt] = useState(0)
+  const canTranslate = supportedIds.some(id => selected.has(id) && (id === 'title' || id === 'summary'))
+  const translateThisScrape = Boolean(onConfirmVideo && translate && canTranslate)
+  useEffect(() => {
+    let active = true
+    if (!translateThisScrape) {
+      setModel(null)
+      setModelError('')
+      setDirectApply(false)
+      setTranslate(false)
+    } else {
+      setModelError('')
+      void api.metadataTranslation.model().then(value => { if (active) setModel(value) })
+        .catch(error => { if (active) setModelError(String(error?.message ?? error)) })
+    }
+    return () => { active = false }
+  }, [translateThisScrape, modelAttempt])
+
   const canConfirm =
+    (!translateThisScrape || Boolean(model)) &&
     selected.size > 0 &&
     scrapers.length > 0 &&
     (!scopeOptions?.length || scope !== undefined) &&
     (!missingFilterEnabled || missingSelected.size > 0)
 
   const avatarFieldSelected = selected.has('avatar' as T)
-  const hasOptionalToggles = showUseAliasesToggle || showAutoCropAvatarToggle
+  const hasOptionalToggles = showUseAliasesToggle || showAutoCropAvatarToggle || onConfirmVideo
   const scopeLabel = scopeOptionLabel(scopeOptions, scope)
   const auxScopeLabel = scopeOptionLabel(auxScopeOptions, auxScope)
   const updateModeLabel = scopeOptionLabel(updateModeOptions, updateMode)
@@ -488,8 +523,10 @@ export default function ScrapeFieldsModal<
             type="button"
             variant="primary"
             disabled={!canConfirm}
-            onClick={() =>
-              onConfirm(
+            onClick={() => onConfirmVideo
+              ? onConfirmVideo([...selected], scraperName, scope, updateMode, effectiveMissingFields,
+                translateThisScrape && model ? { modelToken: model.token, directApply } : undefined)
+              : onConfirm(
                 [...selected],
                 scraperName,
                 scope,
@@ -710,26 +747,56 @@ export default function ScrapeFieldsModal<
               <section className={styles.scrapeConfigSection}>
                 <span className={styles.scrapeModalSectionTitle}>附加选项</span>
                 <SettingsToggleList compact className={styles.scrapeModalToggles}>
+                  {onConfirmVideo && <>
+                    <div className={styles.scrapeOption}>
+                      <SettingsSwitchRow title="刮削后自动翻译" checked={translateThisScrape} disabled={!canTranslate}
+                        description={canTranslate ? '将写入的标题和简介译成简体中文。' : '勾选标题或简介后可用。'}
+                        onChange={setTranslate} />
+                      {translateThisScrape && <div className={styles.translationModel}>
+                        <div role="status">
+                          <div className={styles.modelCaption}>
+                            <Box size={13} aria-hidden="true" />当前模型
+                            {model && <span className={styles.modelLocation}>{translationModelLocation[model.location]}</span>}
+                          </div>
+                          {model ? <>
+                            <strong className={styles.modelName}>{model.name}</strong>
+                            {model.location === 'cloud' && <p className={styles.modelNote}>原文将发送到该服务。</p>}
+                          </> : <p className={styles.modelNote} data-error={Boolean(modelError)}>
+                            {modelError || '正在读取翻译模型…'}
+                          </p>}
+                        </div>
+                        {modelError && <Button size="sm" onClick={() => setModelAttempt(value => value + 1)}>重新读取模型</Button>}
+                      </div>}
+                    </div>
+                    {translateThisScrape && <div className={styles.scrapeOption}>
+                      <SettingsSwitchRow title="翻译后直接应用" checked={directApply} onChange={setDirectApply}
+                        description={translationDirectApplyDescription} />
+                    </div>}
+                  </>}
                   {showUseAliasesToggle && (
-                    <SettingsSwitchRow
-                      title="使用别名刮削"
-                      description={useAliasesHint}
-                      checked={useAliases}
-                      onChange={setUseAliases}
-                    />
+                    <div className={styles.scrapeOption}>
+                      <SettingsSwitchRow
+                        title="使用别名刮削"
+                        description={useAliasesHint}
+                        checked={useAliases}
+                        onChange={setUseAliases}
+                      />
+                    </div>
                   )}
                   {showAutoCropAvatarToggle && (
-                    <SettingsSwitchRow
-                      title="自动智能构图头像"
-                      description={
-                        avatarFieldSelected
-                          ? autoCropAvatarHint
-                          : '勾选“头像”写入字段后可用。'
-                      }
-                      checked={autoCropAvatar && avatarFieldSelected}
-                      disabled={!avatarFieldSelected}
-                      onChange={setAutoCropAvatar}
-                    />
+                    <div className={styles.scrapeOption}>
+                      <SettingsSwitchRow
+                        title="自动智能构图头像"
+                        description={
+                          avatarFieldSelected
+                            ? autoCropAvatarHint
+                            : '勾选“头像”写入字段后可用。'
+                        }
+                        checked={autoCropAvatar && avatarFieldSelected}
+                        disabled={!avatarFieldSelected}
+                        onChange={setAutoCropAvatar}
+                      />
+                    </div>
                   )}
                 </SettingsToggleList>
               </section>

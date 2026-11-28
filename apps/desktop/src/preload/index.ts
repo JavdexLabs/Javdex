@@ -96,6 +96,7 @@ import type {
   VideoRematchBatchRequest,
   VideoRematchScope,
   VideoScrapeField,
+  VideoScrapeTranslation,
   VideoScrapeUpdateMode
 } from '../../../../packages/contracts/src/scrapeTypes'
 import type { PendingVideoScrapeConfirmInput, PendingVideoScrapePageQuery } from '../../../../packages/contracts/src/videoScrapeTypes'
@@ -647,7 +648,8 @@ const api = {
       fields?: VideoScrapeField[],
       mode?: VideoScrapeUpdateMode,
       directorSelectionId?: number,
-      libraryId?: number
+      libraryId?: number,
+      translation?: VideoScrapeTranslation
     ) =>
       invokeScrape(
         IPC.SCRAPE_ONE,
@@ -656,7 +658,8 @@ const api = {
         fields,
         mode,
         directorSelectionId,
-        libraryId
+        libraryId,
+        translation
       ),
     countPending: () => invokeScrape(IPC.PENDING_VIDEO_SCRAPE_COUNT),
     existingPendingIds: (ids: number[]) => invokeScrape(IPC.PENDING_VIDEO_SCRAPE_EXISTING_IDS, ids),
@@ -911,6 +914,17 @@ const api = {
   assetStorage: {
     relocate: (targetPath?: string | null) =>
       invokeApp(IPC.ASSET_STORAGE_RELOCATE, targetPath)
+  },
+  metadataTranslation: {
+    model: () => invokeApp(IPC.METADATA_TRANSLATION_MODEL),
+    start: (input: import('@shared/desktop/metadataTranslationTasks').TranslationStart) => invokeApp(IPC.METADATA_TRANSLATION_START, input),
+    list: () => invokeApp(IPC.METADATA_TRANSLATION_LIST),
+    page: (offset: number, filter: import('@shared/desktop/metadataTranslationTasks').TranslationReviewFilter) =>
+      invokeApp(IPC.METADATA_TRANSLATION_PAGE, offset, filter),
+    bulkTargets: (operation: import('@shared/desktop/metadataTranslationTasks').TranslationBulkOperation) => invokeApp(IPC.METADATA_TRANSLATION_BULK_TARGETS, operation),
+    selection: () => invokeApp(IPC.METADATA_TRANSLATION_SELECTION),
+    command: (input: import('@shared/desktop/metadataTranslationTasks').TranslationTaskCommand) => invokeApp(IPC.METADATA_TRANSLATION_COMMAND, input),
+    onApplied: (callback: () => void) => onAppEvent(IPC.METADATA_TRANSLATION_APPLIED, callback)
   },
   llm: {
     translateToChinese: (text: string) => invokeApp(IPC.LLM_TRANSLATE_TO_CHINESE, text)

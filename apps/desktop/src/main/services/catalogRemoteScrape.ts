@@ -312,48 +312,39 @@ export async function scrapeVideoThroughCatalog(
             }))
           )
           : undefined
+        const applyCandidate = () => backend.videos.applyScrapeCandidate(
+          {
+            videoId,
+            fields: fieldsToApply,
+            mode,
+            candidate: result,
+            sourceName: fieldSources.sourceName,
+            ratingSourceName: fieldSources.ratingSourceName,
+            cover,
+            samples,
+            actressAvatars,
+            directorSelectionId: options?.directorSelectionId,
+            directorAmbiguity: options?.directorAmbiguity ?? 'preserve'
+          },
+          applyCtx
+        )
+        const appliedOutcome = (applied: Awaited<ReturnType<typeof applyCandidate>>): ScrapeOutcome => ({
+          ok: true,
+          result,
+          skipped: Boolean(applied.directorChoice) || applied.applied === false,
+          writtenText: applied.writtenText,
+          warnings: [...collected.warnings, ...(applied.warnings ?? [])],
+          classifications: [],
+          directorChoice: applied.directorChoice
+        })
         try {
-          const applied = (await backend.videos.applyScrapeCandidate(
-            {
-              videoId,
-              fields: fieldsToApply,
-              mode,
-              candidate: result,
-              sourceName: fieldSources.sourceName,
-              ratingSourceName: fieldSources.ratingSourceName,
-              cover,
-              samples,
-              actressAvatars,
-              directorSelectionId: options?.directorSelectionId,
-              directorAmbiguity: options?.directorAmbiguity ?? 'preserve'
-            },
-            applyCtx
-          )) as {
-            applied?: boolean
-            warnings?: string[]
-            directorChoice?: ScrapeOutcome['directorChoice']
-          }
-          if (applied.directorChoice) {
-            return {
-              ok: true,
-              result,
-              skipped: true,
-              warnings: [...collected.warnings, ...(applied.warnings ?? [])],
-              classifications: [],
-              directorChoice: applied.directorChoice
-            }
-          }
-          return {
-            ok: true,
-            result,
-            skipped: applied.applied === false,
-            warnings: [...collected.warnings, ...(applied.warnings ?? [])],
-            classifications: []
-          }
+          return appliedOutcome(await applyCandidate())
         } catch (error) {
           if (isStructuredError(error) && error.code === 'CONNECTION_UNAVAILABLE') {
             const receipt = await readRemoteMutationReceipt(backend, applyCtx.operationId)
             if (isAcceptedRemoteMutation(receipt)) {
+              const recovered = await applyCandidate().catch(() => null)
+              if (recovered) return appliedOutcome(recovered)
               return {
                 ok: true,
                 result,

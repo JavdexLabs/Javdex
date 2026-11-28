@@ -10,6 +10,7 @@ import { queryClient } from '../query/queryClient'
 Object.defineProperty(globalThis, 'React', { configurable: true, value: React })
 
 let renderer: TestRenderer.ReactTestRenderer | null = null
+const metadataTranslation = { onApplied: () => () => undefined }
 
 afterEach(async () => {
   await act(async () => renderer?.unmount())
@@ -22,7 +23,7 @@ it('a late startup snapshot cannot overwrite authentication failure; recovery pr
   let notify!: (snapshot: DesktopSessionSnapshot) => void
   const originalWindow = globalThis.window
   const initial = new Promise<DesktopSessionSnapshot>(resolve => { resolveInitial = resolve })
-  Object.defineProperty(globalThis, 'window', { configurable: true, value: { api: { desktop: {
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: { api: { metadataTranslation, desktop: {
     getSession: () => initial,
     onSessionChanged: (callback: typeof notify) => { notify = callback; return () => undefined }
   } } } })
@@ -55,7 +56,7 @@ it('reloads a mounted home query when the initial remote session arrives', async
   Object.defineProperty(globalThis, 'window', {
     configurable: true,
     value: {
-      api: { desktop: {
+      api: { metadataTranslation, desktop: {
         getSession: () => initialSession,
         onSessionChanged: (callback: typeof onSessionChanged) => {
           onSessionChanged = callback

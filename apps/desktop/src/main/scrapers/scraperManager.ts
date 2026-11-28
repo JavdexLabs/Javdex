@@ -18,6 +18,7 @@ import type {
   VideoClassificationResolutionOutcome,
   VideoDirectorChoiceRequired,
   VideoScrapeField,
+  VideoScrapeTextReceipt,
   VideoScrapeUpdateMode
 } from '@shared/videoScrapeTypes'
 import { ALL_VIDEO_SCRAPE_FIELDS } from '@shared/videoScrapeTypes'
@@ -172,7 +173,7 @@ export function getScraper(name?: string): BaseScraper {
   return scraper
 }
 
-export interface ScrapeOutcome {
+export interface ScrapeOutcome extends VideoScrapeTextReceipt {
   ok: boolean
   result?: ScrapeResult
   error?: string
@@ -579,6 +580,7 @@ export async function scrapeVideo(
           ok: true,
           result,
           skipped: !delivery.applied,
+          writtenText: delivery.writtenText,
           warnings: [...collected.warnings, ...delivery.warnings],
           classifications: delivery.classifications,
           directorChoice: delivery.directorChoice

@@ -35,6 +35,7 @@ window.failCommand = null
 window.emptyTasks = () => { tasks = []; scanActive = false; batch = { ...batch, status: 'idle' }; onBatch(batch) }
 window.setBatchWithoutEvent = status => { batch = { ...batch, status } }
 window.api = {
+  metadataTranslation: { list: async () => ({ total: 0, running: 0, attention: 0 }) },
   mediaLibraries: { list: async () => libraries },
   scrape: { countPending: async () => 2, onVideoBatchProgress: fn => { onBatch = fn; return () => { onBatch = () => {} } }, pagePending: async () => ({ items: [], total: 2, offset: 0 }) },
   actressScrape: { conflictSummary: async () => ({ groupCount: 1 }), onBatchProgress: () => () => {}, pageConflicts: async () => ({ items: [], total: 1, offset: 0 }) },

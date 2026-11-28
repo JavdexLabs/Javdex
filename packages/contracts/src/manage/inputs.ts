@@ -339,6 +339,7 @@ const scrapedStatusSchema = z.union([z.literal(0), z.literal(1), z.literal(2), z
 const videoQuerySchema = z
   .object({
     search: searchTextSchema.optional(),
+    exactCode: codeSchema.optional(),
     scrapedStatus: scrapedStatusSchema.optional(),
     minRating: z.number().min(0).max(5).optional(),
     year: z.union([z.number().int(), z.literal('all')]).optional(),
@@ -458,6 +459,7 @@ const mediaLibraryConfigPatchSchema = z
     autoScanEnabled: z.boolean().optional(),
     autoScanIntervalMinutes: z.number().int().positive().optional(),
     minImportDurationMinutes: z.number().int().nonnegative().optional(),
+    useFilenameAsCode: z.boolean().optional(),
     autoMergeSameCodeResources: z.boolean().optional(),
     autoImportLocalNfo: z.boolean().optional(),
     removeResourceLessMemberships: z.boolean().optional(),

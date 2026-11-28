@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import Database from 'better-sqlite3'
+import { registerReadFunctions } from './database'
 import { migrateDatabase } from './migrations'
 import { createScopedVideoCatalogRepo } from './scopedVideoCatalogRepo'
 
@@ -83,6 +84,24 @@ function explainPlan(database: Database.Database, statement: string): string {
 }
 
 describe('scoped video catalog repo', () => {
+  it('matches a filename code literally within the requested library', () => {
+    const database = createFixture()
+    try {
+      registerReadFunctions(database)
+      database.exec(`
+        UPDATE videos SET code = '東京熱_100%.CUT' WHERE id = 101;
+        UPDATE videos SET code = '東京熱A100 EXTRA.CUT' WHERE id = 102;
+      `)
+      const repo = createScopedVideoCatalogRepo(database)
+      const scope = { kind: 'library', libraryId: 2 } as const
+      assert.equal(repo.list(scope, { search: '東京熱_100%.cut' }).total, 2)
+      assert.deepEqual(repo.list(scope, { exactCode: ' 東京熱_100%.cut ' }).items.map(({ id }) => id), [101])
+      assert.deepEqual(repo.list(scope, { exactCode: '東京熱A100.EXTRA.CUT' }).items, [])
+    } finally {
+      database.close()
+    }
+  })
+
   it('sorts library and global pages by default external score rather than membership time', () => {
     const database = createFixture()
     try {

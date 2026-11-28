@@ -4,9 +4,7 @@ import { useEffect, useState } from 'react'
 import { Copy, FolderOpen, AlertCircle } from 'lucide-react'
 import type { ManualImportResult } from '@shared/libraryTypes'
 import type { Video, VideoResourceImportTarget } from '@shared/videoTypes'
-import { normalizeVideoCode } from '@shared/videoCode'
 import { api } from '../../api'
-import { normalizeOptionalVideoCode } from '../videoResourceImportForm'
 import { useToast } from '../Toast'
 import Button from '../Button'
 import IconButton from '../IconButton'
@@ -30,53 +28,48 @@ export default function UnrecognizedRow({
 }): JSX.Element {
   const toast = useToast()
   const { capabilities } = useDesktopSession()
-  const fullName = filePath.split(/[\\/]/).pop() || filePath
+  const fullName = filePath.split(filePath.startsWith('/') ? '/' : /[\\/]/).pop() || filePath
   const dot = fullName.lastIndexOf('.')
-  const baseName = dot > 0 ? fullName.slice(0, dot) : fullName
-  const ext = dot > 0 ? fullName.slice(dot) : ''
+  const baseName = dot >= 0 ? fullName.slice(0, dot) : fullName
+  const ext = dot >= 0 ? fullName.slice(dot) : ''
   const [code, setCode] = useState('')
   const [renameBase, setRenameBase] = useState(baseName)
   const [busy, setBusy] = useState<'import' | 'rename' | null>(null)
   const [targetValue, setTargetValue] = useState('new')
-  const [matchingVideos, setMatchingVideos] = useState<Array<Pick<Video, 'id' | 'code' | 'title'>>>([])
-  const [loadingTargets, setLoadingTargets] = useState(false)
+  const [lookup, setLookup] = useState<{
+    code: string
+    videos: Array<Pick<Video, 'id' | 'code' | 'title'>>
+  } | null>(null)
 
   const codeTrimmed = code.trim()
+  const matchingVideos = lookup?.code === codeTrimmed ? lookup.videos : []
   const renameTrimmed = renameBase.trim()
   const canImport = codeTrimmed.length > 0 && targetValue.length > 0
   const canRename = renameTrimmed.length > 0 && renameTrimmed !== baseName
 
+  const updateCode = (value: string): void => {
+    setCode(value)
+    if (value.trim() !== codeTrimmed) setTargetValue('new')
+  }
+
   useEffect(() => {
-    const normalized = normalizeOptionalVideoCode(code)
-    setTargetValue('new')
-    if (!normalized) {
-      setMatchingVideos([])
-      return
-    }
+    if (!codeTrimmed) return
     let cancelled = false
     const timer = window.setTimeout(() => {
-      setLoadingTargets(true)
       void api.videos
-        .list(ALL_CATALOG_SCOPE, { search: normalized, limit: 100, offset: 0 })
+        .list(ALL_CATALOG_SCOPE, { exactCode: codeTrimmed, limit: 100, offset: 0 })
         .then((result) => {
-          if (!cancelled) {
-            setMatchingVideos(
-              result.items.filter((video) => normalizeVideoCode(video.code) === normalized)
-            )
-          }
+          if (!cancelled) setLookup({ code: codeTrimmed, videos: result.items })
         })
         .catch((error) => {
           if (!cancelled) toast.show(String((error as Error).message), 'error')
-        })
-        .finally(() => {
-          if (!cancelled) setLoadingTargets(false)
         })
     }, 180)
     return () => {
       cancelled = true
       window.clearTimeout(timer)
     }
-  }, [code, toast])
+  }, [codeTrimmed, toast])
 
   const finishImport = (res: ManualImportResult): void => {
     if (res.imported) {
@@ -200,18 +193,26 @@ export default function UnrecognizedRow({
           <TextInput
             density="workspace" className={styles.codeInput}
             value={code}
-            onChange={(e) => setCode(e.target.value)}
+            onChange={(e) => updateCode(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'Enter') void doManualImport()
             }}
             placeholder="输入番号（如 ABC-123）"
             aria-label={`${fullName} 番号`}
           />
+          <Button
+            type="button"
+            size="sm"
+            disabled={busy !== null || !baseName.trim()}
+            onClick={() => updateCode(baseName.trim())}
+          >
+            使用文件名
+          </Button>
           <SelectControl
             className={styles.targetSelect}
             value={targetValue}
             onChange={(event) => setTargetValue(event.target.value)}
-            disabled={busy !== null || loadingTargets || !codeTrimmed}
+            disabled={busy !== null || matchingVideos.length === 0}
             aria-label={`${fullName} 导入目标`}
           >
             <option value="new">新建独立影片</option>

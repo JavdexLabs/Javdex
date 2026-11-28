@@ -132,6 +132,7 @@ export const VIDEO_LIST_PAGE_LIMIT_MAX = 200
 
 export interface VideoQuery {
   search?: string
+  exactCode?: string
   scrapedStatus?: ScrapedStatus | 'all'
   minRating?: number
   year?: number | 'all'

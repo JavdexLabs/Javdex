@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3'
 import type { CatalogScope } from '@shared/mediaLibraryTypes'
+import { normalizeVideoCode } from '@shared/videoCode'
 import type { MediaLibraryBadge, ScopedStoredVideoDetail, ScopedVideo, ScopedVideoListResult } from '@shared/catalogTypes'
 import type {
   VideoQuery,
@@ -163,6 +164,10 @@ function buildWhere(
   const params: unknown[] = []
   let joins = scope.membershipJoin
 
+  if (query.exactCode?.trim()) {
+    conditions.push('upper(trim(v.code)) = ?')
+    params.push(normalizeVideoCode(query.exactCode))
+  }
   if (query.search?.trim()) {
     const like = `%${query.search.trim()}%`
     conditions.push(

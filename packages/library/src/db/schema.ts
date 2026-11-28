@@ -292,6 +292,12 @@ INSERT OR IGNORE INTO media_libraries (
 INSERT OR IGNORE INTO media_library_configs (library_id) VALUES (1);
 `
 
+export const MEDIA_LIBRARY_FILENAME_CODE_MIGRATION_SQL = `
+ALTER TABLE media_library_configs
+    ADD COLUMN use_filename_as_code INTEGER NOT NULL DEFAULT 0
+        CHECK(use_filename_as_code IN (0, 1));
+`
+
 export const MEDIA_LIBRARY_MEMBERSHIP_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS library_video_memberships (
     library_id INTEGER NOT NULL,

@@ -59,6 +59,7 @@ interface MediaLibraryConfigRow {
   auto_scan_enabled: 0 | 1
   auto_scan_interval_minutes: number
   min_import_duration_minutes: number
+  use_filename_as_code: 0 | 1
   auto_merge_same_code_resources: 0 | 1
   auto_import_local_nfo: 0 | 1
   remove_resource_less_memberships: 0 | 1
@@ -98,6 +99,7 @@ interface MediaLibrarySummaryRow {
   auto_scan_enabled: 0 | 1
   auto_scan_interval_minutes: number
   min_import_duration_minutes: number
+  use_filename_as_code: 0 | 1
   auto_merge_same_code_resources: 0 | 1
   auto_import_local_nfo: 0 | 1
   remove_resource_less_memberships: 0 | 1
@@ -154,6 +156,7 @@ const SUMMARY_SELECT_SQL = `
     config.auto_scan_enabled,
     config.auto_scan_interval_minutes,
     config.min_import_duration_minutes,
+    config.use_filename_as_code,
     config.auto_merge_same_code_resources,
     config.auto_import_local_nfo,
     config.remove_resource_less_memberships,
@@ -271,6 +274,12 @@ function normalizeConfigPatch(input: MediaLibraryConfigPatch): MediaLibraryConfi
     }
     patch.minImportDurationMinutes = value
   }
+  if (input.useFilenameAsCode !== undefined) {
+    if (typeof input.useFilenameAsCode !== 'boolean') {
+      validationError('直接用文件名作为番号导入的开关必须是布尔值。')
+    }
+    patch.useFilenameAsCode = input.useFilenameAsCode
+  }
   if (input.autoMergeSameCodeResources !== undefined) {
     if (typeof input.autoMergeSameCodeResources !== 'boolean') {
       validationError('同番号自动归并开关必须是布尔值。')
@@ -371,6 +380,7 @@ function hydrateConfig(row: MediaLibraryConfigRow): MediaLibraryConfig {
     autoScanEnabled: Boolean(row.auto_scan_enabled),
     autoScanIntervalMinutes: row.auto_scan_interval_minutes,
     minImportDurationMinutes: row.min_import_duration_minutes,
+    useFilenameAsCode: Boolean(row.use_filename_as_code),
     autoMergeSameCodeResources: Boolean(row.auto_merge_same_code_resources),
     autoImportLocalNfo: Boolean(row.auto_import_local_nfo),
     removeResourceLessMemberships: Boolean(row.remove_resource_less_memberships),
@@ -416,6 +426,7 @@ function hydrateSummary(row: MediaLibrarySummaryRow): MediaLibrarySummary {
       auto_scan_enabled: row.auto_scan_enabled,
       auto_scan_interval_minutes: row.auto_scan_interval_minutes,
       min_import_duration_minutes: row.min_import_duration_minutes,
+      use_filename_as_code: row.use_filename_as_code,
       auto_merge_same_code_resources: row.auto_merge_same_code_resources,
       auto_import_local_nfo: row.auto_import_local_nfo,
       remove_resource_less_memberships: row.remove_resource_less_memberships,
@@ -714,6 +725,7 @@ function insertConfig(
          auto_scan_enabled,
          auto_scan_interval_minutes,
          min_import_duration_minutes,
+         use_filename_as_code,
          auto_merge_same_code_resources,
          auto_import_local_nfo,
          remove_resource_less_memberships,
@@ -727,6 +739,7 @@ function insertConfig(
          @autoScanEnabled,
          @autoScanIntervalMinutes,
          @minImportDurationMinutes,
+         @useFilenameAsCode,
          @autoMergeSameCodeResources,
          @autoImportLocalNfo,
          @removeResourceLessMemberships,
@@ -742,6 +755,7 @@ function insertConfig(
       autoScanEnabled: values.autoScanEnabled ? 1 : 0,
       autoScanIntervalMinutes: values.autoScanIntervalMinutes,
       minImportDurationMinutes: values.minImportDurationMinutes,
+      useFilenameAsCode: values.useFilenameAsCode ? 1 : 0,
       autoMergeSameCodeResources: values.autoMergeSameCodeResources ? 1 : 0,
       autoImportLocalNfo: values.autoImportLocalNfo ? 1 : 0,
       removeResourceLessMemberships: values.removeResourceLessMemberships ? 1 : 0,
@@ -1091,6 +1105,7 @@ export function updateMediaLibraryConfig(input: {
         patch.autoScanIntervalMinutes ?? currentRow.auto_scan_interval_minutes,
       minImportDurationMinutes:
         patch.minImportDurationMinutes ?? currentRow.min_import_duration_minutes,
+      useFilenameAsCode: patch.useFilenameAsCode ?? Boolean(currentRow.use_filename_as_code),
       autoMergeSameCodeResources:
         patch.autoMergeSameCodeResources ?? Boolean(currentRow.auto_merge_same_code_resources),
       autoImportLocalNfo:
@@ -1113,6 +1128,7 @@ export function updateMediaLibraryConfig(input: {
             SET auto_scan_enabled = @autoScanEnabled,
                 auto_scan_interval_minutes = @autoScanIntervalMinutes,
                 min_import_duration_minutes = @minImportDurationMinutes,
+                use_filename_as_code = @useFilenameAsCode,
                 auto_merge_same_code_resources = @autoMergeSameCodeResources,
                 auto_import_local_nfo = @autoImportLocalNfo,
                 remove_resource_less_memberships = @removeResourceLessMemberships,
@@ -1129,6 +1145,7 @@ export function updateMediaLibraryConfig(input: {
         autoScanEnabled: next.autoScanEnabled ? 1 : 0,
         autoScanIntervalMinutes: next.autoScanIntervalMinutes,
         minImportDurationMinutes: next.minImportDurationMinutes,
+        useFilenameAsCode: next.useFilenameAsCode ? 1 : 0,
         autoMergeSameCodeResources: next.autoMergeSameCodeResources ? 1 : 0,
         autoImportLocalNfo: next.autoImportLocalNfo ? 1 : 0,
         removeResourceLessMemberships: next.removeResourceLessMemberships ? 1 : 0,

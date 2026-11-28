@@ -16,13 +16,13 @@ function releasedDatabase() {
 it('adds the cleanup queue, tag index and scan audit tables when upgrading V15 and preserves old business data and damaged diagnostic state', () => {
   const db = releasedDatabase()
   try {
-    const schemaBefore = db.prepare("SELECT type, name, tbl_name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name NOT GLOB 'library_scan_audit_*' AND name NOT GLOB 'catalog_*' AND name NOT GLOB 'idx_catalog_*' AND name <> 'idx_video_tag_tag_id' AND name <> 'videos' AND name <> 'trg_videos_revision_after_update' AND name NOT IN ('video_external_stats','idx_playlists_system_kind','actresses','organizations','directors','series','playlists') ORDER BY name").all()
+    const legacySchema = () => db.prepare("SELECT type, name, tbl_name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name NOT GLOB 'library_scan_audit_*' AND name NOT GLOB 'catalog_*' AND name NOT GLOB 'idx_catalog_*' AND name NOT IN ('agent_resource_cleanup','idx_video_tag_tag_id','videos','trg_videos_revision_after_update','video_external_stats','idx_playlists_system_kind','actresses','organizations','directors','series','playlists','media_library_configs') ORDER BY name").all()
+    const schemaBefore = legacySchema()
     const runsBefore = db.prepare('SELECT * FROM agent_runs').all()
     const actressesBefore = db.prepare('SELECT * FROM actresses').all() as Array<Record<string, unknown>>
     migrateDatabase(db)
     assert.equal(db.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)
-    const schemaAfter = db.prepare("SELECT type, name, tbl_name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name NOT GLOB 'library_scan_audit_*' AND name NOT GLOB 'catalog_*' AND name NOT GLOB 'idx_catalog_*' AND name <> 'agent_resource_cleanup' AND name <> 'idx_video_tag_tag_id' AND name <> 'videos' AND name <> 'trg_videos_revision_after_update' AND name NOT IN ('video_external_stats','idx_playlists_system_kind','actresses','organizations','directors','series','playlists') ORDER BY name").all()
-    assert.deepEqual(schemaAfter, schemaBefore)
+    assert.deepEqual(legacySchema(), schemaBefore)
     assert.deepEqual(db.prepare('SELECT * FROM agent_runs').all(), runsBefore)
     const actressesAfter = db.prepare('SELECT * FROM actresses').all() as Array<Record<string, unknown>>
     assert.deepEqual(

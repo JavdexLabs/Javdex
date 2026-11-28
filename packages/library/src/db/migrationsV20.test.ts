@@ -6,7 +6,6 @@ import { releasedV19Database } from '../testFixtures/releasedV19Database'
 import { CURRENT_SCHEMA_VERSION, migrateDatabase } from './migrations'
 
 it('advances the released 0.8.0 database schema exactly once', () => {
-  assert.equal(CURRENT_SCHEMA_VERSION, 21)
   const db = releasedV19Database()
   try {
     migrateDatabase(db)
@@ -57,7 +56,7 @@ it('preserves legacy credentials, claims and tokens while enabling schema 21 tru
     const claims = db.prepare('SELECT * FROM catalog_writer_claims').all()
     const tokens = db.prepare('SELECT * FROM catalog_one_time_tokens').all()
     migrateDatabase(db)
-    assert.equal(db.pragma('user_version', { simple: true }), 21)
+    assert.equal(db.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)
     assert.deepEqual(db.prepare('SELECT writer_epoch,secret_digest,claim_id,created_at,superseded_at FROM catalog_writer_credentials').all(), credential)
     assert.deepEqual(db.prepare('SELECT * FROM catalog_writer_claims').all(), claims)
     assert.deepEqual(db.prepare('SELECT * FROM catalog_one_time_tokens').all(), tokens)

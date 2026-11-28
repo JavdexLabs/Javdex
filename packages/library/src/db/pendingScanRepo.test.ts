@@ -14,7 +14,7 @@ import {
   PendingScanRepoError,
   getPendingScanGroup,
   listPendingScanGroups,
-  pendingScanResourceExists,
+  getPendingScanResourceCode,
   reconcilePendingScanResources,
   removePendingScanResource,
   resolvePendingScanGroup,
@@ -95,8 +95,8 @@ describe('pendingScanRepo media-library scope', () => {
     assert.equal(firstGroup.resources[0].rootId, first.rootId)
     assert.equal(secondGroup.resources[0].rootId, second.rootId)
     assert.equal('scanRoot' in firstGroup.resources[0], false)
-    assert.equal(pendingScanResourceExists(first.id, firstInput.filePath), true)
-    assert.equal(pendingScanResourceExists(second.id, firstInput.filePath), false)
+    assert.equal(getPendingScanResourceCode(first.id, firstInput.filePath), 'SAME-001')
+    assert.equal(getPendingScanResourceCode(second.id, firstInput.filePath), null)
     assert.equal(getPendingScanGroup(first.id, secondGroup.id), null)
     assert.equal(removePendingScanResource(second.id, firstInput.filePath), false)
     assert.equal(listPendingScanGroups(first.id).length, 1)
@@ -135,8 +135,8 @@ describe('pendingScanRepo media-library scope', () => {
     assert.notEqual(firstUpsert.groupId, secondUpsert.groupId)
     assert.equal(secondUpsert.addedResources, 1)
     assert.equal(secondRepeat.addedResources, 0)
-    assert.equal(pendingScanResourceExists(first.id, sharedInput.filePath), true)
-    assert.equal(pendingScanResourceExists(second.id, sharedInput.filePath), true)
+    assert.equal(getPendingScanResourceCode(first.id, sharedInput.filePath), 'TAKEOVER-001')
+    assert.equal(getPendingScanResourceCode(second.id, sharedInput.filePath), 'TAKEOVER-001')
     assert.equal(
       (
         getDb()

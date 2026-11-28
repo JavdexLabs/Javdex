@@ -31,6 +31,7 @@ const library: MediaLibraryDetail = {
     autoScanEnabled: false,
     autoScanIntervalMinutes: 60,
     minImportDurationMinutes: 0,
+    useFilenameAsCode: false,
     autoMergeSameCodeResources: false,
     autoImportLocalNfo: true,
     removeResourceLessMemberships: false,

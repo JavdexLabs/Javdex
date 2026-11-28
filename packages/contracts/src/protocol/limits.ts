@@ -13,7 +13,7 @@ export const RELATED_LINK_MAX = 50
 export const RELATED_LINK_LABEL_MAX = 200
 export const RELATED_LINK_URL_MAX = 2048
 export const TAG_NAME_MAX = 200
-export const CODE_MAX = 200
+export const CODE_MAX = 255
 export const UPLOAD_STREAM_MAX_BYTES = 32 * 1024 * 1024
 /** Existing local encoded-asset read budget; uploads are stricter. */
 export const STORED_ASSET_READ_MAX_BYTES = 64 * 1024 * 1024

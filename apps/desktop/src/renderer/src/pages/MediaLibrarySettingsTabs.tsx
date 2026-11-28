@@ -603,6 +603,13 @@ export function ScanSettingsTab({
         >
           <SettingsToggleList compact>
             <SettingsSwitchRow
+              title="直接用文件名作为番号导入"
+              description="下次手动或自动扫描时，用去掉扩展名的完整文件名作为新资源的番号。"
+              checked={configDraft.useFilenameAsCode}
+              disabled={formDisabled}
+              onChange={(value) => void updateConfigImmediately('useFilenameAsCode', value)}
+            />
+            <SettingsSwitchRow
               title="同番号自动合并资源"
               description="新发现的同番号文件加入现有影片；已有待确认组保留。"
               checked={configDraft.autoMergeSameCodeResources}

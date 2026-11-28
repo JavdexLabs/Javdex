@@ -24,6 +24,7 @@ function snapshot(db: Database.Database) {
       }
       if (name === 'playlists') { extra.add('system_kind'); extra.add('remove_after_play') }
       if (name === 'video_external_stats') extra.add('is_default')
+      if (name === 'media_library_configs') extra.add('use_filename_as_code')
       if (name === 'actresses') extra.add('generation')
       if (extra.size === 0) return row
       return Object.fromEntries(Object.entries(row).filter(([key]) => !extra.has(key)))
@@ -39,7 +40,7 @@ it('upgrades V15 without changing any business rows or other schema and matches 
   const fresh = new Database(':memory:')
   try {
     const before = snapshot(db)
-    const schema = () => db.prepare("SELECT type,name,tbl_name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name NOT GLOB 'library_scan_audit_*' AND name NOT GLOB 'catalog_*' AND name NOT GLOB 'idx_catalog_*' AND name <> 'agent_resource_cleanup' AND name <> 'idx_video_tag_tag_id' AND name <> 'videos' AND name <> 'trg_videos_revision_after_update' AND name NOT IN ('video_external_stats','idx_playlists_system_kind','actresses','organizations','directors','series','playlists') ORDER BY name").all()
+    const schema = () => db.prepare("SELECT type,name,tbl_name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name NOT GLOB 'library_scan_audit_*' AND name NOT GLOB 'catalog_*' AND name NOT GLOB 'idx_catalog_*' AND name <> 'agent_resource_cleanup' AND name <> 'idx_video_tag_tag_id' AND name <> 'videos' AND name <> 'trg_videos_revision_after_update' AND name NOT IN ('video_external_stats','idx_playlists_system_kind','actresses','organizations','directors','series','playlists','media_library_configs') ORDER BY name").all()
     const oldSchema = schema()
     migrateDatabase(db)
     assert.equal(db.pragma('user_version', { simple: true }), CURRENT_SCHEMA_VERSION)

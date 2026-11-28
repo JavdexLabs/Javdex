@@ -40,37 +40,46 @@ afterEach(() => {
   importCalls.length = 0
 })
 
-it('defaults the import target to a new video so typing a code is enough to import', async () => {
+it('fills the code from the filename and waits for a separate import action', async () => {
   const { default: UnrecognizedRow } = await import('./UnrecognizedRow')
   const refreshed: string[] = []
+  const stem = 'RBD677\\original.1080p'
+  const filename = `${stem}.mp4`
+  const filePath = `/media/${filename}`
   await act(async () => {
     renderer = TestRenderer.create(
       <UnrecognizedRow
         libraryId={1}
         rootId={2}
-        path="D:/media/RBD677.mp4"
+        path={filePath}
         onResolved={(oldPath) => refreshed.push(oldPath)}
       />
     )
   })
   const importButton = () =>
     renderer!.root.findAllByType('button').find((button) => visibleText(button) === '导入')!
+  const codeInput = () => renderer!.root.findByProps({ 'aria-label': `${filename} 番号` })
   assert.equal(importButton().props.disabled, true)
+  const useFilename = renderer!.root.findAllByType('button').find((button) => visibleText(button) === '使用文件名')
+  assert.ok(useFilename)
+  act(() => useFilename.props.onClick())
+  assert.equal(codeInput().props.value, stem)
+  assert.deepEqual(importCalls, [])
+  assert.deepEqual(renameCalls, [])
+  assert.deepEqual(refreshed, [])
   act(() => {
-    renderer!.root
-      .findByProps({ 'aria-label': 'RBD677.mp4 番号' })
-      .props.onChange({ target: { value: 'RBD-677' } })
+    codeInput().props.onChange({ target: { value: 'RBD-677' } })
   })
   assert.equal(
-    renderer!.root.findByProps({ 'aria-label': 'RBD677.mp4 导入目标' }).props.value,
+    renderer!.root.findByProps({ 'aria-label': `${filename} 导入目标` }).props.value,
     'new'
   )
   assert.equal(importButton().props.disabled, false)
   await act(async () => {
     await importButton().props.onClick()
   })
-  assert.deepEqual(importCalls, [[1, 2, 'D:/media/RBD677.mp4', 'RBD-677', { kind: 'new' }]])
-  assert.deepEqual(refreshed, ['D:/media/RBD677.mp4'])
+  assert.deepEqual(importCalls, [[1, 2, filePath, 'RBD-677', { kind: 'new' }]])
+  assert.deepEqual(refreshed, [filePath])
 })
 
 it('renames with no manual code or target and refreshes the pending row after failed recognition', async () => {

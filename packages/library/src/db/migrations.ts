@@ -17,6 +17,7 @@ import {
   CATALOG_IMAGE_UPLOAD_SCHEMA_SQL,
   CATALOG_TASK_SCHEMA_SQL,
   MEDIA_LIBRARY_CORE_SCHEMA_SQL,
+  MEDIA_LIBRARY_FILENAME_CODE_MIGRATION_SQL,
   MEDIA_LIBRARY_MEMBERSHIP_SCHEMA_SQL,
   MEDIA_LIBRARY_PENDING_SCAN_SCHEMA_SQL,
   MEDIA_LIBRARY_SCAN_SCHEMA_SQL,
@@ -30,7 +31,7 @@ import {
   VIDEO_SOURCES_SCHEMA_SQL
 } from './schema'
 
-export const CURRENT_SCHEMA_VERSION = 21
+export const CURRENT_SCHEMA_VERSION = 22
 
 type Migration = {
   version: number
@@ -1555,7 +1556,8 @@ const MIGRATIONS: Migration[] = [
       database.exec(BUILTIN_PLAYLISTS_SQL)
     }
   },
-  { version: 21, migrate(database) { database.exec(CATALOG_MULTI_DEVICE_MIGRATION_SQL) } }
+  { version: 21, migrate(database) { database.exec(CATALOG_MULTI_DEVICE_MIGRATION_SQL) } },
+  { version: 22, migrate(database) { database.exec(MEDIA_LIBRARY_FILENAME_CODE_MIGRATION_SQL) } }
 ]
 
 function migrationForVersion(version: number): Migration | undefined {
@@ -1607,6 +1609,7 @@ export function migrateDatabase(database: Database.Database): void {
     database.transaction(() => {
       database.exec(SCHEMA_SQL)
       database.exec(CATALOG_MULTI_DEVICE_MIGRATION_SQL)
+      database.exec(MEDIA_LIBRARY_FILENAME_CODE_MIGRATION_SQL)
       database.pragma(`user_version = ${CURRENT_SCHEMA_VERSION}`)
     })()
     return

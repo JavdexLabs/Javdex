@@ -1,7 +1,7 @@
 import { it } from 'node:test'
 import assert from 'node:assert/strict'
 import Database from 'better-sqlite3'
-import { CATALOG_MULTI_DEVICE_MIGRATION_SQL, SCHEMA_SQL, SCAN_AUDIT_ENTRIES_SCHEMA_SQL } from './schema'
+import { SCAN_AUDIT_ENTRIES_SCHEMA_SQL } from './schema'
 import { CURRENT_SCHEMA_VERSION, migrateDatabase } from './migrations'
 import { releasedV15Database } from '../testFixtures/releasedV15Database'
 
@@ -103,8 +103,7 @@ function assertUpgrade(db: Database.Database, before: ReturnType<typeof snapshot
   const fresh = new Database(':memory:')
   try {
     fresh.pragma('foreign_keys = ON')
-    fresh.exec(SCHEMA_SQL)
-    fresh.exec(CATALOG_MULTI_DEVICE_MIGRATION_SQL)
+    migrateDatabase(fresh)
     assert.deepEqual(comparableSchema(db), comparableSchema(fresh))
   } finally { fresh.close() }
 }
@@ -139,9 +138,13 @@ it('adds combined V16 to the released V15 schema without rewriting any legacy da
     for (const table of added.filter(row => row.type === 'table')) {
       assert.equal((db.prepare(`SELECT COUNT(*) AS n FROM ${quote(table.name)}`).get() as { n: number }).n, 0)
     }
+    const changedSchema = new Set([
+      'idx_video_tag_tag_id', 'videos', 'actresses', 'organizations', 'directors', 'series',
+      'playlists', 'video_external_stats', 'media_library_configs'
+    ])
     assert.deepEqual(
-      schema(db).filter(row => row.name !== 'idx_video_tag_tag_id' && row.name !== 'videos' && !['actresses','organizations','directors','series','playlists','video_external_stats'].includes(row.name) && oldSchema.some(old => old.name === row.name)),
-      oldSchema.filter(row => row.name !== 'idx_video_tag_tag_id' && row.name !== 'videos' && !['actresses','organizations','directors','series','playlists','video_external_stats'].includes(row.name))
+      schema(db).filter(row => !changedSchema.has(row.name) && oldSchema.some(old => old.name === row.name)),
+      oldSchema.filter(row => !changedSchema.has(row.name))
     )
     assert.deepEqual(auditBytes(), originalBytes)
     // A second startup must remain data- and schema-idempotent.

@@ -409,6 +409,7 @@ export class ScanCoordinator {
             snapshot.config.minImportDurationMinutes
           ),
           autoMergeSameCodeResources: snapshot.config.autoMergeSameCodeResources,
+          useFilenameAsCode: snapshot.config.useFilenameAsCode,
           autoImportLocalNfo: snapshot.config.autoImportLocalNfo,
           ...(writer ? { resultMode: 'summary', auditSink: {
             recordFile: (entry) => persist(() => writer!.writeBatch('files', [entry])),

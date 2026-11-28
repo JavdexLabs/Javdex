@@ -416,7 +416,7 @@ export function upsertPendingScanResources(
   }).immediate()
 }
 
-export function pendingScanResourceExists(libraryId: number, filePath: string): boolean {
+export function getPendingScanResourceCode(libraryId: number, filePath: string): string | null {
   const database = getDb()
   requireLibrary(database, libraryId)
   let normalizedPath: string
@@ -425,13 +425,16 @@ export function pendingScanResourceExists(libraryId: number, filePath: string): 
   } catch {
     validationError('待确认资源路径必须是绝对路径。')
   }
-  return Boolean(
-    database
-      .prepare(
-        'SELECT 1 FROM pending_scan_resources WHERE library_id = ? AND normalized_path = ?'
-      )
-      .get(libraryId, normalizedPath)
-  )
+  const row = database
+    .prepare(
+      `SELECT groups.normalized_code
+         FROM pending_scan_resources resources
+         JOIN pending_scan_groups groups ON groups.id = resources.group_id
+          AND groups.library_id = resources.library_id
+        WHERE resources.library_id = ? AND resources.normalized_path = ?`
+    )
+    .get(libraryId, normalizedPath) as Pick<PendingGroupRow, 'normalized_code'> | undefined
+  return row?.normalized_code ?? null
 }
 
 export function removePendingScanResource(libraryId: number, filePath: string): boolean {

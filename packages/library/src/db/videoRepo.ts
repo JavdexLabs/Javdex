@@ -1312,6 +1312,10 @@ function buildWhere(q: VideoQuery): { sql: string; params: unknown[]; joins: str
   const params: unknown[] = []
   let joins = ''
 
+  if (q.exactCode?.trim()) {
+    conditions.push('upper(trim(v.code)) = ?')
+    params.push(normalizeVideoCode(q.exactCode))
+  }
   if (q.search && q.search.trim()) {
     const like = `%${q.search.trim()}%`
     conditions.push(

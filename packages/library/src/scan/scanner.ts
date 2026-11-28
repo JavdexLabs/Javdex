@@ -54,7 +54,7 @@ import {
 } from '@library/scan/videoDuration'
 import { normalizeVideoCode } from '@shared/videoCode'
 import {
-  pendingScanResourceExists,
+  getPendingScanResourceCode,
   removePendingScanResource,
   upsertPendingScanResources
 } from '@library/db/pendingScanRepo'
@@ -161,6 +161,7 @@ export interface ScanOptions {
   autoMergeSameCodeResources?: boolean
   /** Read local NFO only while a resource is being discovered for the first time. */
   autoImportLocalNfo?: boolean
+  useFilenameAsCode?: boolean
   /** Override the built-in local NFO source (tests). */
   localNfoService?: LocalNfoScanService
   /** Receives exactly one final audit outcome for every processed file. */
@@ -342,6 +343,13 @@ function localResourceInLibrary(libraryId: number, file: string): LocalVideoReso
 
 function strmResourceInLibrary(libraryId: number, file: string): VideoResource | null {
   return getStrmVideoResourceBySourcePath(libraryId, file)
+}
+
+function scanFilenameCode(filePath: string, useFilenameAsCode = false): string | null {
+  const extension = path.extname(filePath)
+  const stem = path.basename(filePath, extension)
+  if (!useFilenameAsCode) return parseCode(stem)
+  return extension && stem.trim() ? normalizeVideoCode(stem) : null
 }
 
 function resolveRefreshTarget(libraryId: number, file: string): LocalVideoResource | null {
@@ -536,6 +544,8 @@ async function scanPreparedFolders(
   const libraryId = request.libraryId
   const auditSink = options.auditSink
   const autoImportLocalNfo = options.autoImportLocalNfo ?? false
+  const filenameCodeFor = (filePath: string): string | null =>
+    scanFilenameCode(filePath, options.useFilenameAsCode)
   const unavailableRootIds = new Set(options.unavailableRootIds ?? [])
   const readDirectory =
     options.readDirectory ??
@@ -575,7 +585,7 @@ async function scanPreparedFolders(
           nfoWorkset!.setDirectoryIdentity(directory, summarizeDirectoryVideoCodes((function* () {
             for (const entry of entries) {
               if (entry.isFile() && (isVideoFile(entry.name) || isStrmFile(entry.name))) {
-                yield parseCode(path.basename(entry.name, path.extname(entry.name)))
+                yield filenameCodeFor(entry.name)
               }
             }
           })()))
@@ -620,7 +630,7 @@ async function scanPreparedFolders(
     }
     const directory = path.dirname(filePath)
     nfoWorkset!.setDirectoryIdentity(directory, appendDirectoryVideoCode(
-      nfoWorkset!.getDirectoryIdentity(directory), parseCode(path.basename(filePath, path.extname(filePath)))
+      nfoWorkset!.getDirectoryIdentity(directory), filenameCodeFor(filePath)
     ))
   }
   nfoWorkset?.sealDirectories()
@@ -635,12 +645,12 @@ async function scanPreparedFolders(
       if (
         getLocalVideoResourceByLocator(libraryId, filePath) ||
         getStrmVideoResourceBySourcePath(libraryId, filePath) ||
-        pendingScanResourceExists(libraryId, filePath) ||
+        getPendingScanResourceCode(libraryId, filePath) ||
         pendingResourceIdentityExists(libraryId, filePath)
       ) {
         continue
       }
-      const filenameCode = parseCode(path.basename(filePath, path.extname(filePath)))
+      const filenameCode = filenameCodeFor(filePath)
       const anchor: LocalNfoAnchor = {
         root,
         anchorPath: filePath,
@@ -686,7 +696,7 @@ async function scanPreparedFolders(
   nfoWorkset?.sealPreflights()
   const codeForNewFile = (filePath: string): string | null => {
     const preflight = nfoWorkset?.getEffectiveCode(filePath)
-    return preflight ? preflight.effectiveCode : parseCode(path.basename(filePath, path.extname(filePath)))
+    return preflight ? preflight.effectiveCode : filenameCodeFor(filePath)
   }
   if (newFileCounts) {
     let countedFiles = 0
@@ -699,7 +709,7 @@ async function scanPreparedFolders(
       if (
         getLocalVideoResourceByLocator(libraryId, file) ||
         getStrmVideoResourceBySourcePath(libraryId, file) ||
-        pendingScanResourceExists(libraryId, file) ||
+        getPendingScanResourceCode(libraryId, file) ||
         pendingResourceIdentityExists(libraryId, file)
       ) {
         continue
@@ -726,7 +736,7 @@ async function scanPreparedFolders(
         if (
           getLocalVideoResourceByLocator(libraryId, file) ||
           getStrmVideoResourceBySourcePath(libraryId, file) ||
-          pendingScanResourceExists(libraryId, file) ||
+          getPendingScanResourceCode(libraryId, file) ||
           pendingResourceIdentityExists(libraryId, file) ||
           listVideosByCode(code).length > 0
         ) {
@@ -917,38 +927,35 @@ async function scanPreparedFolders(
           await maybeYield(result.scannedFiles, yieldEvery)
           continue
         }
-        if (pendingScanResourceExists(libraryId, file)) {
-          if (code) authorizeFileWrite()
+        const pendingCode = getPendingScanResourceCode(libraryId, file)
+        if (pendingCode) {
+          authorizeFileWrite()
           const groupId = strmRelocations.mutateWithoutResourceChanges(() => commitFileAudit(() => {
-            let groupId: number | null = null
-            if (code) {
-              const pending = upsertPendingScanResources(libraryId, code, [
-                {
-                  rootId,
-                  filePath: file,
-                  sourceKind: 'strm',
-                  targetKind: target.kind,
-                  targetLocator: target.locator,
-                  targetKey: target.targetKey,
-                  sizeBytes: null,
-                  durationSeconds: null,
-                  fileMtimeMs: null,
-                  displayName: path.basename(file)
-                }
-              ])
-              groupId = pending.groupId
-            }
+            const { groupId } = upsertPendingScanResources(libraryId, pendingCode, [
+              {
+                rootId,
+                filePath: file,
+                sourceKind: 'strm',
+                targetKind: target.kind,
+                targetLocator: target.locator,
+                targetKey: target.targetKey,
+                sizeBytes: null,
+                durationSeconds: null,
+                fileMtimeMs: null,
+                displayName: path.basename(file)
+              }
+            ])
             recordFile({
               filePath: file,
               sourceKind: 'strm',
               outcome: 'pending',
-              normalizedCode: code ? normalizeVideoCode(code) : null,
+              normalizedCode: pendingCode,
               groupId,
               addedToQueue: false
             })
             return groupId
           }))
-          if (groupId != null) pendingGroupIds.add(groupId)
+          pendingGroupIds.add(groupId)
           onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
           await maybeYield(result.scannedFiles, yieldEvery)
           continue
@@ -1182,40 +1189,33 @@ async function scanPreparedFolders(
         continue
       }
 
-      if (pendingScanResourceExists(libraryId, file)) {
-        const code = parseCode(path.basename(file, path.extname(file)))
-        const fileDurationSeconds = code ? await readDurationSeconds(file) : null
-        let fingerprint: VideoFileFingerprint | null = null
-        if (code) {
-          authorizeFileWrite()
-          fingerprint = statFileFingerprint(file)
-        }
+      const pendingCode = getPendingScanResourceCode(libraryId, file)
+      if (pendingCode) {
+        const fileDurationSeconds = await readDurationSeconds(file)
+        authorizeFileWrite()
+        const fingerprint = statFileFingerprint(file)
         const groupId = strmRelocations.mutateWithoutResourceChanges(() => commitFileAudit(() => {
-          let groupId: number | null = null
-          if (code) {
-            const pending = upsertPendingScanResources(libraryId, code, [
-              {
-                rootId,
-                filePath: file,
-                sizeBytes: fingerprint?.file_size ?? null,
-                durationSeconds: fileDurationSeconds,
-                fileMtimeMs: fingerprint?.file_mtime_ms ?? null,
-                displayName: path.basename(file)
-              }
-            ])
-            groupId = pending.groupId
-          }
+          const { groupId } = upsertPendingScanResources(libraryId, pendingCode, [
+            {
+              rootId,
+              filePath: file,
+              sizeBytes: fingerprint?.file_size ?? null,
+              durationSeconds: fileDurationSeconds,
+              fileMtimeMs: fingerprint?.file_mtime_ms ?? null,
+              displayName: path.basename(file)
+            }
+          ])
           recordFile({
             filePath: file,
             sourceKind: 'local',
             outcome: 'pending',
-            normalizedCode: code ? normalizeVideoCode(code) : null,
+            normalizedCode: pendingCode,
             groupId,
             addedToQueue: false
           })
           return groupId
         }))
-        if (groupId != null) pendingGroupIds.add(groupId)
+        pendingGroupIds.add(groupId)
         onProgress?.({ scanned: result.scannedFiles, imported: result.imported, currentFile: file })
         await maybeYield(result.scannedFiles, yieldEvery)
         continue
@@ -1683,7 +1683,7 @@ async function rediscoverRenamedPath(
   // Renaming is the requested operation. A failed recognition must not undo it.
   const response: RenameImportResult = {
     newPath, newName: path.basename(newPath), imported: false,
-    code: parseCode(path.basename(newPath, path.extname(newPath))), outcome: 'failed'
+    code: scanFilenameCode(newPath, config.useFilenameAsCode), outcome: 'failed'
   }
   const entries: LibraryScanFileAuditEntry[] = []
   try {
@@ -1695,6 +1695,7 @@ async function rediscoverRenamedPath(
       auditSink: undefined,
       autoMergeSameCodeResources: config.autoMergeSameCodeResources,
       autoImportLocalNfo: config.autoImportLocalNfo,
+      useFilenameAsCode: config.useFilenameAsCode,
       minImportDurationSeconds: config.minImportDurationMinutes * 60,
       onFileResult: (entry) => entries.push(entry)
     })

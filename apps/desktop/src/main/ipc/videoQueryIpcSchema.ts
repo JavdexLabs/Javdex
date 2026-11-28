@@ -4,6 +4,7 @@ import {
   MEDIA_LIBRARY_SORT_DIRECTIONS
 } from '@shared/mediaLibraryTypes'
 import { VIDEO_LIST_PAGE_LIMIT_MAX, type VideoQuery } from '@shared/videoTypes'
+import { CODE_MAX } from '@shared/protocol/limits'
 
 export const positiveSafeInteger = z
   .number()
@@ -23,6 +24,7 @@ const uniqueResourceKinds = z
 
 const videoQueryShape = {
   search: z.string().trim().max(500).optional(),
+  exactCode: z.string().trim().min(1).max(CODE_MAX).optional(),
   scrapedStatus: z
     .union([z.literal(0), z.literal(1), z.literal(2), z.literal('all')])
     .optional(),

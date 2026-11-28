@@ -33,6 +33,7 @@ const mediaLibraryConfigSchema = z
     autoImportLocalNfo: z.boolean().optional(),
     autoScanIntervalMinutes: z.number().int().min(5).max(10_080).optional(),
     minImportDurationMinutes: z.number().int().min(0).max(1_440).optional(),
+    useFilenameAsCode: z.boolean().optional(),
     autoMergeSameCodeResources: z.boolean().optional(),
     removeResourceLessMemberships: z.boolean().optional(),
     defaultVideoScraper: scraperName.nullable().optional(),

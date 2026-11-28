@@ -5,10 +5,11 @@ import os from 'node:os'
 import path from 'node:path'
 import type { LibraryScanAudit, LibraryScanEvent } from '@shared/libraryTypes'
 import { initDatabaseAtPath, closeDatabase } from '@library/db/database'
-import { createMediaLibrary } from '@library/db/mediaLibraryRepo'
+import { createMediaLibrary, getMediaLibraryConfig, listMediaLibraryAutomaticScanStates, updateMediaLibraryConfig } from '@library/db/mediaLibraryRepo'
 import { insertTestVideoWithFile } from '@library/db/testVideoFixtures'
 import { readScanAuditSource } from '@library/db/scanAuditSource'
 import { recoverInterruptedLibraryScanRuns } from '@library/db/libraryScanRepo'
+import { AutomaticScanScheduler } from '@library/scan/automaticScanScheduler'
 import { readScanAuditHeader } from '../services/scanAuditReadHeader'
 import { resetSettingsCacheForTests } from '../settings/settingsStore'
 import { scanFolders } from './scanner'
@@ -66,6 +67,87 @@ function setup(storage?:'json',cancelAfterFirst=false,processingFailure=false){
 }
 function runState(current:ReturnType<typeof setup>){return current.db.prepare("SELECT status,audit_json FROM library_scan_runs WHERE id='cx-run'").get() as {status:string;audit_json:string|null}|undefined}
 function body(current:ReturnType<typeof setup>){return JSON.parse(readScanAuditSource(current.db,{libraryId:current.library.id,runId:'cx-run'},'body')!.body) as LibraryScanAudit}
+
+it('uses the saved filename mode per library for manual and automatic scans', async () => {
+  const dbPath = path.join(directory, 'filename-codes.db')
+  let db = initDatabaseAtPath(dbPath)
+  const library = createMediaLibrary({
+    name: 'Filename codes',
+    roots: [{ path: media }],
+    config: { minImportDurationMinutes: 0, autoMergeSameCodeResources: false, autoScanEnabled: true }
+  })
+  const other = createMediaLibrary({ name: 'Standard codes' })
+  const writeFile = (name: string, contents = 'synthetic media') =>
+    fs.writeFileSync(path.join(media, name), contents)
+  const coordinator = createScanCoordinator({
+    scanFolders: (request, onProgress, options) => scanFolders(
+      request, onProgress, { ...options, readDurationSeconds: async () => 120 }
+    )
+  })
+  const codes = () => (db.prepare('SELECT code FROM videos ORDER BY code').all() as { code: string }[])
+    .map(({ code }) => code)
+  const groups = () => db.prepare('SELECT id, normalized_code FROM pending_scan_groups ORDER BY id').all()
+
+  writeFile('ABC-123 [1080p].mp4')
+  writeFile('東京熱 作品その一.mp4')
+  assert.equal(library.config.useFilenameAsCode, false)
+  const initial = await coordinator.run({ libraryId: library.id, trigger: 'manual' })
+  assert.equal(initial.unrecognizedCount, 1)
+  assert.deepEqual(codes(), ['ABC-123'])
+
+  const enabled = updateMediaLibraryConfig({
+    libraryId: library.id, expectedRevision: library.config.revision, patch: { useFilenameAsCode: true }
+  })
+  closeDatabase()
+  db = initDatabaseAtPath(dbPath)
+  assert.equal(getMediaLibraryConfig(library.id)?.useFilenameAsCode, true)
+  assert.equal(getMediaLibraryConfig(other.id)?.useFilenameAsCode, false)
+  writeFile('天然むすめ.第一集.strm', 'https://example.test/synthetic.mp4')
+  writeFile('.mp4')
+  writeFile('需要确认.mp4')
+  writeFile('需要确认.nfo', '<movie><num>NFO-001</num><title>冲突测试</title></movie>')
+  writeFile('待确认双资源.mkv')
+  writeFile('待确认双资源.mp4')
+  const manual = await coordinator.run({ libraryId: library.id, trigger: 'manual' })
+  assert.equal(manual.unrecognizedCount, 1)
+  assert.equal(db.prepare('SELECT file_path FROM library_unrecognized_files WHERE library_id = ?').pluck().get(library.id), path.join(media, '.mp4'))
+  assert.deepEqual(codes(), ['ABC-123', '天然むすめ.第一集', '東京熱 作品その一'])
+  assert.deepEqual(
+    db.prepare('SELECT filename_code, nfo_code FROM pending_resource_identities').all(),
+    [{ filename_code: '需要确认', nfo_code: 'NFO-001' }]
+  )
+  const originalGroups = groups()
+  assert.equal(originalGroups.length, 1)
+  assert.equal(db.prepare('SELECT count(*) AS count FROM pending_scan_resources').pluck().get(), 2)
+
+  writeFile('ABC-124 [1080p].mp4')
+  const timers: Array<() => void | Promise<void>> = []
+  const scheduler = new AutomaticScanScheduler({
+    listLibraries: listMediaLibraryAutomaticScanStates,
+    now: () => Date.now() + 7 * 24 * 60 * 60_000,
+    setTimer: (callback) => timers.push(callback),
+    clearTimer: () => undefined,
+    isMaintenanceBusy: () => coordinator.running,
+    runScan: (libraryId, trigger) => coordinator.run({ libraryId, trigger })
+  })
+  try {
+    scheduler.start()
+    await timers[0]()
+    assert.ok(codes().includes('ABC-124 [1080P]'))
+    assert.equal(db.prepare("SELECT COUNT(*) FROM library_scan_runs WHERE trigger = 'initial' AND status = 'completed'").pluck().get(), 1)
+  } finally {
+    scheduler.stop()
+  }
+
+  updateMediaLibraryConfig({
+    libraryId: library.id, expectedRevision: enabled.revision, patch: { useFilenameAsCode: false }
+  })
+  const afterDisabling = await coordinator.run({ libraryId: library.id, trigger: 'manual' })
+  assert.equal(afterDisabling.unrecognizedCount, 1)
+  assert.deepEqual(groups(), originalGroups)
+  assert.ok(codes().includes('ABC-124 [1080P]'))
+  assert.equal(codes().includes('ABC-124'), false)
+})
 
 it('defaults to real incremental entries and publishes the same NFO/pending/cleanup audit as explicit legacy JSON',async()=>{
   const legacy=setup('json');const oldResult=await legacy.coordinator.run({libraryId:legacy.library.id,trigger:'manual'}),oldBody=body(legacy)

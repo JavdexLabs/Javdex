@@ -67,6 +67,7 @@ export interface MediaLibraryConfig {
   autoScanEnabled: boolean
   autoScanIntervalMinutes: number
   minImportDurationMinutes: number
+  useFilenameAsCode: boolean
   autoMergeSameCodeResources: boolean
   autoImportLocalNfo: boolean
   removeResourceLessMemberships: boolean
@@ -83,6 +84,7 @@ export const DEFAULT_MEDIA_LIBRARY_CONFIG: Readonly<MediaLibraryConfigValues> = 
   autoScanEnabled: false,
   autoScanIntervalMinutes: 1440,
   minImportDurationMinutes: 30,
+  useFilenameAsCode: false,
   autoMergeSameCodeResources: true,
   autoImportLocalNfo: true,
   removeResourceLessMemberships: false,
@@ -232,6 +234,7 @@ export interface MediaLibraryConfigPatch {
   autoScanEnabled?: boolean
   autoScanIntervalMinutes?: number
   minImportDurationMinutes?: number
+  useFilenameAsCode?: boolean
   autoMergeSameCodeResources?: boolean
   autoImportLocalNfo?: boolean
   removeResourceLessMemberships?: boolean

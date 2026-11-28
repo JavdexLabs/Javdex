@@ -61,7 +61,7 @@ describe('ScanSettingsTab', () => {
     )
   })
 
-  it('renders automatic local NFO import enabled by default and persists a switch change immediately', async () => {
+  it('renders scan rule defaults and saves switch changes immediately', async () => {
     const { ScanSettingsTab } = await import('./MediaLibrarySettingsTabs')
     const updates: Array<[string, unknown]> = []
     act(() => {
@@ -93,19 +93,22 @@ describe('ScanSettingsTab', () => {
       )
     })
 
-    const row = renderer!.root
-      .findAllByType('label')
-      .find((candidate) => nodeText(candidate).includes('自动导入本地 NFO'))
-    assert.ok(row)
-    const input = row.findByProps({ role: 'switch' })
-    assert.equal(input.props.checked, true)
+    const switchFor = (title: string) => {
+      const row = renderer!.root.findAllByType('label').find((candidate) => nodeText(candidate).includes(title))
+      assert.ok(row)
+      return row.findByProps({ role: 'switch' })
+    }
+    const nfo = switchFor('自动导入本地 NFO')
+    const filename = switchFor('直接用文件名作为番号导入')
+    assert.equal(nfo.props.checked, true)
+    assert.equal(filename.props.checked, false)
 
     await act(async () => {
-      input.props.onChange({ target: { checked: false } })
-      await Promise.resolve()
+      nfo.props.onChange({ target: { checked: false } })
+      filename.props.onChange({ target: { checked: true } })
     })
 
-    assert.deepEqual(updates, [['autoImportLocalNfo', false]])
+    assert.deepEqual(updates, [['autoImportLocalNfo', false], ['useFilenameAsCode', true]])
   })
 })
 

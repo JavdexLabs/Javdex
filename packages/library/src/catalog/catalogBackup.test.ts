@@ -100,6 +100,7 @@ async function historicalBackup(source: ReturnType<typeof fixture>, version: num
         for (const row of added.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as Array<{ name: string }>) db.exec(`DROP TABLE ${row.name}`)
       } finally { added.close() }
     }
+    if (version < 22) db.exec('ALTER TABLE media_library_configs DROP COLUMN use_filename_as_code')
     if (version < 20) {
       db.exec("DELETE FROM playlists WHERE system_kind IS NOT NULL; DROP INDEX idx_playlists_system_kind; ALTER TABLE playlists DROP COLUMN system_kind; ALTER TABLE playlists DROP COLUMN remove_after_play;")
     }
@@ -126,13 +127,14 @@ async function historicalBackup(source: ReturnType<typeof fixture>, version: num
 }
 
 test('older format-1 backups upgrade isolated copies through existing migrations and restore locally and remotely', async t => {
-  for (const version of [17, 18, CURRENT_SCHEMA_VERSION]) for (const mode of ['local', 'remote'] as const) await t.test(`${version} -> ${CURRENT_SCHEMA_VERSION}, ${mode}`, async () => {
+  for (const version of [17, 18, 21, CURRENT_SCHEMA_VERSION]) for (const mode of ['local', 'remote'] as const) await t.test(`${version} -> ${CURRENT_SCHEMA_VERSION}, ${mode}`, async () => {
     const source = fixture(); const target = fixture(mode)
     target.host.appVersion = '0.8.0-beta.1'
     const video = insertTestVideoWithFile(source.db, { code: 'OLD-BACKUP', filePath: '/source/old.avi', libraryId: 1 })
     source.db.prepare('UPDATE videos SET cover_path = ? WHERE id = ?').run('covers/test.png', video.videoId)
     fs.writeFileSync(path.join(source.host.imagesDir!, 'covers/test.png'), 'image')
     source.db.prepare('INSERT INTO playlists (name) VALUES (?)').run('保留清单')
+    source.db.prepare('UPDATE media_library_configs SET use_filename_as_code = 1 WHERE library_id = 1').run()
     const file = await historicalBackup(source, version, (_db, manifest) => { manifest.optionalDescription = '未知可选字段不会影响格式 1 的读取' })
     const checksum = sha256File(file); const oldIdentity = readCatalogIdentity(target.db)!
     const id = await received(target, file); const job = target.request({ action: 'status', id })
@@ -144,6 +146,9 @@ test('older format-1 backups upgrade isolated copies through existing migrations
     target.request({ action: 'restore', id, digest: preview.digest }); await wait(target, id, 'completed')
     assert.equal((target.db.prepare('SELECT code FROM videos').get() as { code: string }).code, 'OLD-BACKUP')
     assert.equal((target.db.prepare('SELECT name FROM playlists WHERE system_kind IS NULL').get() as { name: string }).name, '保留清单')
+    assert.deepEqual(target.db.prepare('SELECT use_filename_as_code FROM media_library_configs WHERE library_id = 1').get(), {
+      use_filename_as_code: version < 22 ? 0 : 1
+    })
     const cover = (target.db.prepare('SELECT cover_path FROM videos').get() as { cover_path: string }).cover_path
     assert.equal(fs.readFileSync(path.join(target.host.imagesDir!, cover), 'utf8'), 'image')
     assert.equal(readCatalogIdentity(target.db)!.serverId, oldIdentity.serverId)
